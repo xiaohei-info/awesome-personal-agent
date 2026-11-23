@@ -146,10 +146,9 @@ function ItemList() {
 
   const all = items ?? [];
   const projectOrder = useNamed("project").map((p) => p.id);
-  // 行上操作之后只把这一件换成服务端的最新值显示；分组、排序与筛选仍按取回时的那份算，位置、页码与滚动不动，下次取回再重排。
-  const [fresh, setFresh] = useState<Record<string, Item>>({});
-  useEffect(() => setFresh({}), [items]);
-  const replace = (it: Item) => setFresh((m) => ({ ...m, [it.id]: it }));
+  // 行上操作之后把这一件换成服务端的最新值，分组、排序与筛选当场按新值重算（都在前端，口径就是 arrange 与七维筛选）：
+  // 完成的移到组尾，筛掉的就不再显示；不重读整个列表，页面不卸载，滚动位置不动。
+  const replace = (it: Item) => setItems((l) => l && l.map((x) => (x.id === it.id ? it : x)));
   const shown = arrange(all.filter((i) => keep(i, f)), projectOrder, !!sort);
   const name = (d: Dim, v: string): string =>
     v === NONE ? t.none[d] ?? t.notSet
@@ -234,7 +233,7 @@ function ItemList() {
             <section key={pid} aria-label={pid ? project(pid) : t.none.project}>
               <h2>{t.groupCount(pid ? project(pid) : t.none.project, shown.filter((i) => (i.project ?? "") === pid).length)}</h2>
               <ul className="rows">
-                {list.map((x) => fresh[x.id] ?? x).map((i) => (
+                {list.map((i) => (
                   <li key={i.id} data-item={i.id}>
                     <div className="act-row">
                       <div>
@@ -584,6 +583,9 @@ function NewItem() {
   const [deadline, setDeadline] = useState(pre.deadline);
   const [plannedFor, setPlannedFor] = useState(pre.plannedFor);
   const [slot, setSlot] = useState(() => slotForm(pre.plannedSlot));
+  // 建好后交给 Agent（对齐工作台新建表单的「交给助手」）：带上交给 Agent 的标记建出来；规则只在「进入进行中」时开工，
+  // 新建直接是进行中，所以跳到详情后由本人在 Agent 处理区点「现在开始」（§13.6）。
+  const [handoff, setHandoff] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [created, setCreated] = useState<string | null>(null);
   const { utc_offset: offset } = useHostClock(api);
@@ -615,6 +617,7 @@ function NewItem() {
         ...(deadline ? { deadline: deadlineValue(deadline.slice(0, 10), deadline.slice(11) === "23:59" ? null : deadline.slice(11), offset) } : {}),
         ...(plannedFor ? { planned_for: plannedFor } : {}),
         ...(slotV.slot ? { planned_slot: slotV.slot } : {}),
+        ...(handoff ? { tags: [HANDOFF_TAG] } : {}),
       }, { "Idempotency-Key": idem.current });
       id = r.id;
     } catch (e) {
@@ -655,6 +658,8 @@ function NewItem() {
             <label>{t.deadlineField} <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
             <label>{t.plannedDate} <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} /></label>
             <SlotFields date={plannedFor} {...slot} bad={slotV.bad} onChange={(p) => setSlot({ ...slot, ...p })} />
+            <label><input type="checkbox" checked={handoff} onChange={(e) => setHandoff(e.target.checked)} /> {t.createHandoff}</label>
+            {handoff && <p className="sub">{t.createHandoffHint}</p>}
           </>
         }
       />

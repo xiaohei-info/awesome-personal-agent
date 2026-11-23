@@ -5,21 +5,48 @@ import { useSession } from "../../app/session";
 import { Go, PageHead } from "../../app/page";
 import { refreshCounts, useAttention, type Reminder } from "../../app/attention";
 import type { Item } from "../items/ItemsPage";
-import { ProgressForm } from "./ProgressForm";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useItemTitle, useNamed } from "../../app/names";
-import { loadDone } from "../done/DonePage";
+import { loadDone, loadProgress } from "../done/DonePage";
 import { monday } from "../calendar/layout";
-import { hostClock } from "../items/schedule";
-import { RowActions } from "../items/RowActions";
+import { hostClock, hostParts, useHostClock } from "../items/schedule";
+import { RowActions, type RowAct } from "../items/RowActions";
 import { Val } from "../../app/values";
 import { strings } from "./strings";
 
 // 今天（界面设计 §3.2、§5.2）：自上而下五块，空的不显示——要你处理、Agent 交回的、今天的事、提醒、久未推进（默认折叠）。
 // 「要你处理」与导航角标、状态灯取同一份注意力汇总；今天的事取自 GET /v1/today（附录 B.2），操作交给既有事项接口。
-// 今天的事每行的快捷操作对齐工作台「今日焦点」：排时间（日期与时段）、交给 Agent、完成，做完原位反映。
-interface Today { planned: Item[]; due: Item[]; pending: Item[]; stale: Item[] }
+// 今天的事对齐工作台「今日焦点」：计划今天或更早、今天到期、已逾期、高优先级四类合在一起，按项目分组，每行标出它为什么在这；
+// 行上四个快捷操作：排时间（日期与时段）、交给 Agent、完成、记进展。
+interface Today { planned: Item[]; due: Item[]; pending: Item[]; stale: Item[]; overdue?: Item[]; high_priority?: Item[] }
+type Why = "planned" | "due" | "overdue" | "high";
+export interface Entry { item: Item; why: Why[] }
+
+/** 「今天的事」：四组合并，同一件只列一次、记下它在哪几组（服务端的组，前端不重算口径）。 */
+export function todayEntries(d: Today): Entry[] {
+  const out = new Map<string, Entry>();
+  const put = (list: Item[] | undefined, why: Why) => {
+    for (const it of list ?? []) {
+      const e = out.get(it.id);
+      if (e) e.why.push(why);
+      else out.set(it.id, { item: it, why: [why] });
+    }
+  };
+  put(d.planned, "planned");
+  put(d.due, "due");
+  put(d.overdue, "overdue");
+  put(d.high_priority, "high");
+  return [...out.values()];
+}
+
+/** 按项目分组：组按项目列表的顺序（与事项列表一致），没归项目的排最后；组内保持服务端的先后。 */
+export function byProject(entries: Entry[], order: string[]): [string, Entry[]][] {
+  const groups = new Map<string, Entry[]>();
+  for (const e of entries) groups.set(e.item.project ?? "", [...(groups.get(e.item.project ?? "") ?? []), e]);
+  const rank = (p: string) => (!p ? order.length + 1 : order.includes(p) ? order.indexOf(p) : order.length);
+  return [...groups].sort(([a], [b]) => rank(a) - rank(b));
+}
 interface Run { id: string; target: string; category: string; state: string; finished_at?: string; fault?: Fault }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -33,16 +60,21 @@ export function TodayPage() {
   const [back, setBack] = useState<Run[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [since] = useState(() => localStorage.getItem(SEEN) ?? "");
-  const [doneN, setDoneN] = useState<{ today: number; week: number } | null>(null);
+  const [doneN, setDoneN] = useState<{ today: number; week: number; progress: number | null } | null>(null);
+  const [left, setLeft] = useState<{ id: string; text: string }[]>([]);
+  const projects = useNamed("project");
 
   const load = useCallback(
     () => api.get<Today>("/today").then((r) => setData(r), (e) => setError(e)),
     [api],
   );
   useEffect(() => { load(); }, [load]);
-  // 底部一行完成计数：做完的事从上面消失后仍看得到进度；明细只在「已完成」页，这里不重复列。取不到就不显示。
-  const countDone = useCallback(() => hostClock(api).then((c) => loadDone(api, c.utc_offset).then((ds) =>
-    setDoneN({ today: ds.filter((d) => d.day === c.today).length, week: ds.filter((d) => d.day >= monday(c.today)).length }))).catch(() => setDoneN(null)), [api]);
+  // 底部一行完成与进展计数：做完的事从上面消失后仍看得到进度；进展条数与「已完成」页同一口径（同事同日算一条）。
+  // 明细只在「已完成」页，这里不重复列。取不到就不显示。
+  const countDone = useCallback(() => hostClock(api).then(async (c) => {
+    const [ds, ps] = await Promise.all([loadDone(api, c.utc_offset), loadProgress(api, monday(c.today), c.today, c.utc_offset).catch(() => null)]);
+    setDoneN({ today: ds.filter((d) => d.day === c.today).length, week: ds.filter((d) => d.day >= monday(c.today)).length, progress: ps && ps.reduce((n, p) => n + p.records.length, 0) });
+  }).catch(() => setDoneN(null)), [api]);
   useEffect(() => { countDone(); }, [countDone]);
   useEffect(() => {
     localStorage.setItem(SEEN, new Date().toISOString());
@@ -67,9 +99,18 @@ export function TodayPage() {
     countDone();
   };
 
-  // 行上操作之后：只把这一件换成服务端的最新值，列表、顺序与滚动位置不动；角标与完成计数另取。
-  const replace = (it: Item) => {
-    setData((d) => d && { ...d, planned: d.planned.map((x) => (x.id === it.id ? it : x)), due: d.due.map((x) => (x.id === it.id ? it : x)) });
+  // 行上操作之后：先把这一件换成服务端的最新值，再静默重取一次 GET /today，按新的分组与先后就地重排（不显示加载、不卸载页面，滚动位置不动）。
+  // 归不归今天由服务端定，前端不复刻口径；因此离开了今天的那一件（做完、改到以后）在块顶留一行说明去了哪。
+  const replace = (it: Item, what: RowAct) => {
+    const swap = (l?: Item[]) => l?.map((x) => (x.id === it.id ? it : x));
+    setData((d) => d && { ...d, planned: swap(d.planned)!, due: swap(d.due)!, overdue: swap(d.overdue), high_priority: swap(d.high_priority) });
+    api.get<Today>("/today").then((r) => {
+      setData(r);
+      if (!todayEntries(r).some((e) => e.item.id === it.id)) {
+        const text = what === "done" || it.phase === "done" ? t.leftDone(it.title) : what === "plan" && it.planned_for ? t.leftPlan(it.title, it.planned_for) : t.leftOther(it.title);
+        setLeft((l) => [{ id: it.id, text }, ...l.filter((x) => x.id !== it.id)].slice(0, 3));
+      }
+    }, () => undefined);
     refreshCounts();
     countDone();
   };
@@ -81,8 +122,7 @@ export function TodayPage() {
     sys > 0 && { key: "system", text: t.top.system(sys), button: t.top.toSystem, to: "/health", red: false },
     a.proposals > 0 && { key: "proposals", text: t.top.proposals(a.proposals), button: t.top.toProposals, to: "/proposals", red: false },
   ].filter((x): x is { key: string; text: string; button: string; to: string; red: boolean } => !!x) : [];
-  // 计划今天或更早与今天到期合并成「今天的事」，同一件只列一次。
-  const todays = data ? [...data.planned, ...data.due.filter((d) => !data.planned.some((p) => p.id === d.id))] : [];
+  const todays = data ? todayEntries(data) : [];
   const reminders = a?.reminders ?? [];
   const empty = !!data && !top.length && !back.length && !todays.length && !reminders.length && !data.stale.length;
 
@@ -113,10 +153,19 @@ export function TodayPage() {
         error == null && <p role="status">{t.loading}</p>
       ) : (
         <>
-          {todays.length > 0 && (
+          {(todays.length > 0 || left.length > 0) && (
             <section aria-label={t.blocks.today}>
               <h2>{t.count(t.blocks.today, todays.length)}</h2>
-              <ul className="rows">{todays.map((it) => <TodayRow key={it.id} item={it} onChange={replace} />)}</ul>
+              {left.map((x) => <p key={x.id} role="status" className="sub"><Link to={"/items/" + encodeURIComponent(x.id)}>{x.text}</Link></p>)}
+              {byProject(todays, projects.map((p) => p.id)).map(([pid, es]) => {
+                const name = pid ? projects.find((p) => p.id === pid)?.name ?? "" : t.noProject;
+                return (
+                  <section key={pid} aria-label={name} className="today-group">
+                    <h3>{pid ? <Link to={"/projects/" + encodeURIComponent(pid)}>{name}</Link> : name} <span className="sub">{es.length}</span></h3>
+                    <ul className="rows">{es.map((e) => <TodayRow key={e.item.id} entry={e} onChange={replace} />)}</ul>
+                  </section>
+                );
+              })}
             </section>
           )}
           {reminders.length > 0 && <Reminders list={reminders} />}
@@ -124,7 +173,7 @@ export function TodayPage() {
           {empty && <p className="empty">{t.allClear}</p>}
           {doneN && (
             <p className="sub">
-              {doneN.week ? t.doneLine(doneN.today, doneN.week) : t.doneNone} · <Link to="/done">{t.seeDone}</Link>
+              {doneN.week ? t.doneLine(doneN.today, doneN.week) : t.doneNone} · {doneN.progress != null && <>{t.progressLine(doneN.progress)} · </>}<Link to="/done">{t.seeDone}</Link>
             </p>
           )}
         </>
@@ -161,6 +210,7 @@ function BackRow({ run }: { run: Run }) {
   );
 }
 
+/** 久未推进的一行：标题、项目与计划、截止。 */
 function ItemLink({ item }: { item: Item }) {
   const t = useT(strings);
   const pname = useNamed("project").find((p) => p.id === item.project)?.name;
@@ -177,34 +227,32 @@ function ItemLink({ item }: { item: Item }) {
 
 const itemPath = (it: Item) => "/items/" + encodeURIComponent(it.id);
 const ifMatch = (it: Item) => ({ "If-Match": String(it.version) });
+const md = (d: string) => d.slice(5);
 
 /**
- * 今天的一件事：一行标题，行上直接是「排时间、交给 Agent、完成」（RowActions，与事项列表共用）；写进展收在折叠里。
- * 做完、改期之后这一行留在原处显示新状态（已完成、新的计划），不重读整页；下次打开今天页按服务端重新分组。
+ * 今天的一件事：标题下一行写它为什么在这——计划哪天（过了的写「已过」）、今天截止、逾期（带原截止日）、紧急或高优先级，
+ * 三类用不同的标记，不混在一起；行上四个快捷操作（RowActions，与事项列表共用）。项目名在组标题上，这里不重复。
  */
-function TodayRow({ item, onChange }: { item: Item; onChange: (it: Item) => void }) {
-  const { api } = useSession();
+function TodayRow({ entry, onChange }: { entry: Entry; onChange: (it: Item, what: RowAct) => void }) {
   const t = useT(strings);
-  const [err, setErr] = useState<unknown>(null);
-  const progress = async (b: { text: string }) => {
-    setErr(null);
-    try { await api.post(itemPath(item) + "/progress", b); } catch (e) { setErr(e); }
-    await api.get<{ item: Item }>(itemPath(item)).then((r) => onChange(r.item), () => undefined);
-  };
-  const ended = item.phase === "done" || item.phase === "dropped";
+  const { api } = useSession();
+  const { utc_offset: offset, today } = useHostClock(api);
+  const { item, why } = entry;
+  const due = item.deadline ? hostParts(item.deadline, offset) : null;
+  const marks: { cls: string; text: string }[] = [];
+  if (why.includes("overdue") && due) marks.push({ cls: "badge bad", text: t.why.overdue(md(due.date)) });
+  if (why.includes("due") && due) marks.push({ cls: "badge warn", text: due.time === "23:59:59" ? t.why.dueToday : t.why.dueAt(due.time.slice(0, 5)) });
+  if (why.includes("high")) marks.push({ cls: "badge warn", text: item.priority === "urgent" ? t.why.urgent : t.why.high });
+  if (why.includes("planned") && item.planned_for) marks.push({ cls: "badge plain", text: item.planned_for < today ? t.why.plannedPast(md(item.planned_for)) : t.why.plannedToday });
   return (
-    <li className="stack" data-item={item.id}>
+    <li data-item={item.id}>
       <div className="act-row">
-        <div><ItemLink item={item} />{ended && <> <span className="badge plain"><Val k="phase" id={item.phase} /></span></>}</div>
+        <div>
+          {item.planned_slot && <span className="badge plain">{item.planned_slot}</span>} <Link to={itemPath(item)}>{item.title}</Link>
+          <span className="sub reasons">{marks.map((m) => <span key={m.text} className={m.cls}>{m.text}</span>)}</span>
+        </div>
         <RowActions item={item} where={t.where} onChange={onChange} />
       </div>
-      {err != null && <ErrorNote error={err} />}
-      {!ended && (
-        <details>
-          <summary>{t.moreFor}</summary>
-          <ProgressForm onSubmit={progress} />
-        </details>
-      )}
     </li>
   );
 }

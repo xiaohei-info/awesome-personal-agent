@@ -91,6 +91,21 @@ describe("Web 新建与编辑事项", () => {
     expect((await timelineText())).toContain("新建了");
   });
 
+  it("新建时勾「建好后交给 Agent」：带交给 Agent 的标记建出来（不勾不带），跳到详情由本人在 Agent 处理区点现在开始", async () => {
+    const l = ledger();
+    const u = userEvent.setup();
+    mount(l);
+    await u.click(await screen.findByRole("button", { name: "新建" }));
+    await u.type(await field("标题"), "WB-HO 整理接口文档");
+    expect(screen.queryByText("建好后在「Agent 处理」里点「现在开始」开工")).toBeNull();
+    await u.click(screen.getByRole("checkbox", { name: "建好后交给 Agent" }));
+    expect(screen.getByText("建好后在「Agent 处理」里点「现在开始」开工")).toBeInTheDocument();
+    await u.click(screen.getByRole("button", { name: "创建" }));
+    await screen.findByRole("heading", { name: "WB-HO 整理接口文档", level: 1 });
+    const post = l.calls.find((c) => c.method === "POST" && c.path === "/v1/items")!;
+    expect(post.body).toEqual({ kind: "task", phase: "open", title: "WB-HO 整理接口文档", tags: ["agent-ok"] });
+  });
+
   it("新建缺标题时不发请求", async () => {
     const l = ledger();
     const u = userEvent.setup();

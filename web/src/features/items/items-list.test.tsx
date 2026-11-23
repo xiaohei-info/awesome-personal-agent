@@ -20,10 +20,11 @@ function server(list: It[]) {
     calls.push({ method, path: url, body, ifMatch: (init.headers as Record<string, string> | undefined)?.["If-Match"] });
     if (url === "/v1/projects") return json(200, { projects: [{ id: "p-work", name: "工作" }, { id: "p-home", name: "家务" }] });
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items: [...items.values()] });
-    const m = /^\/v1\/items\/([^/]+)(\/transition)?$/.exec(url);
+    const m = /^\/v1\/items\/([^/]+)(\/transition|\/progress)?$/.exec(url);
     const it = m && items.get(m[1]);
     if (!it) return json(404, { code: "not_found", why: "no route", next: "x" });
     if (method === "GET") return json(200, { item: it, relations: [] });
+    if (m![2] === "/progress") return json(201, { id: it.id });
     if (m![2]) it.phase = body.to;
     else for (const [k, v] of Object.entries(body)) if (k !== "reason") it[k] = v;
     it.version++;
@@ -66,18 +67,33 @@ describe("事项列表（对齐工作台任务库）", () => {
     expect(titles(work)).toEqual(["甲", "乙"]);
   });
 
-  it("行上完成：发 transition（带 If-Match 与在事项列表完成的理由），只重读这一件，行留在原处显示已完成、按钮消失，列表不重读", async () => {
+  it("行上完成：发 transition（带 If-Match 与在事项列表完成的理由），只重读这一件、不重取列表；按新阶段就地重排到组尾，显示已完成、按钮消失", async () => {
     const s = server([mk("a", { project: "p-work", version: 4, title: "甲" }), mk("b", { project: "p-work", title: "乙" })]);
     mount(s.impl);
     const user = userEvent.setup();
     const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
     await user.click(within(row).getByRole("button", { name: "完成" }));
     await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/transition", body: { to: "done", reason: "在事项列表完成" }, ifMatch: "4" }]));
-    expect(await within(row).findByText("已完成")).toBeInTheDocument();
-    expect(within(row).queryByRole("button")).toBeNull();
-    expect(titles(screen.getByRole("region", { name: "工作" }))).toEqual(["甲", "乙"]); // 原位，不重排
+    await waitFor(() => expect(titles(screen.getByRole("region", { name: "工作" }))).toEqual(["乙", "甲"])); // 已完成排到组尾
+    const done = screen.getByRole("link", { name: "甲" }).closest("li")!;
+    expect(within(done).getByText("已完成")).toBeInTheDocument();
+    expect(within(done).queryByRole("button")).toBeNull();
     expect(s.calls.filter((c) => c.path === "/v1/items")).toHaveLength(1);
     expect(s.calls.filter((c) => c.path === "/v1/items/a")).toEqual([{ method: "GET", path: "/v1/items/a", body: undefined, ifMatch: undefined }]);
+  });
+
+  it("行上记进展：与今天页同一个按钮与输入框，写一次进展、只重读这一件，行还在", async () => {
+    const s = server([mk("a", { project: "p-work", title: "甲" })]);
+    mount(s.impl);
+    const user = userEvent.setup();
+    const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展"]);
+    await user.click(within(row).getByRole("button", { name: "记进展" }));
+    await user.type(within(within(row).getByRole("group", { name: "记进展：甲" })).getByLabelText("进展"), "联调通过");
+    await user.click(within(row).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/progress", body: { text: "联调通过" }, ifMatch: undefined }]));
+    await waitFor(() => expect(within(row).queryByRole("group", { name: "记进展：甲" })).toBeNull());
+    expect(s.calls.filter((c) => c.path === "/v1/items")).toHaveLength(1);
   });
 
   it("行上排时间：只填日期不定时，写计划日期一项；行上原位显示新计划；建议与已结束的事没有行内操作", async () => {

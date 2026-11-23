@@ -49,23 +49,36 @@ describe("今天页（flow-web-workbench）", () => {
     expect(within(todays).getByText("事项 WB-A")).toBeInTheDocument(); // 既在计划又在到期的只列一次
     expect(within(todays).getByText("事项 WB-B")).toBeInTheDocument();
     expect(within(todays).getByText("事项 WB-D")).toBeInTheDocument();
-    expect(within(todays).getByRole("heading")).toHaveTextContent("（3）");
+    expect(within(todays).getByRole("heading", { level: 2 })).toHaveTextContent("（3）");
     const stale = screen.getByRole("group", { name: "久未推进" });
     expect(stale).not.toHaveAttribute("open");
     expect(within(stale).getByText("事项 WB-H")).toBeInTheDocument();
     expect(writes(s)).toHaveLength(0); // 浏览不改任何事项（不自动改期）
   });
 
-  // 对齐工作台「今日焦点」的行上按钮：排时间、交给助手（APA 里是交给 Agent）、完成。写入后只重读那一件（GET /items/{id}），不重读 /today。
-  function live(list: ReturnType<typeof mk>[]) {
+  // 对齐工作台「今日焦点」的行上按钮：排时间、交给助手（APA 里是交给 Agent）、完成，另加记进展。
+  // 写入后重读那一件（GET /items/{id}），再静默重取 /today 按新分组就地重排；替身的 /today 按当前状态算（未结束、计划不晚于 TODAY）。
+  const TODAY = new Date().toISOString().slice(0, 10);
+  function live(list: ReturnType<typeof mk>[], groups: { overdue?: string[]; high?: string[] } = {}) {
     const items = new Map(list.map((i) => [i.id, { ...i } as Record<string, any>]));
+    const progress: Record<string, { id: string; text: string; at: string }[]> = {};
     const calls: { method: string; path: string; body?: any; headers: Record<string, string> }[] = [];
+    const open = (i: Record<string, any>) => !["done", "dropped"].includes(i.phase);
     const impl = (async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? "GET";
       const body = init.body ? JSON.parse(init.body as string) : undefined;
       calls.push({ method, path: url, body, headers: (init.headers ?? {}) as Record<string, string> });
-      if (url === "/v1/projects") return json(200, { projects: [] });
-      if (url === "/v1/today") return json(200, { planned: list, due: [], pending: [], stale: [] });
+      if (url === "/v1/projects") return json(200, { projects: [{ id: "p-work", name: "工作" }, { id: "p-home", name: "家务" }] });
+      if (url === "/v1/today") {
+        const all = [...items.values()].filter(open);
+        const pick = (ids?: string[]) => all.filter((i) => ids?.includes(i.id));
+        return json(200, { planned: all.filter((i) => i.planned_for && i.planned_for <= TODAY), due: [], pending: [], stale: [], overdue: pick(groups.overdue), high_priority: pick(groups.high) });
+      }
+      if (url === "/v1/items?phase=done") return json(200, { items: [], done_at: {} });
+      if (url.startsWith("/v1/items?progress_from=")) {
+        const ids = Object.keys(progress);
+        return json(200, { items: ids.map((id) => items.get(id)), progress });
+      }
       if (url === "/v1/rules") return json(200, { rules: [{ key: "background-run/event_rules/handle-labelled", mode: "auto" }] });
       if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: { agent_id: "legacy:hx", agent_name: "主 Agent" }, reason: "" });
       if (url.startsWith("/v1/runs?target=")) return json(200, { runs: [] });
@@ -74,7 +87,10 @@ describe("今天页（flow-web-workbench）", () => {
       if (!it) return json(404, { code: "not_found", why: "no route", next: "x" });
       if (method === "GET") return json(200, { item: it, relations: [] });
       if (m![2] === "/start") return json(202, { id: it.id });
-      if (m![2] === "/progress") return json(201, { id: it.id });
+      if (m![2] === "/progress") {
+        (progress[it.id] ??= []).push({ id: it.id + ".p" + (progress[it.id]?.length ?? 0), text: body.text, at: new Date().toISOString() });
+        return json(201, { id: it.id });
+      }
       if (m![2] === "/transition") it.phase = body.to;
       else for (const [k, v] of Object.entries(body)) if (k !== "reason") it[k] = v;
       it.version++;
@@ -83,16 +99,15 @@ describe("今天页（flow-web-workbench）", () => {
     return { impl, calls };
   }
   const todayReads = (s: { calls: { path: string }[] }) => s.calls.filter((c) => c.path === "/v1/today").length;
+  const rowOf = async (title: string) => (await screen.findByRole("link", { name: title })).closest("li")!;
 
-  it("ACT-WBN-08 排时间：行上直接选日期与时段，写计划日期与时段两项（带 If-Match），这一行原位显示新时段，不重读整页", async () => {
-    const s = live([mk("WB-A", { version: 3, planned_for: "2000-01-01" })]);
+  it("ACT-WBN-08 排时间：行上直接选日期与时段，写计划日期与时段两项（带 If-Match），这一行原位显示新时段；改到以后就离开今天并说明去了哪", async () => {
+    const s = live([mk("WB-A", { version: 3, planned_for: "2000-01-01" }), mk("WB-B", { planned_for: TODAY })]);
     mount(s.impl);
     const user = userEvent.setup();
-    const row = (await screen.findByText("事项 WB-A")).closest("li")!;
+    let row = await rowOf("事项 WB-B");
     await user.click(within(row).getByRole("button", { name: "排时间" }));
-    const form = within(row).getByRole("form", { name: "排时间：事项 WB-A" });
-    await user.clear(within(form).getByLabelText("计划日期"));
-    await user.type(within(form).getByLabelText("计划日期"), "2031-05-06");
+    let form = within(row).getByRole("form", { name: "排时间：事项 WB-B" });
     await user.click(within(form).getByLabelText("不定时"));
     await user.clear(within(form).getByLabelText("开始"));
     await user.type(within(form).getByLabelText("开始"), "10:00");
@@ -100,52 +115,93 @@ describe("今天页（flow-web-workbench）", () => {
     await user.type(within(form).getByLabelText("结束"), "11:30");
     await user.click(within(form).getByRole("button", { name: "确定" }));
     await waitFor(() => expect(writes(s)).toHaveLength(1));
-    expect(writes(s)[0]).toEqual({ method: "PATCH", path: "/v1/items/WB-A", body: { planned_for: "2031-05-06", planned_slot: "10:00 - 11:30", reason: "在今天页排时间" }, headers: expect.objectContaining({ "If-Match": "3" }) });
+    expect(writes(s)[0]).toEqual({ method: "PATCH", path: "/v1/items/WB-B", body: { planned_for: TODAY, planned_slot: "10:00 - 11:30", reason: "在今天页排时间" }, headers: expect.objectContaining({ "If-Match": "1" }) });
+    row = await rowOf("事项 WB-B");
     expect(await within(row).findByText("10:00 - 11:30")).toBeInTheDocument();
-    expect(within(row).getByText(/计划 2031-05-06/)).toBeInTheDocument();
     expect(within(row).queryByRole("form")).toBeNull(); // 存好后收起
-    expect(todayReads(s)).toBe(1);
+    await waitFor(() => expect(todayReads(s)).toBe(2)); // 首次 + 写后静默重取一次，页面没有回到加载中
+    expect(screen.queryByRole("status", { name: /加载中/ })).toBeNull();
+
+    row = await rowOf("事项 WB-A");
+    await user.click(within(row).getByRole("button", { name: "排时间" }));
+    form = within(row).getByRole("form", { name: "排时间：事项 WB-A" });
+    await user.clear(within(form).getByLabelText("计划日期"));
+    await user.type(within(form).getByLabelText("计划日期"), "2999-05-06");
+    await user.click(within(form).getByRole("button", { name: "确定" }));
+    expect(await screen.findByText("「事项 WB-A」已改到 2999-05-06，不在今天的事里了")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "事项 WB-A" })).toBeNull();
   });
 
   it("ACT-WBN-08 交给 Agent：行上一键加交给 Agent 的标记，在行下展开事项详情同一块 Agent 处理，可直接现在开始；不是任务的没有这个按钮", async () => {
-    const s = live([mk("WB-B", { tags: ["home"] }), mk("WB-C", { kind: "commitment" })]);
+    const s = live([mk("WB-B", { tags: ["home"], planned_for: TODAY }), mk("WB-C", { kind: "commitment", planned_for: TODAY })]);
     mount(s.impl);
     const user = userEvent.setup();
-    const row = (await screen.findByText("事项 WB-B")).closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "交给 Agent" }));
+    await user.click(within(await rowOf("事项 WB-B")).getByRole("button", { name: "交给 Agent" }));
     await waitFor(() => expect(writes(s)).toHaveLength(1));
     expect(writes(s)[0]).toMatchObject({ method: "PATCH", path: "/v1/items/WB-B", body: { tags: ["home", "agent-ok"], reason: "交给 Agent 处理" } });
     expect(writes(s)[0].headers["If-Match"]).toBe("1");
+    const row = await rowOf("事项 WB-B");
     const block = await within(row).findByRole("group", { name: "Agent 处理：事项 WB-B" });
     expect(within(block).getByRole("checkbox", { name: "交给 Agent 处理", checked: true })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Agent 处理" })).toBeInTheDocument(); // 已交出：按钮改为收放这一块
     await user.click(within(block).getByRole("button", { name: "现在开始" }));
     await waitFor(() => expect(writes(s).map((c) => c.path)).toEqual(["/v1/items/WB-B", "/v1/items/WB-B/start"]));
     expect(within(row).queryByText(/agent-ok/)).toBeNull();
-    const other = screen.getByText("事项 WB-C").closest("li")!;
+    const other = await rowOf("事项 WB-C");
     expect(within(other).queryByRole("button", { name: "交给 Agent" })).toBeNull();
     expect(within(other).getByRole("button", { name: "完成" })).toBeInTheDocument();
-    expect(todayReads(s)).toBe(1);
   });
 
-  it("ACT-WBN-08 完成与记进展：各发一次写入；完成的这一行留在原处标「已完成」、不再有按钮，不重读整页", async () => {
-    const s = live([mk("WB-A"), mk("WB-B")]);
+  it("ACT-WBN-08 完成：一次写入；做完的这一件按服务端的新分组离开今天的事，块顶说明它已完成，其余行不动", async () => {
+    const s = live([mk("WB-A", { planned_for: TODAY }), mk("WB-B", { planned_for: TODAY })]);
     mount(s.impl);
     const user = userEvent.setup();
-    const b = (await screen.findByText("事项 WB-B")).closest("li")!;
-    await user.type(within(b).getByLabelText("进展"), "已订酒店");
-    await user.click(within(b).getByRole("button", { name: "写进展" }));
+    await user.click(within(await rowOf("事项 WB-B")).getByRole("button", { name: "完成" }));
     await waitFor(() => expect(writes(s)).toHaveLength(1));
-    expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/WB-B/progress", body: { text: "已订酒店" } });
+    expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/WB-B/transition", body: { to: "done", reason: "在今天页完成" } });
+    expect(await screen.findByRole("link", { name: "「事项 WB-B」已完成，不在今天的事里了" })).toHaveAttribute("href", "/items/WB-B");
+    expect(screen.queryByRole("link", { name: "事项 WB-B" })).toBeNull();
+    expect(within(await rowOf("事项 WB-A")).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展"]);
+    expect(within(screen.getByRole("region", { name: "今天的事" })).getByRole("heading", { level: 2 })).toHaveTextContent("（1）");
+  });
 
-    await user.click(within(b).getByRole("button", { name: "完成" }));
+  it("记进展：行上按钮就地展开一个输入框与保存，写一次进展；这一行留在原处，底部本周进展条数随即加一（同事同日算一条）", async () => {
+    const s = live([mk("WB-A", { planned_for: TODAY }), mk("WB-B", { planned_for: TODAY })]);
+    mount(s.impl);
+    const user = userEvent.setup();
+    const row = await rowOf("事项 WB-B");
+    await user.click(within(row).getByRole("button", { name: "记进展" }));
+    const box = within(row).getByRole("group", { name: "记进展：事项 WB-B" });
+    await user.type(within(box).getByLabelText("进展"), "已订酒店");
+    await user.click(within(box).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(writes(s)).toEqual([expect.objectContaining({ method: "POST", path: "/v1/items/WB-B/progress", body: { text: "已订酒店" } })]));
+    await waitFor(() => expect(within(row).queryByRole("group", { name: "记进展：事项 WB-B" })).toBeNull()); // 存好后收起，行还在原处
+    expect(screen.getByRole("link", { name: "事项 WB-B" }).closest("li")).toBe(row);
+    expect(await screen.findByText(/本周进展 1 条/)).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "记进展" }));
+    await user.type(within(within(row).getByRole("group", { name: "记进展：事项 WB-B" })).getByLabelText("进展"), "又一条");
+    await user.click(within(row).getByRole("button", { name: "保存" }));
     await waitFor(() => expect(writes(s)).toHaveLength(2));
-    expect(writes(s)[1]).toMatchObject({ method: "POST", path: "/v1/items/WB-B/transition", body: { to: "done", reason: "在今天页完成" } });
-    expect(await within(b).findByText("已完成")).toBeInTheDocument();
-    expect(within(b).queryByRole("button")).toBeNull();
-    const rows = within(screen.getByRole("region", { name: "今天的事" })).getAllByRole("listitem");
-    expect(rows.map((li) => li.getAttribute("data-item"))).toEqual(["WB-A", "WB-B"]); // 顺序不变
-    expect(todayReads(s)).toBe(1);
+    expect(screen.getByText(/本周进展 1 条/)).toBeInTheDocument(); // 同一件事同一天两条仍算一条
+  });
+
+  it("按项目分组；逾期标原截止日、高优先级标紧急或高、计划过了的标已过，三类各用各的标记，同一件只列一次", async () => {
+    const s = live([
+      mk("A", { project: "p-home", title: "交电费", planned_for: TODAY }),
+      mk("B", { project: "p-work", title: "交报告", deadline: "2026-11-20T18:00:00+08:00" }),
+      mk("C", { project: "p-work", title: "修线上问题", priority: "urgent", planned_for: "2000-01-02" }),
+      mk("D", { title: "看牙", priority: "high" }),
+    ], { overdue: ["B"], high: ["C", "D"] });
+    mount(s.impl);
+    const todays = await screen.findByRole("region", { name: "今天的事" });
+    await waitFor(() => expect(within(todays).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["工作 2", "家务 1", "没归项目的 1"]));
+    expect(within(todays).getByRole("heading", { level: 2 })).toHaveTextContent("（4）");
+    const marks = (title: string) => [...screen.getByRole("link", { name: title }).closest("li")!.querySelectorAll(".reasons > span")].map((x) => `${x.className}|${x.textContent}`);
+    expect(marks("交报告")).toEqual(["badge bad|逾期 · 原截止 11-20"]);
+    expect(marks("修线上问题")).toEqual(["badge warn|紧急", "badge plain|计划 01-02，已过"]);
+    expect(marks("看牙")).toEqual(["badge warn|高优先级"]);
+    expect(marks("交电费")).toEqual(["badge plain|计划今天"]);
+    expect(within(within(todays).getByRole("region", { name: "工作" })).getAllByRole("link").map((l) => l.textContent)).toEqual(["工作", "修线上问题", "交报告"]);
   });
 
   it("服务端拒绝写入时显示原因并重读，不留下本地假状态", async () => {

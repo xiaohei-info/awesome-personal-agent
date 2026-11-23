@@ -7,26 +7,30 @@ import { AgentBlock } from "./HandOff";
 import type { Item } from "./ItemsPage";
 import { SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { useHostClock } from "./schedule";
+import { ProgressForm } from "../today/ProgressForm";
+
+/** 行上做了什么：done、plan、progress、edit（交给 Agent 等其余改动）。 */
+export type RowAct = "done" | "plan" | "progress" | "edit";
 import { strings } from "./strings";
 
-// 列表行上的快捷操作，放在 .act-row 里：按钮与标题同一行，展开的表单与 Agent 处理区（.row-panel）换到下一行占满整行（界面设计 §5.2、§9.3）：对应工作台任务行的「排时间、交给助手、完成」三个按钮，今天页与事项列表共用。
+// 列表行上的快捷操作，放在 .act-row 里：按钮与标题同一行，展开的表单与 Agent 处理区（.row-panel）换到下一行占满整行（界面设计 §5.2、§9.3）：对应工作台任务行的「排时间、交给助手、完成」，另加「记进展」，今天页与事项列表共用。
 // 写入走事项详情同样的接口（PATCH 带 If-Match、transition）；写完只重读这一件（GET /items/{id}）交给 onChange 原位替换，
 // 不重读整页、不丢滚动位置。失败时显示服务端原因，并同样重读这一件，不留本地假状态。
 // 「交给 Agent」就是事项详情的 Agent 处理区（AgentBlock）：加上交给 Agent 的标记后在行下展开同一块，选 Agent、看前提、现在开始都在那里。
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export function RowActions({ item, where, onChange }: { item: Item; where: string; onChange: (it: Item) => void }) {
+export function RowActions({ item, where, onChange }: { item: Item; where: string; onChange: (it: Item, what: RowAct) => void }) {
   const t = useT(strings);
   const { api } = useSession();
-  const [open, setOpen] = useState<"plan" | "agent" | null>(null);
+  const [open, setOpen] = useState<"plan" | "agent" | "progress" | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const path = "/items/" + encodeURIComponent(item.id);
   const ifMatch = { "If-Match": String(item.version) };
 
-  /** 写一次，再重读这一件；返回是否成功。 */
-  const write = async (fn: () => Promise<unknown>): Promise<boolean> => {
+  /** 写一次，再重读这一件；返回是否成功。what 告诉页面这次做了什么（今天页据此刷新计数、说明为什么离开了列表）。 */
+  const write = async (fn: () => Promise<unknown>, what: RowAct = "edit"): Promise<boolean> => {
     setErr(null);
     setBusy(true);
     let ok = true;
@@ -36,7 +40,7 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
       ok = false;
       setErr(e);
     }
-    await api.get<{ item: Item }>(path).then((r) => onChange(r.item), () => undefined);
+    await api.get<{ item: Item }>(path).then((r) => onChange(r.item, what), () => undefined);
     setBusy(false);
     return ok;
   };
@@ -57,12 +61,22 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
         {/* 交给 Agent 只对任务（交给 Agent 的规则只认任务，§13.6）。 */}
         {item.kind === "task" && <button type="button" aria-expanded={open === "agent"} disabled={busy} onClick={() => void handoff()}>{handed ? t.rowAgent : t.rowHandoff}</button>}
         {/* 委派完成要带证据（§6.14），去详情填；其余一键完成。 */}
-        {item.kind !== "delegation" && <button type="button" disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch))}>{t.done}</button>}
+        {item.kind !== "delegation" && <button type="button" disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done")}>{t.done}</button>}
+        <button type="button" aria-expanded={open === "progress"} onClick={() => setOpen(open === "progress" ? null : "progress")}>{t.rowProgress}</button>
       </span>
       {err != null && <div className="row-panel"><ErrorNote error={err} /></div>}
       {open === "plan" && <PlanForm item={item} onCancel={() => setOpen(null)} onSubmit={async (b) => {
-        if (await write(() => api.patch(path, { ...b, reason: t.rowPlanReason(where) }, ifMatch))) setOpen(null);
+        if (await write(() => api.patch(path, { ...b, reason: t.rowPlanReason(where) }, ifMatch), "plan")) setOpen(null);
       }} />}
+      {open === "progress" && (
+        <div className="row-panel" role="group" aria-label={t.rowProgressFor(item.title)}>
+          <ProgressForm autoFocus label={t.rowSave} onSubmit={async (b) => {
+            const ok = await write(() => api.post(path + "/progress", b), "progress");
+            if (ok) setOpen(null);
+            return ok;
+          }} />
+        </div>
+      )}
       {open === "agent" && item.kind === "task" && (
         <div className="row-panel" aria-label={t.rowAgentFor(item.title)} role="group">
           <AgentBlock key={"h" + item.version} item={item} onSave={(tags) => void tagWrite(tags)}
