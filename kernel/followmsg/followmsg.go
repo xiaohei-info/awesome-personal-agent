@@ -270,6 +270,8 @@ func resolve(tx *store.Tx, ev domain.SourceEvent, onUpdate string) (plan, error)
 			p.how = echo
 			w := got[id].WaitingOn
 			p.wakes = got[id].Phase == domain.PhaseWaiting && w != nil && (w.Kind == domain.WaitingHuman || w.Kind == domain.WaitingExternal)
+		} else if mode == refresh && !registered[id] && !builtIn(tx, got[id], ev.DedupeKey.Domain) {
+			p.how = echo // 这个对象的事件是按合并键并进别处建出的事项的：只记为挂靠消息，不拿它改那条事项的标题与正文
 		}
 		return p, nil
 	case len(open) > 1:
@@ -278,6 +280,19 @@ func resolve(tx *store.Tx, ev domain.SourceEvent, onUpdate string) (plan, error)
 		return plan{hint: "correlation: matches only closed items (" + strings.Join(shut, ", ") + "), not reopening"}, nil
 	}
 	return plan{}, nil
+}
+
+// builtIn 判断事项是不是由这个去重域里的来源事件建出的（§9.4 "建出的事项"）。合并键把别的来源的事件并进来时，
+// 那条事件指向的是别的来源建出的事项，不是它自己建出的。没记建出它的事件（早期事项）按是处理，与原来一致。
+func builtIn(tx *store.Tx, it domain.Item, dom string) bool {
+	var x struct {
+		SourceEvent string `json:"source_event"`
+	}
+	if len(it.Ext) == 0 || json.Unmarshal(it.Ext, &x) != nil || x.SourceEvent == "" {
+		return true
+	}
+	ev, err := runner.Event(tx, x.SourceEvent)
+	return err == nil && ev.DedupeKey.Domain == dom
 }
 
 // Attaches 只读预判 Intercept 会不会把事件挂靠到原事项（不写任何东西）；出错按不挂靠处理。
