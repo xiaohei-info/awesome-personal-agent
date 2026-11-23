@@ -453,3 +453,9 @@ func (q *Queue) Unread(tx *store.Tx) ([]domain.Delivery, error) {
 func (q *Queue) Backlog(tx *store.Tx) ([]domain.Delivery, error) {
 	return q.list(tx, "WHERE state IN ('pending','claimed') ORDER BY created_at, rowid")
 }
+
+// SupersedeID 作废一条还没被领取的投递（pending，含退避等待中的），返回条数；已领取、已送达或已终结的不动。
+// 不属于单个事项的合并投递在成员变化时由触达调用。
+func (q *Queue) SupersedeID(tx *store.Tx, id string) (int64, error) {
+	return tx.Exec(`UPDATE delivery_delivery SET state = 'superseded', lease_until = 0 WHERE id = ? AND state = 'pending'`, id)
+}

@@ -11,6 +11,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
@@ -225,8 +227,20 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (domain.Delivery, 
 	if pl.Error != "" {
 		why += "：" + firstLine(pl.Error)
 	}
+	route := pushRoute(pol, r)
+	if cat == policy.PushTemplateRun && r.Route == "" { // 产出注入主会话的任务，没出来也说在主会话里（主会话能唤醒时）
+		if _, on, err := instances.PushToMain(tx, pol, it); err != nil {
+			return domain.Delivery{}, false, err
+		} else if on {
+			if agent, blocked, err := executors.MainWake(tx, pol); err != nil {
+				return domain.Delivery{}, false, err
+			} else if blocked == "" {
+				route = delivery.WakeRoute(agent)
+			}
+		}
+	}
 	return domain.Delivery{ID: fmt.Sprintf("push:run:%s:%d", it.ID, e.At.Truncate(runCooldown).Unix()), Item: it.ID, Class: domain.DeliveryHealth, Version: 1,
-		Route:   pushRoute(pol, r),
+		Route:   route,
 		Content: domain.DeliveryContent{Title: title, Summary: why + "。去事项里看原因，决定重跑还是放弃。", WebURL: "/items/" + it.ID + "#agent"}}, true, nil
 }
 

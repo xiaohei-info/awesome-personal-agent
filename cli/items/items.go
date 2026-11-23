@@ -159,11 +159,11 @@ func (f *form) headers() map[string]string {
 	return h
 }
 
-var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "planned-for", "planned-slot", "deadline", "origin", "ext", "reason"}
+var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "planned-for", "planned-slot", "daily-at", "deadline", "origin", "ext", "reason"}
 
 // add 实现 item add 与 propose：POST /items。propose 不带 --phase，由内核缺省为 proposed。
 func add(c *client.Ctx, args []string, name string) error {
-	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --planned-slot <HH:MM - HH:MM> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
+	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --planned-slot <HH:MM - HH:MM> --daily-at <HH:MM, no date> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
 	fields := itemFields
 	if name == "item add" {
 		fields = append([]string{"phase"}, fields...)
@@ -190,7 +190,7 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	switch sub {
 	case "update":
 		fields = itemFields[1:]
-		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
+		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --daily-at <HH:MM, empty clears; a planned date clears it> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
 	case "progress":
 		fields = []string{"text", "on"}
 		hint = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>]"

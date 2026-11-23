@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
@@ -63,7 +64,7 @@ var useClockNow bool
 func setup(t *testing.T, drafter ...Drafter) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, proc.Module, registry.Module, direct.Module, background.Module, channel.Module, Module, executors.Module, delegation.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, proc.Module, registry.Module, direct.Module, background.Module, channel.Module, Module, executors.Module, delegation.Module, instances.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

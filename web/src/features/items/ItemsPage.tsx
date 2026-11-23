@@ -43,6 +43,7 @@ export interface Item {
   deadline?: string | null;
   planned_for?: string;
   planned_slot?: string;
+  daily_at?: string;
   body?: string;
   spec?: { sections?: { project?: string; title?: string; body: string }[] };
   waiting_on?: { kind: string; ref: string };

@@ -189,3 +189,47 @@ describe("设置 › 提醒与打扰", () => {
     expect(screen.getByRole("main")).not.toHaveTextContent(/channel:|source_failing/);
   });
 });
+
+describe("设置 › 提醒与打扰 › 到点提醒与定时任务的结果", () => {
+  it("默认关；预览写明开启后下一批几条、在什么时候、24 小时共几条与几条消息、送到主会话；一键开启只发 proactive 且不带 since", async () => {
+    const at = new Date(2026, 10, 24, 9, 0).toISOString();
+    const s = policyServer({ preview: { total: 5, batches: 3, next_at: at, next_count: 2, route: "wake", entries: [] } });
+    mount(s.impl);
+    const c = await section("到点提醒");
+    expect(c.getByRole("switch", { name: "开启到点提醒" })).not.toBeChecked();
+    await waitFor(() => expect(c.getByRole("status", { name: "开启后的预览" })).toHaveTextContent(
+      "按当前数据，开启后下一批提醒 2 条，在 11月24日 09:00接下来 24 小时共 5 条，合成 3 条消息送到主 Agent 的对话里开启之前已经过去的提醒点不补推"));
+    expect(s.previews.at(-1)).toEqual({ on: false, work_start: "09:00", work_end: "18:00", workdays: [1, 2, 3, 4, 5], shift: true, start: true, end: true, lead_min: 0, dedup_min: 60, max_items: 20, max_batches: 6 });
+    await userEvent.click(c.getByRole("button", { name: "按这些设置开启" }));
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.proactive).toEqual({ on: true, work_start: "09:00", work_end: "18:00", workdays: [1, 2, 3, 4, 5], shift: true, start: true, end: true, lead_min: 0, dedup_min: 60, max_items: 20, max_batches: 6 }));
+    expect(s.puts.at(-1)!.body.disturb.routes).toEqual({ decision: "inject", health: "web" }); // 其余段原样带回
+  });
+
+  it("主会话不能唤醒时写明原因；改工作开始时间与工作日后预览按草稿重算，保存发整段", async () => {
+    const s = policyServer({ preview: { total: 1, batches: 1, next_at: new Date(2026, 10, 24, 9, 0).toISOString(), next_count: 1, route: "web", blocked: "main_cannot_wake", entries: [] } });
+    mount(s.impl);
+    const c = await section("到点提醒");
+    await waitFor(() => expect(c.getByRole("status", { name: "开启后的预览" })).toHaveTextContent("主 Agent 不能在对话里接收，先放在今天页的提醒里"));
+    await userEvent.clear(c.getByLabelText("工作开始时间"));
+    await userEvent.type(c.getByLabelText("工作开始时间"), "08:30");
+    await userEvent.click(within(c.getByRole("group", { name: "工作日" })).getByLabelText("六"));
+    await waitFor(() => expect(s.previews.at(-1)).toMatchObject({ work_start: "08:30", workdays: [1, 2, 3, 4, 5, 6] }));
+    await saveIn("到点提醒");
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.proactive).toMatchObject({ on: false, work_start: "08:30", workdays: [1, 2, 3, 4, 5, 6] }));
+  });
+
+  it("定时任务的结果：简报与复盘默认推、例行任务默认只记；按实例单独设；一键全部只记", async () => {
+    const s = policyServer({ instances: [{ id: "ins_b", pack: "brief", params: { schedule: "0 8 * * *" } }, { id: "ins_m", pack: "agents-md", params: {} }] });
+    mount(s.impl);
+    const c = await section("定时任务的结果");
+    expect(c.getByRole("switch", { name: "简报" })).toBeChecked();
+    expect(c.getByRole("switch", { name: "复盘" })).toBeChecked();
+    expect(c.getByRole("switch", { name: "例行任务" })).not.toBeChecked();
+    expect(c.queryByText(/agents-md/)).toBeNull(); // 只列定时任务类型的实例
+    await userEvent.selectOptions(await c.findByLabelText("0 8 * * * 的结果"), "false");
+    await saveIn("定时任务的结果");
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.proactive).toMatchObject({ task_push: { brief: true, review: true, routine: false }, instance_push: { ins_b: false } }));
+    await userEvent.click(c.getByRole("button", { name: "全部只记在 APA，不推" }));
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.proactive).toMatchObject({ task_push: { brief: false, review: false, routine: false }, instance_push: {} }));
+  });
+});

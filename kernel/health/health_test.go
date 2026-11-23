@@ -17,6 +17,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -47,7 +49,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, policy.Module, command.Module, proc.Module, delivery.Module,
-		registry.Module, runner.Module, agentsmd.Module, chain.Module, direct.Module, items.Module, clock.Module, Module} {
+		registry.Module, runner.Module, agentsmd.Module, chain.Module, direct.Module, items.Module, clock.Module, executors.Module, instances.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

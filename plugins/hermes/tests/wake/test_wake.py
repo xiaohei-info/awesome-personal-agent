@@ -175,3 +175,44 @@ def test_cli_rejects_malformed_args(wake):
     ctx = Ctx()
     wake.register(ctx)
     assert "list of strings" in json.loads(ctx.tools["apa_wake_cli"]({"args": "context"}))["error"]
+
+
+def test_notice_is_injected_as_facts_without_credential(wake, kernel):
+    """A proactive reminder (no run) reaches the main session as one short message; no run credential is exchanged."""
+    kernel.notice()
+    ctx = Ctx()
+    wake.poll_once(ctx, SESSION, wait=0)
+    (text, key), = ctx.injected
+    assert key == SESSION
+    assert text.splitlines()[:2] == ["[APA 提醒] 到点提醒：1 件事", "· [14:00] 开始｜14:00 - 15:00 写周报（it1）"]
+    assert kernel.exchanges == 0 and "apa_wake_cli" not in text and "apa_run_" not in text
+    assert kernel.reports == [("ack", "schedbatch:1", {"version": 1, "external_ref": "main-session"})]
+
+
+def test_brief_notice_names_its_kind(wake, kernel):
+    kernel.notice(did="brief:it9", cls="brief", title="【简报】brief 2026-11-24 08:00", summary="## 今天\n- 写周报")
+    ctx = Ctx()
+    wake.poll_once(ctx, SESSION, wait=0)
+    assert ctx.injected[0][0].startswith("[APA 简报] 【简报】brief 2026-11-24 08:00\n## 今天\n- 写周报\n")
+
+
+def test_refused_notice_is_failed_back_for_retry(wake, kernel):
+    kernel.notice()
+    ctx = Ctx(accept=False)
+    with pytest.raises(wake.WakeError, match="refused"):
+        wake.poll_once(ctx, SESSION, wait=0)
+    assert [r[0] for r in kernel.reports] == ["fail"] and kernel.exchanges == 0
+
+
+def test_notice_with_lost_ack_is_not_injected_twice(wake, kernel):
+    """The kernel re-offers a delivery whose ack never arrived; this process re-acks it instead of injecting again."""
+    kernel.fail_ack = True
+    kernel.notice()
+    ctx = Ctx()
+    with pytest.raises(wake.WakeError, match="500"):
+        wake.poll_once(ctx, SESSION, wait=0)
+    kernel.fail_ack = False
+    kernel.notice()  # the same delivery comes back after its lease
+    wake.poll_once(ctx, SESSION, wait=0)
+    assert len(ctx.injected) == 1
+    assert [r[0] for r in kernel.reports] == ["ack", "ack"]

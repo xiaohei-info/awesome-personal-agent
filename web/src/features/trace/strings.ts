@@ -108,7 +108,7 @@ const zh = {
   internal: "一条内部记录",
   fields: {
     title: "标题", summary: "摘要", body: "正文", priority: "优先级", project: "项目", assignee: "负责人", deadline: "截止",
-    planned_for: "计划日期", planned_slot: "时段", kind: "类型", spec: "内容", status_label: "状态标签", tags: "标签",
+    planned_for: "计划日期", planned_slot: "时段", daily_at: "每天提醒", kind: "类型", spec: "内容", status_label: "状态标签", tags: "标签",
   } as Record<string, string>,
   // 原文栏（§6.10、§15.1）
   rawTitle: "原文",
@@ -234,7 +234,7 @@ const en: typeof zh = {
   internal: "an internal record",
   fields: {
     title: "title", summary: "summary", body: "body", priority: "priority", project: "project", assignee: "assignee", deadline: "deadline",
-    planned_for: "planned date", planned_slot: "time slot", kind: "type", spec: "content", status_label: "status label", tags: "tags",
+    planned_for: "planned date", planned_slot: "time slot", daily_at: "daily reminder", kind: "type", spec: "content", status_label: "status label", tags: "tags",
   },
   rawTitle: "Original",
   rawHead: (size, state) => `Original ${size} · ${state}`,

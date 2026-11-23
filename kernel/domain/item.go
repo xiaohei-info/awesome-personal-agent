@@ -188,6 +188,7 @@ type ItemInput struct {
 	Deadline    *time.Time      `json:"deadline,omitempty"`
 	PlannedFor  string          `json:"planned_for,omitempty"`  // 计划日期 YYYY-MM-DD（§6.3），不带定时
 	PlannedSlot string          `json:"planned_slot,omitempty"` // 时段 HH:MM - HH:MM（§6.3），落在计划日期那天
+	DailyAt     string          `json:"daily_at,omitempty"`     // 每天到点提醒的钟点 HH:MM（§6.3），与计划日期互斥
 	Ask         *AskInput       `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Proposal    *Proposal       `json:"proposal,omitempty"` // 建议信息，由入站流水线写入（§6.3）
@@ -310,7 +311,8 @@ type Item struct {
 	WaitingOn   *WaitingOn      `json:"waiting_on,omitempty"`
 	Deadline    *time.Time      `json:"deadline,omitempty"`     // 事项自身的截止，与 ask.deadline（决策超时）无关
 	PlannedFor  string          `json:"planned_for,omitempty"`  // 计划日期 YYYY-MM-DD（§6.3），不带定时、不产生提醒
-	PlannedSlot string          `json:"planned_slot,omitempty"` // 时段 HH:MM - HH:MM（§6.3），有它必须有计划日期，不产生提醒
+	PlannedSlot string          `json:"planned_slot,omitempty"` // 时段 HH:MM - HH:MM（§6.3），有它必须有计划日期；开启主动提醒时按它提醒开始与截止（§7.4）
+	DailyAt     string          `json:"daily_at,omitempty"`     // 每天到点提醒的钟点 HH:MM（§6.3），与计划日期互斥；只在开启主动提醒时产生提醒
 	Ask         *Ask            `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Proposal    *Proposal       `json:"proposal,omitempty"`
@@ -363,6 +365,15 @@ func ParseSlot(s string) (start, end int, ok bool) {
 	start, ok1 := hm(s[:5])
 	end, ok2 := hm(s[8:])
 	return start, end, ok1 && ok2 && start < 24*60 && end > start
+}
+
+// ParseClock 解析钟点 `HH:MM`（§6.3 daily_at），两位补零，00:00–23:59，返回当天的分钟数。
+func ParseClock(s string) (int, bool) {
+	if len(s) != 5 || s[2] != ':' || !digits(s[:2]) || !digits(s[3:]) {
+		return 0, false
+	}
+	h, m := int(s[0]-'0')*10+int(s[1]-'0'), int(s[3]-'0')*10+int(s[4]-'0')
+	return h*60 + m, h < 24 && m < 60
 }
 
 func digits(s string) bool {
