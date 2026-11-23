@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, type ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
@@ -13,12 +13,15 @@ import { HANDOFF_TAG } from "../../app/ids";
 import { Prereqs } from "../../app/Prereqs";
 import { handoffPrereqs, useHandoff } from "../items/HandOff";
 import { strings as itemStrings } from "../items/strings";
+import { arrange, family, groupBy, type Origin } from "./groups";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
 export interface Proposal {
   id: string;
   version?: number;
   tags?: string[];
+  kind?: string;
+  created_at?: string;
   title: string;
   summary?: string;
   priority?: string;
@@ -26,7 +29,7 @@ export interface Proposal {
   origin?: { source: string; actor?: string };
   // 入站流水线写入的建议信息（主文档 §6.3）；agent 直接提出的建议没有 recommend。
   proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[];
-    merges?: Merge[]; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep };
+    merges?: Merge[]; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep; urgent?: boolean };
 }
 /** 一次合并的留痕（§9.3 跨来源合并）：并入的来源事件、当时的内容、判断方与理由；item 是被折叠的那条建议（批量归类才有）。 */
 interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; why?: string; batch?: string; item?: string; at: string }
@@ -37,7 +40,7 @@ interface SourceRead { event: { id: string; source_id: string; subject: string; 
 type Action = "accept" | "dismiss" | "attach" | "handoff" | "split" | "unmerge";
 /** 处理完的一行回执：说清结果，并给去处（界面设计 §5.2、§7 路径一）。 */
 interface Receipt { id: string; title: string; text: string; to?: string; missing?: boolean }
-interface BatchResult { id: string; do: string; ok: boolean; why?: string }
+interface BatchResult { id: string; do: string; ok: boolean; code?: string; why?: string }
 
 
 
@@ -338,6 +341,22 @@ function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => P
   );
 }
 
+/** 批量忽略的两步：先写明会忽略几条、依据是什么，再确认；幂等键在确认前生成，同一次确认重发不多改，成功后换新键。 */
+function BulkIgnore({ n, label, plan, onConfirm }: { n: number; label: string; plan: string; onConfirm: (key: string) => Promise<boolean> }) {
+  const t = useT(strings);
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const key = useRef(crypto.randomUUID());
+  if (!asking) return <p><button type="button" onClick={() => setAsking(true)}>{label}</button></p>;
+  return (
+    <p role="group" aria-label={t.confirmHead}>
+      <span>{plan}</span>{" "}
+      <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { if (await onConfirm(key.current)) { key.current = crypto.randomUUID(); setAsking(false); } } finally { setBusy(false); } }}>{t.confirmIgnore(n)}</button>{" "}
+      <button type="button" disabled={busy} onClick={() => setAsking(false)}>{t.cancel}</button>
+    </p>
+  );
+}
+
 /** 导航上建议流的数量：待处理的建议条数。 */
 export const countProposals = (api: ApiClient) => api.get<{ items: Proposal[] }>("/items?phase=proposed").then((r) => r.items.length);
 
@@ -345,6 +364,9 @@ export function ProposalsPage() {
   const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<Proposal[] | null>(null);
+  const [origins, setOrigins] = useState<Record<string, Origin>>({});
+  const [axis, setAxis] = useState<"source" | "type">("source");
+  const [undo, setUndo] = useState<{ ids: string[]; note?: string } | null>(null);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
   const [error, setError] = useState<unknown>(null);
   const [source, setSource] = useState("");
@@ -361,9 +383,10 @@ export function ProposalsPage() {
 
   const load = useCallback(
     () =>
-      api.get<{ items: Proposal[]; last_rejections?: Record<string, Rejection> }>("/items?phase=proposed").then(
+      api.get<{ items: Proposal[]; last_rejections?: Record<string, Rejection>; origins?: Record<string, Origin> }>("/items?phase=proposed").then(
         (r) => {
           setRejections(r.last_rejections ?? {});
+          setOrigins(r.origins ?? {});
           setItems(r.items);
         },
         (e) => setError(e),
@@ -455,6 +478,52 @@ export function ProposalsPage() {
     window.dispatchEvent(new Event(COUNTS_EVENT));
   };
 
+  // 批量忽略（按组，或按上游已结束）：一次请求，逐条各是一条 proposal.dismiss；带幂等键，重发不多改。成功的那几条可一键改回建议。
+  const ignore = async (body: object, key: string): Promise<boolean> => {
+    let sent = false;
+    setError(null);
+    setOutcome(null);
+    setUndo(null);
+    try {
+      const r = await api.post<{ results: BatchResult[] }>("/proposals/batch", body, { "Idempotency-Key": key });
+      const title = (id: string) => all.find((i) => i.id === id)?.title ?? id;
+      const ok = r.results.filter((x) => x.ok).map((x) => x.id);
+      setOutcome({ done: ok.length, skipped: r.results.filter((x) => !x.ok).map((x) => ({ title: title(x.id), why: x.code === "conflict" && (body as { mode: string }).mode === "ended" ? t.notEnded : x.why ?? t.notHandled })) });
+      if (ok.length) setUndo({ ids: ok });
+      sent = true;
+    } catch (e) {
+      setError(e); // 没有确知的结果：留在确认里，重发用同一个幂等键
+    }
+    await load();
+    window.dispatchEvent(new Event(COUNTS_EVENT));
+    return sent;
+  };
+  // shortcut: 撤销入口只在这一页这一次处理后的回执里，离开页面后要逐条经 POST /items/{id}/transition 改回；需要事后批量找回时再加"最近批量忽略"列表。
+  const undoIgnore = async () => {
+    if (!undo) return;
+    setError(null);
+    let back = 0;
+    const failed: string[] = [];
+    for (const id of undo.ids) {
+      try {
+        await api.post("/items/" + encodeURIComponent(id) + "/transition", { to: "proposed", reason: t.undoReason });
+        back++;
+      } catch {
+        failed.push(id); // 别处已改过（例如已重新打开）：保持服务端现状
+      }
+    }
+    setUndo(failed.length ? { ids: failed, note: t.undoPartial(back, failed.length) } : null);
+    setOutcome(null);
+    await load();
+    window.dispatchEvent(new Event(COUNTS_EVENT));
+  };
+  const parts = arrange(shown, origins);
+  const ended = parts.hosted.filter((i) => origins[i.id]?.ended);
+  const card = (i: Proposal) => <Card key={i.id} item={i} rejection={rejections[i.id]} candidates={candidates} onAct={act} ready={ready} />;
+  const typeName = (k: string) => t.family[k] ?? (k || t.family[""]);
+  const groupName = (k: string) => (axis === "source" ? (k ? sourceName(k) : t.noSource) : typeName(k));
+  const when = (i: Proposal) => (i.created_at ? new Date(i.created_at).toLocaleString() : "");
+
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
@@ -490,6 +559,12 @@ export function ProposalsPage() {
             </ul>
           )}
         </div>
+      )}
+      {undo && (
+        <p role="status" aria-label={t.undoHead}>
+          {undo.note ?? t.ignored(undo.ids.length)}{" "}
+          <button type="button" onClick={() => void undoIgnore()}>{t.undo}</button>
+        </p>
       )}
       {receipts.length > 0 && (
         <ul className="rows" aria-label={t.receipts}>
@@ -536,9 +611,53 @@ export function ProposalsPage() {
               <button disabled={batching || recommended === 0} onClick={() => setConfirming(true)}>{t.batch(recommended)}</button>
             )}
           </div>
-          {shown.map((i) => (
-            <Card key={i.id} item={i} rejection={rejections[i.id]} candidates={candidates} onAct={act} ready={ready} />
-          ))}
+          {parts.pinned.length > 0 && (
+            <section aria-label={t.pinnedHead}>
+              <h2>{t.pinnedHead} · {parts.pinned.length}</h2>
+              <p className="sub">{t.pinnedWhy}</p>
+              {parts.pinned.map(card)}
+            </section>
+          )}
+          {parts.hosted.length > 0 && (
+            <details className="panel" aria-label={t.hostedHead}>
+              <summary>{t.hostedSummary(parts.hosted.length, parts.objects.length, ended.length)}</summary>
+              <p className="sub">{t.hostedWhy}</p>
+              {ended.length > 0 && (
+                <BulkIgnore n={ended.length} label={t.ignoreEnded(ended.length)} plan={[t.endedPlan(ended.filter((i) => origins[i.id].ended!.type.endsWith(".merged")).length, ended.filter((i) => origins[i.id].ended!.type.endsWith(".closed")).length), parts.hosted.length > ended.length ? t.endedUnsure(parts.hosted.length - ended.length) : ""].filter(Boolean).join("；")}
+                  onConfirm={(key) => ignore({ mode: "ended", filter: { ids: ended.map((i) => i.id) } }, key)} />
+              )}
+              {parts.objects.map((g) => (
+                <section key={g.object} aria-label={g.object} className="group">
+                  <h3>{g.object} · {t.count(g.items.length)}{g.ended && <span className="sub"> · {t.endedAs(g.ended.type.endsWith(".merged"), new Date(g.ended.at).toLocaleString())}</span>}</h3>
+                  {g.items.length > 1 && (
+                    <ul className="rows" aria-label={t.groupSources}>
+                      {g.items.map((i) => <li key={i.id}>{sourceName(i.origin?.source ?? "") || t.noSource} · {when(i)} · {i.title}</li>)}
+                    </ul>
+                  )}
+                  {g.items.map(card)}
+                </section>
+              ))}
+            </details>
+          )}
+          {parts.rest.length > 0 && (
+            <>
+              <label>
+                {t.groupBy}
+                <select value={axis} onChange={(e) => setAxis(e.target.value as "source" | "type")}>
+                  <option value="source">{t.bySource}</option>
+                  <option value="type">{t.byType}</option>
+                </select>
+              </label>
+              {groupBy(parts.rest, (i) => (axis === "source" ? i.origin?.source ?? "" : family(origins[i.id]?.type))).map(([k, its]) => (
+                <details key={axis + k} open className="group" aria-label={groupName(k)}>
+                  <summary>{groupName(k)} · {t.count(its.length)}</summary>
+                  <BulkIgnore n={its.length} label={t.ignoreGroup(its.length)} plan={t.groupPlan(groupName(k), its.length)}
+                    onConfirm={(key) => ignore({ mode: "explicit", actions: its.map((i) => ({ id: i.id, do: "dismiss", reason: t.groupReason(groupName(k)) })) }, key)} />
+                  {its.map(card)}
+                </details>
+              ))}
+            </>
+          )}
         </>
       )}
     </main>

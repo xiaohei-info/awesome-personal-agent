@@ -528,3 +528,141 @@ describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 
     await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/itm_w/unmerge")).toMatchObject({ method: "POST", csrf: "tok-1" }));
   });
 });
+
+// 降噪（主文档 §7.2）：需要拍板的置顶不折叠；代码托管通知默认收起、一键展开、同一对象合组；批量忽略二次确认、带幂等键、可撤销。
+describe("建议页降噪：折叠、合组与批量忽略", () => {
+  const PR7 = "o/r/pull/7";
+  const merged = { event: "sev_m7", type: "pr.merged", at: "2030-01-02T00:00:00Z" };
+  const items = [
+    prop("gh7", { title: "PR 7 开了", origin: { source: "src_gh" } }),
+    prop("ml7", { title: "Re: PR 7 的邮件", origin: { source: "src_mail_qq" } }),
+    prop("gh8", { title: "PR 8 开了", origin: { source: "src_gh" } }),
+    { ...prop("dec", { title: "要不要接这个 PR 的评审", origin: { source: "src_gh" } }), kind: "decision" } as P,
+    prop("urg", { title: "今天 16:00 前回复", origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, urgent: true } as any }),
+    prop("m1", { title: "普通邮件一", origin: { source: "src_mail_qq" } }),
+    prop("m2", { title: "普通邮件二", origin: { source: "src_mail_qq" } }),
+  ].map((p, n) => ({ ...p, created_at: `2030-01-01T0${n}:00:00Z` }));
+  const origins = {
+    gh7: { type: "pr.opened", object: PR7, ended: merged }, ml7: { type: "mail.received", object: PR7, ended: merged },
+    gh8: { type: "pr.opened", object: "o/r/pull/8" }, dec: { type: "pr.opened", object: "o/r/pull/9" },
+    urg: { type: "mail.received" }, m1: { type: "mail.received" }, m2: { type: "mail.received" },
+  };
+  function backend(batch?: (body: any, key: string) => Response) {
+    let live = [...items];
+    const calls: { method: string; path: string; body?: any; key?: string }[] = [];
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? "GET";
+      const body = init.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ method, path: url, body, key: (init.headers as Record<string, string> | undefined)?.["Idempotency-Key"] });
+      if (url === "/v1/projects") return json(200, { projects: [] });
+      if (url === "/v1/sources") return json(200, { sources: [{ id: "src_gh", name: "GitHub" }, { id: "src_mail_qq", name: "QQ 邮箱" }] });
+      if (url === "/v1/items?phase=proposed") return json(200, { items: live, last_rejections: {}, origins });
+      if (url === "/v1/proposals/batch") {
+        const r = batch?.(body, calls.at(-1)!.key!);
+        if (r) return r;
+        const ids: string[] = body.mode === "ended" ? body.filter.ids : body.actions.map((a: any) => a.id);
+        const ok = ids.filter((id) => body.mode !== "ended" || (origins as any)[id]?.ended);
+        live = live.filter((i) => !ok.includes(i.id));
+        return json(200, { results: ids.map((id) => (ok.includes(id) ? { id, do: "dismiss", ok: true } : { id, do: "dismiss", ok: false, code: "conflict", why: "the upstream object is not verifiably merged or closed; left as is" })) });
+      }
+      const tr = url.match(/^\/v1\/items\/(.+)\/transition$/);
+      if (tr && method === "POST") {
+        live = [...live, items.find((i) => i.id === tr[1])!];
+        return json(200, { id: tr[1] });
+      }
+      return json(404, { code: "not_found", why: url, next: "x" });
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  }
+  const hosted = async () => (await screen.findByRole("group", { name: "代码托管通知" })) as HTMLDetailsElement;
+
+  it("需要拍板的置顶、不进任何折叠；代码托管通知默认收起，点一下展开；其余按来源分组且展开", async () => {
+    mount(backend().impl);
+    const pinned = await screen.findByRole("region", { name: "需要你拍板" });
+    expect(within(pinned).getByRole("article", { name: "要不要接这个 PR 的评审" })).toBeInTheDocument(); // 属于 PR 也不折叠
+    expect(within(pinned).getByRole("article", { name: "今天 16:00 前回复" })).toBeInTheDocument();
+    expect(within(pinned).getAllByRole("article")).toHaveLength(2);
+    const box = await hosted();
+    expect(box.open).toBe(false);
+    expect(box).toHaveTextContent("代码托管通知 3 条 · 2 个 PR/Issue · 2 条已结束（已收起）");
+    expect(box.closest("details")!.contains(screen.getByRole("article", { name: "要不要接这个 PR 的评审" }))).toBe(false);
+    await userEvent.click(within(box).getByText(/已收起/));
+    expect(box.open).toBe(true);
+    const mail = screen.getByRole("group", { name: "QQ 邮箱" }) as HTMLDetailsElement;
+    expect(mail.open).toBe(true);
+    expect(within(mail).getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["普通邮件一", "普通邮件二"]);
+    // 默认能看到的：拍板 2 条 + 其余 2 条；代码托管 3 条收在折叠里
+    expect(document.querySelector("main")!.textContent).not.toMatch(/src_/);
+  });
+
+  it("同一个 PR 的通知合成一组：组头写对象与已合并时间，组内列出每条的来源与时间，逐条操作照旧", async () => {
+    const s = backend();
+    mount(s.impl);
+    const box = await hosted();
+    const g = within(box).getByRole("region", { name: PR7 });
+    expect(g).toHaveTextContent(PR7 + " · 2 条");
+    expect(g).toHaveTextContent("已合并");
+    const rows = within(within(g).getByRole("list", { name: "这一组的来源与时间" })).getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      `GitHub · ${new Date("2030-01-01T00:00:00Z").toLocaleString()} · PR 7 开了`,
+      `QQ 邮箱 · ${new Date("2030-01-01T01:00:00Z").toLocaleString()} · Re: PR 7 的邮件`,
+    ]);
+    expect(within(g).getAllByRole("article")).toHaveLength(2);
+    const single = within(box).getByRole("region", { name: "o/r/pull/8" });
+    expect(within(single).queryByRole("list", { name: "这一组的来源与时间" })).toBeNull();
+    for (const n of ["接受", "补到已有事项", "忽略"]) expect(within(within(g).getByRole("article", { name: "PR 7 开了" })).getByRole("button", { name: n })).toBeEnabled();
+  });
+
+  it("忽略已合并或关闭的：先写明条数与依据，确认才发 ended，带幂等键；拿不准的不动并说明；可一键撤销改回建议", async () => {
+    const s = backend();
+    mount(s.impl);
+    const box = await hosted();
+    await userEvent.click(within(box).getByRole("button", { name: "忽略已合并或关闭的 2 条…" }));
+    const ask = within(box).getByRole("group", { name: "确认批量忽略" });
+    expect(ask).toHaveTextContent("将忽略已合并 2 条、已关闭 0 条，依据事件写进理由；另有 1 条拿不准，不动");
+    expect(s.calls.some((c) => c.path === "/v1/proposals/batch")).toBe(false);
+    await userEvent.click(within(ask).getByRole("button", { name: "确认忽略 2 条" }));
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/proposals/batch")).toBeTruthy());
+    const b = s.calls.find((c) => c.path === "/v1/proposals/batch")!;
+    expect(b.body).toEqual({ mode: "ended", filter: { ids: ["gh7", "ml7"] } });
+    expect(b.key).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await screen.findByRole("status", { name: "批量处理结果" })).toHaveTextContent("已处理 2 条");
+    await waitFor(() => expect(screen.queryByRole("article", { name: "PR 7 开了" })).toBeNull());
+    const undo = screen.getByRole("status", { name: "批量忽略" });
+    expect(undo).toHaveTextContent("已批量忽略 2 条");
+    await userEvent.click(within(undo).getByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(s.calls.filter((c) => c.path.endsWith("/transition")).map((c) => [c.path, c.body])).toEqual([
+      ["/v1/items/gh7/transition", { to: "proposed", reason: "撤销批量忽略" }],
+      ["/v1/items/ml7/transition", { to: "proposed", reason: "撤销批量忽略" }],
+    ]));
+    expect(await screen.findByRole("article", { name: "PR 7 开了" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "批量忽略" })).toBeNull();
+  });
+
+  it("幂等：一次确认没有确知结果时留在确认里，重发用同一个幂等键", async () => {
+    let fail = true;
+    const s = backend(() => (fail ? json(500, { code: "internal", why: "boom", next: "retry" }) : (undefined as unknown as Response)));
+    mount(s.impl);
+    const mail = await screen.findByRole("group", { name: "QQ 邮箱" });
+    await userEvent.click(within(mail).getByRole("button", { name: "忽略这一组 2 条…" }));
+    expect(within(mail).getByRole("group", { name: "确认批量忽略" })).toHaveTextContent("将忽略「QQ 邮箱」这一组的 2 条；需要你拍板的不在组里，不受影响。");
+    await userEvent.click(within(mail).getByRole("button", { name: "确认忽略 2 条" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+    fail = false;
+    await userEvent.click(within(mail).getByRole("button", { name: "确认忽略 2 条" }));
+    await screen.findByRole("status", { name: "批量处理结果" });
+    const posts = s.calls.filter((c) => c.path === "/v1/proposals/batch");
+    expect(posts).toHaveLength(2);
+    expect(posts[1].key).toBe(posts[0].key);
+    expect(posts[1].body).toEqual({ mode: "explicit", actions: [{ id: "m1", do: "dismiss", reason: "批量忽略：QQ 邮箱" }, { id: "m2", do: "dismiss", reason: "批量忽略：QQ 邮箱" }] });
+    expect(posts[1].body.actions.map((a: any) => a.id)).not.toContain("urg"); // 需要拍板的那条同来源，也不在组里
+  });
+
+  it("按类型分组：按来源事件类型的大类，换轴不丢条目", async () => {
+    mount(backend().impl);
+    await screen.findByRole("group", { name: "QQ 邮箱" });
+    await userEvent.selectOptions(screen.getByLabelText("分组"), "type");
+    const mail = screen.getByRole("group", { name: "邮件" });
+    expect(within(mail).getAllByRole("article")).toHaveLength(2);
+  });
+});

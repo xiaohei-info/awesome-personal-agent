@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -156,10 +157,11 @@ func attachTarget(tx *store.Tx, v attachIn) (domain.Item, error) {
 // MaxBatch 是一次批量至多处理的建议条数。
 const MaxBatch = 200
 
-// 批量的两种方式。
+// 批量的三种方式。ended：忽略 Filter.IDs 里上游对象可核为已结束的建议，依据（来源事件）逐条写进忽略理由；拿不准的不动。
 const (
 	BatchRecommended = "recommended"
 	BatchExplicit    = "explicit"
+	BatchEnded       = "ended"
 )
 
 // BatchFilter 限定按推荐处理的范围；都空表示全部带推荐的建议。
@@ -177,7 +179,7 @@ type BatchAction struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// BatchRequest 二选一：Mode=recommended 配 Filter；Mode=explicit 配 Actions。
+// BatchRequest：Mode=recommended 配 Filter；Mode=explicit 配 Actions；Mode=ended 配 Filter.IDs。
 type BatchRequest struct {
 	Mode    string        `json:"mode"`
 	Filter  BatchFilter   `json:"filter,omitzero"`
@@ -201,11 +203,11 @@ func usage(why string) error {
 // 其余按条各自成败，每条成功的处置各是一条命令、各记一条 Event、可逐条撤销。req 带调用者身份，
 // Command、Input 由本函数按每条填写；req.IdemKey 非空时每条派生自己的幂等键。
 func Batch(ctx context.Context, x *command.Executor, st *store.Store, req command.Request, b BatchRequest) ([]BatchResult, error) {
-	acts, err := planBatch(ctx, st, b)
+	acts, skipped, err := planBatch(ctx, st, b)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]BatchResult, 0, len(acts))
+	out := make([]BatchResult, 0, len(acts)+len(skipped))
 	var denied error
 	for _, a := range acts {
 		r := req
@@ -231,7 +233,7 @@ func Batch(ctx context.Context, x *command.Executor, st *store.Store, req comman
 	if denied != nil && !slices.ContainsFunc(out, func(r BatchResult) bool { return r.Code != domain.CodePermissionDenied }) {
 		return nil, denied
 	}
-	return out, nil
+	return append(out, skipped...), nil
 }
 
 var batchVerbs = map[string]string{"accept": "proposal.accept", "dismiss": "proposal.dismiss", "attach": CmdAttach}
@@ -248,33 +250,71 @@ func batchCommand(a BatchAction) (string, json.RawMessage) {
 	return batchVerbs[a.Do], in
 }
 
-func planBatch(ctx context.Context, st *store.Store, b BatchRequest) ([]BatchAction, error) {
+// planBatch 返回要执行的处置，以及事先就判定不处理的那几条（只有 ended 方式会有）。
+func planBatch(ctx context.Context, st *store.Store, b BatchRequest) ([]BatchAction, []BatchResult, error) {
 	switch b.Mode {
 	case BatchExplicit:
 		if len(b.Actions) == 0 || len(b.Actions) > MaxBatch {
-			return nil, usage("explicit mode takes 1 to 200 actions")
+			return nil, nil, usage("explicit mode takes 1 to 200 actions")
 		}
 		if b.Filter.Source != "" || b.Filter.Project != "" || len(b.Filter.IDs) > 0 {
-			return nil, usage("filter belongs to recommended mode")
+			return nil, nil, usage("filter belongs to recommended mode")
 		}
 		for _, a := range b.Actions {
 			if _, ok := batchVerbs[a.Do]; !ok || strings.TrimSpace(a.ID) == "" {
-				return nil, usage("every action needs an id and do of accept, attach or dismiss")
+				return nil, nil, usage("every action needs an id and do of accept, attach or dismiss")
 			}
 		}
-		return b.Actions, nil
+		return b.Actions, nil, nil
 	case BatchRecommended:
 		if len(b.Actions) > 0 {
-			return nil, usage("actions belong to explicit mode")
+			return nil, nil, usage("actions belong to explicit mode")
 		}
 		var acts []BatchAction
 		err := st.View(ctx, func(tx *store.Tx) (err error) { acts, err = recommended(tx, b.Filter); return })
 		if err == nil && len(acts) > MaxBatch {
 			err = usage("at most 200 proposals per batch; narrow the filter")
 		}
-		return acts, err
+		return acts, nil, err
+	case BatchEnded:
+		if len(b.Actions) > 0 || b.Filter.Source != "" || b.Filter.Project != "" {
+			return nil, nil, usage("ended mode takes filter.ids only")
+		}
+		if len(b.Filter.IDs) == 0 || len(b.Filter.IDs) > MaxBatch {
+			return nil, nil, usage("ended mode takes 1 to 200 ids")
+		}
+		var (
+			acts    []BatchAction
+			skipped []BatchResult
+		)
+		err := st.View(ctx, func(tx *store.Tx) error {
+			var its []domain.Item
+			for _, id := range b.Filter.IDs {
+				it, err := items.Get(tx, id)
+				if err != nil {
+					var de *domain.Error
+					if !errors.As(err, &de) {
+						return err
+					}
+					skipped = append(skipped, BatchResult{ID: id, Do: "dismiss", Code: de.Code, Why: de.Why})
+					continue
+				}
+				its = append(its, it)
+			}
+			os, err := Origins(tx, its)
+			for _, it := range its {
+				// 依据只看上游对象，与建议现在的阶段无关：同一幂等键重放时照样得到同一条处置，由命令的幂等记录返回第一次的结果。
+				if o := os[it.ID]; o.Ended != nil {
+					acts = append(acts, BatchAction{ID: it.ID, Do: "dismiss", Reason: "upstream " + o.Object + " ended: " + o.Ended.Type + " " + o.Ended.Event + " at " + o.Ended.At.Format(time.RFC3339)})
+				} else {
+					skipped = append(skipped, BatchResult{ID: it.ID, Do: "dismiss", Code: domain.CodeConflict, Why: "the upstream object is not verifiably merged or closed; left as is"})
+				}
+			}
+			return err
+		})
+		return acts, skipped, err
 	}
-	return nil, usage("mode must be recommended or explicit")
+	return nil, nil, usage("mode must be recommended, explicit or ended")
 }
 
 // recommended 把范围内带推荐的建议翻成处置：忽略取推荐理由，补到取推荐的目标。没有推荐的不动。

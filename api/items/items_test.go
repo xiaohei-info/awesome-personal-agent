@@ -818,3 +818,20 @@ func TestTodayOverdueAndHighPriority(t *testing.T) {
 		t.Fatalf("planned keeps its own rule: %s", ids("planned"))
 	}
 }
+
+// 建议页的分组依据：phase=proposed 时给出 origins（没有来源事件的建议不在其中），其余阶段不给。配对规则的测试在 kernel/inbound。
+func TestOriginsOnlyForProposed(t *testing.T) {
+	e := setup(t)
+	e.create(e.web, `{"kind":"task","title":"p","phase":"proposed"}`)
+	rec := e.do("GET", "/v1/items?phase=proposed", "", e.web)
+	var out struct {
+		Items   []json.RawMessage          `json:"items"`
+		Origins map[string]json.RawMessage `json:"origins"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 || len(out.Items) != 1 || out.Origins == nil || len(out.Origins) != 0 {
+		t.Fatalf("origins = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items?phase=open", "", e.web); strings.Contains(rec.Body.String(), "origins") {
+		t.Fatalf("origins only with phase=proposed: %s", rec.Body)
+	}
+}
