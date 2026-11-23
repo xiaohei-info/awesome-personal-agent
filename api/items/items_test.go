@@ -701,7 +701,8 @@ func TestListFilterByOrigin(t *testing.T) {
 	}
 }
 
-// 「已完成」页的口径：phase=done 时给出 done_at——转入已完成的时刻；新建即已完成的迁移事项取 ext.workbench.completed 那天。
+// 「已完成」页的口径：phase=done 时给出 done_at——转入已完成的时刻；新建即已完成的迁移事项取 ext.workbench.completed 那天；
+// 迁移来而没记完成日期的不给时刻、列入 done_unknown（不拿写入时刻或 updated 顶替）；补上完成日期后即归到那天。
 func TestDoneAtOverHTTP(t *testing.T) {
 	e := setup(t)
 	a := e.create(e.web, `{"kind":"task","title":"a","phase":"open"}`)
@@ -710,23 +711,42 @@ func TestDoneAtOverHTTP(t *testing.T) {
 	}
 	m := e.create(e.web, `{"kind":"task","title":"m","phase":"done","ext":{"workbench":{"completed":"2026-11-18"}}}`)
 	u := e.create(e.web, `{"kind":"task","title":"u","phase":"done","ext":{"workbench":{"completed":"","updated":"2026-10-19"}}}`)
-	var out struct {
-		DoneAt map[string]time.Time `json:"done_at"`
+	n := e.create(e.web, `{"kind":"task","title":"n","phase":"done"}`)
+	read := func() (at map[string]time.Time, unknown []string) {
+		t.Helper()
+		var out struct {
+			DoneAt      map[string]time.Time `json:"done_at"`
+			DoneUnknown []string             `json:"done_unknown"`
+		}
+		rec := e.do("GET", "/v1/items?phase=done", "", e.web)
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.DoneUnknown == nil {
+			t.Fatalf("done_at = %d %s", rec.Code, rec.Body)
+		}
+		return out.DoneAt, out.DoneUnknown
 	}
-	rec := e.do("GET", "/v1/items?phase=done", "", e.web)
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.DoneAt) != 3 {
-		t.Fatalf("done_at = %d %s", rec.Code, rec.Body)
+	at, unknown := read()
+	if len(at) != 3 || len(unknown) != 1 || unknown[0] != u.ID {
+		t.Fatalf("done_at = %v, done_unknown = %v", at, unknown)
 	}
-	if d := out.DoneAt[a.ID]; time.Since(d) > time.Minute {
-		t.Fatalf("transitioned done_at = %v", d)
+	if _, ok := at[u.ID]; ok {
+		t.Fatalf("migrated without completed date must have no done_at: %v", at[u.ID])
 	}
-	if d := out.DoneAt[m.ID].In(time.Local).Format("2006-01-02 15:04"); d != "2026-11-18 00:00" {
+	for _, id := range []string{a.ID, n.ID} {
+		if d := at[id]; time.Since(d) > time.Minute {
+			t.Fatalf("done_at of %s = %v", id, d)
+		}
+	}
+	if d := at[m.ID].In(time.Local).Format("2006-01-02 15:04"); d != "2026-11-18 00:00" {
 		t.Fatalf("migrated done_at = %s", d)
 	}
-	if d := out.DoneAt[u.ID].In(time.Local).Format("2006-01-02"); d != "2026-10-19" {
-		t.Fatalf("migrated without completed date = %s", d)
+	if rec := e.do("PATCH", "/v1/items/"+u.ID, `{"reason":"补完成日期","ext":{"workbench":{"completed":"2026-10-18","updated":"2026-10-19"}}}`, e.web); rec.Code != 200 {
+		t.Fatalf("patch = %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("GET", "/v1/items", "", e.web); strings.Contains(rec.Body.String(), "done_at") {
+	at, unknown = read()
+	if len(unknown) != 0 || at[u.ID].In(time.Local).Format("2006-01-02 15:04") != "2026-10-18 00:00" {
+		t.Fatalf("after fill: done_at[u] = %v, done_unknown = %v", at[u.ID], unknown)
+	}
+	if rec := e.do("GET", "/v1/items", "", e.web); strings.Contains(rec.Body.String(), "done_at") || strings.Contains(rec.Body.String(), "done_unknown") {
 		t.Fatalf("done_at only with phase=done: %s", rec.Body)
 	}
 }

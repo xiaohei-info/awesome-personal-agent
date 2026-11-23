@@ -349,28 +349,36 @@ func Purge(tx *store.Tx, id string) error {
 }
 
 // DoneAt 返回已完成事项进入已完成的时刻：最近一次转入 done 的事件时刻（§7.1，"已完成"按完成那天算）。
-// 工作台迁移写入的事项新建时就是已完成，没有转入那一刻；它们取迁移带来的完成日期 ext.workbench.completed，
-// 没记完成日期的取工作台最后改动的日期 ext.workbench.updated（都是本机当天 00:00），两样都没有才用写入时刻。
-func DoneAt(tx *store.Tx) (map[string]time.Time, error) {
-	r, err := tx.Query(`SELECT e.object, e.type, e.at, COALESCE(NULLIF(json_extract(i.data, '$.ext.workbench.completed'), ''), json_extract(i.data, '$.ext.workbench.updated'), '')
+// 工作台迁移写入的事项新建时就是已完成，没有转入那一刻：有完成日期 ext.workbench.completed 的取那天（本机当天 00:00），
+// 没有的完成日期不详，进第二个返回值、不给时刻，不拿写入时刻或最后改动日期顶替。非迁移写入的事项新建即完成，取写入时刻。
+func DoneAt(tx *store.Tx) (known map[string]time.Time, unknown map[string]bool, err error) {
+	r, err := tx.Query(`SELECT e.object, e.type, e.at, json_extract(i.data, '$.ext.workbench') IS NOT NULL, COALESCE(json_extract(i.data, '$.ext.workbench.completed'), '')
 		FROM eventlog_event e JOIN items i ON i.id = e.object
 		WHERE i.phase = 'done' AND e.type IN ('item.created', 'item.phase_changed') AND json_extract(e.payload, '$.item.phase') = 'done'
 		ORDER BY e.seq`)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer r.Close()
-	out := map[string]time.Time{}
+	known, unknown = map[string]time.Time{}, map[string]bool{}
 	for r.Next() {
 		var id, typ, wb string
 		var at int64
-		if err := r.Scan(&id, &typ, &at, &wb); err != nil {
-			return nil, err
+		var migrated bool
+		if err := r.Scan(&id, &typ, &at, &migrated, &wb); err != nil {
+			return nil, nil, err
 		}
-		out[id] = time.Unix(0, at).UTC()
-		if d, err := time.ParseInLocation("2006-01-02", wb, time.Local); typ == domain.EvItemCreated && err == nil {
-			out[id] = d.UTC()
+		known[id] = time.Unix(0, at).UTC()
+		delete(unknown, id)
+		if typ != domain.EvItemCreated || !migrated {
+			continue
+		}
+		if d, err := time.ParseInLocation("2006-01-02", wb, time.Local); err == nil {
+			known[id] = d.UTC()
+		} else {
+			delete(known, id)
+			unknown[id] = true
 		}
 	}
-	return out, r.Err()
+	return known, unknown, r.Err()
 }

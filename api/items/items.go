@@ -100,6 +100,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		prog   map[string]string
 		rejs   = map[string]Rejection{}
 		done   map[string]time.Time
+		undone map[string]bool
 		within map[string][]domain.Progress
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
@@ -107,7 +108,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			return err
 		}
 		if f.Phase == domain.PhaseDone {
-			if done, err = kitems.DoneAt(tx); err != nil {
+			if done, undone, err = kitems.DoneAt(tx); err != nil {
 				return err
 			}
 		}
@@ -149,6 +150,13 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			}
 		}
 		out["done_at"] = at
+		unknown := []string{} // 迁移来、没记完成日期的：不给时刻，页面如实标"完成日期不详"
+		for _, it := range its {
+			if undone[it.ID] {
+				unknown = append(unknown, it.ID)
+			}
+		}
+		out["done_unknown"] = unknown
 	}
 	if within != nil {
 		at := map[string][]domain.Progress{}

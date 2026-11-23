@@ -13,10 +13,10 @@ const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200
 // 测试边界替身：GET /items?phase=done 带 done_at（附录 B.2），范围读法给主机的今天与时区。
 // GET /items?progress_from&progress_to 给这一周有进展的事与其进展（moved：周一 → 事项与进展）。
 type P = { id: string; text: string; on?: string; at: string };
-function server(items: Item[], at: Record<string, string>, moved: Record<string, { items: Item[]; progress: Record<string, P[]> }> = {}) {
+function server(items: Item[], at: Record<string, string>, moved: Record<string, { items: Item[]; progress: Record<string, P[]> }> = {}, unknown: string[] = []) {
   return (async (url: string) => {
     if (url === "/v1/projects") return json({ projects: [{ id: "p1", name: "家务" }, { id: "p2", name: "工作" }] });
-    if (url === "/v1/items?phase=done") return json({ items, last_rejections: {}, done_at: at });
+    if (url === "/v1/items?phase=done") return json({ items, last_rejections: {}, done_at: at, done_unknown: unknown });
     const m = /^\/v1\/items\?progress_from=([\d-]+)&progress_to=([\d-]+)$/.exec(url);
     if (m) return json({ last_rejections: {}, ...(moved[m[1]] ?? { items: [], progress: {} }) });
     if (url.startsWith("/v1/items?from=")) return json({ items: [], last_rejections: {}, today: TODAY, utc_offset: "+08:00" });
@@ -92,6 +92,22 @@ describe("已完成页", () => {
     const none = screen.getByRole("region", { name: "没归项目的" });
     expect(within(within(none).getByRole("list", { name: "等报价 这周的进展" })).getByRole("listitem")).toHaveTextContent("周二 01-08 发了询价");
     expect(screen.queryByText("早间简报")).toBeNull();
+  });
+
+  it("完成日期不详（迁移来、没记完成日）：不算在任何一周、不计入完成数，单独成一节如实标出；这周有进展时行上写不详而不是写阶段", async () => {
+    const items = [mk("a", { title: "交电费" }), mk("u", { title: "看牙" }), mk("v", { title: "发版" })];
+    const moved = { "2030-01-07": { items: [mk("v", { title: "发版" })], progress: { v: [{ id: "v.1", text: "补记", on: "2030-01-08", at: "2030-01-09T03:00:00Z" }] } } };
+    mount(server(items, { a: "2030-01-09T01:00:00Z" }, moved, ["u", "v"]));
+    expect(await screen.findByText("进展 1 条 · 完成 1 项 · 涉及项目 0 个")).toBeInTheDocument();
+    const sec = screen.getByRole("region", { name: "完成日期不详" });
+    expect(within(sec).getByText("2 件从工作台迁移来的事已完成，但没有记下完成那天，不算在任何一周里。")).toBeInTheDocument();
+    expect(within(sec).getAllByRole("link").map((l) => l.textContent)).toEqual(["看牙", "发版"]);
+    expect(screen.getByRole("link", { name: "看牙" })).toHaveAttribute("href", "/items/u");
+    const row = screen.getAllByRole("link", { name: "发版" })[0].closest("li")!;
+    expect(row).toHaveTextContent("完成日期不详");
+    await userEvent.click(screen.getByRole("button", { name: "上一周" }));
+    expect(await screen.findByText("这一周没有完成的事")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "完成日期不详" })).getAllByRole("link")).toHaveLength(2);
   });
 
   it("空态：本周没有完成的事时说明会记在哪，并给看上一周的入口；过去的周写这一周没有", async () => {
