@@ -1195,3 +1195,23 @@ func TestImportOriginPrefixRejectedOnOrdinaryWrites(t *testing.T) {
 	}
 	e.must(t, owner, "item.update", map[string]any{"id": id, "origin": map[string]any{"source": "other"}})
 }
+
+// 网页上的「删除」就是转到已放弃：事项与历史仍在账本里（不物理删除），从进行中或已完成都能去，之后可重开。
+func TestDeleteIsTransitionToDropped(t *testing.T) {
+	e := setup(t)
+	for _, from := range []string{"open", "done"} {
+		id := e.create(t, owner, map[string]any{"phase": "open", "title": "to delete"})
+		if from == "done" {
+			e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "done", "reason": "d"})
+		}
+		e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "dropped", "reason": "在事项页删除（移到已放弃）"})
+		if it := e.get(t, id); it.Phase != domain.PhaseDropped || it.Title != "to delete" {
+			t.Fatalf("from %s: dropped item must stay readable, got %+v", from, it)
+		}
+		e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "找回"})
+		if e.get(t, id).Phase != domain.PhaseOpen {
+			t.Fatalf("from %s: dropped item must be restorable", from)
+		}
+	}
+	e.verify(t)
+}

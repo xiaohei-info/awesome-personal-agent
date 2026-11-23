@@ -578,3 +578,6 @@ pre.raw-text { margin: 6px 0; max-height: 32em; overflow: auto; font: 13px/1.5 v
 .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 6px 0; }
 .pair dt { color: var(--ink-3); font-size: 12px; }
 .pair dd { margin: 0; overflow-wrap: anywhere; }
+
+/* 已放弃的事项（被筛出来看时）：已闭合，不是当前问题，用中性灰，不用朱砂 */
+.rows li[data-phase="dropped"] > .act-row a { color: var(--ink-3); }

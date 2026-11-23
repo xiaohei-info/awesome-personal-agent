@@ -4,13 +4,14 @@ import { useT } from "../../app/i18n";
 import { HANDOFF_TAG } from "../../app/ids";
 import { useSession } from "../../app/session";
 import { AgentBlock } from "./HandOff";
+import { DeleteItem } from "./DeleteItem";
 import type { Item } from "./ItemsPage";
 import { SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { useHostClock } from "./schedule";
 import { ProgressForm } from "../today/ProgressForm";
 
 /** 行上做了什么：done、plan、progress、edit（交给 Agent 等其余改动）。 */
-export type RowAct = "done" | "plan" | "progress" | "edit";
+export type RowAct = "done" | "plan" | "progress" | "edit" | "drop";
 import { strings } from "./strings";
 
 // 列表行上的快捷操作，放在 .act-row 里：按钮与标题同一行，展开的表单与 Agent 处理区（.row-panel）换到下一行占满整行（界面设计 §5.2、§9.3）：对应工作台任务行的「排时间、交给助手、完成」，另加「记进展」，今天页与事项列表共用。
@@ -23,7 +24,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export function RowActions({ item, where, onChange }: { item: Item; where: string; onChange: (it: Item, what: RowAct) => void }) {
   const t = useT(strings);
   const { api } = useSession();
-  const [open, setOpen] = useState<"plan" | "agent" | "progress" | null>(null);
+  const [open, setOpen] = useState<"plan" | "agent" | "progress" | "more" | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const path = "/items/" + encodeURIComponent(item.id);
@@ -63,8 +64,14 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
         {/* 委派完成要带证据（§6.14），去详情填；其余一键完成。 */}
         {item.kind !== "delegation" && <button type="button" disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done")}>{t.done}</button>}
         <button type="button" aria-expanded={open === "progress"} onClick={() => setOpen(open === "progress" ? null : "progress")}>{t.rowProgress}</button>
+        <button type="button" aria-expanded={open === "more"} onClick={() => setOpen(open === "more" ? null : "more")}>{t.rowMore}</button>
       </span>
       {err != null && <div className="row-panel"><ErrorNote error={err} /></div>}
+      {open === "more" && (
+        <div className="row-panel">
+          <DeleteItem title={item.title} busy={busy} onConfirm={() => void write(() => api.post(path + "/transition", { to: "dropped", reason: t.delReason(where) }, ifMatch), "drop")} />
+        </div>
+      )}
       {open === "plan" && <PlanForm item={item} onCancel={() => setOpen(null)} onSubmit={async (b) => {
         if (await write(() => api.patch(path, { ...b, reason: t.rowPlanReason(where) }, ifMatch), "plan")) setOpen(null);
       }} />}

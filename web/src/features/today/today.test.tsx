@@ -161,7 +161,7 @@ describe("今天页（flow-web-workbench）", () => {
     expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/WB-B/transition", body: { to: "done", reason: "在今天页完成" } });
     expect(await screen.findByRole("link", { name: "「事项 WB-B」已完成，不在今天的事里了" })).toHaveAttribute("href", "/items/WB-B");
     expect(screen.queryByRole("link", { name: "事项 WB-B" })).toBeNull();
-    expect(within(await rowOf("事项 WB-A")).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展"]);
+    expect(within(await rowOf("事项 WB-A")).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展", "更多"]);
     expect(within(screen.getByRole("region", { name: "今天的事" })).getByRole("heading", { level: 2 })).toHaveTextContent("（1）");
   });
 

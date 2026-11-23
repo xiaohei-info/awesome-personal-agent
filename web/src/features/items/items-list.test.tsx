@@ -87,7 +87,7 @@ describe("事项列表（对齐工作台任务库）", () => {
     mount(s.impl);
     const user = userEvent.setup();
     const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展", "更多"]);
     await user.click(within(row).getByRole("button", { name: "记进展" }));
     await user.type(within(within(row).getByRole("group", { name: "记进展：甲" })).getByLabelText("进展"), "联调通过");
     await user.click(within(row).getByRole("button", { name: "保存" }));
@@ -108,7 +108,12 @@ describe("事项列表（对齐工作台任务库）", () => {
     await user.click(within(form).getByRole("button", { name: "确定" }));
     await waitFor(() => expect(writes(s)).toEqual([{ method: "PATCH", path: "/v1/items/a", body: { planned_for: "2031-02-03", reason: "在事项列表排时间" }, ifMatch: "1" }]));
     expect(await within(row).findByText(/计划 2031-02-03/)).toBeInTheDocument();
-    for (const name of ["建议", "不做的"]) expect(within(screen.getByRole("link", { name }).closest("li")!).queryByRole("button")).toBeNull();
+    expect(within(screen.getByRole("link", { name: "建议" }).closest("li")!).queryByRole("button")).toBeNull();
+  });
+
+  it("已放弃的事没有行内操作（默认列表里看不到，筛出来才有）", async () => {
+    mount(server([mk("a", { title: "甲" }), mk("d", { phase: "dropped", title: "不做的" })]).impl, "/items?phase=dropped");
+    expect(within((await screen.findByRole("link", { name: "不做的" })).closest("li")!).queryByRole("button")).toBeNull();
   });
 
   it("版本对不上（409）：行上显示服务端原因并重读这一件，不留本地假状态", async () => {
@@ -130,5 +135,41 @@ describe("事项列表（对齐工作台任务库）", () => {
     expect(screen.getByTestId("where").textContent).toBe("");
     await userEvent.selectOptions(screen.getByLabelText("项目"), "p-work");
     expect(screen.getByTestId("where").textContent).toBe("?project=p-work");
+  });
+
+  it("默认列表不含已放弃，并提示隐藏了几件；阶段筛选里选已放弃能切出来，已放弃按中性样式（不带朱砂类）", async () => {
+    mount(server([mk("a", { title: "甲" }), mk("d1", { phase: "dropped", title: "弃一" }), mk("d2", { phase: "dropped", title: "弃二" })]).impl);
+    await screen.findByRole("link", { name: "甲" });
+    expect(screen.queryByRole("link", { name: "弃一" })).toBeNull();
+    expect(screen.getByText(/已隐藏 2 件已放弃/)).toBeInTheDocument();
+    expect(screen.getByLabelText("阶段")).toHaveTextContent("已放弃 (2)");
+    await userEvent.selectOptions(screen.getByLabelText("阶段"), "dropped");
+    const row = (await screen.findByRole("link", { name: "弃一" })).closest("li")!;
+    expect(screen.queryByRole("link", { name: "甲" })).toBeNull();
+    expect(screen.getByTestId("where").textContent).toBe("?phase=dropped");
+    expect(row).toHaveAttribute("data-phase", "dropped");
+    expect(row.querySelector(".danger, .bad")).toBeNull();
+    expect(screen.queryByText(/已隐藏/)).toBeNull();
+  });
+
+  it("行上删除：更多 → 删除… 只展开确认（写清移到已放弃、可找回、不抹掉记录），没确认不发请求；确认才转到已放弃，行随即从默认列表消失", async () => {
+    const s = server([mk("a", { project: "p-work", version: 3, title: "甲" }), mk("b", { project: "p-work", title: "乙" })]);
+    mount(s.impl);
+    const user = userEvent.setup();
+    const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "更多" }));
+    await user.click(within(row).getByRole("button", { name: "删除…" }));
+    const ask = within(row).getByRole("group", { name: "删除：甲" });
+    expect(ask).toHaveTextContent("会移到已放弃，之后还能从已放弃里找回，不会真正抹掉记录");
+    expect(within(ask).getByRole("button", { name: "确认删除" })).not.toHaveClass("danger");
+    expect(writes(s)).toEqual([]);
+    await user.click(within(ask).getByRole("button", { name: "取消" }));
+    expect(writes(s)).toEqual([]);
+    await user.click(within(row).getByRole("button", { name: "删除…" }));
+    await user.click(within(row).getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/transition", body: { to: "dropped", reason: "在事项列表删除（移到已放弃）" }, ifMatch: "3" }]));
+    await waitFor(() => expect(screen.queryByRole("link", { name: "甲" })).toBeNull());
+    expect(screen.getByRole("link", { name: "乙" })).toBeInTheDocument();
+    expect(screen.getByText(/已隐藏 1 件已放弃/)).toBeInTheDocument();
   });
 });

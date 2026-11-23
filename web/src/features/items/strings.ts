@@ -153,6 +153,15 @@ const zh = {
   // 事项列表按项目分组（同工作台任务库「按业务」）
   groupCount: (name: string, n: number) => `${name}（${n}）`,
   listWhere: "事项列表",
+  // 删除：不物理删除，只转到已放弃（可从已放弃里找回）
+  del: "删除…",
+  delNote: "确认删除后，这件事会移到已放弃，之后还能从已放弃里找回，不会真正抹掉记录。",
+  confirmDel: "确认删除",
+  delFor: (title: string) => `删除：${title}`,
+  delReason: (where: string) => `在${where}删除（移到已放弃）`,
+  detailWhere: "事项页",
+  rowMore: "更多",
+  hiddenDropped: (n: number) => `已隐藏 ${n} 件已放弃的事项；在「阶段」筛选里选「已放弃」可查看、找回`,
 };
 
 const en: typeof zh = {
@@ -305,6 +314,14 @@ const en: typeof zh = {
   rowPlanReason: (where) => `scheduled on ${where}`,
   groupCount: (name, n) => `${name} (${n})`,
   listWhere: "the item list",
+  del: "Delete…",
+  delNote: "After you confirm, this item moves to Dropped. You can still find it there and bring it back; the record is not erased.",
+  confirmDel: "Confirm delete",
+  delFor: (title) => `Delete: ${title}`,
+  delReason: (where) => `deleted on ${where} (moved to Dropped)`,
+  detailWhere: "the item page",
+  rowMore: "More",
+  hiddenDropped: (n) => `${n} dropped item(s) hidden; pick Dropped under Phase to see or restore them`,
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

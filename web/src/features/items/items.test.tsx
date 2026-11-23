@@ -156,6 +156,22 @@ describe("转阶段（主操作区）", () => {
   });
 });
 
+describe("删除（转到已放弃，不物理删除）", () => {
+  it("详情主操作区有「删除…」：先确认（写清去向与可找回），确认才发 transition 到已放弃；已放弃的事不再有删除", async () => {
+    const l = ledger();
+    mount(l.impl, "/items/item_a");
+    const last = () => l.calls.filter((c) => c.path.endsWith("/transition")).at(-1)?.body;
+    await userEvent.click(await screen.findByRole("button", { name: "删除…" }));
+    expect(last()).toBeUndefined();
+    expect(screen.getByText(/会移到已放弃，之后还能从已放弃里找回，不会真正抹掉记录/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(last()).toEqual({ to: "dropped", reason: "在事项页删除（移到已放弃）" }));
+    expect(await screen.findByText(/现在：已放弃/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除…" })).toBeNull();
+    expect(screen.getByRole("button", { name: "重新打开" })).toBeInTheDocument(); // 找回
+  });
+});
+
 describe("设截止（ACT-LIF-03）", () => {
   it("在排期区块写入截止（带时刻）、只到日的显示日期，可清除", async () => {
     const l = ledger();

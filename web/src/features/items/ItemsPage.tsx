@@ -22,6 +22,7 @@ import { TraceView } from "../trace/Trace";
 import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow } from "./ItemMaterials";
 import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
 import { RowActions } from "./RowActions";
+import { DeleteItem } from "./DeleteItem";
 import { ScheduleBlock, SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { deadlineText, deadlineValue, useHostClock } from "./schedule";
 import { ApiError } from "../../app/api";
@@ -149,7 +150,10 @@ function ItemList() {
   // 行上操作之后把这一件换成服务端的最新值，分组、排序与筛选当场按新值重算（都在前端，口径就是 arrange 与七维筛选）：
   // 完成的移到组尾，筛掉的就不再显示；不重读整个列表，页面不卸载，滚动位置不动。
   const replace = (it: Item) => setItems((l) => l && l.map((x) => (x.id === it.id ? it : x)));
-  const shown = arrange(all.filter((i) => keep(i, f)), projectOrder, !!sort);
+  // 默认不显示已放弃（删除就是转到已放弃）：没选阶段时先去掉；选了「已放弃」就是切出来看。阶段筛选的选项仍数全部，所以「已放弃」始终可选。
+  const hide = (i: Item) => !f.phase && i.phase === "dropped";
+  const hidden = all.filter((i) => hide(i) && keep(i, f)).length;
+  const shown = arrange(all.filter((i) => keep(i, f) && !hide(i)), projectOrder, !!sort);
   const name = (d: Dim, v: string): string =>
     v === NONE ? t.none[d] ?? t.notSet
     : d === "project" ? project(v)
@@ -162,9 +166,9 @@ function ItemList() {
   // 每个维度的选项按「其余筛选都生效时」的条数从多到少排；只剩一种取值且没被选中的维度不显示。
   const facets = DIMS.map((d) => {
     const n = new Map<string, number>();
-    for (const i of all) if (keep(i, f, d)) for (const v of valuesOf(i, d)) n.set(v, (n.get(v) ?? 0) + 1);
+    for (const i of all) if (keep(i, f, d) && (d === "phase" || !hide(i))) for (const v of valuesOf(i, d)) n.set(v, (n.get(v) ?? 0) + 1);
     return { d, opts: [...n.entries()].sort((a, b) => b[1] - a[1] || name(d, a[0]).localeCompare(name(d, b[0]))) };
-  }).filter((x) => x.opts.length > 1 || f[x.d]);
+  }).filter((x) => x.opts.length > 1 || f[x.d] || (x.d === "phase" && hidden > 0));
   const active = DIMS.filter((d) => f[d]);
   const filtered = active.length > 0 || !!q || !!plannedFor || !!view;
   const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
@@ -227,6 +231,7 @@ function ItemList() {
       {error != null && <ErrorNote error={error} />}
       {view && items && <ViewTable view={view} items={all} />}
       {!view && items && !shown.length && error == null && <p className="empty">{t.noMatch}</p>}
+      {!view && hidden > 0 && <p className="sub">{t.hiddenDropped(hidden)}</p>}
       {!view && (
         <div aria-label={t.list} role="group">
           {pageGroups(rows).map(([pid, list]) => (
@@ -234,7 +239,7 @@ function ItemList() {
               <h2>{t.groupCount(pid ? project(pid) : t.none.project, shown.filter((i) => (i.project ?? "") === pid).length)}</h2>
               <ul className="rows">
                 {list.map((i) => (
-                  <li key={i.id} data-item={i.id}>
+                  <li key={i.id} data-item={i.id} data-phase={i.phase}>
                     <div className="act-row">
                       <div>
                         <Link to={i.id} state={{ list: location.search }}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
@@ -366,6 +371,11 @@ function ItemDetail() {
         </div>
       )}
       {item.phase !== "proposed" && <PhaseActions key={"p" + item.version} item={item} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />}
+      {item.phase !== "dropped" && (
+        <div className="actions" aria-label={t.delFor(item.title)} role="group">
+          <DeleteItem key={"x" + item.version} title={item.title} onConfirm={() => act(() => api.post(path + "/transition", { to: "dropped", reason: t.delReason(t.detailWhere) }, ifMatch))} />
+        </div>
+      )}
       {item.kind === "task" && (
         <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
       )}
