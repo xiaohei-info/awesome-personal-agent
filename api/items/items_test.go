@@ -709,11 +709,12 @@ func TestDoneAtOverHTTP(t *testing.T) {
 		t.Fatalf("transition = %d %s", rec.Code, rec.Body)
 	}
 	m := e.create(e.web, `{"kind":"task","title":"m","phase":"done","ext":{"workbench":{"completed":"2026-11-18"}}}`)
+	u := e.create(e.web, `{"kind":"task","title":"u","phase":"done","ext":{"workbench":{"completed":"","updated":"2026-10-19"}}}`)
 	var out struct {
 		DoneAt map[string]time.Time `json:"done_at"`
 	}
 	rec := e.do("GET", "/v1/items?phase=done", "", e.web)
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.DoneAt) != 2 {
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.DoneAt) != 3 {
 		t.Fatalf("done_at = %d %s", rec.Code, rec.Body)
 	}
 	if d := out.DoneAt[a.ID]; time.Since(d) > time.Minute {
@@ -721,6 +722,9 @@ func TestDoneAtOverHTTP(t *testing.T) {
 	}
 	if d := out.DoneAt[m.ID].In(time.Local).Format("2006-01-02 15:04"); d != "2026-11-18 00:00" {
 		t.Fatalf("migrated done_at = %s", d)
+	}
+	if d := out.DoneAt[u.ID].In(time.Local).Format("2006-01-02"); d != "2026-10-19" {
+		t.Fatalf("migrated without completed date = %s", d)
 	}
 	if rec := e.do("GET", "/v1/items", "", e.web); strings.Contains(rec.Body.String(), "done_at") {
 		t.Fatalf("done_at only with phase=done: %s", rec.Body)

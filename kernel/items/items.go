@@ -349,10 +349,10 @@ func Purge(tx *store.Tx, id string) error {
 }
 
 // DoneAt 返回已完成事项进入已完成的时刻：最近一次转入 done 的事件时刻（§7.1，"已完成"按完成那天算）。
-// 工作台迁移写入的事项新建时就是已完成，没有转入那一刻；它们取迁移带来的完成日期 ext.workbench.completed
-// （本机当天 00:00），缺了才用写入时刻。
+// 工作台迁移写入的事项新建时就是已完成，没有转入那一刻；它们取迁移带来的完成日期 ext.workbench.completed，
+// 没记完成日期的取工作台最后改动的日期 ext.workbench.updated（都是本机当天 00:00），两样都没有才用写入时刻。
 func DoneAt(tx *store.Tx) (map[string]time.Time, error) {
-	r, err := tx.Query(`SELECT e.object, e.type, e.at, COALESCE(json_extract(i.data, '$.ext.workbench.completed'), '')
+	r, err := tx.Query(`SELECT e.object, e.type, e.at, COALESCE(NULLIF(json_extract(i.data, '$.ext.workbench.completed'), ''), json_extract(i.data, '$.ext.workbench.updated'), '')
 		FROM eventlog_event e JOIN items i ON i.id = e.object
 		WHERE i.phase = 'done' AND e.type IN ('item.created', 'item.phase_changed') AND json_extract(e.payload, '$.item.phase') = 'done'
 		ORDER BY e.seq`)
