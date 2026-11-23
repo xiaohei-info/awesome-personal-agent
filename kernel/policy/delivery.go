@@ -2,11 +2,13 @@ package policy
 
 import (
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 // 投递矩阵（§7.4 "投递矩阵"）：每一行是一类提醒，各有两层去处——第一层推给 Agent（off、main 马上唤醒主会话、
@@ -326,4 +328,37 @@ func FrozenEqual(a, b Disturb) bool {
 	}
 	pa, pb := a.ProactiveSettings(), b.ProactiveSettings()
 	return maps.Equal(pa.TaskPush, pb.TaskPush) && maps.Equal(pa.InstancePush, pb.InstancePush)
+}
+
+// SuggestedDelivery 是本人拍板采用的矩阵（§4.2"建议"列）：在换算值上只改两处——14 天没动静改为下次对话时带上、不推渠道；
+// 定时任务"没出来"改为推默认渠道（没有默认渠道时不改，免得从主会话退成只留 Web 未读）。按实例覆盖的行不动。
+func SuggestedDelivery(d Disturb, packs map[string]string) Delivery {
+	m := DeriveDelivery(d, packs)
+	m.Rows[RowStale] = Target{Agent: AgentNextChat, User: UserOff}
+	if m.DefaultChannel != "" {
+		for _, t := range append(slices.Clone(TaskTypes), TaskOther) {
+			m.Rows[RowTaskFailed+t] = Target{Agent: AgentOff, User: UserDefault}
+		}
+	}
+	return m
+}
+
+// SeedDelivery 是采用建议值的一次性默认值变更（§16.5）：还没有投递矩阵、且建议值与换算值确有不同时，按 SuggestedDelivery 写入
+// disturb.delivery，经策略版本落账并记 policy.changed，操作者由调用方给（kernel:defaults）。写入即冻结旧键，旧二进制回滚读到的就是这一刻的设置。
+// 出厂设置换算出来的矩阵与建议值相同（提醒本就下次对话时带上，也没有默认渠道），所以新装与没改过去处的部署不写、旧键不冻结；
+// 已有矩阵的不动，重复执行不重复写。packs 是实例 id → 类型。
+func SeedDelivery(tx *store.Tx, actor domain.Actor, packs map[string]string) (int, bool, error) {
+	v, p, err := Stored(tx)
+	if err != nil || p.Disturb.Delivery != nil {
+		return v, false, err
+	}
+	m := SuggestedDelivery(p.Disturb, packs)
+	if reflect.DeepEqual(m, DeriveDelivery(p.Disturb, packs)) {
+		return v, false, nil
+	}
+	nv, err := Update(tx, actor, "defaults: delivery matrix adopts the suggested values", func(np *Policy) error {
+		np.Disturb.Delivery = &m
+		return nil
+	})
+	return nv, err == nil && nv != v, err
 }

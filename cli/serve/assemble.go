@@ -77,6 +77,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/guideline"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/stale"
@@ -529,6 +530,9 @@ func (k *kernel) start(ctx context.Context) error {
 	if err := kprojects.SeedCapture(ctx, k.x, k.st, owner); err != nil { // 对话捕获默认开启：已有项目一次性补开（§16.5）
 		return err
 	}
+	if err := k.st.Update(ctx, seedDelivery); err != nil { // 投递矩阵采用建议值：已有部署一次性写入（§16.5）
+		return err
+	}
 	if n, err := sregistry.Backfill(ctx, k.st, storedName, sourceKindNames, clock.Now()); err != nil {
 		return err
 	} else if n > 0 {
@@ -781,4 +785,18 @@ func localURL(a net.Addr) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(t.Port))
+}
+
+// seedDelivery 让已有部署一次性采用投递矩阵的建议值（kpolicy.SeedDelivery），操作者是 system（kernel:defaults）。
+func seedDelivery(tx *store.Tx) error {
+	list, err := instances.List(tx)
+	if err != nil {
+		return err
+	}
+	packs := make(map[string]string, len(list))
+	for _, in := range list {
+		packs[in.ID] = in.Pack
+	}
+	_, _, err = kpolicy.SeedDelivery(tx, domain.Actor{Type: domain.ActorSystem, Principal: "kernel:defaults", Via: domain.ViaClock, OnBehalfOf: owner}, packs)
+	return err
 }

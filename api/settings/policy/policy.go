@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
@@ -40,6 +41,8 @@ type section struct {
 	// view 非空时代替 get：响应要读账本里别的数据（在读策略的同一事务里）。
 	view func(*store.Tx, *kpolicy.Policy) (any, error)
 	set  func(*kpolicy.Policy, json.RawMessage) error
+	// setTx 非空时代替 set：写入要读账本里别的数据（在写策略的同一事务里）。
+	setTx func(*store.Tx, *kpolicy.Policy, json.RawMessage) error
 }
 
 func strictDecode(raw json.RawMessage, v any) error {
@@ -68,6 +71,7 @@ func sect[T any](key string, tier authz.Tier, page string, field func(*kpolicy.P
 
 // disturbSection 是 disturb 段：请求体缺 daily_cap 时取缺省 20，而不是被当成"不限"。
 // 响应里的 delivery 总是生效的投递矩阵：没保存过时是按旧键换算的结果，delivery_saved 为假（只读字段，PUT 回传时忽略）。
+// 还没保存过矩阵时，PUT 回传的 delivery 与换算值一字不差就当作没改矩阵（照 GET 的形状改旧键的客户端照旧可用，不写入、不冻结）；
 // 矩阵一经写入，旧键 routes、push.*.route、proactive.task_push 与 instance_push 冻结：PUT 改了它们为 400；
 // PUT 没带 delivery 时沿用已存的矩阵（不会因此退回旧键）。
 var disturbSection = section{
@@ -86,10 +90,19 @@ var disturbSection = section{
 		}
 		return disturbBody{Disturb: d, DeliverySaved: &saved}, nil
 	},
-	set: func(p *kpolicy.Policy, raw json.RawMessage) error {
+	setTx: func(tx *store.Tx, p *kpolicy.Policy, raw json.RawMessage) error {
 		v := disturbBody{Disturb: kpolicy.Disturb{DailyCap: kpolicy.DefaultDailyCap}}
 		if err := strictDecode(raw, &v); err != nil {
 			return err
+		}
+		if v.Delivery != nil && p.Disturb.Delivery == nil {
+			packs, err := instancePacks(tx)
+			if err != nil {
+				return err
+			}
+			if reflect.DeepEqual(*v.Delivery, p.Disturb.Matrix(packs)) {
+				v.Delivery = nil
+			}
 		}
 		if v.Delivery == nil {
 			v.Delivery = p.Disturb.Delivery
@@ -700,7 +713,11 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 							return domain.NewError(domain.CodeConflict, "请重新载入 Agent 设置以保留实例策略", "reload Agent settings")
 						}
 					}
-					if err := known[k].set(np, raw); err != nil {
+					set := known[k].set
+					if st := known[k].setTx; st != nil {
+						set = func(p *kpolicy.Policy, raw json.RawMessage) error { return st(tx, p, raw) }
+					}
+					if err := set(np, raw); err != nil {
 						return err
 					}
 				}
