@@ -23,7 +23,7 @@ import (
 // TaskID 是简报以外的定时任务产出（例行任务）的投递 id：一次产出只入队一次。
 func TaskID(item string) string { return "task:" + item }
 
-// 注入正文的长度取舍：全文不超过 fullRunes 就给全文，否则每节给标题与前 sectionLines 行（每行至多 lineRunes），另附全文位置。
+// 注入正文的长度取舍：全文不超过 fullRunes 就给全文，否则每节给标题与前 sectionLines 行（每行至多 lineRunes），另附全文位置（事项页的可点击链接，不是事项 id，也不是运行目录）。
 const (
 	fullRunes    = 1800
 	sectionLines = 2
@@ -145,7 +145,7 @@ func TaskContent(it domain.Item, pack, webURL string) domain.DeliveryContent {
 	}
 	text := render(false)
 	if utf8.RuneCountInString(text) > fullRunes {
-		text = render(true) + "\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：" + it.ID + "）"
+		text = render(true) + "\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：" + webURL + "）"
 	}
 	return domain.DeliveryContent{Title: "【" + label + "】" + it.Title, Summary: text, WebURL: webURL}
 }

@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -437,7 +438,7 @@ func TestReviewLabelAndLongBodySummary(t *testing.T) {
 	if len(d) != 1 || d[0].Content.Title != "【复盘】review 2026-11-27" {
 		t.Fatalf("review = %+v", d)
 	}
-	if want := "## 完成了什么\n- 一行很长的复盘内容，说明本周完成的事情与原因。\n- 一行很长的复盘内容，说明本周完成的事情与原因。\n……（本节共 80 行）\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：" + id + "）"; d[0].Content.Summary != want {
+	if want := "## 完成了什么\n- 一行很长的复盘内容，说明本周完成的事情与原因。\n- 一行很长的复盘内容，说明本周完成的事情与原因。\n……（本节共 80 行）\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：/items/" + id + "）"; d[0].Content.Summary != want {
 		t.Fatalf("summary = %q", d[0].Content.Summary)
 	}
 }
@@ -486,5 +487,15 @@ func TestBriefFallsBackWhenMainCannotWake(t *testing.T) {
 	id := e.briefDone(map[string]any{"origin": e.task("ins_b", "brief")})
 	if c := e.claim("channel:chan"); c == nil || c.ID != delivery.BriefID(id) {
 		t.Fatalf("channel = %+v", c)
+	}
+}
+
+// 长正文摘要末尾的全文位置是传入的绝对链接，不是事项 id 也不是运行目录。
+func TestTaskContentLongBodyPointsToItemURL(t *testing.T) {
+	long := strings.Repeat("- 一行很长的内容，说明事情与原因，凑够长度。\n", 80)
+	spec, _ := json.Marshal(map[string]any{"sections": []map[string]any{{"title": "今天", "body": long}}})
+	c := TaskContent(domain.Item{ID: "itm_x", Title: "t", Spec: spec}, "brief", "https://apa.example/items/itm_x")
+	if want := "\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：https://apa.example/items/itm_x）"; !strings.HasSuffix(c.Summary, want) {
+		t.Fatalf("summary tail = %q", c.Summary[len(c.Summary)-80:])
 	}
 }
