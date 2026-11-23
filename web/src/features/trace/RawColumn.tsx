@@ -9,7 +9,8 @@ import { strings } from "./strings";
 // 所有内容只经 React 文本节点进入页面——不渲染 HTML，也就不会加载其中的任何外部资源。
 interface Manifest { state: string; bytes: number; missing?: { part: string; reason?: string }[] }
 interface Attachment { name: string; media_type?: string; size: number; ref?: string; blob?: string }
-interface ChatMessage { sender: string; text: string; at: string }
+interface MessageAttachment { kind: string; name?: string; media_type?: string }
+interface ChatMessage { sender: string; text: string; at: string; attachments?: MessageAttachment[] }
 interface RawRead {
   event?: { subject?: string };
   content: Manifest;
@@ -129,7 +130,11 @@ export function RawColumn({ id }: { id: string }) {
                   {data.messages.map((m, i) => (
                     <li key={i}>
                       <strong>{m.sender}</strong> · <time dateTime={m.at}>{new Date(m.at).toLocaleString(locale())}</time>
-                      <pre className="raw-text">{m.text}</pre>
+                      {m.text.trim() !== "" && <pre className="raw-text">{m.text}</pre>}
+                      {m.attachments?.map((a, j) => (
+                        <div key={j}>{[(t.rawMessageKinds[a.kind] ?? a.kind) + (a.name ? "：" + a.name : ""), a.media_type].filter(Boolean).join(" · ")}</div>
+                      ))}
+                      {m.text.trim() === "" && !m.attachments?.length && <div>{t.rawNoText}</div>}
                     </li>
                   ))}
                 </ol>

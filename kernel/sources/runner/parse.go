@@ -155,9 +155,12 @@ func validateV2(ev parsedEvent) error {
 	if len(ev.Items) > maxItems {
 		return fmt.Errorf("bad field: items has %d entries, at most %d", len(ev.Items), maxItems)
 	}
+	// text 可以为空（图片、文件、语音消息）：一条没有文字的消息不能让同一事件里的其他消息一起被拒收（§9.2）。
 	for i, m := range ev.Items {
-		if strings.TrimSpace(m.Text) == "" {
-			return fmt.Errorf("bad field: items[%d].text is empty", i)
+		for j, a := range m.Attachments {
+			if strings.TrimSpace(a.Kind) == "" {
+				return fmt.Errorf("bad field: items[%d].attachments[%d].kind is empty", i, j)
+			}
 		}
 	}
 	return validateRaw(ev)
