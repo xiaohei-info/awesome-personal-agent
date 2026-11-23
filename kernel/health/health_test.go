@@ -10,6 +10,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -49,7 +50,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, policy.Module, command.Module, proc.Module, delivery.Module,
-		registry.Module, runner.Module, agentsmd.Module, chain.Module, direct.Module, items.Module, clock.Module, executors.Module, instances.Module, Module} {
+		registry.Module, runner.Module, agentsmd.Module, chain.Module, direct.Module, items.Module, clock.Module, executors.Module, instances.Module, attention.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -64,6 +65,11 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	return &env{t: t, st: st, x: x, q: delivery.New(delivery.Options{Now: func() time.Time { return t0 }})}
+}
+
+// att 是与 e.q 同一时钟的触达：健康推送与告警经它入队。
+func (e *env) att() *attention.Attention {
+	return attention.New(attention.Options{Queue: e.q, Now: func() time.Time { return t0 }})
 }
 
 func (e *env) update(fn func(*store.Tx) error) {
@@ -402,7 +408,7 @@ func (e *env) sync() []domain.Delivery {
 	e.t.Helper()
 	var out []domain.Delivery
 	e.update(func(tx *store.Tx) (err error) {
-		if err = NewNotifier(e.q).Sync(tx); err == nil {
+		if err = NewNotifier(e.att()).Sync(tx); err == nil {
 			out, err = e.q.Unread(tx)
 		}
 		return
@@ -471,14 +477,37 @@ func TestPackRejectionYieldsOneHealthDelivery(t *testing.T) {
 	}
 }
 
-// 路由取策略里健康类的配置。
+// 路由取策略里健康类的配置（经投递矩阵 health 行换算，与旧版本按 routes.health 选路由逐值一致）。
 func TestHealthRouteFollowsPolicy(t *testing.T) {
 	for in, want := range map[string]string{"": delivery.RouteWeb, "web": delivery.RouteWeb, "inject": delivery.RouteInject,
 		"channel:tg": "channel:tg", "tg": delivery.ChannelRoute("tg")} {
-		p := policy.Default()
-		p.Disturb.Routes = map[string]string{"health": in}
-		if got := route(p); got != want {
-			t.Errorf("route(%q) = %q, want %q", in, got, want)
+		e := setup(t)
+		e.update(func(tx *store.Tx) error {
+			_, err := policy.Update(tx, owner.Actor, "route", func(p *policy.Policy) error {
+				if in == "" {
+					delete(p.Disturb.Routes, "health")
+				} else {
+					p.Disturb.Routes["health"] = in
+				}
+				return nil
+			})
+			return err
+		})
+		e.event(domain.EvHealthAlert, "src_a", "x", map[string]string{"kind": "source"})
+		var got []domain.Delivery
+		e.update(func(tx *store.Tx) (err error) {
+			if err = NewNotifier(e.att()).Sync(tx); err == nil {
+				got, err = e.q.Backlog(tx)
+				if u, uerr := e.q.Unread(tx); uerr == nil {
+					got = append(got, u...)
+				} else {
+					err = uerr
+				}
+			}
+			return
+		})
+		if len(got) != 1 || got[0].Route != want {
+			t.Errorf("routes.health %q: deliveries %+v, want one on %q", in, got, want)
 		}
 	}
 }

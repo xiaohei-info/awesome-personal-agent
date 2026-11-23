@@ -103,7 +103,9 @@ describe("设置 › 提醒渠道：内置渠道", () => {
     const a = within(await screen.findByRole("region", { name: "我的 iPhone" }));
     expect(a.getByText("在用")).toBeInTheDocument();
     expect(a.getByText("只能看")).toBeInTheDocument();
-    expect(a.getByText(/用来送：等你决定/)).toBeInTheDocument();
+    expect(a.getByText(/用来送：问题卡/)).toBeInTheDocument(); // 只读，按矩阵：旧路由换算后问题卡走默认渠道，默认渠道就是它
+    expect(a.getByText("默认渠道")).toBeInTheDocument();
+    expect(a.getByRole("link", { name: "去改" })).toHaveAttribute("href", "/settings/notify");
     const b = within(screen.getByRole("region", { name: "备用手机" }));
     expect(b.getByText("有问题")).toBeInTheDocument();
     expect(b.getByRole("alert")).toHaveTextContent("密钥没填或已失效，重新填写");
@@ -114,7 +116,7 @@ describe("设置 › 提醒渠道：内置渠道", () => {
     expect(document.body.textContent).not.toMatch(/ch-a1|ch-b2|credentials_missing/);
   });
 
-  it("添加四步：选类型 → 填表单 → 发一条测试 → 启用；「用它来送」写打扰策略的路由", async () => {
+  it("添加四步：选类型 → 填表单 → 发一条测试 → 启用；最后一步只给默认渠道的初值，冻结的旧路由原样带回", async () => {
     const s = server();
     mount(s.impl);
     await userEvent.click(await screen.findByRole("button", { name: "+ 添加渠道" }));
@@ -126,11 +128,32 @@ describe("设置 › 提醒渠道：内置渠道", () => {
     expect(await screen.findByText("已送达，去手机上看看")).toBeInTheDocument();
     expect(conns.calls[0]).toEqual({ method: "POST", url: "/v1/connections/test", body: { type: "bark", config: {}, secrets: { device_key: "dev-1" }, send: true } });
     await userEvent.click(screen.getByRole("button", { name: "下一步" }));
-    await userEvent.click(screen.getByLabelText("系统状态"));
+    expect(screen.queryByText("用它来送")).toBeNull();
+    expect(screen.getByLabelText("设为默认渠道")).toBeChecked(); // 还没有默认渠道：默认勾上
     await userEvent.click(screen.getByRole("button", { name: "启用" }));
     expect(await screen.findByRole("region", { name: "我的 iPhone" })).toBeInTheDocument();
     expect(conns.calls[1]).toEqual({ method: "POST", url: "/v1/connections", body: { type: "bark", name: "我的 iPhone", config: {}, secrets: { device_key: "dev-1" }, enabled: true } });
-    expect(s.puts.at(-1)!.body.disturb.routes).toEqual({ decision: "channel:ch-new1", reminder: "channel:ch-new1", health: "channel:ch-new1" });
+    expect(s.puts).toHaveLength(1);
+    const d = s.puts[0].body.disturb;
+    expect(d.routes).toEqual({ decision: "inject", health: "web" });
+    expect(d).not.toHaveProperty("delivery_saved");
+    expect(d.delivery.default_channel).toBe("channel:ch-new1");
+    expect(d.delivery.rows.decision).toEqual({ agent: "next_chat", user: "off" }); // 只改默认渠道，各行原样
+  });
+
+  it("编辑表单只改连接本身：没有「用它来送」，保存不写打扰策略", async () => {
+    const s = server();
+    conns.list.push({ id: "ch-a1", type: "bark", name: "我的 iPhone", config: {}, secrets: { device_key: true }, enabled: true, state: "ok" });
+    s.doc.disturb.routes.decision = "channel:ch-a1";
+    mount(s.impl);
+    const c = within(await screen.findByRole("region", { name: "我的 iPhone" }));
+    await userEvent.click(c.getByRole("button", { name: "编辑" }));
+    const form = within(c.getByRole("form", { name: "编辑" }));
+    expect(form.queryByText("用它来送")).toBeNull();
+    expect(form.queryByRole("checkbox", { name: "等你决定" })).toBeNull();
+    await userEvent.click(form.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(conns.calls).toEqual([{ method: "PUT", url: "/v1/connections/ch-a1", body: { config: {}, secrets: {} } }]));
+    expect(s.puts).toHaveLength(0);
   });
 });
 
@@ -187,7 +210,7 @@ describe("设置 › 提醒渠道：用自己的程序接入", () => {
 });
 
 describe("设置 › 提醒渠道：删除", () => {
-  it("启用中的内置渠道也能删除：先停止发送，再删除，并把路由解绑", async () => {
+  it("启用中的内置渠道也能删除：先停止发送，再删除；不改任何去处（指向它的由服务端改落今天页），不会悄悄改成下次聊天时告诉我", async () => {
     const s = server();
     conns.list.push({ id: "ch-a1", type: "bark", name: "我的 iPhone", config: {}, secrets: { device_key: true }, enabled: true, state: "ok" });
     s.doc.disturb.routes.decision = "channel:ch-a1";
@@ -199,8 +222,9 @@ describe("设置 › 提醒渠道：删除", () => {
       { method: "POST", url: "/v1/connections/ch-a1/disable", body: {} },
       { method: "DELETE", url: "/v1/connections/ch-a1", body: undefined },
     ]));
-    expect(confirm.mock.calls[0][0]).toMatch(/会先停止发送/);
-    expect(s.puts.at(-1)!.body.disturb.routes.decision).toBe("inject");
+    expect(confirm.mock.calls[0][0]).toMatch(/会先停止发送，指向它的推送改放在今天页的提醒里/);
+    expect(s.puts).toHaveLength(0);
+    expect(s.doc.disturb.routes.decision).toBe("channel:ch-a1");
     confirm.mockRestore();
   });
 

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature as notify } from "../settings-notify";
 import { feature as agents } from "../settings-agents";
-import { policyServer } from "./test-server";
+import { deriveDelivery, policyServer } from "./test-server";
 
 // 改版前后 PUT 载荷逐字段一致（界面设计 §6.1）：「策略与人格」拆成「我来拍板 / 提醒与打扰 / 通用」（权限上限的载荷见 settings-agents.test）后，
 // 每张卡片「不改直接保存」与「做一次与改版前测试相同的编辑再保存」发出的请求体，都必须与改版前的组件
@@ -26,16 +26,15 @@ const CASES: Case[] = [
   },
   // 与改版前测试相同的编辑
   {
-    name: "打扰策略：加一条「类别:优先级」路由", at: "/settings/notify", card: "各类提醒怎么送", path: "/v1/settings/policy",
+    name: "投递矩阵：改一行，只写 delivery，冻结的旧键原样带回", at: "/settings/notify", card: "每类提醒送到哪", path: "/v1/settings/policy",
     edit: async (c) => {
-      await userEvent.click(c.getByRole("button", { name: "＋ 按优先级单独设" }));
-      await userEvent.selectOptions(c.getByLabelText("单独设1 类别"), "reminder");
-      await userEvent.selectOptions(c.getByLabelText("单独设1 优先级"), "high");
-      await userEvent.selectOptions(c.getByLabelText("单独设1 方式"), "web");
+      const pick = c.getByLabelText("截止已过：推给你");
+      await waitFor(() => expect(within(pick).getByRole("option", { name: "发到 slack" })).toBeInTheDocument());
+      await userEvent.selectOptions(pick, "channel:slack");
     },
-    body: { disturb: { ...DISTURB, routes: { decision: "inject", health: "web", "reminder:high": "web" } } },
+    body: { disturb: { ...DISTURB, delivery: { default_channel: "", rows: { ...deriveDelivery(DISTURB).rows, overdue: { agent: "off", user: "channel:slack" } } } } },
   },
-  // 提醒与打扰拆成各自保存的小节（界面设计 §6.1）：每节发整段 disturb，只换自己改过的字段。
+  // 提醒与推送拆成各自保存的小节（界面设计 §6.1）：每节发整段 disturb，只换自己改过的字段。
   {
     name: "打扰策略：日上限", at: "/settings/notify", card: "每天最多发几条", path: "/v1/settings/policy",
     edit: async (c) => {
@@ -79,7 +78,7 @@ describe("改版前后 PUT 载荷逐字段一致", () => {
     const c = within(await screen.findByRole("region", { name: card }));
     if (edit) await edit(c);
     await userEvent.click(c.getByRole("button", { name: `保存${card}` }));
-    await c.findByRole("status");
+    await c.findByText("已保存"); // 矩阵卡里嵌着到点提醒的预览（role=status），按保存结果的文字找
     expect(s.puts).toHaveLength(1);
     expect(s.puts[0].path).toBe(path);
     expect(s.puts[0].body).toEqual(body);

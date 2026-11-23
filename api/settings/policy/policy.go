@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
@@ -23,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -36,7 +38,11 @@ type section struct {
 	tier authz.Tier // 3a 改日常或 3b 造新权力（§14.3）；同一次 PUT 取其中最高的一档判
 	page string     // 该段所在的 Web 设置页，拒绝时 web_url 落在这里
 	get  func(*kpolicy.Policy) any
+	// view 非空时代替 get：响应要读账本里别的数据（在读策略的同一事务里）。
+	view func(*store.Tx, *kpolicy.Policy) (any, error)
 	set  func(*kpolicy.Policy, json.RawMessage) error
+	// setTx 非空时代替 set：写入要读账本里别的数据（在写策略的同一事务里）。
+	setTx func(*store.Tx, *kpolicy.Policy, json.RawMessage) error
 }
 
 func strictDecode(raw json.RawMessage, v any) error {
@@ -63,19 +69,72 @@ func sect[T any](key string, tier authz.Tier, page string, field func(*kpolicy.P
 	}
 }
 
-// disturbSection 与 sect 相同，但请求体缺 daily_cap 时取缺省 20，而不是被当成"不限"。
+// disturbSection 是 disturb 段：请求体缺 daily_cap 时取缺省 20，而不是被当成"不限"。
+// 响应里的 delivery 总是生效的投递矩阵：没保存过时是按旧键换算的结果，delivery_saved 为假（只读字段，PUT 回传时忽略）。
+// 还没保存过矩阵时，PUT 回传的 delivery 与换算值一字不差就当作没改矩阵（照 GET 的形状改旧键的客户端照旧可用，不写入、不冻结）；
+// 矩阵一经写入，旧键 routes、push.*.route、proactive.task_push 与 instance_push 冻结：PUT 改了它们为 400；
+// PUT 没带 delivery 时沿用已存的矩阵（不会因此退回旧键）。
 var disturbSection = section{
 	key: "disturb", tier: authz.TierRules, page: "/settings/notify",
 	get: func(p *kpolicy.Policy) any { return p.Disturb },
-	set: func(p *kpolicy.Policy, raw json.RawMessage) error {
-		v := kpolicy.Disturb{DailyCap: kpolicy.DefaultDailyCap}
+	view: func(tx *store.Tx, p *kpolicy.Policy) (any, error) {
+		d := p.Disturb
+		saved := d.Delivery != nil
+		if !saved {
+			packs, err := instancePacks(tx)
+			if err != nil {
+				return nil, err
+			}
+			m := d.Matrix(packs)
+			d.Delivery = &m
+		}
+		return disturbBody{Disturb: d, DeliverySaved: &saved}, nil
+	},
+	setTx: func(tx *store.Tx, p *kpolicy.Policy, raw json.RawMessage) error {
+		v := disturbBody{Disturb: kpolicy.Disturb{DailyCap: kpolicy.DefaultDailyCap}}
 		if err := strictDecode(raw, &v); err != nil {
 			return err
 		}
+		if v.Delivery != nil && p.Disturb.Delivery == nil {
+			packs, err := instancePacks(tx)
+			if err != nil {
+				return err
+			}
+			if reflect.DeepEqual(*v.Delivery, p.Disturb.Matrix(packs)) {
+				v.Delivery = nil
+			}
+		}
+		if v.Delivery == nil {
+			v.Delivery = p.Disturb.Delivery
+		}
+		if v.Delivery != nil && !kpolicy.FrozenEqual(p.Disturb, v.Disturb) {
+			return domain.NewError(domain.CodeInvalidRequest,
+				"disturb routes, push.*.route, proactive.task_push and proactive.instance_push are frozen once disturb.delivery is saved",
+				"change where reminders go in disturb.delivery and send the frozen keys back unchanged")
+		}
 		stampSince(p.Disturb.Proactive, v.Proactive)
-		p.Disturb = v
+		p.Disturb = v.Disturb
 		return nil
 	},
+}
+
+// disturbBody 是 disturb 段的请求与响应形状：策略的 disturb 加只读的 delivery_saved。
+type disturbBody struct {
+	kpolicy.Disturb
+	DeliverySaved *bool `json:"delivery_saved,omitempty"`
+}
+
+// instancePacks 是全部定时任务实例 id → 类型，用于换算按实例覆盖的矩阵行。
+func instancePacks(tx *store.Tx) (map[string]string, error) {
+	list, err := instances.List(tx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(list))
+	for _, in := range list {
+		out[in.ID] = in.Pack
+	}
+	return out, nil
 }
 
 // stampSince：到点提醒的开启时刻只由这里记（请求体里带的一律不认）：从关到开记现在，一直开着沿用原值，关着清空。
@@ -531,14 +590,21 @@ func top(secs []section) (authz.Tier, string) {
 	return t, page
 }
 
-func render(version int, pol kpolicy.Policy, secs []section) map[string]any {
+func render(tx *store.Tx, version int, pol kpolicy.Policy, secs []section) (map[string]any, error) {
 	out := map[string]any{"version": version}
 	for _, s := range secs {
-		if s.get != nil {
+		switch {
+		case s.view != nil:
+			v, err := s.view(tx, &pol)
+			if err != nil {
+				return nil, err
+			}
+			out[s.key] = v
+		case s.get != nil:
 			out[s.key] = s.get(&pol)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func read(st *store.Store, path string, secs []section) core.Handler {
@@ -561,14 +627,17 @@ func read(st *store.Store, path string, secs []section) core.Handler {
 				return err
 			}
 		}
-		var (
-			v   int
-			pol kpolicy.Policy
-		)
-		if err := st.View(r.Context(), func(tx *store.Tx) (err error) { v, pol, err = kpolicy.Stored(tx); return }); err != nil {
+		var out map[string]any
+		if err := st.View(r.Context(), func(tx *store.Tx) error {
+			v, pol, err := kpolicy.Stored(tx)
+			if err == nil {
+				out, err = render(tx, v, pol, shown)
+			}
+			return err
+		}); err != nil {
 			return err
 		}
-		return core.WriteJSON(w, http.StatusOK, render(v, pol, shown))
+		return core.WriteJSON(w, http.StatusOK, out)
 	}
 }
 
@@ -617,10 +686,7 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 		if err != nil {
 			return err
 		}
-		var (
-			v   int
-			pol kpolicy.Policy
-		)
+		var out map[string]any
 		err = st.Update(detached(r), func(tx *store.Tx) error {
 			var err error
 			if version != nil {
@@ -636,7 +702,7 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 					return domain.NewError(domain.CodeConflict, "设置已变更", "重新载入设置")
 				}
 			}
-			v, err = kpolicy.UpdateWith(tx, p.Caller.Actor, basis, "settings: PUT "+path, func(np *kpolicy.Policy) error {
+			v, err := kpolicy.UpdateWith(tx, p.Caller.Actor, basis, "settings: PUT "+path, func(np *kpolicy.Policy) error {
 				if np.DefaultAgentID != nil && body["default_harness"] != nil {
 					return domain.NewError(domain.CodeConflict, "已启用 Agent 角色设置", "请用新的角色入口")
 				}
@@ -647,7 +713,11 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 							return domain.NewError(domain.CodeConflict, "请重新载入 Agent 设置以保留实例策略", "reload Agent settings")
 						}
 					}
-					if err := known[k].set(np, raw); err != nil {
+					set := known[k].set
+					if st := known[k].setTx; st != nil {
+						set = func(p *kpolicy.Policy, raw json.RawMessage) error { return st(tx, p, raw) }
+					}
+					if err := set(np, raw); err != nil {
 						return err
 					}
 				}
@@ -656,7 +726,10 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 			if err != nil {
 				return err
 			}
-			_, pol, err = kpolicy.Stored(tx) // 设置页显示存储的原文：暂停时端点照常在内
+			_, pol, err := kpolicy.Stored(tx) // 设置页显示存储的原文：暂停时端点照常在内
+			if err == nil {
+				out, err = render(tx, v, pol, secs)
+			}
 			return err
 		})
 		if errors.Is(err, kpolicy.ErrInvalid) {
@@ -665,7 +738,7 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 		if err != nil {
 			return err
 		}
-		return core.WriteJSON(w, http.StatusOK, render(v, pol, secs))
+		return core.WriteJSON(w, http.StatusOK, out)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -41,7 +42,7 @@ type env struct {
 func setup(t *testing.T, extra ...core.RouteGroup) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, kpolicy.Module, command.Module, core.Module, direct.Module, items.Module, executors.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, kpolicy.Module, command.Module, core.Module, direct.Module, items.Module, executors.Module, instances.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

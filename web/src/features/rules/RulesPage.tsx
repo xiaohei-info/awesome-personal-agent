@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { locale, useLang, useT } from "../../app/i18n";
@@ -9,7 +10,8 @@ import { entryOf } from "../../app/values";
 import { RULE_MODE } from "../../app/ids";
 import { strings } from "./strings";
 
-// 自动规则 › 规则（界面设计 §3.1、§6.1）：模式、用哪个 Agent、在哪里做都是即改即存，旁边写「已保存」；用哪个 Agent 默认收起成一行。
+// 设置 › 自动动手（界面设计 §3.1、§6.1）：只列动作类与其他规则；提醒类规则（class: reminder）的开关在「提醒与推送」矩阵里，不在这里重复。
+// 模式、用哪个 Agent、在哪里做都是即改即存，旁边写「已保存」；用哪个 Agent 默认收起成一行。
 // 形状对应 GET /v1/rules（含 class）、PATCH /v1/rules/{id}/mode（附录 B.2）、GET /v1/packs 与 GET /v1/audit/events（§14.8）。
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择，被拒绝时模式保持原值。只改模式，不编辑规则内容。
 // 以 Agent 本人身份运行的规则（runner=main_session）另可覆盖 Agent 在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
@@ -144,7 +146,7 @@ export function RulesPage() {
   // 规则名：词表按「包/规则 id」查；查不到时用包的说明。
   const nameOf = (r: Rule) => entryOf(lang, "rule", `${r.pack}/${r.id}`)?.label ?? packs.find((p) => p.name === r.pack)?.description ?? r.id;
   const groupOf = (r: Rule) => r.class ?? "other";
-  const groups = (["reminder", "action", "other"] as const)
+  const groups = (["action", "other"] as const)
     .map((g) => ({ g, list: (rules ?? []).filter((r) => groupOf(r) === g) }))
     .filter((x) => x.list.length);
 
@@ -153,7 +155,8 @@ export function RulesPage() {
       <PageHead>{t.title}</PageHead>
       {error != null && <ErrorNote error={error} />}
       {!rules && error == null && <p role="status">{t.loading}</p>}
-      {rules && !rules.length && <p className="empty">{t.none}</p>}
+      {rules && !groups.length && <p className="empty">{t.none}</p>}
+      {rules && <p className="sub"><Link to="/settings/notify">{t.reminderElsewhere}</Link></p>}
       {groups.map(({ g, list }) => (
         <section key={g} aria-label={t.groups[g]} className="panel">
           <h2>{t.groups[g]}</h2>

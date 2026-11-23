@@ -3,8 +3,9 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  title: "规则",
-  groups: { reminder: "提醒我", action: "替我动手", other: "其他" },
+  title: "自动动手",
+  groups: { action: "替我动手", other: "其他" } as Record<string, string>,
+  reminderElsewhere: "跟进与停滞提醒的开关在「提醒与推送」",
   hint: "试运行只记录，不动手。",
   none: "还没有加载任何规则",
   mode: (name: string) => `${name}：开关`,
@@ -19,8 +20,9 @@ const zh = {
 
 const en: typeof zh = {
   ...common.en,
-  title: "Rules",
-  groups: { reminder: "Remind me", action: "Act for me", other: "Other" },
+  title: "Act for me",
+  groups: { action: "Act for me", other: "Other" },
+  reminderElsewhere: "Follow-up and stalled reminders are switched under Reminders and pushes",
   hint: "Trial only records; it does nothing.",
   none: "No rules are loaded yet",
   mode: (name) => `${name}: switch`,

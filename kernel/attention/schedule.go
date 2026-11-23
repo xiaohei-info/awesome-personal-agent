@@ -15,7 +15,6 @@ package attention
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -251,16 +250,12 @@ func (a *Attention) remindScheduled(tx *store.Tx, pol policy.Policy) error {
 		if err != nil {
 			return err
 		}
-		content, err := json.Marshal(domain.DeliveryContent{Title: p.Item.Title, Summary: line(p), WebURL: a.o.WebURL(p.Item.ID)})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`INSERT INTO attention_held (id, item, class, priority, content, version, exempt, mergeable, release_at, origin)
-			VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, '')`, key, p.Item.ID, string(domain.DeliveryReminder), string(p.Item.Priority), string(content), ver, now.UnixNano()); err != nil {
+		if err := a.offer(tx, pol, held{id: key, item: p.Item.ID, class: domain.DeliveryReminder, priority: p.Item.Priority, version: ver,
+			content: domain.DeliveryContent{Title: p.Item.Title, Summary: line(p), WebURL: a.o.WebURL(p.Item.ID)}}); err != nil {
 			return err
 		}
 	}
-	return a.releaseScheduled(tx, pol, s, now)
+	return nil // 放行在 flush：静默与暂停与其他提醒同一条流水线，成批与每日上限是这一行声明的合并方式
 }
 
 // schedDup：同一事项同一类型已有推过或排队中的提醒点，与 p 相距不足 window。
@@ -285,40 +280,23 @@ func (a *Attention) schedDup(tx *store.Tx, p SchedPoint, window time.Duration) (
 	return dup, err
 }
 
-type schedHeld struct {
-	key, item string
-	at        time.Time
-	content   domain.DeliveryContent
-}
-
-// releaseScheduled 放行到期的暂存提醒点：静默中拦到静默结束；到了每日上限的攒到下一个工作日的工作开始时间；
-// 其余合成一条投递。被静音的事项各自只留 Web 未读，不进合并消息。
-func (a *Attention) releaseScheduled(tx *store.Tx, pol policy.Policy, s policy.Proactive, now time.Time) error {
-	var due []schedHeld
-	err := scan(tx, func(r *store.Rows) error {
-		var h schedHeld
-		var body string
-		if err := r.Scan(&h.key, &h.item, &body); err != nil {
-			return err
-		}
-		_, _, h.at, _ = parseKey(h.key)
-		due = append(due, h)
-		return json.Unmarshal([]byte(body), &due[len(due)-1].content)
-	}, `SELECT id, item, content FROM attention_held WHERE id LIKE 'sched:%' AND release_at <= ?`, now.UnixNano())
-	if err != nil || len(due) == 0 {
-		return err
+// releaseScheduled 是到点提醒这一行的成批放行（flush 已按共享流水线判过静默）：到了每日件数或条数上限的
+// 攒到下一个工作日的工作开始时间；其余合成一条投递，按矩阵 scheduled 行的去处入队（日上限与暂停由投递队列判）。
+// 被静音的事项各自只留 Web 未读，不进合并消息。
+func (a *Attention) releaseScheduled(tx *store.Tx, pol policy.Policy, due []held, now time.Time) error {
+	if len(due) == 0 {
+		return nil
 	}
-	sort.SliceStable(due, func(i, j int) bool { return due[i].at.Before(due[j].at) })
-	hold := func(hs []schedHeld, until time.Time) error {
+	s := pol.Disturb.ProactiveSettings()
+	at := func(h held) time.Time { _, _, t, _ := parseKey(h.id); return t }
+	sort.SliceStable(due, func(i, j int) bool { return at(due[i]).Before(at(due[j])) })
+	hold := func(hs []held, until time.Time) error {
 		for _, h := range hs {
-			if _, err := tx.Exec(`UPDATE attention_held SET release_at = ? WHERE id = ?`, until.UnixNano(), h.key); err != nil {
+			if _, err := tx.Exec(`UPDATE attention_held SET release_at = ? WHERE id = ?`, until.UnixNano(), h.id); err != nil {
 				return err
 			}
 		}
 		return nil
-	}
-	if end, ok := quietEnd(pol, now); ok {
-		return hold(due, end)
 	}
 	batches, members, err := a.schedToday(tx, now)
 	if err != nil {
@@ -337,9 +315,10 @@ func (a *Attention) releaseScheduled(tx *store.Tx, pol policy.Policy, s policy.P
 	if err := hold(due[room:], a.nextWorkStart(s, now)); err != nil {
 		return err
 	}
-	var batch []schedHeld
+	sched := row{keys: []string{policy.RowScheduled}, floor: true}
+	var batch []held
 	for _, h := range due[:room] {
-		if _, err := tx.Exec(`DELETE FROM attention_held WHERE id = ?`, h.key); err != nil {
+		if _, err := tx.Exec(`DELETE FROM attention_held WHERE id = ?`, h.id); err != nil {
 			return err
 		}
 		t, err := a.target(tx, held{item: h.item})
@@ -347,12 +326,8 @@ func (a *Attention) releaseScheduled(tx *store.Tx, pol policy.Policy, s policy.P
 			return err
 		}
 		if a.o.Queue.Muted(pol, h.item, t) {
-			ver, err := command.Version(tx, h.item)
-			if err != nil {
-				return err
-			}
-			if _, _, err := a.o.Queue.Create(tx, domain.Delivery{ID: h.key, Item: h.item, Class: domain.DeliveryReminder, Route: delivery.RouteWeb,
-				Version: ver, Content: h.content, Suppressed: delivery.SuppressedMuted}); err != nil {
+			if _, err := a.emit(tx, pol, sched, h.priority, domain.Delivery{ID: h.id, Item: h.item, Class: domain.DeliveryReminder,
+				Version: h.version, Content: h.content}, t); err != nil {
 				return err
 			}
 			continue
@@ -365,18 +340,14 @@ func (a *Attention) releaseScheduled(tx *store.Tx, pol policy.Policy, s policy.P
 	keys := make([]string, len(batch))
 	lines := make([]string, len(batch))
 	for i, h := range batch {
-		keys[i], lines[i] = h.key, stamp(h.at, now)+h.content.Summary
+		keys[i], lines[i] = h.id, stamp(at(h), now)+h.content.Summary
 	}
 	sorted := append([]string(nil), keys...)
 	sort.Strings(sorted)
 	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
 	id := schedBatchPrefix + hex.EncodeToString(sum[:8])
-	route, _, err := MainRoute(tx, pol)
-	if err != nil {
-		return err
-	}
-	if _, _, err := a.o.Queue.Create(tx, domain.Delivery{ID: id, Item: ScheduleItem, Class: domain.DeliveryReminder, Route: route, Version: 1,
-		Content: domain.DeliveryContent{Title: fmt.Sprintf("到点提醒：%d 件事", len(batch)), Summary: strings.Join(lines, "\n"), WebURL: "/today"}}); err != nil {
+	if _, err := a.emit(tx, pol, sched, "", domain.Delivery{ID: id, Item: ScheduleItem, Class: domain.DeliveryReminder, Version: 1,
+		Content: domain.DeliveryContent{Title: fmt.Sprintf("到点提醒：%d 件事", len(batch)), Summary: strings.Join(lines, "\n"), WebURL: "/today"}}, delivery.Target{}); err != nil {
 		return err
 	}
 	for _, k := range keys {
@@ -406,7 +377,7 @@ func (a *Attention) schedToday(tx *store.Tx, now time.Time) (batches, members in
 		}
 		ids = append(ids, id)
 		return nil
-	}, `SELECT id FROM delivery_delivery WHERE id LIKE 'schedbatch:%' AND state != 'superseded' AND created_at >= ? AND created_at < ?`,
+	}, `SELECT id FROM delivery_delivery WHERE id LIKE 'schedbatch:%' AND id NOT LIKE '%`+AgentSuffix+`' AND state != 'superseded' AND created_at >= ? AND created_at < ?`,
 		from.UnixNano(), from.AddDate(0, 0, 1).UnixNano()); err != nil {
 		return 0, 0, err
 	}
@@ -445,7 +416,11 @@ func (a *Attention) voidScheduled(tx *store.Tx, item string) error {
 		if err != nil {
 			return err
 		}
-		if n == 0 {
+		m, err := a.o.Queue.SupersedeID(tx, b+AgentSuffix) // 两层都推时的另一条
+		if err != nil {
+			return err
+		}
+		if n+m == 0 {
 			continue
 		}
 		var keys []string
@@ -477,7 +452,8 @@ type Preview struct {
 	Batches   int        `json:"batches"`
 	NextAt    *time.Time `json:"next_at,omitempty"`
 	NextCount int        `json:"next_count"`
-	// Route 是送往的路由；Blocked 非空时主会话不能唤醒（executors.Main*），提醒会落 Web 未读。
+	// Route 是送往的路由（矩阵 scheduled 行，两层都推时取 Agent 层）；Blocked 非空时主会话不能唤醒（executors.Main*），
+	// 提醒按该行的退路走（默认落 Web 未读）。
 	Route   string         `json:"route"`
 	Blocked string         `json:"blocked,omitempty"`
 	Entries []PreviewEntry `json:"entries"`
@@ -496,9 +472,16 @@ type PreviewEntry struct {
 // 静默时段内的点并到静默结束那一刻；同一时刻（到分钟）的点是一批；每日上限按本机自然日截断（截断的次日合并，算作一批）。只读。
 func SchedulePreview(tx *store.Tx, pol policy.Policy, s policy.Proactive, now time.Time) (Preview, error) {
 	pv := Preview{Entries: []PreviewEntry{}}
-	var err error
-	if pv.Route, pv.Blocked, err = MainRoute(tx, pol); err != nil {
+	sched := row{keys: []string{policy.RowScheduled}, floor: true}
+	l, err := resolve(tx, pol, sched, "")
+	if err != nil {
 		return pv, err
+	}
+	pv.Route = orElse(orElse(l.agent, l.user), delivery.RouteWeb)
+	if t, _ := pol.Disturb.Matrix(nil).Lookup("", policy.RowScheduled); t.Agent == policy.AgentMain {
+		if _, pv.Blocked, err = MainRoute(tx, pol); err != nil {
+			return pv, err
+		}
 	}
 	pts, err := duePoints(tx, s, now, now.Add(24*time.Hour))
 	if err != nil {

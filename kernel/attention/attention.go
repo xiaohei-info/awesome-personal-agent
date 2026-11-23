@@ -476,18 +476,20 @@ type held struct {
 	origin    *domain.DeliveryOrigin // 没有事项的提醒（规则 alert 出口）的出处；有事项时为空
 }
 
-// offer 决定一条提醒现在投还是先拦住：静默中拦到静默结束；低优先级提醒进合并窗口。
+// offer 决定一条提醒现在投还是先拦住：按它所在行的节流属性，受静默的在静默中拦到静默结束；
+// 低优先级提醒进合并窗口；到点提醒一律先暂存，由 flush 按批放行。
 // 已经有同 id 的投递或暂存（包括已作废的）就什么都不做，所以重复调用不会重复提醒。
 func (a *Attention) offer(tx *store.Tx, pol policy.Policy, h held) error {
 	if known, err := a.known(tx, h.id); err != nil || known {
 		return err
 	}
+	th := throttleOf(h.id)
 	now := a.o.Now()
 	h.release = now
-	if end, ok := quietEnd(pol, now); ok && !h.exempt {
+	if end, ok := quietEnd(pol, now); ok && th.quiet && !h.exempt {
 		h.release = end
 	}
-	if h.class == domain.DeliveryReminder && h.priority == domain.PriorityLow && pol.Disturb.MergeWindowSec > 0 {
+	if th.merge == mergeLow && h.class == domain.DeliveryReminder && h.priority == domain.PriorityLow && pol.Disturb.MergeWindowSec > 0 {
 		h.mergeable = true
 		window := now.Add(time.Duration(pol.Disturb.MergeWindowSec) * time.Second)
 		var open int64 // 窗口内的后来者并入同一个窗口
@@ -505,7 +507,7 @@ func (a *Attention) offer(tx *store.Tx, pol policy.Policy, h held) error {
 	if h.notBefore.After(h.release) {
 		h.release = h.notBefore
 	}
-	if !h.release.After(now) {
+	if !h.release.After(now) && th.merge != mergeBatch {
 		return a.deliver(tx, pol, []held{h})
 	}
 	content, err := json.Marshal(h.content)
@@ -526,6 +528,7 @@ func (a *Attention) offer(tx *store.Tx, pol policy.Policy, h held) error {
 	return err
 }
 
+// known：这条提醒已暂存、已处理，或已有投递（含两层都推时 Agent 层那一条）。
 func (a *Attention) known(tx *store.Tx, id string) (bool, error) {
 	var n int64
 	if err := scan(tx, func(r *store.Rows) error { return r.Scan(&n) }, `SELECT COUNT(*) FROM attention_held WHERE id = ?`, id); err != nil || n > 0 {
@@ -534,17 +537,12 @@ func (a *Attention) known(tx *store.Tx, id string) (bool, error) {
 	if err := scan(tx, func(r *store.Rows) error { return r.Scan(&n) }, `SELECT COUNT(*) FROM attention_done WHERE id = ?`, id); err != nil || n > 0 {
 		return n > 0, err
 	}
-	if _, err := a.o.Queue.Get(tx, id); err != nil {
-		if isNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+	err := scan(tx, func(r *store.Rows) error { return r.Scan(&n) }, `SELECT COUNT(*) FROM delivery_delivery WHERE id IN (?, ?)`, id, id+AgentSuffix)
+	return n > 0, err
 }
 
 // flush 放行到期的暂存提醒。放行时按当时的策略重新判静默（策略可能在等待期间变了）；
-// 同批到期的可合并提醒两条以上合成一条摘要，一条则原样投。
+// 按各行的合并方式：到点提醒成批放行；同批到期的低优先级提醒、静默结束时一起放行的推送，去处相同的两条以上合成一条摘要，一条则原样投。
 func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 	now := a.o.Now()
 	var due []held
@@ -566,12 +564,13 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 		h.class, h.priority, h.exempt, h.mergeable, h.release = domain.DeliveryClass(class), domain.Priority(prio), exempt == 1, merge == 1, time.Unix(0, rel)
 		due = append(due, h)
 		return json.Unmarshal([]byte(body), &due[len(due)-1].content)
-	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at, origin FROM attention_held WHERE (release_at <= ? OR class = 'decision') AND id NOT LIKE 'sched:%' ORDER BY release_at, rowid`, now.UnixNano())
+	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at, origin FROM attention_held WHERE release_at <= ? OR class = 'decision' ORDER BY release_at, rowid`, now.UnixNano())
 	if err != nil {
 		return err
 	}
-	var go_, merged []held
+	var go_, merged, quieted, batch []held
 	for _, h := range due {
+		th := throttleOf(h.id)
 		if h.class == domain.DeliveryDecision { // 豁免按当前时间与策略重算：静默期内决策可能刚变得临近截止
 			it, err := items.Get(tx, h.item)
 			if err != nil && !isNotFound(err) {
@@ -582,33 +581,76 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 				continue
 			}
 		}
-		if end, ok := quietEnd(pol, now); ok && !h.exempt {
+		if end, ok := quietEnd(pol, now); ok && th.quiet && !h.exempt {
 			if _, err := tx.Exec(`UPDATE attention_held SET release_at = ? WHERE id = ?`, end.UnixNano(), h.id); err != nil {
 				return err
 			}
 			continue
 		}
-		if h.mergeable {
+		switch {
+		case th.merge == mergeBatch:
+			batch = append(batch, h) // 成批放行时再删：到了每日上限的要留着
+			continue
+		case h.mergeable:
 			merged = append(merged, h)
-		} else {
+		case th.merge == mergeQuiet:
+			quieted = append(quieted, h)
+		default:
 			go_ = append(go_, h)
 		}
 		if _, err := tx.Exec(`DELETE FROM attention_held WHERE id = ?`, h.id); err != nil {
 			return err
 		}
 	}
+	if err := a.releaseScheduled(tx, pol, batch, now); err != nil {
+		return err
+	}
 	for _, h := range go_ {
 		if err := a.deliver(tx, pol, []held{h}); err != nil {
 			return err
 		}
 	}
-	if len(merged) > 0 {
-		return a.deliver(tx, pol, merged)
+	for _, g := range [][]held{merged, quieted} {
+		groups, err := a.byTargets(tx, pol, g)
+		if err != nil {
+			return err
+		}
+		for _, hs := range groups {
+			if err := a.deliver(tx, pol, hs); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-// deliver 把一条或一批（合并）提醒写成投递。一批多条时合成摘要；摘要不属于任何单个事项。
+// byTargets 把待合并的提醒按两层去处分组（只合并去处相同的成员），组的顺序按首个成员。
+func (a *Attention) byTargets(tx *store.Tx, pol policy.Policy, hs []held) ([][]held, error) {
+	var order []string
+	groups := map[string][]held{}
+	for _, h := range hs {
+		r, err := rowOf(tx, h)
+		if err != nil {
+			return nil, err
+		}
+		l, err := resolve(tx, pol, r, h.priority)
+		if err != nil {
+			return nil, err
+		}
+		k := l.user + "|" + l.agent
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], h)
+	}
+	out := make([][]held, len(order))
+	for i, k := range order {
+		out[i] = groups[k]
+	}
+	return out, nil
+}
+
+// deliver 把一条或一批（合并，去处相同）提醒写成投递。一批多条时合成摘要；摘要不属于任何单个事项。
 func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 	if len(hs) > 1 { // 被静音的成员不并入摘要：各自走 Web 未读
 		var rest []held
@@ -635,23 +677,28 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 	d := domain.Delivery{ID: hs[0].id, Item: hs[0].item, Class: hs[0].class, Version: hs[0].version, Content: hs[0].content, Origin: hs[0].origin}
 	if len(hs) > 1 {
 		titles := make([]string, len(hs))
-		for i, h := range hs {
-			titles[i] = h.content.Title
-		}
 		ids := make([]string, len(hs))
+		class := domain.DeliveryHealth
 		for i, h := range hs {
-			ids[i] = h.id
+			titles[i], ids[i] = h.content.Title, h.id
+			if h.class != domain.DeliveryHealth { // 混有提醒类时按提醒类计日上限
+				class = domain.DeliveryReminder
+			}
 		}
 		sort.Strings(ids)
 		sum := sha256.Sum256([]byte(strings.Join(ids, "\n")))
-		d.ID, d.Item, d.Version = "digest:"+hex.EncodeToString(sum[:8]), DigestItem, 1
-		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
-	}
-	d.Route = a.route(pol, hs[0].class, hs[0].priority)
-	if len(hs) == 1 { // 定时任务的产出：开了注入主会话就只走主会话（不再发原路由），内容换成正文摘要或全文
-		if err := a.taskRoute(tx, pol, &d); err != nil {
-			return err
+		title := fmt.Sprintf("%d 条低优先级提醒", len(hs))
+		if throttleOf(hs[0].id).merge == mergeQuiet {
+			title = fmt.Sprintf("安静时段攒下的 %d 条推送", len(hs))
+		} else {
+			class = hs[0].class
 		}
+		d = domain.Delivery{ID: "digest:" + hex.EncodeToString(sum[:8]), Item: DigestItem, Class: class, Version: 1,
+			Content: domain.DeliveryContent{Title: title, Summary: strings.Join(titles, "；")}}
+	}
+	r, err := rowOf(tx, hs[0])
+	if err != nil {
+		return err
 	}
 	t, err := a.target(tx, hs[0])
 	if err != nil {
@@ -659,8 +706,9 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 	}
 	if len(hs) > 1 {
 		t = delivery.Target{} // 摘要不属于任何事项，成员已逐个对照过静音
+		r.task, r.floor = nil, true
 	}
-	if _, _, err := a.o.Queue.CreateGated(tx, pol, d, t); err != nil {
+	if _, err := a.emit(tx, pol, r, hs[0].priority, d, t); err != nil {
 		return err
 	}
 	for _, h := range hs { // 合并成员也算已提醒：不再被重新暂存，摘要 id 与成员集绑定而非与某一条绑定
@@ -708,21 +756,6 @@ func orElse(a, b string) string {
 		return a
 	}
 	return b
-}
-
-// route 是阈值：「类别:优先级」优先于「类别」；策略没给就退回 Web 未读。
-func (a *Attention) route(pol policy.Policy, class domain.DeliveryClass, prio domain.Priority) string {
-	r := pol.Disturb.Routes[string(class)+":"+string(prio)]
-	if r == "" {
-		r = pol.Disturb.Routes[string(class)]
-	}
-	switch {
-	case r == "":
-		return delivery.RouteWeb
-	case r == delivery.RouteInject || r == delivery.RouteWake || r == delivery.RouteWeb || strings.HasPrefix(r, "channel:"):
-		return r
-	}
-	return delivery.ChannelRoute(r)
 }
 
 // quietEnd 返回 now 所处静默时段的结束时刻；不在静默中（或未设静默）返回 false。

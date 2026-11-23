@@ -10,6 +10,7 @@ import { strings } from "./strings";
 import { Pick } from "../../app/values";
 import { RoutineForm, type Instance } from "./Routine";
 import { ScheduleCard, When } from "./ScheduleCard";
+import type { Delivery } from "../settings-notify/matrix";
 import { BriefDetail } from "./BriefDetail";
 import { Library } from "./Library";
 import type { Brief } from "./BriefBody";
@@ -42,6 +43,10 @@ export function BriefsPage() {
 /** 自动规则 › 定时安排（/briefs/schedule，地址不变）：定时简报与例行任务两节。 */
 export function Schedule() {
   const { api } = useSession();
+  const [delivery, setDelivery] = useState<Delivery>();
+  useEffect(() => {
+    api.get<{ disturb?: { delivery?: Delivery } }>("/settings/policy").then((p) => setDelivery(p.disturb?.delivery), () => setDelivery(undefined));
+  }, [api]);
   const t = useT(strings);
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [instances, setInstances] = useState<Instance[] | null>(null);
@@ -144,7 +149,7 @@ export function Schedule() {
         <div aria-label={t.instanceList}>
           {scheduled.map((i) => {
             const last = lastOf(i.id);
-            return <ScheduleCard key={i.id} i={i} fallback={defaults[i.pack] ?? ""} agentReady={agentReady} open={nav?.open === i.id} last={last && { id: last.id, at: last.created_at }} onChange={replace} />;
+            return <ScheduleCard key={i.id} i={i} fallback={defaults[i.pack] ?? ""} agentReady={agentReady} open={nav?.open === i.id} last={last && { id: last.id, at: last.created_at }} delivery={delivery} onChange={replace} />;
           })}
         </div>
         <More open={!scheduled.length} label={t.more}>

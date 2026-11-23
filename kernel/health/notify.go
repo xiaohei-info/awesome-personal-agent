@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -38,10 +36,11 @@ const DraftKind = "decision-card"
 // Notifier 是"健康告警 → 健康类投递"的唯一出口（设计 §15.2）：按游标读 health.alert，
 // 每条以事件序号为幂等键产出一条 class=health 的投递，重复处理不会重复投递。
 // 各模块只记 health.alert，不自建健康投递；本包只写自己的游标与投递队列。
-type Notifier struct{ q *delivery.Queue }
+// 送到哪按投递矩阵的 health 行，经触达（attention.Notify）入队；这一行不判静默、不合并，健康类不计日上限、不受暂停。
+type Notifier struct{ att *attention.Attention }
 
-// NewNotifier 返回 Notifier；q 必填。
-func NewNotifier(q *delivery.Queue) *Notifier { return &Notifier{q} }
+// NewNotifier 返回 Notifier；att 必填。
+func NewNotifier(att *attention.Attention) *Notifier { return &Notifier{att} }
 
 // Sync 在调用方事务内处理游标之后的全部 health.alert。
 func (n *Notifier) Sync(tx *store.Tx) error {
@@ -67,10 +66,6 @@ func (n *Notifier) Sync(tx *store.Tx) error {
 	if after > head { // 账本被恢复到较早状态：从头来，宁可重算也不漏（投递幂等）
 		after = 0
 	}
-	_, pol, err := policy.Current(tx)
-	if err != nil {
-		return err
-	}
 	for {
 		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert}, after, 500)
 		if err != nil {
@@ -81,11 +76,11 @@ func (n *Notifier) Sync(tx *store.Tx) error {
 		}
 		for _, en := range es {
 			after = en.Event.Seq
-			d, ok := alertDelivery(en, route(pol))
+			d, ok := alertNotice(en)
 			if !ok {
 				continue
 			}
-			if _, _, err := n.q.Create(tx, d); err != nil {
+			if err := n.att.Notify(tx, d); err != nil {
 				return err
 			}
 		}
@@ -94,8 +89,8 @@ func (n *Notifier) Sync(tx *store.Tx) error {
 	return err
 }
 
-// alertDelivery 把一条 health.alert 格式化成健康类投递；初筛与起草失败不出投递。
-func alertDelivery(en eventlog.Entry, route string) (domain.Delivery, bool) {
+// alertNotice 把一条 health.alert 格式化成健康类提醒；初筛与起草失败不出投递。
+func alertNotice(en eventlog.Entry) (attention.Notice, bool) {
 	e := en.Event
 	var p struct {
 		Kind string `json:"kind"`
@@ -104,10 +99,10 @@ func alertDelivery(en eventlog.Entry, route string) (domain.Delivery, bool) {
 		_ = json.Unmarshal(e.Payload, &p) // 墓碑化后没有内容：按通用格式出投递
 	}
 	if p.Kind == ScreeningKind || p.Kind == DraftKind {
-		return domain.Delivery{}, false
+		return attention.Notice{}, false
 	}
-	d := domain.Delivery{
-		ID: fmt.Sprintf("health:%d", e.Seq), Item: e.Object, Class: domain.DeliveryHealth, Version: 1, Route: route,
+	d := attention.Notice{
+		ID: fmt.Sprintf("health:%d", e.Seq), Item: e.Object, Class: domain.DeliveryHealth,
 		Content: domain.DeliveryContent{
 			Title:   "健康告警：" + e.Object,
 			Summary: e.Reason + "。修复入口见健康视图。",
@@ -123,18 +118,6 @@ func alertDelivery(en eventlog.Entry, route string) (domain.Delivery, bool) {
 		}
 	}
 	return d, true
-}
-
-// route 取策略里健康类的路由，未配置走 Web。
-func route(pol policy.Policy) string {
-	r := pol.Disturb.Routes[string(domain.DeliveryHealth)]
-	switch {
-	case r == "":
-		return delivery.RouteWeb
-	case r == delivery.RouteInject || r == delivery.RouteWake || r == delivery.RouteWeb || strings.HasPrefix(r, "channel:"):
-		return r
-	}
-	return delivery.ChannelRoute(r)
 }
 
 // PackRejected 记一条能力包加载失败的 health.alert，作为 packs.Options.OnReject 的落账函数；

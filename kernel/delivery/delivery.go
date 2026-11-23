@@ -391,18 +391,33 @@ func (q *Queue) Confirm(tx *store.Tx, id string, version int64) (domain.Delivery
 	return q.reload(tx, id)
 }
 
-// ConfirmAnswered 确认事项上被本人回答的那条决策投递：未终结的决策投递中版本最高的一条（回答针对的是当时最新的版本）。
+// ConfirmAnswered 确认事项上被本人回答的那份决策投递：未终结的决策投递中版本最高的那一版（回答针对的是当时最新的版本），
+// 两层都推时同一版有两条（推给本人与推给 Agent），一并确认。
 // 回答之后的作废只针对更低版本，所以要在 Supersede 之前调用；没有可确认的投递是正常情况，返回 false。
 func (q *Queue) ConfirmAnswered(tx *store.Tx, item string) (bool, error) {
-	var id string
+	const open = `item = ? AND class = 'decision' AND state IN ('pending', 'claimed', 'delivered', 'fallback_web')`
 	var ver int64
-	if err := query(tx, func(r *store.Rows) error { return r.Scan(&id, &ver) },
-		`SELECT id, version FROM delivery_delivery WHERE item = ? AND class = 'decision'
-		AND state IN ('pending', 'claimed', 'delivered', 'fallback_web') ORDER BY version DESC, rowid DESC LIMIT 1`, item); err != nil || id == "" {
+	if err := query(tx, func(r *store.Rows) error { return r.Scan(&ver) },
+		`SELECT COALESCE(MAX(version), 0) FROM delivery_delivery WHERE `+open, item); err != nil || ver == 0 {
 		return false, err
 	}
-	_, _, err := q.Confirm(tx, id, ver)
-	return err == nil, err
+	var ids []string
+	if err := query(tx, func(r *store.Rows) error {
+		var id string
+		if err := r.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+		return nil
+	}, `SELECT id FROM delivery_delivery WHERE `+open+` AND version = ? ORDER BY rowid`, item, ver); err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		if _, _, err := q.Confirm(tx, id, ver); err != nil {
+			return false, err
+		}
+	}
+	return len(ids) > 0, nil
 }
 
 // Supersede 作废该事项中版本小于 below 的未终结投递（含退回 Web 未读的：已变化的事项不再展示旧提醒；事项变化的命令在同一事务调用）。
@@ -439,9 +454,12 @@ func (q *Queue) Inject(tx *store.Tx, id, session string) (domain.Delivery, error
 	return q.Get(tx, id)
 }
 
-// Injectable 返回注入路由上尚未确认或作废的投递，供 apa context 带上。
+// Injectable 返回注入路由上尚未确认或作废的投递，供 apa context 带上。"下次对话时带上"不因一直没有对话而丢：
+// 无人领取转了 Web 未读（Sweep）但还没注入过任何会话、本人也没在 Web 读过的，下一次对话照样带上一次。
 func (q *Queue) Injectable(tx *store.Tx) ([]domain.Delivery, error) {
-	return q.list(tx, "WHERE route = ? AND state IN ('pending', 'claimed', 'delivered') ORDER BY created_at, rowid", RouteInject)
+	return q.list(tx, `WHERE route = ? AND (state IN ('pending', 'claimed', 'delivered')
+		OR state = 'fallback_web' AND read_at = 0 AND NOT EXISTS (SELECT 1 FROM delivery_injection WHERE delivery_id = delivery_delivery.id))
+		ORDER BY created_at, rowid`, RouteInject)
 }
 
 // Unread 返回 Web 未读：退回 Web 且本人还没确认的投递，按创建顺序。

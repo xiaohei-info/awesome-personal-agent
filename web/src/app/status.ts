@@ -63,6 +63,9 @@ export interface Status {
 const num = (d: unknown, k: string) => Number((d as Record<string, unknown> | undefined)?.[k] ?? 0);
 const list = <T>(d: unknown) => (Array.isArray(d) ? (d as T[]) : []);
 const enc = encodeURIComponent;
+/** 被退回试运行的规则落到哪：提醒类（跟进、停滞）的开关在提醒与推送的矩阵行上，其余在设置 › 自动动手。 */
+const REMINDER_ROWS: Record<string, string> = { "follow-up/clock_rules/follow-up-interval": "followup", "follow-up/clock_rules/stale-check": "stale" };
+const ruleLink = (k: string) => (REMINDER_ROWS[k] ? "/settings/notify#row-" + REMINDER_ROWS[k] : "/settings/rules#rule-" + enc(k));
 
 /** 一条信号拆成行。信号本身、判定与清除条件全在服务端（§15.2），这里只按对象拆开并归类。 */
 export function rowsOf(s: Signal): Row[] {
@@ -117,7 +120,7 @@ export function rowsOf(s: Signal): Row[] {
       ];
     case "rule_fallbacks": {
       const ids = list<string>(d).filter(Boolean);
-      return ids.length ? ids.map((k) => row("fallback", true, 1, "/rules#rule-" + enc(k), k)) : [row("fallback", true, s.count, "/rules")];
+      return ids.length ? ids.map((k) => row("fallback", true, 1, ruleLink(k), k)) : [row("fallback", true, s.count, "/settings/rules")];
     }
     case "receipt_failures": {
       // 逐条说清谁的什么操作被拒、为什么、下一步（原因码在服务端给出）；没有逐条明细的旧接口退回一行计数。

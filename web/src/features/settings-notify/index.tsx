@@ -5,7 +5,7 @@ import { strings } from "./strings";
 
 export const feature: Feature = {
   id: "settings-notify",
-  title: { zh: "提醒与打扰", en: "Notifications" },
+  title: { zh: "提醒与推送", en: "Reminders and pushes" },
   path: "settings/notify",
   order: 1,
   section: "settings",
