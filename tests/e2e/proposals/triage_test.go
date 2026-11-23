@@ -221,7 +221,7 @@ func TestFlowProposalTriage(t *testing.T) {
 			}
 		}
 		// 批量等于逐条（2026-11-20）：没有一条在运行范围内，整批什么也不处理；全部被拒时为 4，没有可处理的条目时为 0。
-		if r := k.apaRun(runTok, runID, "proposals", "apply", "--recommended"); r.Code != exitDenied && r.Code != 0 {
+		if r := k.apaRun(runTok, runID, "proposals", "apply", "--recommended", "--source", "src_none"); r.Code != exitDenied && r.Code != 0 {
 			t.Errorf("运行凭据 apa proposals apply --recommended 退出码 %d\n%s%s", r.Code, r.Stdout, r.Stderr)
 		}
 		eq(t, "prop-d 阶段", k.phase(d), "proposed")

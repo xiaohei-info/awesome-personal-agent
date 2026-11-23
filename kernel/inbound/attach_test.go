@@ -348,7 +348,7 @@ func TestBatchRecommendedSkipsClosedTargetAndUnrecommended(t *testing.T) {
 	e.recommend(att, `{"recommend":"attach","attach_to":"`+live+`","reason":"同一件事"}`)
 	e.recommend(skip, `{"recommend":"attach","attach_to":"`+shut+`"}`)
 
-	res, err := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner"}, BatchRequest{Mode: BatchRecommended})
+	res, err := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner"}, BatchRequest{Mode: BatchRecommended, Filter: BatchFilter{IDs: []string{acc, dis, att, skip, none}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func (e *env) recommend(id, js string) {
 // 批量没有整批的门：没有可处理的建议时什么也不做，结果为空，谁调用都一样。
 func TestBatchGateRejectsUnauthorizedEvenWhenNothingToDo(t *testing.T) {
 	e := attachEnv(t)
-	b := BatchRequest{Mode: BatchRecommended}
+	b := BatchRequest{Mode: BatchRecommended, Filter: BatchFilter{Source: "src_t"}}
 	for _, who := range []command.Trusted{delegate, runIdent} {
 		res, err := Batch(bg, e.x, e.st, command.Request{Identity: who, Owner: "owner"}, b)
 		if err != nil || len(res) != 0 {
@@ -413,6 +413,26 @@ func TestBatchRejectsBadShape(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
+}
+
+// 缺范围不是“处理全部”：没带 ids/source/project，或 ids 为空，都拒绝（可读原因），且一条建议也不动。
+func TestBatchRecommendedWithoutScopeRejectedAndHandlesNothing(t *testing.T) {
+	e := attachEnv(t)
+	a, b := e.proposalOf("n-1", "有推荐一"), e.proposalOf("n-2", "有推荐二")
+	e.recommend(a, `{"recommend":"accept"}`)
+	e.recommend(b, `{"recommend":"dismiss"}`)
+	req := command.Request{Identity: owner, Owner: "owner"}
+	for name, f := range map[string]BatchFilter{"无范围": {}, "ids 为空": {IDs: []string{}}, "ids 为空但有来源": {Source: "src_t", IDs: []string{}}} {
+		res, err := Batch(bg, e.x, e.st, req, BatchRequest{Mode: BatchRecommended, Filter: f})
+		var de *domain.Error
+		if !errors.As(err, &de) || exitOf(err) != domain.ExitUsage || de.Why == "" || len(res) != 0 {
+			t.Errorf("%s: res=%+v err=%v", name, res, err)
+		}
+		if e.item(a).Phase != domain.PhaseProposed || e.item(b).Phase != domain.PhaseProposed {
+			t.Fatalf("%s: 缺范围时不得处理任何建议", name)
+		}
+	}
+	e.verify()
 }
 
 func exitOf(err error) int {

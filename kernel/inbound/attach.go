@@ -168,7 +168,7 @@ const (
 	BatchUndo        = "undo"
 )
 
-// BatchFilter 限定按推荐处理的范围；都空表示全部带推荐的建议。
+// BatchFilter 限定按推荐处理的范围；按推荐处理必须带范围（ids、source、project 至少一项），都空不等于“全部”，直接拒绝。
 type BatchFilter struct {
 	Source  string   `json:"source,omitempty"`
 	Project string   `json:"project,omitempty"`
@@ -294,6 +294,12 @@ func planBatch(ctx context.Context, st *store.Store, b BatchRequest) ([]BatchAct
 	case BatchRecommended:
 		if len(b.Actions) > 0 {
 			return nil, nil, usage("actions belong to explicit mode")
+		}
+		// 没带范围不能当成“处理全部”：调用方的可见集合为空时也会走到这里，必须拒绝而不是放大。
+		if f := b.Filter; f.IDs != nil && len(f.IDs) == 0 {
+			return nil, nil, usage("filter.ids is empty: nothing is in scope, so nothing was handled")
+		} else if f.IDs == nil && f.Source == "" && f.Project == "" {
+			return nil, nil, usage("recommended mode needs an explicit scope (filter.ids, source or project); it never means all proposals")
 		}
 		var acts []BatchAction
 		err := st.View(ctx, func(tx *store.Tx) (err error) { acts, err = recommended(tx, b.Filter); return })

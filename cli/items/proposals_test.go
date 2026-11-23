@@ -98,7 +98,7 @@ func TestProposalsApplyFile(t *testing.T) {
 		t.Fatal("dispositions do not follow the plan")
 	}
 	// 没有推荐的建议，按推荐批量什么都不处理。
-	r = k.ok(decider, "proposals", "apply", "--recommended")
+	r = k.ok(decider, "proposals", "apply", "--recommended", "--source", "src_none")
 	if res, _ := r.json(t)["results"].([]any); len(res) != 0 || k.phase(e4) != "proposed" {
 		t.Fatalf("recommended with no recommendations: %s", r.out)
 	}
