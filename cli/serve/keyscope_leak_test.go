@@ -32,7 +32,9 @@ func seedHidden(t *testing.T, k *kernel) leakSeed {
 	k.do(t, command.Chain{}, "source.register", map[string]any{"id": s.source, "name": "隐藏来源", "type": "webhook", "source_type": "mail", "config": map[string]any{"scheme": "shared"}})
 	var it struct{ ID string }
 	_ = json.Unmarshal(k.do(t, command.Chain{}, "item.create", map[string]any{"kind": "task", "title": "可以看到的标题", "phase": "open",
-		"body": "LEAKITEMBODY 正文", "summary": "LEAKITEMSUM", "origin": map[string]any{"source": s.source, "ref": "r1"}}), &it)
+		"body": "LEAKITEMBODY 正文", "summary": "LEAKITEMSUM", "origin": map[string]any{"source": s.source, "ref": "r1"},
+		// 计划今天、已逾期、高优先级：让它出现在「今天」的每一组里
+		"priority": "high", "deadline": time.Now().Add(-48 * time.Hour).Format(time.RFC3339), "planned_for": time.Now().Format("2006-01-02")}), &it)
 	s.item = it.ID
 	k.do(t, command.Chain{}, "item.progress", map[string]any{"id": s.item, "text": "LEAKPROGRESS 进展"})
 	var pr struct{ ID string }
@@ -111,6 +113,22 @@ func TestExternalKeyNeverSeesContentOfASourceItWasNotGiven(t *testing.T) {
 				}
 			}
 		}
+	}
+	// 带查询参数才会多出内容的读法：按进展日读事项、全文搜索事项与材料。
+	day := time.Now().Format("2006-01-02")
+	for _, p := range []string{"/v1/items?progress_from=" + day + "&progress_to=" + day, "/v1/items?q=LEAKITEMBODY", "/v1/items?q=LEAKPROGRESS",
+		"/v1/materials/search?q=LEAKMATERIAL", "/v1/context?scope=all", "/v1/context?scope=item&item=" + s.item} {
+		for name, key := range keys {
+			_, body := getAs(k, key, p)
+			for _, m := range leakMarks {
+				if strings.Contains(body, m) {
+					leaks = append(leaks, name+" GET "+p+" → "+m)
+				}
+			}
+		}
+	}
+	if code, body := getAs(k, internal, "/v1/items?progress_from="+day+"&progress_to="+day); code != 200 || !strings.Contains(body, "LEAKPROGRESS") {
+		t.Errorf("internal key reads progress by day: %d %s", code, body)
 	}
 	if len(leaks) > 0 {
 		t.Fatalf("content of a source the key was not given leaked:\n%s", strings.Join(leaks, "\n"))

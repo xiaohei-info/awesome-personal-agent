@@ -253,7 +253,7 @@ func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Princip
 		}
 		rs := readscope.New(tx, p.Caller)
 		out.ContentScopes = map[string]string{}
-		for _, g := range []*[]domain.Item{&l.Planned, &l.Due, &l.Pending, &l.Stale} {
+		for _, g := range []*[]domain.Item{&l.Planned, &l.Due, &l.Pending, &l.Stale, &l.Overdue, &l.HighPriority} {
 			kept, scopes, err := rs.Items(*g)
 			if err != nil {
 				return err

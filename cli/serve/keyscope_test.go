@@ -138,6 +138,14 @@ func TestExternalKeyItemsAndMaterialsTakeTheStrictestSource(t *testing.T) {
 	if len(sm.Items) != 0 || len(si.Items) != 1 {
 		t.Fatalf("an external key searches the trimmed content only: meta %v internal %v", ids(sm), ids(si))
 	}
+	day := time.Now().Format("2006-01-02")
+	var bd struct {
+		Progress map[string][]domain.Progress `json:"progress"`
+	}
+	read(meta, "/v1/items?progress_from="+day+"&progress_to="+day, &bd)
+	if ps := bd.Progress[it.ID]; len(ps) != 1 || ps[0].Text != "" {
+		t.Fatalf("progress by day follows the item's level: %+v", bd.Progress)
+	}
 	if strings.Contains(getBody(k, none, "/v1/today"), it.ID) {
 		t.Fatal("today must leave out an unreachable item")
 	}
