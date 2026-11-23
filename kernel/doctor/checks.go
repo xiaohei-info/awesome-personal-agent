@@ -224,7 +224,16 @@ func SourceDetail(s domain.Source, external bool, exists func(string) bool) Deta
 		d.Data["last_failure_at"] = ts(st.LastFailureAt)
 		problems = append(problems, CodeSourceLastFailed)
 		why = append(why, fmt.Sprintf("the last run failed (%d consecutive failures)", st.ConsecutiveFailures))
-		next = append(next, "open the source page; auth failures have a needs_input item")
+		d.Data["last_failure_kind"] = st.LastFailureKind
+		// 失败原文不进报告（可能含私密内容）；本人在来源页看 last_error，这里只按类别给下一步。
+		switch st.LastFailureKind {
+		case "auth_or_config":
+			next = append(next, "credentials or config are rejected: renew the credentials or fix the config named on the source page, then it recovers on the next pull")
+		case "permanent":
+			next = append(next, "the source was disabled after a permanent failure: read last_error on the source page, fix it, then enable the source")
+		default:
+			next = append(next, "temporary failure, retried automatically with backoff: read last_error on the source page; if it keeps failing, run the source command by hand to see its stderr")
+		}
 	default:
 		d.Data["last_run"] = "ok"
 		d.Data["last_success_at"] = ts(st.LastSuccessAt)

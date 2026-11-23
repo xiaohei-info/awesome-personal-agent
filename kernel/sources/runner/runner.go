@@ -482,15 +482,20 @@ func classify(run domain.Run, reason string) (class, string) {
 	case run.ExitCode == nil:
 		return clsTransient, orElse(reason, "run failed without exit code")
 	}
+	// reason 形如 "exit status N: <stderr 末行>"（外呼调用器附上）；失败原因只在这里留得下来，不能丢。
+	tail := ""
+	if _, t, ok := strings.Cut(reason, ": "); ok {
+		tail = ": " + t
+	}
 	switch *run.ExitCode {
 	case 1:
-		return clsTransient, "exit status 1"
+		return clsTransient, "exit status 1" + tail
 	case 2:
-		return clsNeedsHuman, "exit status 2 (auth or config failure)"
+		return clsNeedsHuman, "exit status 2 (auth or config failure)" + tail
 	case 3:
-		return clsPermanent, "exit status 3 (permanent failure)"
+		return clsPermanent, "exit status 3 (permanent failure)" + tail
 	}
-	return clsTransient, fmt.Sprintf("unexpected exit status %d", *run.ExitCode)
+	return clsTransient, fmt.Sprintf("unexpected exit status %d%s", *run.ExitCode, tail)
 }
 
 func orElse(a, b string) string {

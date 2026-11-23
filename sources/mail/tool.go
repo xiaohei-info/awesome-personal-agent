@@ -58,9 +58,30 @@ func call(ctx context.Context, r Runner, args []string) ([]byte, error) {
 	return out, nil
 }
 
+var (
+	ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	// 工具在真正的错误之后追加的提示行；内核只留 stderr 的末行，不去掉它，末行就只剩这句废话。
+	traceNoteRe = regexp.MustCompile(`Run with --trace`)
+)
+
+// tidyStderr 把工具的 stderr 压成一行真实原因：去颜色码、去提示行、折行，最多 300 字节（取末段）。
+func tidyStderr(b []byte) string {
+	var keep []string
+	for _, l := range strings.Split(ansiRe.ReplaceAllString(string(b), ""), "\n") {
+		if l = strings.TrimSpace(l); l != "" && !traceNoteRe.MatchString(l) {
+			keep = append(keep, l)
+		}
+	}
+	msg := strings.Join(keep, " | ")
+	if len(msg) > 300 {
+		msg = msg[len(msg)-300:]
+	}
+	return msg
+}
+
 // classify 把工具失败映射到 §9.7 退出码：未安装、认证失败 → 2；超时、网络等其余 → 1。
 func classify(ctx context.Context, err error, stderr []byte) error {
-	msg := strings.TrimSpace(string(stderr))
+	msg := tidyStderr(stderr)
 	var nf *exec.Error
 	switch {
 	case errors.As(err, &nf) && errors.Is(nf.Err, exec.ErrNotFound):
