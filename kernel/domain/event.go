@@ -117,6 +117,7 @@ const (
 	EvSourceFailed                   = "source.failed"
 	EvImportCompleted                = "import.completed" // 只读的历史值：导入已取消（§7.1），不再写入；旧账本里的这类事件照常读出
 	EvHealthAlert                    = "health.alert"
+	EvCaptureFailed                  = "inbound.capture_failed" // 一次对话增量没能捕获：类别与时间，不含内容（诊断页 capture_failures 读它）
 	// EvAuthzSwitched 记权限模型第二版的一次性切换（§16.5）：撤了哪些授权单、清了哪些问题、写了哪一版策略。
 	// 内部事件，不在 B.4 的对外稳定集合里。
 	EvAuthzSwitched = "authz.switched"

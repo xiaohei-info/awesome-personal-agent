@@ -521,6 +521,9 @@ func (k *kernel) start(ctx context.Context) error {
 	if err := instances.Seed(ctx, k.x, k.st, k.packs, owner, defaultSchedules); err != nil {
 		return err
 	}
+	if err := kprojects.SeedCapture(ctx, k.x, k.st, owner); err != nil { // 对话捕获默认开启：已有项目一次性补开（§16.5）
+		return err
+	}
 	if n, err := sregistry.Backfill(ctx, k.st, storedName, sourceKindNames, clock.Now()); err != nil {
 		return err
 	} else if n > 0 {

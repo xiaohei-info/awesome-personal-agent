@@ -17,7 +17,7 @@ import (
 
 func init() { client.Register("project", run) }
 
-const usageText = "usage: apa project list | show <id> | create --name N [--intro T] [--tag T]... [--status S] [--capture=bool] | " +
+const usageText = "usage: apa project list | show <id> | create --name N [--intro T] [--tag T]... [--status S] | " +
 	"update <id> [--name N] [--intro T] [--tag T]... [--status S] [--capture=bool] | " +
 	"repos add|remove <id> --remote URL | repos add|remove <id> --path DIR [--host H]"
 
@@ -104,18 +104,20 @@ func fields(args []string, create bool) (map[string]any, error) {
 		body["tags"] = append(tags, v)
 		return nil
 	})
-	fs.Func("capture", "", func(v string) error {
-		switch v {
-		case "true", "":
-			body["capture"] = true
-		case "false":
-			body["capture"] = false
-		default:
-			return os.ErrInvalid
-		}
-		return nil
-	})
-	args = bareCapture(args)
+	if !create { // 新项目的对话捕获恒为开启，创建时没有这一项；update 保留它（3a，默认已开，一般不需要）
+		fs.Func("capture", "", func(v string) error {
+			switch v {
+			case "true", "":
+				body["capture"] = true
+			case "false":
+				body["capture"] = false
+			default:
+				return os.ErrInvalid
+			}
+			return nil
+		})
+		args = bareCapture(args)
+	}
 	fs.Func("allowed-executors", "", func(v string) error {
 		ids := []string{}
 		for _, id := range strings.Split(v, ",") {
