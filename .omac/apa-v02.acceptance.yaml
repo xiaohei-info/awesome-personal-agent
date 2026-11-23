@@ -3082,9 +3082,9 @@ flows:
     - REQ-N05-1
   - id: ACT-WBN-11
     kind: business-action
-    step: 进展的权限边界：worker 只能写自己的事项，delegate 写非绑定事项要依据
-    how: 运行 `APA_TOKEN=$WRK2 apa item progress <WB-F> --text x; echo $?`（WB-F 属于 work-host.cli）；再运行 `APA_TOKEN=$DEL apa item progress <WB-B> --text x; echo $?`（WB-B 不是 DEL 绑定的事项，不带 --evidence/--grant）；最后 `APA_TOKEN=$DEL apa item progress <WB-B> --text "本人说已订" --evidence "已订好了"; echo $?`。
-    expected: 通过：第一条退出码 4；第二条退出码 23 且错误说明缺依据；第三条退出码 0 且进展落账；被拒的两次 progress[] 不变，审计页有 command.rejected。失败：越权写入成功，或带依据的写入被拒。
+    step: 进展的权限边界：写进展是一档，worker 只能写自己的事项、observer 不能写；delegate 写任意事项直接生效、记在 Agent 名下；只整理的 delegate（DELO）替本人拍板被拒（2026-11-23 按权限模型第二版改写，原"缺依据退出码 23"已随本人原话一同取消，决定 84）
+    how: 运行 `APA_TOKEN=$WRK2 apa item progress <WB-F> --text x; echo $?`（WB-F 属于 work-host.cli）；`APA_TOKEN=$OBS apa item progress <WB-B> --text x; echo $?`；`APA_TOKEN=$DEL apa item progress <WB-B> --text "本人说已订"; echo $?`；再运行 `APA_TOKEN=$DELO apa item transition <WB-G> --to dropped --reason 替本人定了; echo $?`（DELO 不归属任何 Agent，只整理；WB-G 是 needs_input，离开它是二档）。
+    expected: 通过：前两条退出码 4，WB-F、WB-B 的 progress[] 不变，审计页各有一条 code=permission_denied 的 command.rejected；第三条退出码 0、进展落账，item.progress_added 的操作者类型是 agent；第四条退出码 23、错误说明 tier_closed，WB-G 仍是 needs_input，审计页有 code=tier_closed 的 command.rejected。失败：任一越权或档位未放开的写入成功，或 delegate 的一档进展被拒。
     requirement_ids:
     - REQ-N05-1
   - id: ACT-WBN-12

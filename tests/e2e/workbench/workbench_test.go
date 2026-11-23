@@ -281,27 +281,29 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		eq(t, "progress 条数", len(k.progress(wbF)), n)
 	})
 
+	// 2026-11-23 改写（权限模型第二版，决定 84）：本人原话不再是依据，写进展是一档，delegate 写任何事项直接生效，
+	// 记在 Agent 名下。仍然必须拒绝的是：钥匙够不着的写入（退出码 4）和档位没放开的拍板（退出码 23）；被拒的都不写入、都留 command.rejected。
 	k.step("ACT-WBN-11 进展的权限边界", func(t *testing.T) {
 		n, nb := len(k.progress(wbF)), len(k.progress(wbB))
-		k.apa(k.WRK2, exitDenied, "item", "progress", wbF, "--text", "x")
-		r := k.apa(k.DEL, exitBasis, "item", "progress", wbB, "--text", "x")
-		if !strings.Contains(r.Stdout+r.Stderr, "evidence") && !strings.Contains(r.Stdout+r.Stderr, "依据") {
-			t.Errorf("第二条没有说明缺依据: %s%s", r.Stdout, r.Stderr)
-		}
+		k.apa(k.WRK2, exitDenied, "item", "progress", wbF, "--text", "x") // worker 只够得着自己的事项
+		k.apa(k.OBS, exitDenied, "item", "progress", wbB, "--text", "x")  // observer 只读与提建议
 		eq(t, "WB-F 进展不变", len(k.progress(wbF)), n)
 		eq(t, "WB-B 进展不变", len(k.progress(wbB)), nb)
+		rejected(t, k.events(wbF, "command.rejected"), "permission_denied", "WB-F 越权写进展")
+		rejected(t, k.events(wbB, "command.rejected"), "permission_denied", "WB-B observer 写进展")
+
 		k.apa(k.DEL, 0, "item", "progress", wbB, "--text", "本人说已订")
 		eq(t, "WB-B 进展落账", len(k.progress(wbB)), nb+1)
-		// 缺依据（退出码 23）的拒绝由命令管线记 command.rejected；越权（退出码 4）在授权层被挡，不落账。
-		basis := false
-		for _, e := range k.events(wbB, "") {
-			if e.Type == "command.rejected" && e.Payload["code"] == "basis_required" {
-				basis = true
-			}
+		eq(t, "Agent 写的进展记在 Agent 名下", k.lastEvent(wbB, "item.progress_added").Actor.Type, "agent")
+
+		// DEL 的 Agent 档位是定规矩（baseline 里放开的）；DELO 不归属 Agent，只整理。它替本人丢掉一件等本人决定的事
+		// （离开 needs_input 是二档）：档位未放开，事项不变。
+		r := k.apa(k.DELO, exitTier, "item", "transition", wbG, "--to", "dropped", "--reason", "替本人定了")
+		if !strings.Contains(r.Stdout+r.Stderr, "tier_closed") {
+			t.Errorf("拒绝没有说明档位未放开: %s%s", r.Stdout, r.Stderr)
 		}
-		if !basis {
-			t.Error("审计页没有 WB-B 缺依据的 command.rejected")
-		}
+		eq(t, "WB-G phase", k.phase(wbG), "needs_input")
+		rejected(t, k.events(wbG, "command.rejected"), "tier_closed", "WB-G 档位未放开")
 	})
 
 	k.step("ACT-WBN-12 全文搜索覆盖标题、摘要、正文与进展", func(t *testing.T) {

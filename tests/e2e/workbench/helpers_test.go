@@ -16,7 +16,7 @@ import (
 const (
 	exitUsage  = 2
 	exitDenied = 4
-	exitBasis  = 23 // 代答缺依据
+	exitTier   = 23 // 档位未放开（tier_closed，§14.3）
 )
 
 type kit struct {
@@ -240,6 +240,17 @@ func byOwner(t *testing.T, what string, e event) {
 	if e.At == "" {
 		t.Errorf("%s 没有时间", what)
 	}
+}
+
+// rejected 要求审计里有一条拒绝码为 code 的 command.rejected。
+func rejected(t *testing.T, es []event, code, what string) {
+	t.Helper()
+	for _, e := range es {
+		if e.Type == "command.rejected" && e.Payload["code"] == code {
+			return
+		}
+	}
+	t.Errorf("%s：审计里没有 code=%s 的 command.rejected", what, code)
 }
 
 func (k *kit) lastEvent(object, typ string) event {
