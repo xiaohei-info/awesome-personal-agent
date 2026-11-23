@@ -45,8 +45,9 @@ func tokens(s string) map[string]bool {
 }
 
 // similarScore = 标题的字符二元组 Dice 系数 + 共享强标识 0.3 + 摘要 Dice × 0.2，上限 1。
+// 两个标题共有的开头（「起草：」「Re: [仓库]」「会议：」这类模板前缀）不说明是同一件事：两边去掉它之后都还有内容时只比剩下的部分。
 func similarScore(aTitle, aSummary, bTitle, bSummary string) float64 {
-	s := similarity(normalizeText(aTitle), normalizeText(bTitle))
+	s := similarity(stripCommonPrefix(normalizeText(aTitle), normalizeText(bTitle)))
 	ta, tb := tokens(aTitle+" "+aSummary), tokens(bTitle+" "+bSummary)
 	for t := range ta {
 		if tb[t] {
@@ -62,13 +63,21 @@ func similarScore(aTitle, aSummary, bTitle, bSummary string) float64 {
 
 // sourcesOf 是一条建议已经包含的来源：它自己的来源加并入过的来源。
 func sourcesOf(it domain.Item) []string {
-	out := []string{it.Origin.Source}
+	out := []string{originSource(it)}
 	if it.Proposal != nil {
 		for _, m := range it.Proposal.Merges {
 			out = append(out, m.Source)
 		}
 	}
 	return out
+}
+
+// originSource 是事项的来源 id；本人或 Agent 直接建的事项没有来源（Origin 为空），记为空串。
+func originSource(it domain.Item) string {
+	if it.Origin == nil {
+		return ""
+	}
+	return it.Origin.Source
 }
 
 type similarHit struct {
@@ -140,11 +149,23 @@ func (s *Service) findSimilar(ctx context.Context, src domain.Source, ev domain.
 	return "", nil, hints, nil
 }
 
+func stripCommonPrefix(a, b string) (string, string) {
+	ra, rb := []rune(a), []rune(b)
+	n := 0
+	for n < len(ra) && n < len(rb) && ra[n] == rb[n] {
+		n++
+	}
+	if n < 2 || n == len(ra) || n == len(rb) {
+		return a, b
+	}
+	return string(ra[n:]), string(rb[n:])
+}
+
 func round2(f float64) float64 { return float64(int(f*100+0.5)) / 100 }
 
 // mergeCall 组出合并判断的是非题：两条建议的标题与摘要；某一边的来源不许送给某个位置的端点时，那一级跳过（§14.14）。
 func (s *Service) mergeCall(pol policy.Policy, src domain.Source, srcs map[string]domain.Source, ev domain.SourceEvent, title, summary string, it domain.Item) direct.JudgeCall {
-	other, registered := srcs[it.Origin.Source]
+	other, registered := srcs[originSource(it)]
 	name := func(x domain.Source, id string) string {
 		if x.Name != "" {
 			return x.Name
@@ -153,7 +174,7 @@ func (s *Service) mergeCall(pol policy.Policy, src domain.Source, srcs map[strin
 	}
 	in, _ := json.Marshal(map[string]any{
 		"new":      map[string]any{"title": title, "summary": summary, "source": name(src, src.ID), "occurred_at": ev.OccurredAt},
-		"existing": map[string]any{"title": it.Title, "summary": it.Summary, "source": name(other, it.Origin.Source), "created_at": it.CreatedAt},
+		"existing": map[string]any{"title": it.Title, "summary": it.Summary, "source": name(other, originSource(it)), "created_at": it.CreatedAt},
 	})
 	text := "新到的：" + title + "\n" + summary + "\n\n已有的建议：" + it.Title + "\n" + it.Summary
 	return direct.JudgeCall{Pack: DefaultPack, Template: mergeTemplates[pol.MergeJudge], Use: MergeUse, Input: in,

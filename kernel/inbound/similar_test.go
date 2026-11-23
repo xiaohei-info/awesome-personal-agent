@@ -109,3 +109,21 @@ func TestSimilarUndecidedHintsAndOffSkips(t *testing.T) {
 		}
 	}
 }
+
+// 相似度：共有的模板前缀不算相似；共享编号加分；一边是另一边的开头时照常比。
+func TestSimilarScore(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		hit  bool
+	}{
+		{"起草：prh-rec-dismiss", "起草：prh 旧事", false},
+		{"Re: [org/repo] fix: 登录页 500", "Re: [org/repo] feat: 导出报表", false},
+		{"确认 AgentSafe AI 资产", "AgentSafe 资产确认（B18630823）", true},
+		{"季度预算评审会议", "季度预算评审会议改期", true},
+		{"处理工单 T-6661", "跟进 T-6661 的回复", true},
+	} {
+		if got := similarScore(c.a, "", c.b, "") >= similarMin; got != c.hit {
+			t.Errorf("%q vs %q: score %.2f", c.a, c.b, similarScore(c.a, "", c.b, ""))
+		}
+	}
+}
