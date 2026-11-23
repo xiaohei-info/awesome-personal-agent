@@ -147,7 +147,7 @@ func TestBacklogReleaseFlow(t *testing.T) {
 			}
 		}
 		_, detail, signals := k.unjudgedHealth()
-		if undecided == 0 || empty == 0 || num(detail, "undecided") != k.manifestInt("backlog", "health", "undecided") || signals != 13 {
+		if undecided == 0 || empty == 0 || num(detail, "undecided") != k.manifestInt("backlog", "health", "undecided") || signals != 14 {
 			t.Fatalf("undecided=%d 原因为空=%d health.detail=%v signals=%d", undecided, empty, detail, signals)
 		}
 	})

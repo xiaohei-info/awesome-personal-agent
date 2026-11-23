@@ -328,7 +328,7 @@ func TestBacklogRestoreFlow(t *testing.T) {
 
 	k.step("ACT-RST-10 健康视图计入 restored", func(t *testing.T) {
 		_, d, signals := k.unjudgedHealth()
-		if num(d, "restored") != total || signals != 13 {
+		if num(d, "restored") != total || signals != 14 {
 			t.Fatalf("detail.restored=%d（期望 %d），信号 %d 项", num(d, "restored"), total, signals)
 		}
 	})
