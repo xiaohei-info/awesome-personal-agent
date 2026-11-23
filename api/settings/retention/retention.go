@@ -55,7 +55,7 @@ func Routes(x *command.Executor, st *store.Store, def retention.Settings) core.R
 			if err != nil {
 				return err
 			}
-			res, err := x.Do(r.Context(), command.Request{Identity: p.Identity, Command: retention.CmdSet, Input: raw, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL})
+			res, err := x.Do(r.Context(), command.Request{Identity: p.Identity, Command: retention.CmdSet, Input: raw, WebURL: p.WebURL})
 			if err != nil {
 				return err
 			}

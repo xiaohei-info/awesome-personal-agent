@@ -139,7 +139,7 @@ func Register(x *command.Executor, blobDir string, def Settings) error {
 		return err
 	}
 	if err := x.Register(command.Spec{
-		Name: CmdSet, Action: authz.ActionChangeSettings, Tier: authz.TierNone,
+		Name: CmdSet, Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/settings/storage", // 与来源原文保留天数同档（3a 改日常）
 		Object:   func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{ID: object}, nil },
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error { _, err := decodeSet(in); return err },
 		Apply: func(c *command.Ctx) (any, error) {
@@ -170,7 +170,7 @@ func Register(x *command.Executor, blobDir string, def Settings) error {
 		return err
 	}
 	return x.Register(command.Spec{
-		Name: CmdReport, Action: authz.ActionUpdateOwn,
+		Name: CmdReport, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, // 只由维护循环记报数
 		Object: func(*store.Tx, json.RawMessage) (authz.Object, error) {
 			return authz.Object{ID: object, Assignee: system.Actor.Principal}, nil
 		},

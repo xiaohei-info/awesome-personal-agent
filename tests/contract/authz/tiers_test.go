@@ -72,7 +72,7 @@ func TestRegisteredTiersMatchAppendixB1(t *testing.T) {
 		"rules":     rules.Register(x),
 		"spotcheck": spotcheck.Register(x),
 		"channel":   channel.Register(x, channel.Options{}),
-		"retention": retention.Register(x, t.TempDir()),
+		"retention": retention.Register(x, t.TempDir(), retention.Defaults(0, 0, 0)),
 	}
 	for name, err := range reg {
 		if err != nil {
