@@ -305,8 +305,8 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		}}); err != nil {
 		return nil, err
 	}
-	// 间隔、模板与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
-	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Packs: ld, Owner: owner,
+	// 间隔、轮数与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
+	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Reminder: att, Packs: ld, Owner: owner,
 		Pack: "follow-up"}); err != nil {
 		return nil, err
 	}

@@ -118,19 +118,17 @@ type Quiet struct {
 // Disturb 是打扰策略（§7.4）。Routes 的键为投递类别，或「类别:优先级」（后者优先），值为路由。
 // Quiet 为空表示不设静默；QuietExempt 为真时，临近截止的决策不受静默限制（默认静默优先）；
 // MergeWindowSec 是低优先级提醒的合并窗口，0 表示不合并；RemindOnDeadline 为真时，截止已过仍未处理的事项再提醒一次。
-// ThresholdJudge 为真时，决策投递在按优先级定路由之外再经判断型问“这条决策可以晚点送吗”（只能降低打扰：是则推迟到合并窗口后单独投递），默认关闭（§7.4）。
+// 投递推迟判定 threshold_judge 与跟进推迟判断 followup_defer 已取消（2026-11-23，§7.4）：旧版本策略文档里的这两个键读入后忽略，下次保存时不再写出。
 type Disturb struct {
 	Routes           map[string]string `json:"routes"`
 	Quiet            *Quiet            `json:"quiet,omitempty"`
 	QuietExempt      bool              `json:"quiet_exempt,omitempty"`
 	MergeWindowSec   int               `json:"merge_window_sec"`
 	RemindOnDeadline bool              `json:"remind_on_deadline"`
-	ThresholdJudge   bool              `json:"threshold_judge,omitempty"`
 	// DailyCap 是每个自然日经渠道推到本人面前的提醒上限，0 不限（§7.4）；DefaultDailyCap 是缺省，旧版本策略文档没有此键时也取它。
 	DailyCap int `json:"daily_cap"`
 	// Mutes 按来源、项目或事项静音；到期（Until）后自动恢复。只在 Web 改。
-	Mutes         []Mute `json:"mutes"`
-	FollowupDefer bool   `json:"followup_defer"`
+	Mutes []Mute `json:"mutes"`
 	// Push 是"推送哪些事"的逐类开关（§7.4）：键为 PushCategories 之一；缺的类别取 PushDefaults。
 	// 旧版本策略文档没有此键，读作全部取默认。
 	Push map[string]PushRule `json:"push,omitempty"`

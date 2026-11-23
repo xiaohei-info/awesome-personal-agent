@@ -31,12 +31,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/why"
 )
 
 var (
@@ -638,16 +636,11 @@ func hasCode(err error, code domain.Code) bool {
 	return ok && de.Code == code
 }
 
-// fakeDrafter 按模板回固定结果；err 非空时每次卡片调用都失败。Judge 回 answer（yes/no），judgeErr 非空时失败，unavailable 表示端点都没答。
+// fakeDrafter 按模板回固定结果；err 非空时每次卡片调用都失败。
 type fakeDrafter struct {
-	card        string
-	err         error
-	answer      string
-	judgeErr    error
-	unavailable bool
-	rec         record.Record // 非零时 Judge 返回它作为已写入的判断记录
-	calls       []direct.Call
-	judged      []direct.JudgeCall
+	card  string
+	err   error
+	calls []direct.Call
 }
 
 func (f *fakeDrafter) Do(_ context.Context, c direct.Call) (direct.Outcome, error) {
@@ -656,11 +649,6 @@ func (f *fakeDrafter) Do(_ context.Context, c direct.Call) (direct.Outcome, erro
 		return direct.Outcome{}, f.err
 	}
 	return direct.Outcome{Settled: true, Steps: []direct.Step{{Result: json.RawMessage(f.card)}}}, nil
-}
-
-func (f *fakeDrafter) Judge(_ context.Context, c direct.JudgeCall) (direct.Verdict, error) {
-	f.judged = append(f.judged, c)
-	return direct.Verdict{Answer: f.answer, Unavailable: f.unavailable, Record: f.rec, Written: f.rec.ID != ""}, f.judgeErr
 }
 
 func (e *env) withModel() {
@@ -680,6 +668,7 @@ func (e *env) drafts() {
 }
 
 // 决策卡片文案由生成型起草：起草返回前不投递，返回后标题、摘要、选项说明、推荐取卡片，选项 id 与回答不变（§7.4、§6.9）。
+// 起草返回后立即按矩阵投递，只有卡片这一次模型调用（投递推迟判定已取消，2026-11-23；出厂合并窗口 30 分钟也不推迟决策）。
 func TestDecisionCardDraftShapesContent(t *testing.T) {
 	f := &fakeDrafter{card: `{"insufficient_info":false,"title":"要不要发版","question":"今天发 1.2 吗？",
 		"options":[{"id":"A","label":"发","consequence":"用户今晚拿到修复"},{"id":"B","label":"不发"}],
@@ -698,113 +687,12 @@ func TestDecisionCardDraftShapesContent(t *testing.T) {
 	if d == nil || !reflect.DeepEqual(d.Content, want) {
 		t.Fatalf("card content %+v, want %+v", d, want)
 	}
-	if len(f.calls) != 1 || f.calls[0].Actor.Type != domain.ActorSystem || f.calls[0].Basis == nil || f.calls[0].Template != TemplateCard || len(f.judged) != 0 {
-		t.Fatalf("defer judged while off, or call not recorded as system with basis: %+v", f.calls)
+	if len(f.calls) != 1 || f.calls[0].Actor.Type != domain.ActorSystem || f.calls[0].Basis == nil || f.calls[0].Template != TemplateCard {
+		t.Fatalf("want exactly the card call, recorded as system with basis: %+v", f.calls)
 	}
 }
 
 const cardJSON = `{"insufficient_info":false,"title":"t","question":"q","options":[{"id":"A","label":"a"},{"id":"B","label":"b"}],"recommendation":"r","why_now":"w"}`
-
-// 投递推迟判定（ACT-DLV-09..13）：判为可以晚点送 → 推迟到合并窗口结束后单独投递（不并入摘要、不只留 Web）；
-// 否、未定、判断失败、端点都没答 → 立即按优先级路由；关闭时不发起判断。
-func TestDeliveryDeferJudgment(t *testing.T) {
-	for _, c := range []struct {
-		name   string
-		f      fakeDrafter
-		off    bool
-		defer_ bool
-		ask    bool // 判断是否被发起
-	}{
-		{"above upper bound defers", fakeDrafter{answer: "yes"}, false, true, true},
-		{"below upper bound routes now", fakeDrafter{answer: "no"}, false, false, true},
-		{"undecided takes no", fakeDrafter{answer: "no", rec: record.Record{ID: "jdg_low", LowConfidence: true}}, false, false, true},
-		{"judge error routes now", fakeDrafter{judgeErr: errors.New("timeout")}, false, false, true},
-		{"endpoints unavailable routes now", fakeDrafter{unavailable: true}, false, false, true},
-		{"off never asks", fakeDrafter{answer: "yes"}, true, false, false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			f := c.f
-			f.card = cardJSON
-			e := setup(t, &f)
-			e.toChannel()
-			e.withModel()
-			e.policy(func(p *policy.Policy) { p.Disturb.ThresholdJudge, p.Disturb.MergeWindowSec = !c.off, 120 })
-			id := e.asked(nil)
-			e.drafts()
-			if got := len(f.judged) == 1; got != c.ask {
-				t.Fatalf("judged %d times, want asked=%v", len(f.judged), c.ask)
-			}
-			if c.ask && (f.judged[0].Template != "delivery-defer" || f.judged[0].Pack != "decision-card" || f.judged[0].Subject != id) {
-				t.Fatalf("judge call %+v", f.judged[0])
-			}
-			d := e.claim("channel:chan")
-			if c.defer_ {
-				if d != nil {
-					t.Fatalf("deferred decision delivered immediately: %+v", d)
-				}
-				if ds := e.unread(); len(ds) != 0 {
-					t.Fatalf("deferred decision left in web unread: %+v", ds)
-				}
-				e.advance(121 * time.Second)
-				d = e.claim("channel:chan")
-				if d == nil || d.Item != id || d.Route != "channel:chan" {
-					t.Fatalf("after the merge window: %+v", d)
-				}
-				return
-			}
-			if d == nil || d.Item != id || d.Route != "channel:chan" {
-				t.Fatalf("decision not routed by rules at once: %+v", d)
-			}
-		})
-	}
-}
-
-// apa why 能展开投递推迟的判断（ACT-DLV-11）：判断记录引用并进事项上的 run.finished 载荷，Replay 读回 Answer/DecidedBy。
-func TestDeferJudgmentIsReplayableThroughWhy(t *testing.T) {
-	for _, c := range []struct {
-		name, answer, by string
-		low              bool
-		levelOutcome     string
-	}{
-		{"yes", "yes", record.DecidedClassifier, false, record.OutcomeDecided},
-		{"classifier error, conservative default no", "no", record.DecidedDefault, true, record.OutcomeError},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			rec := record.Record{ID: "jdg_" + c.by, Use: "delivery_defer", Template: "decision-card/delivery-defer@h", Subject: "x", Fingerprint: "fp",
-				Levels: []record.Level{{Backend: record.BackendClassifier, Outcome: c.levelOutcome}}, DecidedBy: c.by, Answer: c.answer,
-				LowConfidence: c.low, CreatedAt: time.Now().UTC()}
-			f := &fakeDrafter{card: cardJSON, answer: c.answer, rec: rec}
-			e := setup(t, f)
-			e.toChannel()
-			e.withModel()
-			e.policy(func(p *policy.Policy) { p.Disturb.ThresholdJudge = true })
-			id := e.asked(nil)
-			f.rec.Subject = id
-			e.drafts()
-			e.update(func(tx *store.Tx) error { return record.Put(tx, f.rec) })
-			var tl why.Timeline
-			if err := e.st.View(bg, func(tx *store.Tx) (err error) {
-				_, pol, err := policy.Current(tx)
-				if err != nil {
-					return err
-				}
-				tl, err = why.Replay(tx, pol, why.Request{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "obs"}, Level: authz.LevelObserver, ID: id})
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
-			var got *why.Judgment
-			for _, st := range tl.Steps {
-				if st.Judgment != nil {
-					got = st.Judgment
-				}
-			}
-			if got == nil || got.ID != rec.ID || got.Answer != c.answer || got.DecidedBy != c.by || got.Record == nil || got.Record.LowConfidence != c.low {
-				t.Fatalf("why judgment %+v", got)
-			}
-		})
-	}
-}
 
 // 模型未配置时不等待起草，按规则内容与路由立即投递，不调用模型（§5.6）。
 func TestDecisionCardWithoutModelFallsBackToRules(t *testing.T) {
@@ -820,11 +708,10 @@ func TestDecisionCardWithoutModelFallsBackToRules(t *testing.T) {
 
 // 起草失败按规则投递，不阻塞；失败记 kind=decision-card 的 health.alert，进健康视图（§5.6）。
 func TestDecisionCardFailureFallsBackToRulesAndAlerts(t *testing.T) {
-	f := &fakeDrafter{err: errors.New("direct: model unavailable"), judgeErr: errors.New("direct: model unavailable")}
+	f := &fakeDrafter{err: errors.New("direct: model unavailable")}
 	e := setup(t, f)
 	e.toChannel()
 	e.withModel()
-	e.policy(func(p *policy.Policy) { p.Disturb.ThresholdJudge = true })
 	id := e.asked(nil)
 	e.drafts()
 	d := e.claim("channel:chan")
@@ -836,14 +723,12 @@ func TestDecisionCardFailureFallsBackToRulesAndAlerts(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		// 卡片文案与阈值判定各失败一次：各记一条，带 kind 与所用模板，健康视图据此归类并按模板清除。
-		if len(es) != 2 || es[0].Event.Object != id || es[1].Event.Object != id {
+		// 卡片文案失败一次记一条，带 kind 与所用模板，健康视图据此归类并按模板清除。
+		if len(es) != 1 || es[0].Event.Object != id {
 			t.Fatalf("health alerts %+v", es)
 		}
-		for i, tmpl := range []string{"decision-card-copy", "delivery-defer"} {
-			if p := string(es[i].Event.Payload); !strings.Contains(p, `"kind":"decision-card"`) || !strings.Contains(p, `"template":"`+tmpl+`"`) {
-				t.Fatalf("alert %d payload %s", i, p)
-			}
+		if p := string(es[0].Event.Payload); !strings.Contains(p, `"kind":"decision-card"`) || !strings.Contains(p, `"template":"decision-card-copy"`) {
+			t.Fatalf("alert payload %s", p)
 		}
 		return nil
 	}); err != nil {

@@ -49,7 +49,7 @@ kinds:
 | `id` | 规则 id，包内唯一 |
 | `type` | `recur`（周期）、`follow_up`（跟进梯度）、`stale`（久未推进）、`check`（周期检测，如缺规范）。`follow_up` 与 `stale` 是提醒类规则，到期行为由内核固定，不写 `do[]`（主文档 §7.3、§14.8） |
 | `remind_rounds` | 只用于 `follow_up`，默认 2。事项进入等待后按 `schedule` 排第一轮，不建周期 Timer；每轮到期产出一条提醒，带"已催""再等""放弃"三个动作，本人选前两个后按同一间隔再排。连续这么多轮没有任何进展后，不再提醒，事项转 `needs_input` 问去留 |
-| `defer_with` | 只用于 `follow_up`，可选。一个 `yes_no` 判断型模板名（内置 `follow-up-defer`）。策略开启 `disturb.followup_defer` 时，每轮提醒前问一次"这一轮可以晚点提吗"，判为可以就跳过这一轮，至多连续跳过一次（主文档 §8.9） |
+| `defer_with` | ~~只用于 `follow_up`，可选。一个 `yes_no` 判断型模板名（内置 `follow-up-defer`）。策略开启 `disturb.followup_defer` 时，每轮提醒前问一次"这一轮可以晚点提吗"，判为可以就跳过这一轮，至多连续跳过一次（主文档 §8.9）~~ **已取消（2026-11-23）**：跟进推迟判断删除，推迟多久不可预期、推迟了也不告诉本人，少打扰由安静时段、每天上限、合并与暂停承担。已有覆盖包里写了它照常加载（不校验它指向的模板），内核不再读 |
 | `stale_after` | 只用于 `stale`，默认 `14d`。`open` 的任务与承诺超过这么久没有进展或变更、也没有未来的计划日期时，列入"今天"与简报的"久未推进"一组；规则按 `schedule` 检查 |
 | `schedule` | 固定时长（如 `72h`）或标准 5 段 cron（如 `0 8 * * 1-5`，默认本机时区，`CRON_TZ=<时区> ` 前缀指定时区，见主文档 §6.8）；可由实例参数覆盖。加载器校验：不含 `{instance.…}` 占位符的 schedule 必须是其中之一，含占位符的在创建实例时校验 |
 | `mode` | 初始模式。动作类规则只能是 `off` 或 `observe`；提醒类规则（`follow_up`、`stale`）省略即 `auto`，也可写 `off` 或 `observe`；任何规则都不能写 `auto`。由实例驱动、只写回自身事项的规则可省略，它们不看模式 |
@@ -443,8 +443,8 @@ default_instruction: |-
 |---|---|
 | `brief` | kind `brief`；实例参数（周期、项目范围、内容要求 `instruction`）；周期时钟规则；任务型提示词（带 `default_instruction`，经 `instruction_path` 读内容要求；`materials` 为 `context`、`prior`、`schedule`、`decisions`、`due_waiting`、`planned`、`activity`、`proposals`、`digest`、`spot_check`；`result_fields` 为 `period` 与 `sections[].body`，每节有 `title` 或 `project` 之一）；实例参数 `schedule_days`；列表与卡片视图。开箱默认安排工作日 08:30 |
 | `review` | 实例参数（周期、项目范围、内容要求 `instruction`、`schedule_days`）；周期时钟规则；任务型提示词（带 `default_instruction`；`materials` 为 `context`、`prior`、`activity`、`open_items`、`due_waiting`、`decisions`、`planned`、`schedule`，不带知会与抽检；`result_fields` 为 `period` 与 `sections[].body`）；写回 `brief` kind，由 `spec.period` 区分周期。开箱默认安排每周五 17:30 |
-| `follow-up` | 跟进梯度时钟规则 `follow-up-interval`（`follow_up`，72 小时一轮，`remind_rounds: 2`，`defer_with: follow-up-defer`；规则 id 沿用 v0.1）；久未推进规则 `stale-check`（`stale`，每天检查，`stale_after: 14d`）；判断型提示词 `follow-up-defer`（是非题，上限 0.85，未定取"否"即照常提醒）。v0.1 的三选一判断型模板与逐级升级用的生成型、任务型模板移除 |
-| `decision-card` | 生成型提示词（决策卡片文案，选项按事项上的选项 id 对齐；一句话摘要；材料修订摘要）；判断型提示词 `delivery-defer`（是非题"这条决策可以晚点送吗"，`single_shot`，上限 0.85，未定取"否"；取代 v0.1 的三选一模板 `delivery-threshold`，"只留 Web 未读"这一去向不再由模型决定）与 `web-only-screening`（是非题，`single_shot`，下限 0.20，未定取"是"即升级；**已取消（2026-11-20）**：初筛取消，内核不再调用，文件只读保留）。消费方都是内核：触达（卡片文案、投递推迟，主文档 §7.4）、事项中心的摘要起草（一句话摘要、修订摘要，主文档 §6.3、§12.4） |
+| `follow-up` | 跟进梯度时钟规则 `follow-up-interval`（`follow_up`，72 小时一轮，`remind_rounds: 2`~~，`defer_with: follow-up-defer`~~；规则 id 沿用 v0.1）；久未推进规则 `stale-check`（`stale`，每天检查，`stale_after: 14d`）；~~判断型模板 `follow-up-defer`（是非题，上限 0.85，未定取"否"即照常提醒）~~ **已取消（2026-11-23）**：模板已删除，包里不再带模板。v0.1 的三选一判断型模板与逐级升级用的生成型、任务型模板移除 |
+| `decision-card` | 生成型提示词（决策卡片文案，选项按事项上的选项 id 对齐；一句话摘要；材料修订摘要）；~~判断型模板 `delivery-defer`（是非题"这条决策可以晚点送吗"，`single_shot`，上限 0.85，未定取"否"；取代 v0.1 的三选一模板 `delivery-threshold`，"只留 Web 未读"这一去向不再由模型决定）~~ **已取消（2026-11-23）**：模板已删除，推迟多久不可预期、推迟了也不告诉本人，少打扰由安静时段、每天上限、合并与暂停承担；判断型提示词 `web-only-screening`（是非题，`single_shot`，下限 0.20，未定取"是"即升级；**已取消（2026-11-20）**：初筛取消，内核不再调用，文件只读保留）。消费方都是内核：触达（卡片文案~~、投递推迟~~，主文档 §7.4）、事项中心的摘要起草（一句话摘要、修订摘要，主文档 §6.3、§12.4） |
 | `background-run` | `start_background_run` 的规则样例，初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |

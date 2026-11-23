@@ -413,7 +413,7 @@ func TestChannelsSection(t *testing.T) {
 	}
 }
 
-// ACT-DLV-15：缺省日上限 20、静音为空、followup_defer 为 false。
+// ACT-DLV-15：缺省日上限 20、静音为空；已取消（2026-11-23）的 followup_defer、threshold_judge 不再出现。
 func TestDisturbDefaultsCapAndMutes(t *testing.T) {
 	e := setup(t)
 	rec := e.do("GET", routes[0], "", e.web)
@@ -421,15 +421,37 @@ func TestDisturbDefaultsCapAndMutes(t *testing.T) {
 		Disturb map[string]json.RawMessage `json:"disturb"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if string(got.Disturb["daily_cap"]) != "20" || string(got.Disturb["mutes"]) != "[]" || string(got.Disturb["followup_defer"]) != "false" {
+	_, fd := got.Disturb["followup_defer"]
+	_, tj := got.Disturb["threshold_judge"]
+	if string(got.Disturb["daily_cap"]) != "20" || string(got.Disturb["mutes"]) != "[]" || fd || tj {
 		t.Fatalf("disturb defaults: %s", rec.Body)
+	}
+}
+
+// 旧客户端照旧整段回传已取消的 threshold_judge、followup_defer（哪怕是 true）：接受并忽略，不因它们产生新版本，读回也没有。
+func TestCancelledDisturbSwitchesInPutAreIgnored(t *testing.T) {
+	e := setup(t)
+	base := `"routes":{"decision":"inject","brief":"inject","reminder":"inject","health":"web","wake":"web"},"merge_window_sec":1800,"remind_on_deadline":true,"daily_cap":7,"mutes":[]`
+	if rec := e.do("PUT", routes[0], `{"disturb":{`+base+`}}`, e.web); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	v0, _ := e.current()
+	rec := e.do("PUT", routes[0], `{"disturb":{`+base+`,"threshold_judge":true,"followup_defer":true}}`, e.web)
+	if rec.Code != 200 {
+		t.Fatalf("old client PUT: %d %s", rec.Code, rec.Body)
+	}
+	if v, p := e.current(); v != v0 || p.Disturb.DailyCap != 7 {
+		t.Fatalf("cancelled keys made a new version: v%d→v%d", v0, v)
+	}
+	if body := e.do("GET", routes[0], "", e.web).Body.String(); strings.Contains(body, "threshold_judge") || strings.Contains(body, "followup_defer") {
+		t.Fatalf("cancelled keys read back: %s", body)
 	}
 }
 
 // ACT-DLV-16：日上限与静音只能 Web 改（委派级请求被拒、策略不变）；Web 改产生新版本与 policy.changed。
 func TestDailyCapAndMutesAreWebOnly(t *testing.T) {
 	e := setup(t)
-	body := `{"disturb":{"routes":{"decision":"web","brief":"web","reminder":"web","health":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true,"daily_cap":0,"mutes":[{"scope":"project","id":"p"}],"followup_defer":false}}`
+	body := `{"disturb":{"routes":{"decision":"web","brief":"web","reminder":"web","health":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true,"daily_cap":0,"mutes":[{"scope":"project","id":"p"}]}}`
 	rec := e.do("PUT", routes[0], body, e.bearer(auth.Delegate))
 	if rec.Code != 403 || errCode(t, rec) != domain.CodeTierClosed { // 提醒设置是 3a：没放开档位的 Agent 得 23
 		t.Fatalf("delegate PUT: %d %s", rec.Code, rec.Body)

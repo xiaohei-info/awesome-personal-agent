@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -539,8 +540,6 @@ func TestFlowAgentCascade(t *testing.T) {
 			{"packs/inbound-triage/prompts/triage-screen.md", "0.15", "0.60"},
 			{"packs/inbound-triage/prompts/capture-prescreen.md", "0.10", ""},
 			{"packs/decision-card/prompts/web-only-screening.md", "0.20", ""},
-			{"packs/decision-card/prompts/delivery-defer.md", "", "0.85"},
-			{"packs/follow-up/prompts/follow-up-defer.md", "", "0.85"},
 			{"packs/delegation-verify/prompts/delegation-screen.md", "0.20", ""},
 		} {
 			fm := repoFile(t, w.file)
@@ -555,6 +554,12 @@ func TestFlowAgentCascade(t *testing.T) {
 			}
 			if w.high != "" && !strings.Contains(band, "high: "+w.high) || w.high == "" && strings.Contains(band, "high:") {
 				t.Errorf("%s 的上限与 §8.9 不符: %q", w.file, band)
+			}
+		}
+		// 投递推迟与跟进推迟两个模板已取消（2026-11-23）：仓库里不再有它们。
+		for _, gone := range []string{"packs/decision-card/prompts/delivery-defer.md", "packs/follow-up/prompts/follow-up-defer.md"} {
+			if _, err := os.Stat(filepath.Join("..", "..", "..", gone)); !os.IsNotExist(err) {
+				t.Errorf("%s 应已删除: %v", gone, err)
 			}
 		}
 		// GET /packs 列出的包都在（实际路径以它为准）。

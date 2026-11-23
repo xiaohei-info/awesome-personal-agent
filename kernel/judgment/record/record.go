@@ -84,7 +84,7 @@ type Record struct {
 }
 
 // Ref 是命令 Event 载荷里指向判断记录的部分：记录过了保留期后，`apa why` 只剩这里的结论。
-// 使用判断结果的命令（入站处置、初筛结果、投递推迟、跟进推迟）把它并进自己的载荷。
+// 使用判断结果的命令（入站处置、初筛结果；升级前的投递推迟、跟进推迟记录照常可读）把它并进自己的载荷。
 type Ref struct {
 	Judgment  string `json:"judgment"`
 	Answer    string `json:"answer,omitempty"`

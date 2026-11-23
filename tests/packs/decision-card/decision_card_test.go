@@ -47,15 +47,14 @@ func TestGenerativePromptsCarryInsufficientInfoMarker(t *testing.T) {
 	}
 }
 
-// flow-screening：投递阈值与 web_only 初筛是判断型，初筛不声明 event_stats（C.7、§8.4）。
+// flow-screening：web_only 初筛是判断型，不声明 event_stats（C.7、§8.4）；投递阈值（v0.1 delivery-threshold）与
+// 投递推迟判定（delivery-defer，已取消 2026-11-23）都不再随包。
 func TestJudgePromptsAndScreeningHasNoEventStats(t *testing.T) {
 	p := loadPack(t)
-	dd, ok := p.Prompts["delivery-defer"]
-	if !ok || dd.Meta.Agent != "judge" || dd.Meta.QuestionType != "yes_no" || !dd.Meta.SingleShot || dd.Meta.OnUndecided != "no" || dd.Meta.Band == nil {
-		t.Fatalf("delivery-defer must be a single_shot yes_no judge with on_undecided no: %+v", dd.Meta)
-	}
-	if _, old := p.Prompts["delivery-threshold"]; old {
-		t.Error("v0.1 delivery-threshold must be removed")
+	for _, gone := range []string{"delivery-threshold", "delivery-defer"} {
+		if _, old := p.Prompts[gone]; old {
+			t.Errorf("%s must be removed", gone)
+		}
 	}
 	sc, ok := p.Prompts["web-only-screening"]
 	if !ok {
