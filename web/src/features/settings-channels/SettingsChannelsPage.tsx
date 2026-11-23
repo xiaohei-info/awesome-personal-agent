@@ -51,8 +51,12 @@ export function SettingsChannelsPage() {
         </div>
       )}
       {pol && (
-        <Connections routes={pol.disturb?.routes ?? {}}
-          saveRoutes={(routes) => save("policy", { disturb: { ...pol.disturb, routes } })} />
+        <Connections delivery={pol.disturb?.delivery ?? { default_channel: "", rows: {} }}
+          setDefault={(route) => {
+            // 只改默认渠道这一处（添加向导给初值）；冻结的旧键随整段原样带回，delivery_saved 是只读字段不回传。
+            const { delivery_saved: _s, ...disturb } = pol.disturb;
+            return save("policy", { disturb: { ...disturb, delivery: { ...disturb.delivery, default_channel: route } } });
+          }} />
       )}
       <details open={names.length > 0}>
         <summary>{t.ownProgram}</summary>

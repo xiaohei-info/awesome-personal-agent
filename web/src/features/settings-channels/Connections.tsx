@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT, type Lang } from "../../app/i18n";
 import { useRaw } from "../../app/raw";
+import { rowsUsing, type Delivery } from "../settings-notify/matrix";
+import { strings as notify } from "../settings-notify/strings";
 import { strings } from "./strings";
 
 // 设置 › 提醒渠道的内置渠道（界面设计 §9.9）：卡片只显示现状；添加走四步：选类型 → 填表单 → 测试 → 启用。
 // 表单由接入声明（GET /connections/types）生成；凭据只能填写和替换，读接口只回是否已设置。
-// 「用它来送」写打扰策略的路由（disturb.routes 的类别键 → channel:<连接 id>）。规则与校验都在服务端。
+// 「用来送」只读：各类提醒送到哪只在设置 › 提醒与推送的矩阵里改（一个设置一个可编辑处）；添加向导最后一步可把它设为默认渠道（初值）。
+// 删除渠道不改任何去处：指向它的推送由服务端改落今天页的提醒（投递队列的 Deliverable），不再悄悄改成"下次聊天时告诉我"。
 
 type Text = { zh: string; en: string };
 interface Field { key: string; kind: string; label: Text; hint?: Text; default?: string; required?: boolean; group?: string; choices?: { value: string; label: Text }[] }
@@ -17,25 +21,12 @@ export interface Conn {
 }
 interface TestResult { ok: boolean; problem?: string; detail?: string }
 
-export const CLASSES = ["decision", "reminder", "brief", "health"] as const;
-const DEFAULT_ROUTE: Record<string, string> = { decision: "inject", reminder: "inject", brief: "inject", health: "web" };
 const routeOf = (id: string) => "channel:" + id;
 
-/** 新路由表：checked 里的类别指向这个连接；原来指向它而这次没勾的类别回到默认。 */
-export function withRoutes(routes: Record<string, string>, id: string, checked: string[]): Record<string, string> {
-  const out = { ...routes };
-  for (const c of CLASSES) {
-    if (checked.includes(c)) out[c] = routeOf(id);
-    else if (out[c] === routeOf(id)) out[c] = DEFAULT_ROUTE[c];
-  }
-  return out;
-}
-
-const usedFor = (routes: Record<string, string>, id: string) => CLASSES.filter((c) => routes[c] === routeOf(id));
 const viewOnly = (d?: Decl) => !!d && !d.capabilities.buttons && !d.capabilities.reply;
 export const time = (s?: string) => (s ? new Date(s).toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
-export function Connections({ routes, saveRoutes }: { routes: Record<string, string>; saveRoutes: (r: Record<string, string>) => Promise<unknown> }) {
+export function Connections({ delivery, setDefault }: { delivery: Delivery; setDefault: (route: string) => Promise<unknown> }) {
   const t = useT(strings);
   const { api } = useSession();
   const [conns, setConns] = useState<Conn[] | null>(null);
@@ -61,10 +52,10 @@ export function Connections({ routes, saveRoutes }: { routes: Record<string, str
   return (
     <>
       {conns.map((c) => (
-        <ConnCard key={c.id} c={c} d={decl(c.type)} routes={routes} saveRoutes={saveRoutes} onChange={() => void load()} />
+        <ConnCard key={c.id} c={c} d={decl(c.type)} delivery={delivery} onChange={() => void load()} />
       ))}
       {adding ? (
-        <AddWizard types={types} routes={routes} saveRoutes={saveRoutes} onDone={() => { setAdding(false); void load(); }} />
+        <AddWizard types={types} hasDefault={!!delivery.default_channel} setDefault={setDefault} onDone={() => { setAdding(false); void load(); }} />
       ) : (
         <div><button type="button" className="dashed" onClick={() => setAdding(true)}>+ {t.addChannel}</button></div>
       )}
@@ -72,10 +63,9 @@ export function Connections({ routes, saveRoutes }: { routes: Record<string, str
   );
 }
 
-function ConnCard({ c, d, routes, saveRoutes, onChange }: {
-  c: Conn; d?: Decl; routes: Record<string, string>; saveRoutes: (r: Record<string, string>) => Promise<unknown>; onChange: () => void;
-}) {
+function ConnCard({ c, d, delivery, onChange }: { c: Conn; d?: Decl; delivery: Delivery; onChange: () => void }) {
   const t = useT(strings);
+  const rows = useT(notify).rows;
   const lang = useLang();
   const raw = useRaw();
   const { api } = useSession();
@@ -106,15 +96,16 @@ function ConnCard({ c, d, routes, saveRoutes, onChange }: {
     if (!window.confirm(t.confirmRemove(c.name))) return;
     if (c.enabled) await api.post(`/connections/${encodeURIComponent(c.id)}/disable`); // 先停止发送，再删
     await api.del(`/connections/${encodeURIComponent(c.id)}`);
-    if (usedFor(routes, c.id).length) await saveRoutes(withRoutes(routes, c.id, []));
     onChange();
   });
-  const used = usedFor(routes, c.id).map((k) => t.classes[k]);
+  const used = rowsUsing(delivery, routeOf(c.id)).map((k) => rows[k] ?? t.instanceRow);
+  const isDefault = delivery.default_channel === routeOf(c.id);
   const badge = c.state === "ok" ? ["ok", t.inUse] : c.state === "problem" ? ["warn", t.hasProblem] : ["plain", t.disabled];
   return (
     <section aria-label={c.name} className="panel stack">
       <div className="conn-head">
         <h2>{c.name}</h2> {d && <span className="sub">{d.title[lang]}</span>} <span className={"badge " + badge[0]}>{badge[1]}</span>
+        {isDefault && <span className="badge plain">{t.isDefault}</span>}
         <span className="grow" />
         {c.enabled && <button type="button" disabled={busy} onClick={() => void test()}>{t.sendTest}</button>}
         <button type="button" disabled={busy} onClick={() => setEditing(!editing)}>{t.edit}</button>
@@ -130,14 +121,15 @@ function ConnCard({ c, d, routes, saveRoutes, onChange }: {
       )}
       <p className="sub">
         {c.enabled
-          ? [c.last_ok_at ? t.lastSent(time(c.last_ok_at)) : t.neverSent, used.length ? t.usedFor(used.join(lang === "zh" ? "、" : ", ")) : t.notUsed].join(" · ")
+          ? [c.last_ok_at ? t.lastSent(time(c.last_ok_at)) : t.neverSent, used.length ? t.usedFor(short(used, lang)) : t.notUsed].join(" · ")
           : t.stoppedNote}
+        {" "}<Link to="/settings/notify">{t.changeUse}</Link>
       </p>
       {d && <p className="sub">{t.via(d.via[lang])}</p>}
       {raw && <p className="sub"><code>{t.rawId(c.id, c.type)}{c.problem ? ` · ${c.problem}${c.detail ? ": " + c.detail : ""}` : ""}</code></p>}
       {note && <p role={note.ok ? "status" : "alert"}>{note.text}</p>}
       {editing && d && (
-        <EditForm c={c} d={d} routes={routes} saveRoutes={saveRoutes} onDone={() => { setEditing(false); onChange(); }} />
+        <EditForm c={c} d={d} onDone={() => { setEditing(false); onChange(); }} />
       )}
     </section>
   );
@@ -205,37 +197,23 @@ const filled = (s: Record<string, string>) => Object.fromEntries(Object.entries(
 const missing = (d: Decl, config: Record<string, string>, secrets: Record<string, string>, saved?: Record<string, boolean>) =>
   d.fields.some((f) => f.required && f.kind !== "identify" && !(f.kind === "secret" ? secrets[f.key] || saved?.[f.key] : config[f.key] ?? f.default));
 
-function UseFor({ checked, setChecked }: { checked: string[]; setChecked: (c: string[]) => void }) {
-  const t = useT(strings);
-  return (
-    <fieldset>
-      <legend>{t.useFor}</legend>
-      <div className="chips">
-        {CLASSES.map((c) => (
-          <label key={c}><input type="checkbox" checked={checked.includes(c)}
-            onChange={(e) => setChecked(e.target.checked ? [...checked, c] : checked.filter((x) => x !== c))} /> {t.classes[c]}</label>
-        ))}
-      </div>
-    </fieldset>
-  );
+/** 用来送的行名：至多列三个，其余写"等 N 类"。 */
+function short(names: string[], lang: Lang): string {
+  const list = names.slice(0, 3).join(lang === "zh" ? "、" : ", ");
+  return names.length <= 3 ? list : strings[lang].andMore(list, names.length);
 }
 
-function EditForm({ c, d, routes, saveRoutes, onDone }: {
-  c: Conn; d: Decl; routes: Record<string, string>; saveRoutes: (r: Record<string, string>) => Promise<unknown>; onDone: () => void;
-}) {
+function EditForm({ c, d, onDone }: { c: Conn; d: Decl; onDone: () => void }) {
   const t = useT(strings);
   const lang = useLang();
   const { api } = useSession();
   const [config, setConfig] = useState(c.config);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
-  const [checked, setChecked] = useState<string[]>(usedFor(routes, c.id));
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
     setError(null);
     try {
       await api.put(`/connections/${encodeURIComponent(c.id)}`, { config, secrets: filled(secrets) });
-      const next = withRoutes(routes, c.id, checked);
-      if (JSON.stringify(next) !== JSON.stringify(routes)) await saveRoutes(next);
       onDone();
     } catch (e) {
       setError(msg(e));
@@ -244,7 +222,6 @@ function EditForm({ c, d, routes, saveRoutes, onDone }: {
   return (
     <form className="stack" aria-label={t.edit} onSubmit={(e) => { e.preventDefault(); void save(); }}>
       <Fields d={d} lang={lang} config={config} setConfig={setConfig} secrets={secrets} setSecrets={setSecrets} saved={c.secrets} />
-      <UseFor checked={checked} setChecked={setChecked} />
       <div className="conn-actions">
         <button type="submit" className="primary" disabled={missing(d, config, secrets, c.secrets)}>{t.save}</button>
         <button type="button" onClick={onDone}>{t.cancel}</button>
@@ -254,8 +231,8 @@ function EditForm({ c, d, routes, saveRoutes, onDone }: {
   );
 }
 
-function AddWizard({ types, routes, saveRoutes, onDone }: {
-  types: Decl[]; routes: Record<string, string>; saveRoutes: (r: Record<string, string>) => Promise<unknown>; onDone: () => void;
+function AddWizard({ types, hasDefault, setDefault, onDone }: {
+  types: Decl[]; hasDefault: boolean; setDefault: (route: string) => Promise<unknown>; onDone: () => void;
 }) {
   const t = useT(strings);
   const lang = useLang();
@@ -267,7 +244,7 @@ function AddWizard({ types, routes, saveRoutes, onDone }: {
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [result, setResult] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
-  const [checked, setChecked] = useState<string[]>(["decision", "reminder"]);
+  const [asDefault, setAsDefault] = useState(!hasDefault);
   const [error, setError] = useState<string | null>(null);
   const pick = (x: Decl) => { setD(x); setName(x.default[lang]); setConfig({}); setSecrets({}); setResult(null); setStep(2); };
   const test = async () => {
@@ -285,7 +262,7 @@ function AddWizard({ types, routes, saveRoutes, onDone }: {
     setError(null);
     try {
       const c = await api.post<Conn>("/connections", { type: d!.type, name: name.trim(), config, secrets: filled(secrets), enabled });
-      if (enabled && checked.length) await saveRoutes(withRoutes(routes, c.id, checked));
+      if (enabled && asDefault) await setDefault(routeOf(c.id));
       onDone();
     } catch (e) {
       setError(msg(e));
@@ -336,7 +313,8 @@ function AddWizard({ types, routes, saveRoutes, onDone }: {
       {step === 4 && d && (
         <>
           {head(4, t.stepEnable)}
-          <UseFor checked={checked} setChecked={setChecked} />
+          <label><input type="checkbox" checked={asDefault} onChange={(e) => setAsDefault(e.target.checked)} /> {t.setDefault}</label>
+          <p className="sub">{t.setDefaultHint}</p>
           <div className="conn-actions">
             <button type="button" className="primary" onClick={() => void finish(true)}>{t.enableNow}</button>
             <button type="button" onClick={() => void finish(false)}>{t.keepOff}</button>
