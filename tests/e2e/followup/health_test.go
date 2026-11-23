@@ -15,8 +15,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
-// allSignalIDs 是健康视图恒有的十三项，顺序固定（设计 §15.2）。
-var allSignalIDs = append(append([]string{}, signalIDs...), "stalled_delegations", "clock_lag")
+// allSignalIDs 是健康视图恒有的十四项，顺序固定（设计 §15.2）。
+var allSignalIDs = append(append([]string{}, signalIDs...), "stalled_delegations", "clock_lag", "capture_failures")
 
 // stall 造出一个长时间无回执的委派（ACT-HLT-04 前半）：HL-1 委派给 work-host.cli，执行者不回执，测试时钟推进 3 分钟（> delegation_stall_after 2m）。
 // 返回委派子事项 id。
@@ -59,10 +59,10 @@ func TestFlowHealth(t *testing.T) {
 	open := f.Projects["acc-open"]
 	var driftItem, tripItem string
 
-	step(t, "全新环境十三项信号都正常", func(t *testing.T) {
+	step(t, "全新环境十四项信号都正常", func(t *testing.T) {
 		h := f.health()
 		if !h.Healthy || len(h.Signals) != len(allSignalIDs) {
-			t.Fatalf("全新环境应健康且恒有十三项信号: %+v", h)
+			t.Fatalf("全新环境应健康且恒有十四项信号: %+v", h)
 		}
 		for i, id := range allSignalIDs {
 			if h.Signals[i].ID != id || !h.Signals[i].OK {
@@ -197,8 +197,16 @@ event_rules:
 		f.waitFor("HL-2 的到期补触发", 30*time.Second, func() bool { return len(f.eventsOf(lagItem, "item.deadline_passed")) == 1 })
 	})
 
+	step(t, "聊天没有对应项目：不捕获，也进诊断页（capture_failures）", func(t *testing.T) {
+		body := `{"text":"不属于任何项目的一段聊天","path":"/nowhere/at/all","host":"h"}`
+		if r := f.APIRaw("POST", "/v1/capture", body, f.WRK); r.Code != 200 || !strings.Contains(r.Body, `"no_project"`) {
+			t.Fatalf("capture without project: %d %s", r.Code, r.Body)
+		}
+		f.waitFor("没记下的聊天进入健康视图", 30*time.Second, func() bool { return !f.health().sig("capture_failures").OK })
+	})
+
 	var cli healthView
-	step(t, "ACT-HLT-01 十三类信号都显示，三处一致，每类有修复入口", func(t *testing.T) {
+	step(t, "ACT-HLT-01 十四类信号都显示，三处一致，每类有修复入口", func(t *testing.T) {
 		cli = f.health()
 		web := f.webHealth()
 		http := decode[healthView](t, f.APIRaw("GET", "/v1/health", "", f.OBS).Body)
@@ -206,7 +214,7 @@ event_rules:
 			t.Fatal("十一类问题都在时不应报健康")
 		}
 		if len(cli.Signals) != len(allSignalIDs) {
-			t.Fatalf("应恒有十三项信号: %+v", cli.Signals)
+			t.Fatalf("应恒有十四项信号: %+v", cli.Signals)
 		}
 		for i, id := range allSignalIDs {
 			s := cli.Signals[i]
@@ -222,7 +230,7 @@ event_rules:
 				}
 			}
 		}
-		for _, id := range []string{"stalled_delegations", "clock_lag"} {
+		for _, id := range []string{"stalled_delegations", "clock_lag", "capture_failures"} {
 			if s := cli.sig(id); s.Severity != "warning" {
 				t.Errorf("提醒级信号 %s 异常时 severity 应为 warning: %+v", id, s)
 			}
@@ -317,7 +325,7 @@ func TestFlowHealthWarnings(t *testing.T) {
 	f.webOK("PUT", "/settings/policy", `{"disturb":{"routes":{"brief":"web","decision":"web","health":"web","reminder":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true}}`, http.StatusOK)
 	var child, hl2 string
 
-	step(t, "ACT-HLT-03 信号恒为十三项，顺序固定，前十一项与 v0.1 相同", func(t *testing.T) {
+	step(t, "ACT-HLT-03 信号恒为十四项，顺序固定，前十一项与 v0.1 相同", func(t *testing.T) {
 		h := f.health()
 		var ids []string
 		for _, s := range h.Signals {
@@ -326,8 +334,8 @@ func TestFlowHealthWarnings(t *testing.T) {
 		if strings.Join(ids, ",") != strings.Join(allSignalIDs, ",") {
 			t.Fatalf("id 列表 = %v，期望 %v", ids, allSignalIDs)
 		}
-		if web := f.webHealth(); len(web.Signals) != 13 {
-			t.Errorf("Web 也应恒为十三项: %d", len(web.Signals))
+		if web := f.webHealth(); len(web.Signals) != 14 {
+			t.Errorf("Web 也应恒为十四项: %d", len(web.Signals))
 		}
 		if !h.Healthy {
 			t.Fatalf("干净环境应健康: %+v", h)

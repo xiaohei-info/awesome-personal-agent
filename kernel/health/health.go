@@ -1,4 +1,4 @@
-// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十三类信号，
+// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十四类信号，
 // 长时与短任务两个队列分开给出排队数和最长等待时间。只读、只报不修；不新增存储，不写任何模块的数据。
 // 视图只反映现状：每个信号要么由当前状态直接算出，要么有一个正常使用中一定会被满足的恢复条件；已恢复的告警不再计入，
 // 原事件仍留在事件日志里（操作记录、运行日志照常可见）。
@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
@@ -141,7 +142,7 @@ const (
 	EndpointPaused        = "paused"         // 本人暂停了模型：是正常状态，不计入"模型不可用"
 )
 
-// View 是十三类信号。空切片/零值表示该信号当前正常。
+// View 是十四类信号。空切片/零值表示该信号当前正常。
 type View struct {
 	SourceFailures   []SourceFailure
 	Outcall          Outcall
@@ -164,6 +165,8 @@ type View struct {
 	// StalledDelegations 与 ClockLags 是 v0.2.0 追加的两个提醒级信号，都不影响 Healthy。
 	StalledDelegations []StalledDelegation
 	ClockLags          []ClockLag
+	// CaptureFailures 是最近 StaleAfter 内没能捕获的对话增量，按原因类别汇总；提醒级，不影响 Healthy。
+	CaptureFailures []CaptureFailure
 }
 
 // Healthy 为真表示异常级信号都正常。未判定积压只是待本人处理的提醒，不影响它。
@@ -225,6 +228,9 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 		after = 24 * time.Hour
 	}
 	if v.StalledDelegations, err = stalledDelegations(tx, now, after); err != nil {
+		return View{}, err
+	}
+	if v.CaptureFailures, err = captureFailures(tx, now); err != nil {
 		return View{}, err
 	}
 	return v, nil
@@ -748,4 +754,61 @@ func RecordClockLag(tx *store.Tx, c clock.Command, at time.Time) error {
 		Actor:  domain.Actor{Type: domain.ActorSystem, Principal: "kernel:clock", Via: domain.ViaClock},
 		Reason: fmt.Sprintf("timer %s fired %s after its scheduled time", c.TimerID, c.Late.Round(time.Second))})
 	return err
+}
+
+// CaptureFailure 是某一类原因下最近 StaleAfter 内的捕获失败：次数与最近一次的时间。
+// Project 是最近一次失败所属的项目（只有项目已定、但捕获被关掉的那一类有）。事件里没有对话内容与凭据，这里也没有。
+type CaptureFailure struct {
+	Class   string
+	Count   int
+	LastAt  time.Time
+	Project string
+}
+
+// captureFailures 读 inbound.capture_failed，按类别汇总；类别按最近失败时间由新到旧。
+// shortcut: 每次读全部事件再按时间窗筛，事件很多时加游标或时间窗查询。
+func captureFailures(tx *store.Tx, now time.Time) ([]CaptureFailure, error) {
+	by := map[string]*CaptureFailure{}
+	for after := int64(0); ; {
+		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvCaptureFailed}, after, 500)
+		if err != nil {
+			return nil, err
+		}
+		if len(es) == 0 {
+			break
+		}
+		for _, en := range es {
+			after = en.Event.Seq
+			var p struct {
+				Class, Project, At string
+			}
+			if en.Tombstone || json.Unmarshal(en.Event.Payload, &p) != nil || p.Class == "" {
+				continue
+			}
+			at, err := time.Parse(time.RFC3339, p.At)
+			if err != nil {
+				at = en.Event.At
+			}
+			if now.Sub(at) >= StaleAfter {
+				continue
+			}
+			f := by[p.Class]
+			if f == nil {
+				f = &CaptureFailure{Class: p.Class}
+				by[p.Class] = f
+			}
+			f.Count++
+			if !at.Before(f.LastAt) {
+				f.LastAt, f.Project = at, p.Project
+			}
+		}
+	}
+	out := make([]CaptureFailure, 0, len(by))
+	for _, f := range by {
+		out = append(out, *f)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].LastAt.After(out[j].LastAt) || (out[i].LastAt.Equal(out[j].LastAt) && out[i].Class < out[j].Class)
+	})
+	return out, nil
 }

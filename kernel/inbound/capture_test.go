@@ -153,15 +153,19 @@ func TestCaptureBothEndpointsDownIsUnjudged(t *testing.T) {
 	}
 }
 
-// ACT-CAP-01：默认关闭：项目没开捕获时不入账、不调模型；原因只写机制。
+// ACT-CAP-01：捕获默认开启；被直接调 API 关掉的项目不入账、不调模型，原因只写机制，并记一条失败类别（不含内容）。
 func TestCaptureDisabledProjectDoesNothing(t *testing.T) {
 	e := newEnv(t, true)
+	e.setCapture(e.web, false)
 	out, err := e.capture(caller(authz.LevelWorker, ""), map[string]any{"project": e.web, "text": "随便聊聊"})
 	if err != nil || out.Captured || out.Reason != ReasonCaptureDisabled {
 		t.Fatalf("out %+v err %v", out, err)
 	}
 	if len(e.events("capture:"+e.web)) != 0 || len(e.stub.Requests()) != 0 || len(e.allItems()) != 0 {
-		t.Fatal("a disabled project must leave no trace")
+		t.Fatal("a disabled project must leave no source event, model call or item")
+	}
+	if got := e.failures(); len(got) != 1 || got[0].Class != FailDisabled || got[0].Project != e.web {
+		t.Fatalf("failures %+v", got)
 	}
 }
 

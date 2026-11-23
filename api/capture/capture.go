@@ -1,11 +1,11 @@
 // Package capture 是对话候选捕获的 HTTP 路由（附录 B.2，设计 §9.3、§11.2）：POST /capture。
 //
-// 路由里没有业务规则：请求体原样交给内核命令 inbound.capture，授权、项目是否开启捕获、运行身份下不生效、
+// 路由里没有业务规则：请求体原样交给内核命令 inbound.capture，授权、项目的捕获字段、运行身份下不生效、
 // 增量去重与后续的候选抽取都在内核（kernel/inbound）。本层只把 HTTP 搬成命令请求；
 // 候选抽取在提交之后异步进行，响应不等模型。会话取自 X-APA-Session 头（与审计同源）。
 //
-// 请求体：{"text", "project"?, "path"?, "host"?}。project 缺省时按 path+host 解析当前目录所在项目。
-// 响应 200：{"captured": bool, "reason"?, "event"?, "project"?}；未开启捕获或运行身份下，captured 为 false，不是错误。
+// 请求体：{"text", "project"?, "path"?, "host"?, "failures"?}（failures 是插件补报的没送达的失败）。project 缺省时按 path+host 解析当前目录所在项目。
+// 响应 200：{"captured": bool, "reason"?, "event"?, "project"?}；没有项目、项目捕获被关掉或运行身份下，captured 为 false，不是错误。
 package capture
 
 import (

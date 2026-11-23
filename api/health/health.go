@@ -1,4 +1,4 @@
-// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的十三类信号
+// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的十四类信号
 // 连同修复入口原样给出，`apa health` 与 Web 读同一份。
 //
 // 路由里没有业务规则：是否异常由 kernel/health 判定，这里只做格式搬运。
@@ -24,7 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// Signal 是十三类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修），
+// Signal 是十四类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修），
 // Severity 是 error（异常）或 warning（待本人处理的提醒，不影响 healthy）。
 type Signal struct {
 	ID       string `json:"id"`
@@ -42,6 +42,18 @@ type Signal struct {
 	// Notices 只有 other_alerts 给：逐条列出动作没能完成的类别码与机制参数、受影响的事项，展示层据类别码说人话、给下一步。
 	// detail 仍是对象 id 列表；升级前的告警没有类别码。
 	Notices []Notice `json:"notices,omitempty"`
+	// Captures 只有 capture_failures 给：按原因类别汇总最近 24 小时没能捕获的对话增量。只含类别、次数、最近时间与项目 id，
+	// 不带对话内容与凭据；展示层据类别说人话。detail 仍是类别列表。
+	Captures []CaptureRow `json:"captures,omitempty"`
+}
+
+// CaptureRow 是 capture_failures 的一类原因：class 取 no_project、capture_disabled、kernel_unreachable、no_credentials、
+// kernel_refused、plugin_error；last_at 是最近一次失败的时间。
+type CaptureRow struct {
+	Class   string    `json:"class"`
+	Count   int       `json:"count"`
+	LastAt  time.Time `json:"last_at"`
+	Project string    `json:"project,omitempty"`
 }
 
 // Notice 是 other_alerts 的一条（规则动作失败、运行没拉起）。只含类别码与内核生成的机制参数，不带错误原文。
@@ -86,7 +98,7 @@ const (
 	SeverityWarning = "warning"
 )
 
-// Report 是 GET /health 的响应；Signals 恒为十三项且顺序固定（与设计 §15.2 表一致）。
+// Report 是 GET /health 的响应；Signals 恒为十四项且顺序固定（与设计 §15.2 表一致）。
 type Report struct {
 	Healthy bool     `json:"healthy"`
 	Signals []Signal `json:"signals"`
@@ -240,12 +252,25 @@ func build(v khealth.View, rejudgeDays int) Report {
 			"delegations page: nudge, reassign or delegate again", ids(v.StalledDelegations, func(d khealth.StalledDelegation) string { return d.Item }))),
 		warn(sig("clock_lag", len(v.ClockLags), "a timer fired 5 minutes or more after its scheduled time (including timers missed while the kernel was down); clears after an hour without lateness",
 			"health page; if it keeps happening, check host sleep and load", ids(v.ClockLags, func(l khealth.ClockLag) string { return l.Timer }))),
+		warn(sig("capture_failures", len(v.CaptureFailures), "a conversation delta was not captured in the last 24 hours: the session is in no project, the project's capture is off, or the plugin could not deliver it (kernel unreachable or refused, no credentials); counted by reason class, never with the text or credentials; clears when 24 hours pass without a new one",
+			"projects page: register the checkout for the session's directory; for plugin failures check the kernel address and credential the plugin uses", func() []string {
+				cs := make([]string, 0, len(v.CaptureFailures))
+				for _, f := range v.CaptureFailures {
+					cs = append(cs, f.Class)
+				}
+				return cs
+			}())),
 	}}
 	rep = withRejections(rep, v.PackRejections)
 	for i := range rep.Signals {
 		if rep.Signals[i].ID == "other_alerts" {
 			for _, a := range v.OtherAlerts {
 				rep.Signals[i].Notices = append(rep.Signals[i].Notices, Notice{a.Object, a.Rule, a.Code, a.Params, a.Item, a.Dropped})
+			}
+		}
+		if rep.Signals[i].ID == "capture_failures" {
+			for _, f := range v.CaptureFailures {
+				rep.Signals[i].Captures = append(rep.Signals[i].Captures, CaptureRow{f.Class, f.Count, f.LastAt, f.Project})
 			}
 		}
 		if rep.Signals[i].ID == "receipt_failures" {
