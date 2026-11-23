@@ -21,12 +21,21 @@ export interface Done { item: Item; at: string; day: string }
 
 /** 全部已完成的事（不含简报），最近完成的在前；day 是完成那天（主机时区）。今天页的完成计数用同一份。 */
 export async function loadDone(api: ApiClient, offset: string): Promise<Done[]> {
-  const r = await api.get<{ items: Item[]; done_at?: Record<string, string> }>("/items?phase=done");
+  return (await loadDoneAll(api, offset)).done;
+}
+
+/** 同 loadDone，另给完成日期不详的事（工作台迁移来、没记完成日期；不按任何一天算，不计入完成数）。 */
+export async function loadDoneAll(api: ApiClient, offset: string): Promise<{ done: Done[]; unknown: Item[] }> {
+  const r = await api.get<{ items: Item[]; done_at?: Record<string, string>; done_unknown?: string[] }>("/items?phase=done");
   const at = r.done_at ?? {};
-  return r.items
-    .filter((i) => i.kind !== "brief" && at[i.id])
-    .map((i) => ({ item: i, at: at[i.id], day: hostParts(at[i.id], offset).date }))
-    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const undated = new Set(r.done_unknown ?? []);
+  return {
+    done: r.items
+      .filter((i) => i.kind !== "brief" && at[i.id])
+      .map((i) => ({ item: i, at: at[i.id], day: hostParts(at[i.id], offset).date }))
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at)),
+    unknown: r.items.filter((i) => i.kind !== "brief" && undated.has(i.id)),
+  };
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,7 +67,7 @@ export function DonePage() {
   const projects = useNamed("project");
   const [params, setParams] = useSearchParams();
   const [clock, setClock] = useState<HostClock | null>(null);
-  const [done, setDone] = useState<Done[] | null>(null);
+  const [all, setAll] = useState<{ done: Done[]; unknown: Item[] } | null>(null);
   const [moved, setMoved] = useState<{ week: string; list: Awaited<ReturnType<typeof loadProgress>> } | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -68,10 +77,12 @@ export function DonePage() {
   const end = week && addDays(week, 6);
 
   useEffect(() => void hostClock(api).then(setClock), [api]);
-  useEffect(() => void (clock && loadDone(api, clock.utc_offset).then(setDone, setError)), [api, clock]);
+  useEffect(() => void (clock && loadDoneAll(api, clock.utc_offset).then(setAll, setError)), [api, clock]);
   useEffect(() => void (clock && week && loadProgress(api, week, end, clock.utc_offset).then((list) => setMoved({ week, list }), setError)), [api, clock, week, end]);
 
   const go = (d: string) => setParams(d === thisWeek ? {} : { week: d });
+  const done = all?.done;
+  const unknown = all?.unknown ?? [];
   const list = done?.filter((d) => d.day >= week && d.day <= end) ?? [];
   const progressed = moved?.week === week ? moved.list : [];
   // 每件事一行：这周完成的带完成那天，这周有进展的带每天的进展；按项目分组，组与组内都是最近动过的在前，没归项目的排最后。
@@ -88,7 +99,8 @@ export function DonePage() {
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? "";
   // 统计同工作台本周回顾：进展按条（同事同日算一条）、完成按件、涉及项目不算没归项目的。
   const stats = (rs: Row[]) => ({ progress: rs.reduce((n, r) => n + r.records.length, 0), done: rs.filter((r) => r.done).length });
-  const all = stats([...rows.values()]);
+  const total = stats([...rows.values()]);
+  const unknownIds = new Set(unknown.map((i) => i.id));
   const day = (d: string) => t.on(t.weekdays[(new Date(d + "T00:00:00Z").getUTCDay() + 6) % 7], d);
 
   return (
@@ -114,7 +126,7 @@ export function DonePage() {
         </>
       ) : (
         <>
-          <p className="sub">{t.stats(all.progress, all.done, ordered.filter(([pid]) => pid).length)}</p>
+          <p className="sub">{t.stats(total.progress, total.done, ordered.filter(([pid]) => pid).length)}</p>
           {ordered.map(([pid, rs]) => {
             const s = stats(rs);
             return (
@@ -127,7 +139,7 @@ export function DonePage() {
                       <div>
                         <Go to={"/items/" + encodeURIComponent(r.item.id)}>{r.item.title}</Go>
                         <span className="sub">
-                          {r.done ? t.doneOn(day(r.done.day)) : <Val k="phase" id={r.item.phase} />}
+                          {r.done ? t.doneOn(day(r.done.day)) : unknownIds.has(r.item.id) ? t.doneUnknown : <Val k="phase" id={r.item.phase} />}
                           {r.item.kind === "delegation" && <> · <Val k="itemKind" id="delegation" /></>}
                         </span>
                         {r.records.length > 0 && (
@@ -143,6 +155,15 @@ export function DonePage() {
             );
           })}
         </>
+      )}
+      {done && unknown.length > 0 && (
+        <section aria-label={t.unknownTitle}>
+          <h2>{t.unknownTitle}</h2>
+          <p className="sub">{t.unknownNote(unknown.length)}</p>
+          <ul className="rows">
+            {unknown.map((i) => <li key={i.id} className="act-row"><div><Go to={"/items/" + encodeURIComponent(i.id)}>{i.title}</Go></div></li>)}
+          </ul>
+        </section>
       )}
     </main>
   );
