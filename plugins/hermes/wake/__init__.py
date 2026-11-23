@@ -16,6 +16,10 @@ own tools as in chat. A notice whose ack was lost is not injected twice by this 
 Explicit opt-in: the loop starts only when readiness.py finds nothing missing (APA_WAKE_SESSION_KEY names the main
 session to wake, plugins.entries.apa-wake.allow_gateway_injection: true, APA_URL and APA_TOKEN). The same judgment is
 what apa-headless declares, so the ledger never offers waking that would fail. Otherwise the harness stays headless-only.
+
+Gateway only: Hermes loads this plugin in every process (gateway, dashboard, `hermes chat`, `--oneshot` runs), but only
+the gateway can take the injection. The loop claims only while readiness.in_gateway() (Hermes' live gateway injector)
+holds; elsewhere it never calls the kernel, so the gateway is the one claimer and kernel retries reach it.
 Any failure leaves Hermes untouched: the loop logs, backs off, and the kernel retries a failed delivery.
 """
 import importlib.util
@@ -43,6 +47,7 @@ HTTP_TIMEOUT_SECS = 10
 LONG_POLL_SECS = 30  # kernel caps wait at 60
 CLI_TIMEOUT_SECS = 30
 BACKOFF_SECS = 5
+GATEWAY_POLL_SECS = 1  # local check for the live gateway injector; no kernel call
 REFRESH_MARGIN_SECS = 30
 
 _runs = {}  # run id -> {"token", "expires": epoch secs}; in memory only
@@ -160,7 +165,12 @@ def poll_once(ctx, session_key, wait=LONG_POLL_SECS):
 
 
 def _loop(ctx, session_key, stop):
+    """Claim only while this process hosts the live gateway: not in the dashboard or a CLI client (a claim there can
+    only fail), and not while the gateway is still starting or already stopping."""
     while not stop.is_set():
+        if not readiness.in_gateway():
+            stop.wait(GATEWAY_POLL_SECS)
+            continue
         try:
             poll_once(ctx, session_key)
         except Exception as e:  # noqa: BLE001 - fail open: never take the gateway down

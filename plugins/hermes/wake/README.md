@@ -11,6 +11,12 @@ is missing), and `apa-headless` declares `main_session.wake: true` or the same m
 gateway starts. After the owner confirms that declaration, they pick "continue in our chat" on the Agent card in Web
 (or per rule); the card shows what is missing otherwise. Switching back and forth needs no new declaration.
 
+Gateway only, by Hermes' own signal: Hermes loads the plugin in every process of the profile (gateway, dashboard,
+`hermes chat`, `--oneshot` runs). The loop claims only while `readiness.in_gateway()` is true, i.e. Hermes'
+`GatewayRunner` has published its plugin message injector (`PluginManager.has_gateway_message_injector`). Elsewhere,
+and while the gateway is still starting or already stopping, it only checks that flag locally and never calls
+`/deliveries/next`, so the gateway is the one claimer and the kernel's fail/backoff retries come back to it.
+
 Flow per `class: wake` delivery: claim → `POST /runs/{id}/credential` → `ctx.inject_message(facts, session_key=…)` → ack
 (`external_ref` = run id). Any failure → `/fail` (kernel backs off and retries); no chat-channel message is sent.
 The run credential lives in memory only and reaches the turn via `apa_wake_cli` (`APA_RUN` + `APA_TOKEN`), re-exchanged

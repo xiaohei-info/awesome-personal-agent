@@ -61,14 +61,7 @@ def _declare(args, session_id=None, **_):
     return json.dumps({"exit_code": p.returncode, "ok": p.returncode == 0, "stdout": p.stdout.strip(), "stderr": p.stderr.strip()})
 
 
-def _in_gateway():
-    """True once a live gateway has published its message injector: then every plugin is loaded and readiness is
-    what the gateway really has. Never true in `hermes chat` / `--oneshot` clients."""
-    try:
-        from hermes_cli.plugins import get_plugin_manager
-        return bool(get_plugin_manager().has_gateway_message_injector)
-    except Exception:  # noqa: BLE001 - no plugin runtime or another shape: not a gateway we can sync from
-        return False
+_in_gateway = readiness.in_gateway  # once true every plugin is loaded and readiness is what the gateway really has
 
 
 UNREACHABLE = 7  # apa exit code: kernel unreachable (kernel/domain ExitUnreachable)

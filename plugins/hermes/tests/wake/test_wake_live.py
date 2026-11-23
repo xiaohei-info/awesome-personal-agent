@@ -43,7 +43,8 @@ CHILD = textwrap.dedent("""
     from hermes_cli import plugins
     mgr = plugins.get_plugin_manager()
     seen = []
-    mgr.set_gateway_message_injector(object(), lambda **kw: seen.append(kw) or True)
+    if os.environ['APA_TEST_GATEWAY'] == '1':
+        mgr.set_gateway_message_injector(object(), lambda **kw: seen.append(kw) or True)
     plugins.discover_plugins()
     deadline = time.time() + float(os.environ['APA_TEST_WAIT'])
     while time.time() < deadline and not seen:
@@ -68,14 +69,15 @@ def run_hermes(tmp_path, apa_bin):
     k = Kernel()
     k.wake()
 
-    def run(allow, session_key="agent:main:telegram:dm:42", wait="20", args='["events"]'):
+    def run(allow, session_key="agent:main:telegram:dm:42", wait="20", args='["events"]', gateway=True):
         home = tmp_path / f"home_{allow}"
         (home / "plugins").mkdir(parents=True)
         (home / "plugins" / "apa-wake").symlink_to(WAKE)
         (home / "config.yaml").write_text("plugins:\n  enabled:\n    - apa-wake\n" + (
             "  entries:\n    apa-wake:\n      allow_gateway_injection: true\n" if allow else ""))
         env = {**os.environ, "HERMES_HOME": str(home), "APA_BIN": apa_bin, "APA_URL": k.url, "APA_TOKEN": PLUGIN_TOKEN,
-               "APA_HOME": str(tmp_path / "apahome"), "APA_TEST_WAIT": wait, "APA_TEST_ARGS": args}
+               "APA_HOME": str(tmp_path / "apahome"), "APA_TEST_WAIT": wait, "APA_TEST_ARGS": args,
+               "APA_TEST_GATEWAY": "1" if gateway else "0"}
         env.pop("APA_RUN", None)
         if session_key:
             env["APA_WAKE_SESSION_KEY"] = session_key
@@ -112,6 +114,13 @@ def test_default_stays_headless_without_session_key(run_hermes):
     out = run(allow=True, session_key=None, wait="2")  # allowed by Hermes, but never declared: no poller starts
     assert out["seen"] == [] and out["registered"] is True
     assert len(k.deliveries) == 1 and k.reports == []
+
+
+def test_process_without_live_gateway_never_claims(run_hermes):
+    k, run = run_hermes
+    out = run(allow=True, wait="3", gateway=False)  # real loader, everything ready, but no GatewayRunner (dashboard, CLI)
+    assert out["seen"] == [] and out["registered"] is True
+    assert k.claims == 0 and len(k.deliveries) == 1 and k.reports == []
 
 
 def test_wake_turn_ask_goes_to_needs_input_under_run_credential_without_disturbing_owner(run_hermes):

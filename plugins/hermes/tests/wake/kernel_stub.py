@@ -17,6 +17,7 @@ class Kernel:
         self.cli_posts = []    # (path, bearer, body) of POSTs made under a run credential
         self.cli_calls = []    # (run header, bearer) seen on run-identity requests
         self.exchanges = 0
+        self.claims = 0        # GET /deliveries/next calls
         self.fail_exchange = False
         self.fail_ack = False
         self.ttl = "2099-01-01T00:00:00Z"
@@ -40,6 +41,8 @@ class Kernel:
                     return self._send(200, {"ok": True})
                 if not self._auth():
                     return self._send(401, {"error": "bad token"})
+                if self.path.startswith("/v1/deliveries/next"):
+                    k.claims += 1
                 if self.path.startswith("/v1/deliveries/next") and k.deliveries:
                     return self._send(200, k.deliveries.pop(0))
                 self._send(204)
