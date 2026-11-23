@@ -12,11 +12,13 @@ import { useItemTitle, useNamed } from "../../app/names";
 import { loadDone } from "../done/DonePage";
 import { monday } from "../calendar/layout";
 import { hostClock } from "../items/schedule";
+import { RowActions } from "../items/RowActions";
 import { Val } from "../../app/values";
 import { strings } from "./strings";
 
 // 今天（界面设计 §3.2、§5.2）：自上而下五块，空的不显示——要你处理、Agent 交回的、今天的事、提醒、久未推进（默认折叠）。
 // 「要你处理」与导航角标、状态灯取同一份注意力汇总；今天的事取自 GET /v1/today（附录 B.2），操作交给既有事项接口。
+// 今天的事每行的快捷操作对齐工作台「今日焦点」：排时间（日期与时段）、交给 Agent、完成，做完原位反映。
 interface Today { planned: Item[]; due: Item[]; pending: Item[]; stale: Item[] }
 interface Run { id: string; target: string; category: string; state: string; finished_at?: string; fault?: Fault }
 
@@ -56,11 +58,18 @@ export function TodayPage() {
     }, () => setBack([]));
   }, [api, since]);
 
-  // 写入后整页重读：分组永远以服务端为准，失败时不留下本地假状态。
+  // 久未推进的批量处理写完整页重读（它会让事项离开这一组）。
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
     try { await fn(); } catch (e) { setError(e); }
     await load();
+    refreshCounts();
+    countDone();
+  };
+
+  // 行上操作之后：只把这一件换成服务端的最新值，列表、顺序与滚动位置不动；角标与完成计数另取。
+  const replace = (it: Item) => {
+    setData((d) => d && { ...d, planned: d.planned.map((x) => (x.id === it.id ? it : x)), due: d.due.map((x) => (x.id === it.id ? it : x)) });
     refreshCounts();
     countDone();
   };
@@ -107,7 +116,7 @@ export function TodayPage() {
           {todays.length > 0 && (
             <section aria-label={t.blocks.today}>
               <h2>{t.count(t.blocks.today, todays.length)}</h2>
-              <ul className="rows">{todays.map((it) => <TodayRow key={it.id} item={it} act={act} />)}</ul>
+              <ul className="rows">{todays.map((it) => <TodayRow key={it.id} item={it} onChange={replace} />)}</ul>
             </section>
           )}
           {reminders.length > 0 && <Reminders list={reminders} />}
@@ -169,25 +178,33 @@ function ItemLink({ item }: { item: Item }) {
 const itemPath = (it: Item) => "/items/" + encodeURIComponent(it.id);
 const ifMatch = (it: Item) => ({ "If-Match": String(it.version) });
 
-/** 今天的一件事：一行标题加「完成」；改计划日期、写进展收在「更多」里，不再每行展开两张表单。 */
-function TodayRow({ item, act }: { item: Item; act: (fn: () => Promise<unknown>) => Promise<void> }) {
+/**
+ * 今天的一件事：一行标题，行上直接是「排时间、交给 Agent、完成」（RowActions，与事项列表共用）；写进展收在折叠里。
+ * 做完、改期之后这一行留在原处显示新状态（已完成、新的计划），不重读整页；下次打开今天页按服务端重新分组。
+ */
+function TodayRow({ item, onChange }: { item: Item; onChange: (it: Item) => void }) {
   const { api } = useSession();
   const t = useT(strings);
-  const [date, setDate] = useState("");
+  const [err, setErr] = useState<unknown>(null);
+  const progress = async (b: { text: string }) => {
+    setErr(null);
+    try { await api.post(itemPath(item) + "/progress", b); } catch (e) { setErr(e); }
+    await api.get<{ item: Item }>(itemPath(item)).then((r) => onChange(r.item), () => undefined);
+  };
+  const ended = item.phase === "done" || item.phase === "dropped";
   return (
     <li className="stack" data-item={item.id}>
       <div className="act-row">
-        <div><ItemLink item={item} /></div>
-        <button type="button" onClick={() => act(() => api.post(itemPath(item) + "/transition", { to: "done", reason: t.doneReason }, ifMatch(item)))}>{t.done}</button>
+        <div><ItemLink item={item} />{ended && <> <span className="badge plain"><Val k="phase" id={item.phase} /></span></>}</div>
+        <RowActions item={item} where={t.where} onChange={onChange} />
       </div>
-      <details>
-        <summary>{t.moreFor}</summary>
-        <form className="actions" onSubmit={(e) => { e.preventDefault(); if (DATE.test(date)) act(() => api.patch(itemPath(item), { planned_for: date }, ifMatch(item))); }}>
-          <label>{t.plannedDate} <input type="date" aria-label={t.changePlanFor(item.title)} value={date} onChange={(e) => setDate(e.target.value)} /></label>
-          <button type="submit" disabled={!DATE.test(date)}>{t.changePlan}</button>
-        </form>
-        <ProgressForm onSubmit={(b) => act(() => api.post(itemPath(item) + "/progress", b))} />
-      </details>
+      {err != null && <ErrorNote error={err} />}
+      {!ended && (
+        <details>
+          <summary>{t.moreFor}</summary>
+          <ProgressForm onSubmit={progress} />
+        </details>
+      )}
     </li>
   );
 }

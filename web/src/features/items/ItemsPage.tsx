@@ -14,15 +14,16 @@ import { strings } from "./strings";
 import { HANDOFF_TAG, WAITING } from "../../app/ids";
 import { Pick, Val, useLabel } from "../../app/values";
 import { ErrorNote } from "../../app/errors";
-import { EntityPick, useItemTitle, useNames } from "../../app/names";
+import { EntityPick, useItemTitle, useNamed, useNames } from "../../app/names";
 import { ViewTable, useViews } from "./TypeViews";
 import { AgentBlock, tagName } from "./HandOff";
 import { QuestionCard, useAnswer, type DecisionItem } from "../decisions/DecisionsPage";
 import { TraceView } from "../trace/Trace";
 import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow } from "./ItemMaterials";
 import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
-import { ScheduleBlock } from "./ScheduleBlock";
-import { deadlineText, deadlineValue, hhmm, parseSlot, slotOf, useHostClock } from "./schedule";
+import { RowActions } from "./RowActions";
+import { ScheduleBlock, SlotFields, slotForm, slotValue } from "./ScheduleBlock";
+import { deadlineText, deadlineValue, useHostClock } from "./schedule";
 import { ApiError } from "../../app/api";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
@@ -98,6 +99,16 @@ const valuesOf = (i: Item, d: Dim): string[] =>
   : d === "origin" ? [originKey(i.origin?.source)]
   : [(i[d] as string | undefined) || NONE];
 const keep = (i: Item, f: Partial<Record<Dim, string>>, skip?: Dim) => DIMS.every((d) => d === skip || !f[d] || valuesOf(i, d).includes(f[d]!));
+// 列表按项目分组（同工作台任务库「按业务」）：组按项目列表的顺序，没归项目的排最后。
+// 默认排序同任务库：先按阶段（进行中 → 等你决定 → 在等 → 建议 → 已完成 → 不做了），再按优先级；选了别的排序就照服务端的顺序。
+const PHASE_RANK = ["open", "needs_input", "waiting", "proposed", "done", "dropped"];
+const PRIORITY_RANK = ["urgent", "high", "normal", "low"];
+const rank = (list: string[], v: string) => (list.indexOf(v) + list.length + 1) % (list.length + 1);
+export function arrange(items: Item[], projects: string[], serverSort: boolean): Item[] {
+  const group = (i: Item) => (i.project ? rank(projects, i.project) : projects.length + 1);
+  return [...items].sort((a, b) => group(a) - group(b)
+    || (serverSort ? 0 : rank(PHASE_RANK, a.phase) - rank(PHASE_RANK, b.phase) || rank(PRIORITY_RANK, a.priority || "normal") - rank(PRIORITY_RANK, b.priority || "normal")));
+}
 
 function ItemList() {
   const t = useT(strings);
@@ -134,7 +145,12 @@ function ItemList() {
   }, [api, q, sort, plannedFor]);
 
   const all = items ?? [];
-  const shown = all.filter((i) => keep(i, f));
+  const projectOrder = useNamed("project").map((p) => p.id);
+  // 行上操作之后只把这一件换成服务端的最新值显示；分组、排序与筛选仍按取回时的那份算，位置、页码与滚动不动，下次取回再重排。
+  const [fresh, setFresh] = useState<Record<string, Item>>({});
+  useEffect(() => setFresh({}), [items]);
+  const replace = (it: Item) => setFresh((m) => ({ ...m, [it.id]: it }));
+  const shown = arrange(all.filter((i) => keep(i, f)), projectOrder, !!sort);
   const name = (d: Dim, v: string): string =>
     v === NONE ? t.none[d] ?? t.notSet
     : d === "project" ? project(v)
@@ -212,16 +228,30 @@ function ItemList() {
       {error != null && <ErrorNote error={error} />}
       {view && items && <ViewTable view={view} items={all} />}
       {!view && items && !shown.length && error == null && <p className="empty">{t.noMatch}</p>}
-      {!view && <ul aria-label={t.list} className="rows">
-        {rows.map((i) => (
-          <li key={i.id}>
-            <Link to={i.id} state={{ list: location.search }}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
-            <span className="sub">
-              {[i.project && project(i.project), i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.planned_for && t.planAt(i.planned_for, i.planned_slot), i.deadline && t.due(deadlineText(i.deadline, offset))].filter(Boolean).join(" · ")}
-            </span>
-          </li>
-        ))}
-      </ul>}
+      {!view && (
+        <div aria-label={t.list} role="group">
+          {pageGroups(rows).map(([pid, list]) => (
+            <section key={pid} aria-label={pid ? project(pid) : t.none.project}>
+              <h2>{t.groupCount(pid ? project(pid) : t.none.project, shown.filter((i) => (i.project ?? "") === pid).length)}</h2>
+              <ul className="rows">
+                {list.map((x) => fresh[x.id] ?? x).map((i) => (
+                  <li key={i.id} data-item={i.id}>
+                    <div className="act-row">
+                      <div>
+                        <Link to={i.id} state={{ list: location.search }}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
+                        <span className="sub">
+                          {[i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.planned_for && t.planAt(i.planned_for, i.planned_slot), i.deadline && t.due(deadlineText(i.deadline, offset))].filter(Boolean).join(" · ")}
+                        </span>
+                      </div>
+                      <RowActions item={i} where={t.listWhere} onChange={replace} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
       {!view && shown.length > PAGE_SIZE && (
         <nav className="pager" aria-label={t.pager}>
           <button type="button" disabled={page <= 1} onClick={() => set({ page: String(page - 1) })}>{t.prev}</button>
@@ -231,6 +261,17 @@ function ItemList() {
       )}
     </main>
   );
+}
+
+/** 一页里的行按项目切成几段（行已按项目排好）。 */
+function pageGroups(rows: Item[]): [string, Item[]][] {
+  const out: [string, Item[]][] = [];
+  for (const i of rows) {
+    const pid = i.project ?? "";
+    if (out.length && out[out.length - 1][0] === pid) out[out.length - 1][1].push(i);
+    else out.push([pid, [i]]);
+  }
+  return out;
 }
 
 // 导入的条目只知道日期时 precision 为 day：只显示到日，不显示约定的 12:00 或 18:00（§7.1）。
@@ -542,18 +583,15 @@ function NewItem() {
   const [picked, setPicked] = useState<string | null>(null);
   const [deadline, setDeadline] = useState(pre.deadline);
   const [plannedFor, setPlannedFor] = useState(pre.plannedFor);
-  const preSlot = parseSlot(pre.plannedSlot);
-  const [timed, setTimed] = useState(!!preSlot);
-  const [slotStart, setSlotStart] = useState(preSlot ? hhmm(preSlot[0]) : "09:00");
-  const [slotEnd, setSlotEnd] = useState(preSlot ? hhmm(preSlot[1] % 1440) : "10:00");
+  const [slot, setSlot] = useState(() => slotForm(pre.plannedSlot));
   const [err, setErr] = useState<unknown>(null);
   const [created, setCreated] = useState<string | null>(null);
   const { utc_offset: offset } = useHostClock(api);
   const from = (useLocation().state as { from?: string } | null)?.from;
   // 每次打开新建页一个幂等键：连点两次、网络重试都只建出一件（§3.2）；被服务端拒绝（4xx）后换新键，改过的输入不算重放。
   const idem = useRef(crypto.randomUUID());
-  const slotPair = parseSlot(`${slotStart} - ${slotEnd === "00:00" ? "24:00" : slotEnd}`);
-  const badSlot = !!plannedFor && timed && !slotPair;
+  const slotV = slotValue(plannedFor, slot);
+  const badSlot = slotV.bad;
   useEffect(() => void api.get<{ projects: { id: string; name?: string }[] }>("/projects").then((r) => setProjects(r.projects), () => {}), [api]);
   useEffect(() => void api.get<{ vaults: Vault[] }>("/note-vaults").then((r) => setVaults(r.vaults ?? []), () => {}), [api]);
 
@@ -576,7 +614,7 @@ function NewItem() {
         ...(project ? { project } : {}),
         ...(deadline ? { deadline: deadlineValue(deadline.slice(0, 10), deadline.slice(11) === "23:59" ? null : deadline.slice(11), offset) } : {}),
         ...(plannedFor ? { planned_for: plannedFor } : {}),
-        ...(plannedFor && timed && slotPair ? { planned_slot: slotOf(slotPair[0], slotPair[1]) } : {}),
+        ...(slotV.slot ? { planned_slot: slotV.slot } : {}),
       }, { "Idempotency-Key": idem.current });
       id = r.id;
     } catch (e) {
@@ -616,17 +654,7 @@ function NewItem() {
             <label>{t.projectField} <select value={project} onChange={(e) => setPicked(e.target.value)}><option value="">{t.noProject}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id}</option>)}</select></label>
             <label>{t.deadlineField} <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
             <label>{t.plannedDate} <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} /></label>
-            <fieldset disabled={!plannedFor}>
-              <legend>{t.slot}</legend>
-              <label><input type="checkbox" checked={!timed} onChange={(e) => setTimed(!e.target.checked)} /> {t.untimed}</label>
-              {timed && (
-                <div className="actions">
-                  <label>{t.slotStart} <input type="time" step={60} value={slotStart} onChange={(e) => setSlotStart(e.target.value)} /></label>
-                  <label>{t.slotEnd} <input type="time" step={60} value={slotEnd} onChange={(e) => setSlotEnd(e.target.value)} /></label>
-                </div>
-              )}
-              {badSlot && <p role="alert">{t.badSlot}</p>}
-            </fieldset>
+            <SlotFields date={plannedFor} {...slot} bad={slotV.bad} onChange={(p) => setSlot({ ...slot, ...p })} />
           </>
         }
       />

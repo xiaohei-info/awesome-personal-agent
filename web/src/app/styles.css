@@ -90,6 +90,7 @@ kbd {
 .act-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; justify-content: space-between; }
 .act-row > div { flex: 1 1 220px; min-width: 0; }
 .act-row .sub { display: block; }
+.act-row > .row-panel { flex-basis: 100%; margin: 0; }
 .saved-note { margin-left: 8px; font-size: 13px; color: var(--ok); }
 .saved-note.bad { color: var(--seal); }
 .unsaved { margin-left: 8px; font: 12px/1 var(--sans); color: var(--warn); }

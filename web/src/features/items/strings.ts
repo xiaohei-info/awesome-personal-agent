@@ -134,6 +134,20 @@ const zh = {
   confirmSave: "确认并保存",
   latest: (v: string) => `最新：${v}`,
   scheduleReason: "在事项页改排期",
+  // 列表行上的快捷操作（今天页、事项列表共用，对应工作台任务行的「排时间、交给助手、完成」）
+  rowActions: (title: string) => `${title} 的操作`,
+  rowPlan: "排时间",
+  rowPlanFor: (title: string) => `排时间：${title}`,
+  rowHandoff: "交给 Agent",
+  rowAgent: "Agent 处理",
+  rowAgentFor: (title: string) => `Agent 处理：${title}`,
+  rowDoneMark: "已完成",
+  rowOk: "确定",
+  rowDoneReason: (where: string) => `在${where}完成`,
+  rowPlanReason: (where: string) => `在${where}排时间`,
+  // 事项列表按项目分组（同工作台任务库「按业务」）
+  groupCount: (name: string, n: number) => `${name}（${n}）`,
+  listWhere: "事项列表",
 };
 
 const en: typeof zh = {
@@ -269,6 +283,18 @@ const en: typeof zh = {
   confirmSave: "Confirm and save",
   latest: (v) => `latest: ${v}`,
   scheduleReason: "rescheduled on the item page",
+  rowActions: (title) => `Actions for ${title}`,
+  rowPlan: "Schedule",
+  rowPlanFor: (title) => `Schedule: ${title}`,
+  rowHandoff: "Hand to Agent",
+  rowAgent: "Agent work",
+  rowAgentFor: (title) => `Agent work: ${title}`,
+  rowDoneMark: "Done",
+  rowOk: "OK",
+  rowDoneReason: (where) => `completed on ${where}`,
+  rowPlanReason: (where) => `scheduled on ${where}`,
+  groupCount: (name, n) => `${name} (${n})`,
+  listWhere: "the item list",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../../app/api";
 import { ErrorNote } from "../../app/errors";
 import { useT } from "../../app/i18n";
@@ -7,7 +7,8 @@ import type { Item } from "./ItemsPage";
 import { deadlineText, deadlineValue, hhmm, hostParts, parseSlot, slotOf, useHostClock } from "./schedule";
 import { strings } from "./strings";
 
-// 事项详情 › 排期（界面设计 §4、§9.4）：计划日期、时段、截止唯一可编辑的位置，整块保存。
+// 事项详情 › 排期（界面设计 §4、§9.4）：计划日期、时段、截止的完整编辑处，整块保存。
+// 今天页与事项列表行上的「排时间」只改计划日期与时段，用同一组时段控件与同一套写入口径（RowActions）。
 // 保存带版本号；对不上时载入最新值，本人填的留在表单里并标出不同的项，确认后再存（不静默覆盖）。
 
 interface Form {
@@ -21,14 +22,11 @@ interface Form {
 }
 
 function formOf(it: Item, offset: string): Form {
-  const s = parseSlot(it.planned_slot);
   const due = it.deadline ? hostParts(it.deadline, offset) : null;
   const dueTimed = !!due && due.time !== "23:59:59";
   return {
     date: it.planned_for ?? "",
-    timed: !!s,
-    start: s ? hhmm(s[0]) : "09:00",
-    end: s ? hhmm(s[1] % 1440) : "10:00",
+    ...slotForm(it.planned_slot),
     dueDate: due?.date ?? "",
     dueTimed,
     dueTime: dueTimed ? due!.time.slice(0, 5) : "18:00",
@@ -37,14 +35,46 @@ function formOf(it: Item, offset: string): Form {
 
 /** 表单 → 三个字段的写入值（null 表示清除）。时段只在有日期且选了定时时给。 */
 function valuesOf(f: Form, offset: string): { planned_for: string | null; planned_slot: string | null; deadline: string | null; badSlot: boolean } {
-  const s = parseSlot(`${f.start} - ${f.end === "00:00" ? "24:00" : f.end}`);
-  const slot = f.date && f.timed && s ? slotOf(s[0], s[1]) : null;
+  const s = slotValue(f.date, f);
   return {
     planned_for: f.date || null,
-    planned_slot: slot,
+    planned_slot: s.slot,
     deadline: f.dueDate ? deadlineValue(f.dueDate, f.dueTimed ? f.dueTime : null, offset) : null,
-    badSlot: !!f.date && f.timed && !s,
+    badSlot: s.bad,
   };
+}
+
+export interface Slot { timed: boolean; start: string; end: string }
+
+/** 表单里的开始、结束 → 时段写入值；不定时或没有日期为 null，结束早于开始时 bad。end 用 00:00 表示当天结束（time 控件写不出 24:00）。 */
+export function slotValue(date: string, s: Slot): { slot: string | null; bad: boolean } {
+  const p = parseSlot(`${s.start} - ${s.end === "00:00" ? "24:00" : s.end}`);
+  return { slot: date && s.timed && p ? slotOf(p[0], p[1]) : null, bad: !!date && s.timed && !p };
+}
+
+/** 时段的初值：已有时段取它，否则 09:00–10:00、不定时。 */
+export function slotForm(slot?: string): Slot {
+  const s = parseSlot(slot);
+  return { timed: !!s, start: s ? hhmm(s[0]) : "09:00", end: s ? hhmm(s[1] % 1440) : "10:00" };
+}
+
+/** 时段的一组控件（不定时、开始、结束）：排期区块、新建页与列表行上的「排时间」共用，没有日期时整组不可填。 */
+export function SlotFields({ date, timed, start, end, bad, onChange, className, children }: Slot & { date: string; bad: boolean; onChange: (p: Partial<Slot>) => void; className?: string; children?: ReactNode }) {
+  const t = useT(strings);
+  return (
+    <fieldset className={className} disabled={!date}>
+      <legend>{t.slot}</legend>
+      <label><input type="checkbox" checked={!timed} onChange={(e) => onChange({ timed: !e.target.checked })} /> {t.untimed}</label>
+      {timed && (
+        <div className="actions">
+          <label>{t.slotStart} <input type="time" step={60} value={start} onChange={(e) => onChange({ start: e.target.value })} /></label>
+          <label>{t.slotEnd} <input type="time" step={60} value={end} onChange={(e) => onChange({ end: e.target.value })} /></label>
+        </div>
+      )}
+      {bad && <p role="alert">{t.badSlot}</p>}
+      {children}
+    </fieldset>
+  );
 }
 
 const sameInstant = (a?: string | null, b?: string | null) => (a && b ? Date.parse(a) === Date.parse(b) : !a && !b);
@@ -111,18 +141,9 @@ export function ScheduleBlock({ item, path, onSaved }: { item: Item; path: strin
           {t.plannedDate} <input type="date" value={f.date} onChange={(e) => set({ date: e.target.value })} />
           {differs.date && <span className="sub">{t.latest(item.planned_for || t.notSet)}</span>}
         </label>
-        <fieldset className={differs.slot ? "differs" : undefined} disabled={!f.date}>
-          <legend>{t.slot}</legend>
-          <label><input type="checkbox" checked={!f.timed} onChange={(e) => set({ timed: !e.target.checked })} /> {t.untimed}</label>
-          {f.timed && (
-            <div className="actions">
-              <label>{t.slotStart} <input type="time" step={60} value={f.start} onChange={(e) => set({ start: e.target.value })} /></label>
-              <label>{t.slotEnd} <input type="time" step={60} value={f.end} onChange={(e) => set({ end: e.target.value })} /></label>
-            </div>
-          )}
-          {v.badSlot && <p role="alert">{t.badSlot}</p>}
+        <SlotFields className={differs.slot ? "differs" : undefined} date={f.date} timed={f.timed} start={f.start} end={f.end} bad={v.badSlot} onChange={set}>
           {differs.slot && <span className="sub">{t.latest(latestSlot)}</span>}
-        </fieldset>
+        </SlotFields>
         <fieldset className={differs.due ? "differs" : undefined}>
           <legend>{t.deadlineField}</legend>
           <label>{t.deadlineField} <input type="date" value={f.dueDate} onChange={(e) => set({ dueDate: e.target.value })} /></label>
