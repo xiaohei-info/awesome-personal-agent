@@ -25,26 +25,27 @@ const CASES: Case[] = [
     body: { persona_lang: "en" },
   },
   // 与改版前测试相同的编辑
+  // 设计 v2：各类提醒的去处搬到各自的页面（单选，见各页测试）；设置页只剩全局项。默认渠道一节发整段 disturb，矩阵只换 default_channel。
   {
-    name: "投递矩阵：改一行，只写 delivery，冻结的旧键原样带回", at: "/settings/notify", card: "每类提醒送到哪", path: "/v1/settings/policy",
+    name: "默认渠道：改选，只换 default_channel，各行去处与冻结的旧键原样带回", at: "/settings/notify", card: "默认渠道", path: "/v1/settings/policy",
     edit: async (c) => {
-      const pick = c.getByLabelText("截止已过：推给你");
-      await waitFor(() => expect(within(pick).getByRole("option", { name: "发到 slack" })).toBeInTheDocument());
+      const pick = c.getByLabelText("默认渠道");
+      await waitFor(() => expect(within(pick).getByRole("option", { name: "slack" })).toBeInTheDocument());
       await userEvent.selectOptions(pick, "channel:slack");
     },
-    body: { disturb: { ...DISTURB, delivery: { default_channel: "", rows: { ...deriveDelivery(DISTURB).rows, overdue: { agent: "off", user: "channel:slack" } } } } },
+    body: { disturb: { ...DISTURB, delivery: { default_channel: "channel:slack", rows: deriveDelivery(DISTURB).rows } } },
   },
   // 提醒与推送拆成各自保存的小节（界面设计 §6.1）：每节发整段 disturb，只换自己改过的字段。
   {
-    name: "打扰策略：日上限", at: "/settings/notify", card: "每天最多发几条", path: "/v1/settings/policy",
+    name: "打扰策略：日上限", at: "/settings/notify", card: "每天最多推几条", path: "/v1/settings/policy",
     edit: async (c) => {
-      await userEvent.clear(c.getByLabelText("每天最多发（条）"));
-      await userEvent.type(c.getByLabelText("每天最多发（条）"), "3");
+      await userEvent.clear(c.getByLabelText("每天最多推（条）"));
+      await userEvent.type(c.getByLabelText("每天最多推（条）"), "3");
     },
     body: { disturb: { ...DISTURB, daily_cap: 3 } },
   },
   {
-    name: "打扰策略：暂停提醒", at: "/settings/notify", card: "暂停提醒", path: "/v1/settings/policy",
+    name: "打扰策略：暂停名单", at: "/settings/notify", card: "暂停名单", path: "/v1/settings/policy",
     edit: async (c) => {
       await userEvent.click(c.getByRole("button", { name: "＋ 暂停一个" }));
       await userEvent.selectOptions(c.getByLabelText("暂停1 类型"), "project");

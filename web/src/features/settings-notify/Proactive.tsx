@@ -4,9 +4,9 @@ import { useT } from "../../app/i18n";
 import { Card, useDraft, type Doc } from "../settings-policy/shared";
 import { strings } from "./strings";
 
-// 到点提醒（§7.4）：策略 disturb.proactive 的时间规则（默认关，开启前先看预览）；它是投递矩阵「到点提醒」行的展开区。
-// 送到哪由矩阵这一行决定（默认推到主 Agent 的对话里）；主会话不能唤醒时预览写明原因。定时任务的结果送到哪也在矩阵里，不在这里。
-// 静默时段沿用本页「安静时段」，不另设一份。开启时刻（since）由服务端记，页面不发。
+// 到点提醒（§7.4）：策略 disturb.proactive 的时间规则；它是自动规则 › 提醒我 ›「到点提醒」单选下的"什么时候提醒"折叠。
+// 开不开、送到哪由那个单选决定（不提醒即 proactive.on 为假），这里不再有开关，保存时 on 原样带回；预览按草稿、假设开着算。
+// 静默时段沿用设置 › 提醒与推送的「安静时段」，不另设一份。开启时刻（since）由服务端记，页面不发。
 
 export interface Proactive {
   on: boolean; since?: string; work_start: string; work_end: string; workdays: number[]; shift: boolean;
@@ -58,10 +58,7 @@ export function ProactiveCard({ doc, put }: { doc: Doc; put: Put }) {
     <label>{label} <input type="number" min={0} aria-label={label} value={p[k]} onChange={(e) => set({ [k]: Number(e.target.value) } as Partial<Proactive>)} /></label>
   );
   return (
-    <Card title={t.proactive} hint={t.proactiveHint} onSave={() => put({ proactive: body(p) })} dirty={dirty} id="proactive">
-      <label>
-        <input type="checkbox" role="switch" checked={p.on} aria-label={t.proactiveOn} onChange={(e) => set({ on: e.target.checked })} /> {t.proactiveOn}
-      </label>
+    <Card title={t.proactiveTimes} hint={t.proactiveHint} onSave={() => put({ proactive: body({ ...p, on: !!saved?.on }) })} dirty={dirty} id="proactive">
       <div role="status" aria-label={t.previewLabel} className="sub">
         {pv ? (
           <>
@@ -74,9 +71,6 @@ export function ProactiveCard({ doc, put }: { doc: Doc; put: Put }) {
           </>
         ) : pvErr ? <p>{t.previewFailed}</p> : <p>{t.previewing}</p>}
       </div>
-      {!saved?.on && !p.on && (
-        <div><button type="button" className="link" onClick={() => void put({ proactive: body({ ...p, on: true }) })}>{t.enableNow}</button></div>
-      )}
       <div className="sentence">
         <span>{t.workTime}</span>
         <input type="time" aria-label={t.workStart} value={p.work_start} onChange={(e) => set({ work_start: e.target.value })} />
@@ -91,10 +85,7 @@ export function ProactiveCard({ doc, put }: { doc: Doc; put: Put }) {
       {num("dedup_min", t.dedupMin)}
       <div className="sentence">{num("max_items", t.maxItems)}{num("max_batches", t.maxBatches)}</div>
       <p className="sub">{quiet ? t.quietFollows(quiet.start, quiet.end) : t.quietNone}</p>
-      <details>
-        <summary>{t.rules}</summary>
-        <ul className="sub">{t.ruleLines.map((l) => <li key={l}>{l}</li>)}</ul>
-      </details>
+      <ul className="sub">{t.ruleLines.map((l) => <li key={l}>{l}</li>)}</ul>
     </Card>
   );
 }

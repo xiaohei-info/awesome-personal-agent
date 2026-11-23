@@ -32,6 +32,7 @@ const zh = {
   hardLine: "只有你本人能做",
   hardLineWhat: "发钥匙、填凭据、改工具权限、接入新来源、外发范围、渠道回答人、物理删除",
   hardLineHow: "在网页上做，且要再输一次口令",
+  notifyCard: "有事要你拍板时怎么告诉你",
 };
 
 const en: typeof zh = {
@@ -47,6 +48,7 @@ const en: typeof zh = {
   hardLine: "Only you can do",
   hardLineWhat: "Issue keys, enter credentials, change tool access, connect new sources, outbound scope, channel answerers, permanent deletion",
   hardLineHow: "On the web, after entering your password again",
+  notifyCard: "How you hear about decisions",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

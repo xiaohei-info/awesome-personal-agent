@@ -4,12 +4,12 @@ import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT, type Lang } from "../../app/i18n";
 import { useRaw } from "../../app/raw";
 import { rowsUsing, type Delivery } from "../settings-notify/matrix";
-import { strings as notify } from "../settings-notify/strings";
+import { rstrings as notify } from "../settings-notify/strings";
 import { strings } from "./strings";
 
 // 设置 › 提醒渠道的内置渠道（界面设计 §9.9）：卡片只显示现状；添加走四步：选类型 → 填表单 → 测试 → 启用。
 // 表单由接入声明（GET /connections/types）生成；凭据只能填写和替换，读接口只回是否已设置。
-// 「用来送」只读：各类提醒送到哪只在设置 › 提醒与推送的矩阵里改（一个设置一个可编辑处）；添加向导最后一步可把它设为默认渠道（初值）。
+// 「推到这里的有」只读：各类提醒送到哪在它自己的页面上改（一个设置一个可编辑处，设置 › 提醒与推送的总览逐项链过去）；添加向导最后一步可把它设为默认渠道（初值）。
 // 删除渠道不改任何去处：指向它的推送由服务端改落今天页的提醒（投递队列的 Deliverable），不再悄悄改成"下次聊天时告诉我"。
 
 type Text = { zh: string; en: string };
@@ -123,7 +123,7 @@ function ConnCard({ c, d, delivery, onChange }: { c: Conn; d?: Decl; delivery: D
         {c.enabled
           ? [c.last_ok_at ? t.lastSent(time(c.last_ok_at)) : t.neverSent, used.length ? t.usedFor(short(used, lang)) : t.notUsed].join(" · ")
           : t.stoppedNote}
-        {" "}<Link to="/settings/notify">{t.changeUse}</Link>
+        {" "}<Link to="/settings/notify#overview">{t.changeUse}</Link>
       </p>
       {d && <p className="sub">{t.via(d.via[lang])}</p>}
       {raw && <p className="sub"><code>{t.rawId(c.id, c.type)}{c.problem ? ` · ${c.problem}${c.detail ? ": " + c.detail : ""}` : ""}</code></p>}

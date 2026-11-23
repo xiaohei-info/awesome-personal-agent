@@ -64,7 +64,7 @@ export const PERM = ["read", "edit", "full"] as const;
 /** 材料写入策略：kernel/policy/policy.go Write* */
 export const WRITE = ["direct", "proposed"] as const;
 /** 静音范围：kernel/policy/policy.go Mute* */
-export const MUTE_SCOPE = ["source", "project", "item"] as const;
+export const MUTE_SCOPE = ["source", "project", "item", "all"] as const;
 /** 端点位置：kernel/policy/policy.go Locality* */
 export const LOCALITY = ["local", "external"] as const;
 /** 判断协议：kernel/policy/policy.go Protocol*；对数概率换算的协议在 SPIKE-LOGPROB（§21.3）有结论前 Web 不提供，前端产物里不得出现它的名字（ACT-JDP-11）。 */
@@ -188,7 +188,5 @@ export const PACK_BAND: Record<string, { low?: number; high?: number }> = {
   "triage-screen": { low: 0.15, high: 0.6 },
   "capture-prescreen": { low: 0.1 },
   "web-only-screening": { low: 0.2 },
-  "delivery-defer": { high: 0.85 },
-  "follow-up-defer": { high: 0.85 },
   "delegation-screen": { low: 0.2 },
 };

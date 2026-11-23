@@ -11,8 +11,9 @@ export const feature: Feature = {
   section: "settings",
   summary: async (api, lang) => {
     const d = (await api.get<Doc>("/settings/policy")).disturb ?? {};
-    const cap = d.daily_cap ?? 20, muted = (d.mutes ?? []).length;
-    return strings[lang].summary(cap, muted);
+    const mutes = (d.mutes ?? []) as { scope: string; until?: string }[];
+    const all = mutes.some((m) => m.scope === "all" && (!m.until || new Date(m.until) > new Date()));
+    return strings[lang].summary(d.daily_cap ?? 20, mutes.filter((m) => m.scope !== "all").length, all);
   },
   element: <SettingsNotifyPage />,
 };

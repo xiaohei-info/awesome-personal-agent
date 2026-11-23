@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { locale, useLang, useT } from "../../app/i18n";
@@ -10,13 +9,17 @@ import { entryOf } from "../../app/values";
 import { RULE_MODE } from "../../app/ids";
 import { strings } from "./strings";
 
-// 设置 › 自动动手（界面设计 §3.1、§6.1）：只列动作类与其他规则；提醒类规则（class: reminder）的开关在「提醒与推送」矩阵里，不在这里重复。
+// 设置 › 自动规则（界面设计 §3.1、§6.1；设计 v2 §4）：上面「提醒我」一组是提醒类的单选（到点、截止已过、跟进、14 天没动静），
+// 下面只列动作类与其他规则；提醒类规则（class: reminder）的模式由「提醒我」里的单选写（不提醒即关），不在列表里重复。
+// 规则自带提醒（create_timer、then: alert、notify_urgent）时，那一行提醒挂在那条规则下面。
 // 模式、用哪个 Agent、在哪里做都是即改即存，旁边写「已保存」；用哪个 Agent 默认收起成一行。
 // 形状对应 GET /v1/rules（含 class）、PATCH /v1/rules/{id}/mode（附录 B.2）、GET /v1/packs 与 GET /v1/audit/events（§14.8）。
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择，被拒绝时模式保持原值。只改模式，不编辑规则内容。
 // 以 Agent 本人身份运行的规则（runner=main_session）另可覆盖 Agent 在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
 // 按 Agent 的设置原样带回；没覆盖就沿用 Agent 设置（§13.6）。
 import { AgentPick } from "../settings-agents/AgentPick";
+import { Reminder, ReminderScope, WhenReady, useReminderScope } from "../settings-notify/Reminder";
+import { ProactiveCard } from "../settings-notify/Proactive";
 
 interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action"; runner?: string }
 interface Launch { by_harness?: Record<string, string>; by_rule?: Record<string, string> }
@@ -156,7 +159,8 @@ export function RulesPage() {
       {error != null && <ErrorNote error={error} />}
       {!rules && error == null && <p role="status">{t.loading}</p>}
       {rules && !groups.length && <p className="empty">{t.none}</p>}
-      {rules && <p className="sub"><Link to="/settings/notify">{t.reminderElsewhere}</Link></p>}
+      <ReminderScope>
+      <WhenReady><RemindMe /></WhenReady>
       {groups.map(({ g, list }) => (
         <section key={g} aria-label={t.groups[g]} className="panel">
           <h2>{t.groups[g]}</h2>
@@ -174,6 +178,7 @@ export function RulesPage() {
                     {r.mode === "observe" && <Trial rule={r} name={name} />}
                     {r.runner && <AgentPick collapsed inheritRule={false} main={r.runner === "main_session"} value={ruleAgents[r.key] ?? ""} onChange={id => void setAgent(r.key,id)} />}
                     {r.runner === "main_session" && launch && <LaunchPick name={name} value={launch.by_rule?.[r.key] ?? ""} onChange={(v) => void setRuleLaunch(r, v)} />}
+                    <WhenReady><RuleReminder rule={r.key} /></WhenReady>
                   </div>
                   <div>
                     <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />
@@ -186,6 +191,34 @@ export function RulesPage() {
           {(g === "action" || g === "other") && <p className="sub">{t.hint}</p>}
         </section>
       ))}
+      </ReminderScope>
     </main>
   );
+}
+
+/** 「提醒我」：提醒类的四个单选；到点提醒的时间规则收在"什么时候提醒"里（开关就是单选本身）。 */
+function RemindMe() {
+  const t = useT(strings);
+  const { doc, putDisturb } = useReminderScope();
+  return (
+    <section aria-label={t.remindMe} className="panel stack" id="remind-me">
+      <h2>{t.remindMe}</h2>
+      <Reminder row="scheduled">
+        <details>
+          <summary>{t.when}</summary>
+          <ProactiveCard doc={doc} put={putDisturb} />
+        </details>
+      </Reminder>
+      <Reminder row="overdue" />
+      <Reminder row="followup" />
+      <Reminder row="stale" />
+    </section>
+  );
+}
+
+/** 规则自带的提醒（规则设的提醒、来源即时提醒）挂在产生它的那条规则下面；线上没有这种规则时什么都不显示。 */
+function RuleReminder({ rule }: { rule: string }) {
+  const { overview } = useReminderScope();
+  const row = overview?.rows.find((x) => (x.key === "rule_reminder" || x.key === "source_alert") && x.rules?.includes(rule));
+  return row ? <Reminder row={row.key} /> : null;
 }
