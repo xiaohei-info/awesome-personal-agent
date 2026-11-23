@@ -20,6 +20,10 @@ himalaya -c "$CFG" message read --preview -H Message-ID --output json N # read-N
 
 线程头样本（`MEAS-MAIL-THREAD` 的录制样本部分）：`message read --preview -H Message-ID -H References -H In-Reply-To N` 的输出，原信 11、回信 12（References + In-Reply-To）、只带 In-Reply-To 的回信 13、多级回复 14（References 折行）。头部块形态沿用 1.1.0 实录的 `Message-ID: …`，References/In-Reply-To 行是按同一形态合成的，不是真实邮箱实录；真实邮件工具上的证实由本机升级验证 L11 承接。
 
+## 1.1.0/notify
+
+代码托管平台通知邮件的样本（附录 D.2「通知邮件的对象链接」）：PR 原信 21 与它的评审回信 22，发件人与 Message-ID 的写法同平台通知邮件，按 1.1.0/thread 的形态合成，仓库名与内容是占位。
+
 ## 2.0.0
 
 未在真实账号上实测，是按设计假设手写的样本（envelope JSON 带 `message_id`）。拿到 2.x 的真实输出后，按 1.1.0 的方法重录并核对 `Supported` 里的取法。

@@ -326,7 +326,8 @@ func buildMail(list, got mailMsg, subj, sender string, at time.Time) event {
 	p := collectMail(list, got)
 	ev := event{ID: list.MessageID, Type: "mail.received", Subject: subj, Detail: p.text,
 		OccurredAt: at.UTC().Format(time.RFC3339Nano), Sender: sender,
-		CorrelationKeys: []string{"thread:" + threadRoot(list.MessageID, got)}}
+		CorrelationKeys: []string{"thread:" + threadRoot(list.MessageID, got)},
+		Link:            content.NotificationLink(sender, list.MessageID, got.References, got.InReplyTo)}
 	if p.html != "" {
 		ev.Original = &original{MediaType: "text/html", Text: p.html}
 		if txt, err := content.HTMLToText(p.html); err != nil {

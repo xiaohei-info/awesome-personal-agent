@@ -110,3 +110,25 @@ func TestBatcherAlwaysAcceptsFirstEvent(t *testing.T) {
 		t.Fatal("nothing more after oversize first")
 	}
 }
+
+// 通知邮件的链接取自 Message-ID 的平台写法（写法同真实的 PR 通知）；别的发件人、别的写法都不补。
+func TestNotificationLink(t *testing.T) {
+	const gh = "notifications@github.com"
+	for _, c := range []struct {
+		sender string
+		ids    []string
+		want   string
+	}{
+		{gh, []string{"<org/app/pull/227@github.com>"}, "https://github.com/org/app/pull/227"},
+		{gh, []string{"org/app/pull/227/issue_event/123@github.com"}, "https://github.com/org/app/pull/227"},
+		{"Bob <" + gh + ">", []string{"<own@example.com>", "<o/r/pull/9/review/1@github.com> <o/r/pull/9@github.com>"}, "https://github.com/o/r/pull/9"},
+		{gh, []string{"<o/r/issues/12/345@GitHub.com>"}, "https://github.com/o/r/issues/12"},
+		{gh, []string{"<o/r/discussions/5@github.com>"}, ""},
+		{gh, []string{"<mid-1@example.com>"}, ""},
+		{"someone@example.com", []string{"<o/r/pull/9@github.com>"}, ""},
+	} {
+		if got := NotificationLink(c.sender, c.ids...); got != c.want {
+			t.Errorf("%s %v: %q, want %q", c.sender, c.ids, got, c.want)
+		}
+	}
+}

@@ -675,3 +675,24 @@ func TestByteBatchingConvergesWithinBudget(t *testing.T) {
 		t.Fatalf("20 封应全部取到，实际 %d", len(seen))
 	}
 }
+
+// 代码托管平台的通知邮件带上它所说 PR 的规范链接（附录 D.2）：原信与评审回信同一个链接。
+func TestNotificationMailLink(t *testing.T) {
+	var calls [][]string
+	code, out, errs := exec1(t, replay(t, "1.1.0/notify", &calls), input(""))
+	if code != ExitOK {
+		t.Fatalf("exit=%d %s", code, errs)
+	}
+	links := map[string]string{}
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		var ev struct{ ID, Link string }
+		_ = json.Unmarshal([]byte(l), &ev)
+		if ev.ID != "" {
+			links[ev.ID] = ev.Link
+		}
+	}
+	want := "https://github.com/org/app/pull/7"
+	if len(links) != 2 || links["<org/app/pull/7@github.com>"] != want || links["<org/app/pull/7/review/1@github.com>"] != want {
+		t.Fatalf("links %v", links)
+	}
+}

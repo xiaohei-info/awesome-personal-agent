@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"mime"
 	"net/textproto"
+	"regexp"
 	"strings"
 
 	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
@@ -94,4 +95,28 @@ func (b *Batcher) Add(n int) bool {
 	}
 	b.used += n
 	return true
+}
+
+// githubThreadRe 是代码托管平台通知邮件的 Message-ID 写法：<owner/repo/pull|issues/编号[/…]@github.com>，
+// 原信、评审、评论、状态变更都以同一个 PR 或 issue 开头（附录 D.2）。
+var githubThreadRe = regexp.MustCompile(`(?i)^<?([a-z0-9_.-]+)/([a-z0-9_.-]+)/(pull|issues)/(\d+)(?:/[^@<>\s]*)?@github\.com>?$`)
+
+// NotificationLink 给代码托管平台的通知邮件补上它所说对象的规范链接（https://github.com/owner/repo/pull/编号），
+// 与 github 来源同一对象的事件链接逐字相同，内核据此按"同一链接"把邮件与平台事件并成一条建议（§9.3 合并键）。
+// 发件人不是该平台的通知地址、或 ids（自己的 Message-ID、References、In-Reply-To）里没有这种写法时返回空：宁可不补，不猜。
+func NotificationLink(sender string, ids ...string) string {
+	if i := strings.LastIndex(sender, "<"); i >= 0 {
+		sender = strings.TrimSuffix(sender[i+1:], ">")
+	}
+	if !strings.HasSuffix(strings.ToLower(strings.TrimSpace(sender)), "@github.com") {
+		return ""
+	}
+	for _, s := range ids {
+		for _, id := range strings.Fields(s) {
+			if m := githubThreadRe.FindStringSubmatch(id); m != nil {
+				return "https://github.com/" + m[1] + "/" + m[2] + "/" + strings.ToLower(m[3]) + "/" + m[4]
+			}
+		}
+	}
+	return ""
 }

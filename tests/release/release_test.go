@@ -77,8 +77,11 @@ func placeholderEmail(m string) bool {
 	case strings.HasSuffix(domain, ".example"), strings.HasSuffix(domain, ".invalid"), strings.HasSuffix(domain, ".test"), strings.HasSuffix(domain, ".local"), domain == "localhost":
 		return true
 	}
-	// SSH 用户与 iCalendar 事件 UID（uid-*@google.com，测试夹具）不是个人邮箱。
-	return m == "git@github.com" || strings.HasPrefix(m, "uid-") && domain == "google.com"
+	// SSH 用户与 iCalendar 事件 UID（uid-*@google.com，测试夹具）不是个人邮箱；代码托管平台的通知发件地址与
+	// 通知邮件 Message-ID 的末段（<owner/repo/pull/7@github.com> 里只有编号落在本规则里）也不是。
+	local := m[:strings.LastIndex(m, "@")]
+	return m == "git@github.com" || strings.HasPrefix(m, "uid-") && domain == "google.com" ||
+		strings.EqualFold(domain, "github.com") && (local == "notifications" || strings.Trim(local, "0123456789") == "")
 }
 
 // 测试数据里的通用账号名（不对应任何真实用户）。

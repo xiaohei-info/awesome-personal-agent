@@ -1,0 +1,4 @@
+[
+ {"id":"22","flags":[],"subject":"Re: [org/app] fix: 登录 (PR #7)","from":{"name":"Bob","addr":"notifications@github.com"},"to":{"name":null,"addr":"agent@example.com"},"date":"2026-11-06 07:00+00:00","has_attachment":false},
+ {"id":"21","flags":[],"subject":"[org/app] fix: 登录 (PR #7)","from":{"name":"Bob","addr":"notifications@github.com"},"to":{"name":null,"addr":"agent@example.com"},"date":"2026-11-06 06:00+00:00","has_attachment":false}
+]

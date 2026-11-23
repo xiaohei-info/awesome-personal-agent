@@ -1,0 +1,1 @@
+himalaya v1.1.0 +maildir +sendmail +pgp-commands +wizard +smtp +imap

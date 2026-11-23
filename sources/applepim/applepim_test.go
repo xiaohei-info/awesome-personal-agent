@@ -316,3 +316,35 @@ func TestRemindersVerifyAtMostMaxPerPoll(t *testing.T) {
 		t.Fatalf("code=%d gets=%d cursor=%v", code, gets, c.Open)
 	}
 }
+
+// 代码托管平台的通知邮件带上它所说 PR 的规范链接（附录 D.2）：原信与评审回信同一个链接，别的邮件不带。
+func TestMailNotificationLink(t *testing.T) {
+	const gh = "notifications@github.com"
+	list := `{"success":true,"messages":[
+{"dateReceived":"2026-01-03T12:00:00.000Z","messageId":"org/app/pull/7/review/1@github.com","senderAddress":"` + gh + `","subject":"Re: [org/app] fix: 登录 (PR #7)"},
+{"dateReceived":"2026-01-03T10:00:00.000Z","messageId":"org/app/pull/7@github.com","senderAddress":"` + gh + `","subject":"[org/app] fix: 登录 (PR #7)"},
+{"dateReceived":"2026-01-02T10:00:00.000Z","messageId":"m1@example.test","senderAddress":"a@example.test","subject":"报价"}]}`
+	mk := func(Config) Runner {
+		return func(_ context.Context, _ string, a ...string) ([]byte, []byte, error) {
+			if a[0] == "messages" {
+				return []byte(list), nil, nil
+			}
+			id := strings.TrimPrefix(argVal(a, "--id="), "")
+			refs := ""
+			if strings.Contains(id, "/review/") {
+				refs = "<org/app/pull/7@github.com>"
+			}
+			return []byte(`{"success":true,"message":{"messageId":"` + id + `","content":"正文","references":"` + refs + `"}}`), nil, nil
+		}
+	}
+	code, lines, _ := exec1(t, mk, `{"config":{"kind":"mail","account":"Acct"}}`)
+	if code != ExitOK || len(lines) != 4 {
+		t.Fatalf("code=%d lines=%v", code, lines)
+	}
+	want := map[string]any{"m1@example.test": nil, "org/app/pull/7@github.com": "https://github.com/org/app/pull/7", "org/app/pull/7/review/1@github.com": "https://github.com/org/app/pull/7"}
+	for _, l := range lines[:3] {
+		if l["link"] != want[l["id"].(string)] {
+			t.Errorf("%s: link %v", l["id"], l["link"])
+		}
+	}
+}

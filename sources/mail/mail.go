@@ -112,6 +112,8 @@ type event struct {
 	// CorrelationKeys 含 thread:<线程根 Message-ID>，回信与原信共用（§9.4、§9.7）。
 	CorrelationKeys []string `json:"correlation_keys,omitempty"`
 	Sender          string   `json:"sender,omitempty"`
+	// Link 只给代码托管平台的通知邮件：它所说的 PR 或 issue 的规范链接（content.NotificationLink），别的邮件没有。
+	Link string `json:"link,omitempty"`
 	// 不设 sender_verified：himalaya 不给出可核实的结论（§9.7）。
 }
 
@@ -324,6 +326,7 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 			miss = append([]missing{{"headers", "该版本范围的 message read 未按 -H 取信头（未实测）"}}, miss...)
 		}
 		it.ev.CorrelationKeys = []string{"thread:" + root}
+		it.ev.Link = content.NotificationLink(it.ev.Sender, it.ev.ID, root)
 		it.ev.Detail = text
 		it.ev.Content = &declared{State: "partial", Missing: miss}
 		var line bytes.Buffer
