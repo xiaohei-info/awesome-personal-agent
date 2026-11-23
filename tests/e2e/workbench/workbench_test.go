@@ -139,7 +139,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		byOwner(t, "item.updated", k.lastEvent(wbNew, "item.updated"))
 	})
 
-	k.step("ACT-WBN-05 CLI 读写计划日期，计划日期不产生定时与提醒", func(t *testing.T) {
+	k.step("ACT-WBN-05 CLI 读写计划日期，计划日期不产生定时；到点提醒关着（默认）时不产生提醒", func(t *testing.T) {
 		timers := func() (n int) {
 			for _, e := range k.events("", "") {
 				if strings.HasPrefix(e.Type, "timer.") {
@@ -151,7 +151,8 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		timers0 := timers()
 		k.apa(k.WRK, 0, "item", "update", wbF, "--planned-for", TMRW)
 		eq(t, "planned_for", k.planned(wbF), TMRW)
-		// 计划日期只是字段：不新建 Timer（审计里没有新的 timer.* 事件），\`apa why\` 的步骤里没有 timer.*，也没有提到该事项的提醒。
+		// 计划日期不新建 Timer（审计里没有新的 timer.* 事件；到点提醒开着时也由触达的周期扫描判定，不建 Timer），\`apa why\` 的步骤里没有 timer.*；
+		// 到点提醒默认关，所以也没有该事项的提醒（开着时的提醒点见 kernel/attention/schedule_test.go）。
 		eq(t, "timer.* 事件数不变", timers(), timers0)
 		var why struct {
 			Steps []struct {
