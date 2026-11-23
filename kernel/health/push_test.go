@@ -62,7 +62,7 @@ func TestPushSourceFailingOncePerStreak(t *testing.T) {
 	last := t0.Add(-time.Hour)
 	e.source("src_x", true, runner.Stats{ConsecutiveFailures: 3, LastSuccessAt: last})
 	e.event(domain.EvSourceFailed, "src_x", "", map[string]any{"kind": "streak"}) // 启动之前的事件
-	p := NewPusher(e.q)
+	p := NewPusher(e.att())
 	e.push(p)
 	if n, _ := e.deliveries(); n != 0 {
 		t.Fatal("events before start must not be pushed")
@@ -87,7 +87,7 @@ func TestPushSourceFailingOncePerStreak(t *testing.T) {
 // 新建议攒多了：默认关；打开后攒够 Min 条推一次，冷却期内不再推。
 func TestPushNewProposalsThresholdAndCooldown(t *testing.T) {
 	e := setup(t)
-	p := NewPusher(e.q)
+	p := NewPusher(e.att())
 	e.push(p)
 	created := func() {
 		e.event(domain.EvItemCreated, "itm_x", "", map[string]any{"item": map[string]any{"id": "itm_x", "phase": "proposed"}})
@@ -116,7 +116,7 @@ func TestPushNewProposalsThresholdAndCooldown(t *testing.T) {
 // 跨来源合并开启时：建立时只计数，归类完（留着）才看攒够没有；折叠掉的扣回，所以按合并之后的条数推。
 func TestPushNewProposalsCountsAfterMerge(t *testing.T) {
 	e := setup(t)
-	p := NewPusher(e.q)
+	p := NewPusher(e.att())
 	e.push(p)
 	e.setPush(policy.PushNewProposals, policy.PushRule{On: true, Min: 2})
 	item := func(id, phase, state string) map[string]any {
@@ -178,7 +178,7 @@ func TestTemplateFailedFollowsTaskPush(t *testing.T) {
 			"origin": map[string]any{"source": domain.OriginInstancePrefix + "ins_b"}}), &out)
 		return out.ID
 	}
-	p := NewPusher(e.q)
+	p := NewPusher(e.att())
 	e.push(p)
 	a := brief()
 	e.event(domain.EvRunFinished, a, "", map[string]any{"category": "task", "state": "failed", "run_id": "run_1", "error": "exit status 1"})

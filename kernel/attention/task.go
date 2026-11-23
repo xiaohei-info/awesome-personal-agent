@@ -1,9 +1,8 @@
 package attention
 
-// 定时任务产出注入主会话（§7.4 主动提醒）：简报、复盘、例行任务的产出总是写回 APA（事项与简报页）；
-// 本人为这类任务或这个实例打开了「注入主会话」时，再经主 Agent 的唤醒路由把产出送进主会话，且只走这一条路，
-// 不再按 routes 发渠道（同一份内容不会既发渠道又注入）。关着时简报照旧按 routes.brief 走，例行任务只记在 APA。
-// 主会话不能唤醒时简报退回原路由、例行任务落 Web 未读；领取失败与无人领取由投递队列退避重试、超限退回 Web 未读。
+// 定时任务的产出（§7.4 投递矩阵 D 组）：简报、复盘、例行任务的产出总是写回 APA（事项与简报页）；
+// 送到哪按矩阵的 task_result 行（按实例覆盖 → 按类型 → 其他），在放行时由 routing.go 解析。推到主会话时内容换成带类别的正文；
+// 主会话不能唤醒时按该行的 Else 走（空即 Web 未读）；领取失败与无人领取由投递队列退避重试、超限退回 Web 未读。
 
 import (
 	"encoding/json"
@@ -12,10 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -33,11 +29,15 @@ const (
 // taskLabel 是写在注入内容开头的任务类别。
 var taskLabel = map[string]string{"brief": "简报", "review": "复盘", "routine": "例行任务"}
 
-// taskDone：例行任务等非简报的定时任务产出转 done 时，开了注入主会话就产出一条投递（一次产出只一次）；关着不产出（只记在 APA）。
+// taskDone：例行任务等非简报的定时任务产出转 done 时，矩阵给它配了去处就产出一条投递（一次产出只一次）；没配不产出（只记在 APA）。
 // handled 为真表示已经处理（含已入队），调用方不再按普通事项作废它的投递。
 func (a *Attention) taskDone(tx *store.Tx, pol policy.Policy, it domain.Item) (bool, error) {
-	_, on, err := instances.PushToMain(tx, pol, it)
-	if err != nil || !on {
+	r, err := taskRow(tx, it, false)
+	if err != nil || len(r.keys) == 0 {
+		return false, err
+	}
+	l, err := resolve(tx, pol, r, it.Priority)
+	if err != nil || l.user == "" && l.agent == "" {
 		return false, err
 	}
 	id := TaskID(it.ID)
@@ -53,38 +53,6 @@ func (a *Attention) taskDone(tx *store.Tx, pol policy.Policy, it domain.Item) (b
 	}
 	return true, a.offer(tx, pol, held{id: id, item: it.ID, class: domain.DeliveryReminder, priority: it.Priority, version: ver,
 		content: domain.DeliveryContent{Title: it.Title, WebURL: a.o.WebURL(it.ID)}})
-}
-
-// taskRoute 在写投递前改定时任务产出的路由与内容：开了注入主会话、且主会话能唤醒时，路由取主会话，内容换成带类别的正文。
-// 在放行时判（而不是入队时），所以静默期间改了开关也按放行那一刻的设置走。
-func (a *Attention) taskRoute(tx *store.Tx, pol policy.Policy, d *domain.Delivery) error {
-	if d.Class != domain.DeliveryBrief && !strings.HasPrefix(d.ID, "task:") {
-		return nil
-	}
-	it, err := items.Get(tx, d.Item)
-	if isNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	pack, on, err := instances.PushToMain(tx, pol, it)
-	if err != nil || !on {
-		return err
-	}
-	route, blocked, err := MainRoute(tx, pol)
-	if err != nil {
-		return err
-	}
-	if blocked != "" {
-		if d.Class != domain.DeliveryBrief { // 例行任务没有原路由：落 Web 未读，能看到
-			d.Route = delivery.RouteWeb
-		}
-		return nil
-	}
-	d.Route = route
-	d.Content = TaskContent(it, pack, a.o.WebURL(it.ID))
-	return nil
 }
 
 // TaskContent 是注入主会话的产出内容：标题带类别（简报、复盘、例行任务），正文按长度取全文或每节摘要。

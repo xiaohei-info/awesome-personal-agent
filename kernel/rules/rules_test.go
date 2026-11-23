@@ -14,6 +14,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
@@ -64,7 +65,7 @@ func (f *fakeReminder) Remind(_ *store.Tx, it domain.Item, kind string, due time
 func newEnv(t *testing.T, files map[string]string, h map[string]Handler) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, executors.Module, instances.Module, delivery.Module, chain.Module, health.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, executors.Module, instances.Module, delivery.Module, chain.Module, health.Module, attention.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -382,7 +383,7 @@ func (e *env) healthDeliveries() []domain.Delivery {
 	q := delivery.New(delivery.Options{Now: func() time.Time { return e.now }})
 	var out []domain.Delivery
 	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
-		if err = health.NewNotifier(q).Sync(tx); err == nil {
+		if err = health.NewNotifier(attention.New(attention.Options{Queue: q, Now: func() time.Time { return e.now }})).Sync(tx); err == nil {
 			out, err = q.Unread(tx)
 		}
 		return

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -25,13 +24,4 @@ func TaskOf(tx *store.Tx, it domain.Item) (instance, pack string, ok bool, err e
 		return "", "", false, err
 	}
 	return in.ID, in.Pack, true, nil
-}
-
-// PushToMain 报告这件事项（定时任务的产出）写回 APA 之后要不要再注入主会话（§7.4 主动提醒）：按实例 ?? 按类型 ?? 默认。
-func PushToMain(tx *store.Tx, pol policy.Policy, it domain.Item) (pack string, on bool, err error) {
-	id, pack, ok, err := TaskOf(tx, it)
-	if err != nil || !ok {
-		return pack, false, err
-	}
-	return pack, pol.Disturb.ProactiveSettings().PushTask(pack, id), nil
 }

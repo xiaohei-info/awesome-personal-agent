@@ -245,7 +245,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	// 投递里的事项链接用绝对地址：注入主会话的消息只有文字，相对路径点不开。
 	att := attention.New(attention.Options{Queue: q, Drafter: screenJudge, WebURL: func(id string) string { return strings.TrimRight(base, "/") + "/items/" + id }})
-	k := &kernel{st: st, x: x, layout: l, att: att, sum: sum, hn: khealth.NewNotifier(q), push: khealth.NewPusher(q), packs: ld,
+	k := &kernel{st: st, x: x, layout: l, att: att, sum: sum, hn: khealth.NewNotifier(att), push: khealth.NewPusher(att), packs: ld,
 		send:  &kchannel.Sender{Store: st, Queue: q, Conns: conns, Call: caller, Base: base},
 		drain: make(chan struct{}, 1), draft: make(chan struct{}, 1), summarize: make(chan struct{}, 1)}
 

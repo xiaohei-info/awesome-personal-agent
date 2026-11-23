@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/url"
 	"regexp"
@@ -135,6 +136,9 @@ type Disturb struct {
 	Push map[string]PushRule `json:"push,omitempty"`
 	// Proactive 是主动提醒（事项到点提醒、简报与复盘送到哪）；没有此键取 DefaultProactive。
 	Proactive *Proactive `json:"proactive,omitempty"`
+	// Delivery 是投递矩阵（delivery.go）：各类提醒送到哪的唯一权威。没有此键时按 Routes、Push 的 Route、
+	// Proactive 的 TaskPush 与 InstancePush 换算；有了之后这几个旧键冻结，内核不再读它们。
+	Delivery *Delivery `json:"delivery,omitempty"`
 }
 
 // PushRule 是一类推送：On 为假时不产出投递；Route 为空时用决策类的路由；Min 只用于 new_proposals（攒够几条才推）。
@@ -702,6 +706,14 @@ func normalize(p Policy) (Policy, error) {
 		}
 	}
 
+	if m := p.Disturb.Delivery; m != nil {
+		c := *m
+		c.Rows = maps.Clone(m.Rows)
+		if err := c.check(); err != nil {
+			return p, err
+		}
+		p.Disturb.Delivery = &c
+	}
 	if p.Disturb.DailyCap < 0 {
 		return p, invalid("disturb daily_cap %d < 0", p.Disturb.DailyCap)
 	}

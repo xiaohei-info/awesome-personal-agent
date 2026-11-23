@@ -8,11 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
@@ -20,8 +18,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 推送哪些事（§7.4 "推送哪些事"）：本人在设置 › 提醒与打扰里逐类开关的推送，由这里统一产出；
-// 各模块只记事件（source.failed、run.finished、item.created），不自建推送。投递 id 由类别与对象确定，重放不重复。
+// 推送哪些事（§7.4 投递矩阵 D、E、F 组）：本人逐类开关的推送（push.*.on），由这里识别并交给触达（attention.Notify）；
+// 送到哪、静默与合并由触达按矩阵的行统一处理，这里不选路由。各模块只记事件（source.failed、run.finished、item.created），
+// 不自建推送。投递 id 由类别与对象确定，重放不重复。
 const (
 	runCooldown      = time.Hour     // 同一事项的运行失败 1 小时内只推一次
 	proposalCooldown = 2 * time.Hour // 两次"新建议攒多了"之间至少隔 2 小时
@@ -34,7 +33,7 @@ var templateKinds = map[domain.Kind]bool{"brief": true, "routine": true}
 // （事件都由本进程写入，停机期间没有新事件）。
 // shortcut: 进程在写完事件、推送入队之前崩溃时那几条不补推；需要严格补推时把游标落账（加一步迁移）。
 type Pusher struct {
-	q       *delivery.Queue
+	att     *attention.Attention
 	mu      sync.Mutex
 	started bool
 	after   int64
@@ -43,8 +42,8 @@ type Pusher struct {
 	lastPush time.Time
 }
 
-// NewPusher 返回 Pusher；q 必填。
-func NewPusher(q *delivery.Queue) *Pusher { return &Pusher{q: q} }
+// NewPusher 返回 Pusher；att 必填。
+func NewPusher(att *attention.Attention) *Pusher { return &Pusher{att: att} }
 
 // Sync 在自己的事务里处理游标之后的事件；失败不推进游标，下一次重做（投递按 id 幂等）。
 func (p *Pusher) Sync(ctx context.Context, st *store.Store) error {
@@ -74,16 +73,12 @@ func (p *Pusher) Sync(ctx context.Context, st *store.Store) error {
 				if en.Tombstone {
 					continue
 				}
-				d, ok, err := p.delivery(tx, pol, en.Event, &fresh, &last)
+				n, ok, err := p.notice(tx, pol, en.Event, &fresh, &last)
 				if err != nil {
 					return err
 				}
 				if ok {
-					t := delivery.Target{}
-					if d.Class == domain.DeliveryHealth && strings.HasPrefix(d.ID, "push:source:") {
-						t.Source = d.Item
-					}
-					if _, _, err := p.q.CreateGated(tx, pol, d, t); err != nil {
+					if err := p.att.Notify(tx, n); err != nil {
 						return err
 					}
 				}
@@ -96,19 +91,8 @@ func (p *Pusher) Sync(ctx context.Context, st *store.Store) error {
 	return err
 }
 
-// route 是一类推送的去向：设置里选了渠道就用它，否则沿用"需要你决定"的路由。
-func pushRoute(pol policy.Policy, r policy.PushRule) string {
-	if r.Route != "" {
-		return r.Route
-	}
-	if d := pol.Disturb.Routes[string(domain.DeliveryDecision)]; d != "" {
-		return d
-	}
-	return delivery.RouteWeb
-}
-
-// delivery 把一条事件换成推送；不属于任何一类、类别关着、或已不需要本人知道时 ok 为假。
-func (p *Pusher) delivery(tx *store.Tx, pol policy.Policy, e domain.Event, fresh *int, last *time.Time) (domain.Delivery, bool, error) {
+// notice 把一条事件换成推送；不属于任何一类、类别关着、或已不需要本人知道时 ok 为假。
+func (p *Pusher) notice(tx *store.Tx, pol policy.Policy, e domain.Event, fresh *int, last *time.Time) (attention.Notice, bool, error) {
 	switch e.Type {
 	case domain.EvSourceFailed:
 		return sourcePush(tx, pol, e)
@@ -130,53 +114,52 @@ func (p *Pusher) delivery(tx *store.Tx, pol policy.Policy, e domain.Event, fresh
 			} `json:"item"`
 		}
 		if json.Unmarshal(e.Payload, &pl) != nil {
-			return domain.Delivery{}, false, nil
+			return attention.Notice{}, false, nil
 		}
 		settled := pl.Item.Phase == domain.PhaseProposed && pl.Item.Proposal != nil && (pl.Item.Proposal.Sweep == nil || pl.Item.Proposal.Sweep.State == "done")
 		switch {
 		case e.Type == domain.EvItemCreated && pl.Item.Phase == domain.PhaseProposed:
 			*fresh++
 			if pol.MergeJudge != policy.MergeOff {
-				return domain.Delivery{}, false, nil
+				return attention.Notice{}, false, nil
 			}
 		case e.Type == domain.EvItemPhaseChanged && pl.Op == "merge.fold":
 			*fresh = max(*fresh-1, 0)
-			return domain.Delivery{}, false, nil
+			return attention.Notice{}, false, nil
 		case e.Type == domain.EvItemUpdated && settled:
 		default:
-			return domain.Delivery{}, false, nil
+			return attention.Notice{}, false, nil
 		}
 		if !r.On || *fresh < r.Min || (!last.IsZero() && e.At.Sub(*last) < proposalCooldown) {
-			return domain.Delivery{}, false, nil
+			return attention.Notice{}, false, nil
 		}
 		n := *fresh
 		*fresh, *last = 0, e.At
-		return domain.Delivery{ID: fmt.Sprintf("push:proposals:%d", e.Seq), Class: domain.DeliveryReminder, Version: 1,
-			Route:   pushRoute(pol, r),
+		return attention.Notice{ID: fmt.Sprintf("push:proposals:%d", e.Seq), Class: domain.DeliveryReminder,
 			Origin:  &domain.DeliveryOrigin{SourceEvent: fmt.Sprintf("seq:%d", e.Seq), Rule: "push/" + policy.PushNewProposals},
 			Content: domain.DeliveryContent{Title: fmt.Sprintf("新建议攒了 %d 条", n), Summary: "有空时去建议页看一眼：接受、补到已有事项或忽略。", WebURL: "/proposals"}}, true, nil
 	}
-	return domain.Delivery{}, false, nil
+	return attention.Notice{}, false, nil
 }
 
 // sourcePush：连续失败（第 3 次）、认证或配置失败、永久失败。同一串失败只推一次：投递 id 带上一次成功的时刻；
 // 来源已经恢复的不再推。
-func sourcePush(tx *store.Tx, pol policy.Policy, e domain.Event) (domain.Delivery, bool, error) {
+func sourcePush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Notice, bool, error) {
 	r := pol.Disturb.PushRuleFor(policy.PushSourceFailing)
 	var pl struct {
 		Kind   string `json:"kind"`
 		Reason string `json:"reason"`
 	}
 	if !r.On || json.Unmarshal(e.Payload, &pl) != nil {
-		return domain.Delivery{}, false, nil
+		return attention.Notice{}, false, nil
 	}
 	src, err := registry.Get(tx, e.Object)
 	if err != nil {
-		return domain.Delivery{}, false, nil // 来源已删除：不再推
+		return attention.Notice{}, false, nil // 来源已删除：不再推
 	}
 	st, err := runner.StatsOf(src)
 	if err != nil || st.ConsecutiveFailures == 0 {
-		return domain.Delivery{}, false, err
+		return attention.Notice{}, false, err
 	}
 	name := orElse(src.Name, src.ID)
 	title, step := "来源「"+name+"」连续失败", "去来源页看失败原因；常见是本机工具没在跑或网络不通。"
@@ -190,14 +173,13 @@ func sourcePush(tx *store.Tx, pol policy.Policy, e domain.Event) (domain.Deliver
 	if pl.Kind == "permanent" {
 		suffix = "off"
 	}
-	return domain.Delivery{ID: fmt.Sprintf("push:source:%s:%d:%s", src.ID, st.LastSuccessAt.Unix(), suffix), Item: src.ID, Class: domain.DeliveryHealth, Version: 1,
-		Route:   pushRoute(pol, r),
+	return attention.Notice{ID: fmt.Sprintf("push:source:%s:%d:%s", src.ID, st.LastSuccessAt.Unix(), suffix), Item: src.ID, Class: domain.DeliveryHealth,
 		Content: domain.DeliveryContent{Title: title, Summary: fmt.Sprintf("已连续失败 %d 次。%s", st.ConsecutiveFailures, step), WebURL: "/sources/" + src.ID}}, true, nil
 }
 
 // runPush：任务型与后台运行失败或超时。模板型（简报、例行任务）归"简报或定时任务没出来"，其余归"Agent 运行失败"；
 // 事项已经关掉的不推（本人已处理）。同一事项 1 小时内只推一次。
-func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (domain.Delivery, bool, error) {
+func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Notice, bool, error) {
 	var pl struct {
 		Category string `json:"category"`
 		State    string `json:"state"`
@@ -206,11 +188,11 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (domain.Delivery, 
 	}
 	if json.Unmarshal(e.Payload, &pl) != nil || (pl.Category != "task" && pl.Category != "background") ||
 		(pl.State != string(domain.RunFailed) && pl.State != string(domain.RunTimeout)) {
-		return domain.Delivery{}, false, nil
+		return attention.Notice{}, false, nil
 	}
 	it, err := items.Get(tx, e.Object)
 	if err != nil || it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped {
-		return domain.Delivery{}, false, nil
+		return attention.Notice{}, false, nil
 	}
 	cat, title := policy.PushRunFailed, "Agent 没做完：「"+it.Title+"」"
 	if templateKinds[it.Kind] {
@@ -218,7 +200,7 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (domain.Delivery, 
 	}
 	r := pol.Disturb.PushRuleFor(cat)
 	if !r.On {
-		return domain.Delivery{}, false, nil
+		return attention.Notice{}, false, nil
 	}
 	why := "运行失败"
 	if pl.State == string(domain.RunTimeout) {
@@ -227,20 +209,7 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (domain.Delivery, 
 	if pl.Error != "" {
 		why += "：" + firstLine(pl.Error)
 	}
-	route := pushRoute(pol, r)
-	if cat == policy.PushTemplateRun && r.Route == "" { // 产出注入主会话的任务，没出来也说在主会话里（主会话能唤醒时）
-		if _, on, err := instances.PushToMain(tx, pol, it); err != nil {
-			return domain.Delivery{}, false, err
-		} else if on {
-			if agent, blocked, err := executors.MainWake(tx, pol); err != nil {
-				return domain.Delivery{}, false, err
-			} else if blocked == "" {
-				route = delivery.WakeRoute(agent)
-			}
-		}
-	}
-	return domain.Delivery{ID: fmt.Sprintf("push:run:%s:%d", it.ID, e.At.Truncate(runCooldown).Unix()), Item: it.ID, Class: domain.DeliveryHealth, Version: 1,
-		Route:   route,
+	return attention.Notice{ID: fmt.Sprintf("push:run:%s:%d", it.ID, e.At.Truncate(runCooldown).Unix()), Item: it.ID, Class: domain.DeliveryHealth,
 		Content: domain.DeliveryContent{Title: title, Summary: why + "。去事项里看原因，决定重跑还是放弃。", WebURL: "/items/" + it.ID + "#agent"}}, true, nil
 }
 
