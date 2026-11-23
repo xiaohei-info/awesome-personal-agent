@@ -14,11 +14,21 @@ const USAGE = {
     { id: "src_b", name: "日历", events: 0, content_bytes: 0 },
   ],
 };
+let keep: Record<string, unknown> = {};
 function server(opts: { storage?: Response } = {}) {
+  keep = { run_days: 30, ingest_days: 30, judgment_days: 180, last_sweep: { at: "2026-11-23T04:10:00Z", run_dirs: 2, run_dir_bytes: 2048, ingest_bodies: 3, judgments: 4, skipped_in_flight: ["run_x"] } };
   const puts: { url: string; body: unknown }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/storage") return opts.storage ?? json(200, USAGE);
+    if (url === "/v1/settings/retention" && init.method === "PUT") {
+      const body = JSON.parse(init.body as string);
+      puts.push({ url, body });
+      if (body.judgment_days === 5) return json(400, { code: "invalid_request", why: "judgment_days must be 0 (never clear) or between 30 and 3650", next: "fix the value and retry" });
+      keep = { ...keep, ...body };
+      return json(200, keep);
+    }
+    if (url === "/v1/settings/retention") return json(200, keep);
     if (init.method === "PUT") {
       const body = JSON.parse(init.body as string);
       puts.push({ url, body });
@@ -97,5 +107,27 @@ describe("设置 › 存储", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "占用" })).toBeNull();
+  });
+
+  it("三项保留期可改：显示上次清理报数；改成 7 天发 PUT；被拒绝时原因原样显示、输入保留；文案不出现表名", async () => {
+    const s = server();
+    mount(s.impl);
+    const keepPanel = within(await screen.findByRole("region", { name: "运行数据保留" }));
+    expect(await keepPanel.findByLabelText("last-sweep")).toHaveTextContent("删除运行目录 2 个（2.0 KB）、请求体 3 条、判断记录 4 条，在途运行 1 个没动");
+    expect(keepPanel.getByText(/保留：运行记录与结论/)).toBeInTheDocument();
+    expect(keepPanel.queryByText(/outcall|webhook_ingest|outcall_judgment/)).toBeNull();
+    const run = keepPanel.getByLabelText("运行目录（天）");
+    expect(run).toHaveValue(30);
+    await userEvent.clear(run);
+    await userEvent.type(run, "7");
+    await userEvent.click(keepPanel.getByRole("button", { name: "保存保留期" }));
+    await keepPanel.findByText("保留期已保存，下次清理起按新值");
+    expect(s.puts.at(-1)).toEqual({ url: "/v1/settings/retention", body: { run_days: 7, ingest_days: 30, judgment_days: 180 } });
+    const j = keepPanel.getByLabelText("判断记录（天）");
+    await userEvent.clear(j);
+    await userEvent.type(j, "5");
+    await userEvent.click(keepPanel.getByRole("button", { name: "保存保留期" }));
+    expect(await keepPanel.findByRole("alert")).toHaveTextContent("judgment_days must be 0 (never clear) or between 30 and 3650");
+    expect(j).toHaveValue(5);
   });
 });

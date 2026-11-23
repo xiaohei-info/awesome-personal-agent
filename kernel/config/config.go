@@ -60,7 +60,7 @@ func Default() Config {
 		MaxSourceEvent:       16 << 20,
 		MaxWebhookBody:       1 << 20, // 此前写死的值
 		IngestRetention:      30 * day,
-		RunRetention:         14 * day,
+		RunRetention:         30 * day,
 
 		DeliveryUnclaimedAfter: 30 * time.Minute,
 		DeliveryBackoff:        []time.Duration{time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute, 30 * time.Minute},

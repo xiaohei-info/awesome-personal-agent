@@ -690,10 +690,17 @@ func (s *Service) Replay(ctx context.Context, ingestID string) error {
 
 // Expire 清掉超过保留期的原始 payload 与请求头，只留元数据。
 func (s *Service) Expire(ctx context.Context) error {
-	cut := s.o.Now().Add(-s.o.Retention).UnixNano()
-	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
-		_, err := tx.Exec(`UPDATE webhook_ingest SET body = x'', headers = '{}', purged = 1
+	_, err := s.ExpireOlderThan(ctx, s.o.Retention)
+	return err
+}
+
+// ExpireOlderThan 同 Expire，保留期由调用方给（设置里可改），返回清掉正文的条数。
+func (s *Service) ExpireOlderThan(ctx context.Context, keep time.Duration) (n int64, err error) {
+	cut := s.o.Now().Add(-keep).UnixNano()
+	err = s.o.Store.Update(ctx, func(tx *store.Tx) (err error) {
+		n, err = tx.Exec(`UPDATE webhook_ingest SET body = x'', headers = '{}', purged = 1
 			WHERE purged = 0 AND received_at < ? AND state IN (?,?,?)`, cut, StateProcessed, StateFailed, StateRejected)
 		return err
 	})
+	return n, err
 }

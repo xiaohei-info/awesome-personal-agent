@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -15,6 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	kretention "github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
@@ -37,7 +39,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, command.Module, core.Module, kpolicy.Module, registry.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, command.Module, core.Module, kpolicy.Module, registry.Module, kretention.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +56,7 @@ func setup(t *testing.T) *env {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	if e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(e.x)}}); err != nil {
+	if e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(e.x, st, kretention.Defaults(30*24*time.Hour, 30*24*time.Hour, 180*24*time.Hour))}}); err != nil {
 		t.Fatal(err)
 	}
 	rec := e.do("POST", "/v1/auth/login", `{"password":"`+ownerPW+`"}`, nil)
@@ -67,6 +69,9 @@ func setup(t *testing.T) *env {
 		if c.Name == core.SessionCookie {
 			e.cookie = c
 		}
+	}
+	if err := kretention.Register(e.x, t.TempDir(), kretention.Defaults(30*24*time.Hour, 30*24*time.Hour, 180*24*time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 	web := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	for cmd, in := range map[string]string{
@@ -171,5 +176,34 @@ func TestCredentialsCannotSetContentRetention(t *testing.T) {
 	}
 	if e.days() != nil {
 		t.Fatal("retention changed by a credential")
+	}
+}
+
+// 读到默认值；改成 7 天后读到 7 天；越界原因原样返回，已存的值不变。
+func TestRetentionSettingsReadAndWrite(t *testing.T) {
+	e := setup(t)
+	get := func() map[string]any {
+		rec := e.web("GET", "/v1/settings/retention", "")
+		var out map[string]any
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+			t.Fatalf("GET = %d %s", rec.Code, rec.Body)
+		}
+		return out
+	}
+	if g := get(); g["run_days"] != 30.0 || g["ingest_days"] != 30.0 || g["judgment_days"] != 180.0 || g["last_sweep"] != nil {
+		t.Fatalf("defaults = %v", g)
+	}
+	if rec := e.web("PUT", "/v1/settings/retention", `{"run_days":7}`); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"run_days":7`) {
+		t.Fatalf("PUT 7 = %d %s", rec.Code, rec.Body)
+	}
+	if g := get(); g["run_days"] != 7.0 || g["judgment_days"] != 180.0 {
+		t.Fatalf("after = %v", g)
+	}
+	rec := e.web("PUT", "/v1/settings/retention", `{"judgment_days":5}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "judgment_days must be 0") {
+		t.Fatalf("PUT 5 = %d %s", rec.Code, rec.Body)
+	}
+	if g := get(); g["judgment_days"] != 180.0 {
+		t.Fatalf("rejected value was saved: %v", g)
 	}
 }

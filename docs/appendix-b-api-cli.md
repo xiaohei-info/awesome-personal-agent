@@ -237,6 +237,8 @@
 | | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围（3b） | 只有 Web 登录 |
 | | `GET/PUT /settings/note-vaults` | 笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15；3a） | Web 登录；delegate 按档位 |
+| | `GET /settings/retention` | 三项保留期与最近一次清理：`{"run_days", "ingest_days", "judgment_days", "defaults": {同前三项}, "last_sweep": null或{"at", "run_dirs", "run_dir_bytes", "ingest_bodies", "judgments", "skipped_in_flight": [运行 id], "error"?}}`；0 为不清理；ext 与 webhook 凭据不可读（主文档 §6.15） | observer |
+| | `PUT /settings/retention` | 改保留期：`{"run_days"?, "ingest_days"?, "judgment_days"?}`，缺的不改，至少一项；运行目录与请求体 0 或 1–3650，判断记录 0 或 30–3650，越界是 `invalid_request` 并写明范围；返回改后的三项；命令 `retention.set`，写 `retention.changed` | 只有 Web 登录 |
 | | 已有路由 /settings/model-endpoints 的新增字段 | `generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/trusted-senders` | 只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时只接受空名单（清掉以前填的、不生效的条目），非空为 400（`sender_unverifiable`）；名单为空即策略里没有这个键，Web 再次按"从未设置"预填本人（3a） | Web 登录；delegate 按档位 |
 | | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
@@ -495,6 +497,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 数据目录与备份 | 无主密钥 | `master.key`（0600）在升级后第一次启动时生成；`apa backup create` 默认带上，`--no-secrets` 不带并列入待办记录 | 恢复不带主密钥的备份时服务照常启动，连接显示要重新填写凭据 |
 | 渠道 ext 的名字 | 任意 | 不能以 `ch-` 开头（留给内置渠道连接的路由） | 已签发的密钥不受影响；新签发时拒绝这个前缀 |
 |---|---|---|---|
+| 运行目录默认保留期与清理时机 | 默认 14 天；清理在维护循环里每分钟跑 | 默认 30 天；清理在启动时跑一次，之后每天 04:10；三项保留期可在设置里改，存账本 | 默认值变更：没在 `config.yaml` 写 `run_retention_days` 的部署，到期时间由 14 天变 30 天（只是更晚删）；写了的不变；设置里改过的优先于配置。账本结构版本 9 内追加迁移（retention/1），只增 `retention_setting`、`retention_sweep` 两张表 |
 | 凭原话的第二档命令 | 只要求原话与会话引用非空 | 另要求 `X-APA-Session-Kind: direct` | 没有兼容期：缺这个头即退出码 23。harness 插件须与内核一同升级。**已取消（2026-11-20）**：本人原话与会话类型不再参与判定，见本表末行 |
 | `/settings/model-endpoints` | 一个 `model_endpoint` | `judge_endpoint`、`generate_endpoint`、顶层 `screening_timeout_ms` | 本版 `PUT` 仍接受旧形状；已存的策略版本不改写，读取时等同 `generate_endpoint` |
 | `GET /health` 的信号数 | 十一项 | 十三项，末尾追加两项 | 前十一项的 id 与顺序不变；按下标取信号的调用方不受影响，按总数断言的要改 |

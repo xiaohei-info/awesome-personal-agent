@@ -104,6 +104,8 @@ const (
 	// maintainInterval 是后台补做的间隔：重试判断失败的待跟进和未处理的入站记录、清过期 payload、补派发。
 	maintainInterval = time.Minute
 	owner            = "owner"
+	// 每天清理运行数据的时刻（本地时间）：避开整点与半点，也避开已知的重启窗口。
+	sweepHour, sweepMinute = 4, 10
 )
 
 // bundledPull 是随发行附带的拉取程序（设计 §9.1 定时拉取：GitHub、RSS/Atom、本地目录监视、通用 HTTP JSON），delegate 可以登记。
@@ -266,7 +268,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		MaxBody: cfg.MaxWebhookBody, MaxEvent: cfg.MaxSourceEvent, Retention: cfg.IngestRetention, ScriptRoot: l.Sources, OnError: logErr("webhook")}); err != nil {
 		return nil, err
 	}
-	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, Exec: x, RunRetention: cfg.RunRetention, JudgmentRetention: cfg.JudgmentRetention, KeepJudgments: cfg.JudgmentRetention == 0}); err != nil {
+	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, Exec: x, RunRetention: cfg.RunRetention, IngestRetention: cfg.IngestRetention, JudgmentRetention: cfg.JudgmentRetention, KeepJudgments: cfg.JudgmentRetention == 0}); err != nil {
 		return nil, err
 	}
 	verifyAgent, err := verify.Handler(verify.Options{Store: st, Judge: judge})
@@ -395,7 +397,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		blobs.Register(x, l.Blobs),
 		kmaterials.RegisterWith(x, ld), // 能力包声明的 material_kinds 与默认写入策略，提交时从加载器读
 		kpurge.Register(x, l.Blobs),
-		retention.Register(x, l.Blobs),
+		retention.Register(x, l.Blobs, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)),
 		hosted.RegisterWith(x, ld),
 		k.fu.Register(),
 	); err != nil {
@@ -447,7 +449,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x, st, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
@@ -606,11 +608,22 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			k.result(proc.Result{Run: r, Reason: "no live process after restart"})
 		}
 		report("webhook recover", k.wh.Recover(ctx))
+		// 清理单独计时：启动时一次，之后每天 04:10；出错只记日志，不影响下面的维护循环。
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			k.ret.Run(ctx, sweepHour, sweepMinute, clock.Changed, func(r retention.Report, err error) {
+				slog.Info("retention swept", "run_dirs", r.RunDirs, "run_dir_bytes", r.RunDirBytes, "ingest_bodies", r.IngestBodies,
+					"judgments", r.Judgments, "skipped_in_flight", len(r.SkippedInFlight))
+				if err != nil && ctx.Err() == nil { // 关停时被取消不算错
+					slog.Error("retention", "err", err)
+				}
+			})
+		}()
 		maintain := func() {
 			report("inbound", k.in.Process(ctx))
 			report("inbound rejudge", k.in.Rejudge(ctx)) // 模型恢复后重判积压、到期的转 expired（§9.3）
 			report("webhook", k.wh.Process(ctx))
-			report("retention", k.ret.Sweep(ctx))
 			report("wake receipts", k.wk.Settle(ctx, k.st, k.result)) // 补上重启前漏掉的回执，先于调度器的超时判定
 			report("dispatch", k.disp.Dispatch(ctx))
 			report("rules", k.eng.Drain(ctx))
