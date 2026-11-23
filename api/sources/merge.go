@@ -28,13 +28,14 @@ type mergeDecision struct {
 	Hint        string       `json:"hint,omitempty"`
 }
 
-// mergeBatch 是一批归类：时刻、条数、判断方、那次模型调用与送出的字数（没调模型时 run 为空）。
+// mergeBatch 是一批归类：时刻、条数、判断方、那次模型调用与送出的字数（没调模型时 run 为空）、超预算留到下一轮的条数。
 type mergeBatch struct {
 	Batch     string          `json:"batch"`
 	At        time.Time       `json:"at"`
 	Size      int             `json:"size"`
 	Run       string          `json:"run,omitempty"`
 	Chars     int             `json:"chars"`
+	Deferred  int             `json:"deferred,omitempty"`
 	Decisions []mergeDecision `json:"decisions"`
 }
 
@@ -75,7 +76,7 @@ func (a *api) mergeActivity(w http.ResponseWriter, r *http.Request, _ *core.Prin
 			batches[sw.Batch] = b
 		}
 		if sw.Run != "" && b.Run == "" {
-			b.Run, b.Chars = sw.Run, sw.Chars
+			b.Run, b.Chars, b.Deferred = sw.Run, sw.Chars, sw.Deferred
 			calls, chars = calls+1, chars+sw.Chars
 		}
 		if sw.At.After(b.At) {

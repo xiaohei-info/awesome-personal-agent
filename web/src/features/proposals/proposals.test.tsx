@@ -369,7 +369,8 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
   const activity = { days: 7, pending: 3, model_calls: 1, chars: 4200, batches: [{ batch: "mb_1", at: "2030-01-01T02:00:00Z", size: 3, run: "run_1", chars: 4200, decisions: [
     { item: "f1", title: "AgentSafe 资产确认", source: "src_wx", action: "merge", target: "m", target_title: "建议 m", why: "同一个资产编号 B18630823", by: "generate" },
     { item: "f2", title: "周报模板改版", source: "src_dx", action: "duplicate", target: "d9", target_title: "周报模板改版 W47", why: "本人忽略过的同一件事", by: "generate" },
-    { item: "f3", title: "导出报表加一列", source: "src_wx", action: "keep", why: "和账本里已有的记录比过，没有相似的", by: "rule" }] }] };
+    { item: "f3", title: "导出报表加一列", source: "src_wx", action: "keep", why: "和账本里已有的记录比过，没有相似的", by: "rule" }] },
+    { batch: "mb_2", at: "2030-01-01T01:00:00Z", size: 20, run: "run_2", chars: 5900, deferred: 9, decisions: [] }] };
   function withMerge() {
     const s = server([merged]);
     const base = s.impl;
@@ -406,6 +407,8 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
     expect(panel).toHaveTextContent("合成一条建议 1 条、判定重复 1 条、留着 1 条 · 模型调用 1 次，送出约 4200 字 · 还有 3 条等着成批");
     await userEvent.click(within(panel as HTMLElement).getByText(/最近 7 天自动归类/));
     expect(panel).toHaveTextContent("同批 3 条，一次模型调用，送出约 4200 字");
+    expect(within(panel as HTMLElement).getByText(/同批 3 条/)).not.toHaveTextContent("砍半");
+    expect(panel, "超出资料上限砍半的那批写明留到下一轮的条数").toHaveTextContent("同批 20 条，一次模型调用，送出约 5900 字；资料超出上限，这批砍半，9 条留到下一轮");
     const dup = within(panel as HTMLElement).getByRole("listitem", { name: "周报模板改版" });
     expect(dup).toHaveTextContent("判定重复 → 「周报模板改版 W47」 · 写作模型判断");
     expect(dup).toHaveTextContent("理由：本人忽略过的同一件事");

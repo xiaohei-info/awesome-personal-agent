@@ -210,7 +210,7 @@ function Sources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event
 
 interface Activity {
   days: number; pending: number; model_calls: number; chars: number;
-  batches: { batch: string; at: string; size: number; run?: string; chars: number;
+  batches: { batch: string; at: string; size: number; run?: string; chars: number; deferred?: number;
     decisions: { item: string; title: string; source?: string; action: string; target?: string; target_title?: string; why?: string; by: string }[] }[];
 }
 
@@ -238,7 +238,7 @@ function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => P
       {a.batches.map((b) => (
         <section key={b.batch} aria-label={t.batchHead(new Date(b.at).toLocaleString())}>
           <h3>{t.batchHead(new Date(b.at).toLocaleString())}</h3>
-          <p className="sub">{t.batchCost(b.size, !!b.run, b.chars)}</p>
+          <p className="sub">{t.batchCost(b.size, !!b.run, b.chars)}{b.deferred ? t.batchDeferred(b.deferred) : ""}</p>
           <ul className="rows">
             {b.decisions.filter((d) => !quiet(d)).sort((x, y) => rank(x) - rank(y)).map((d) => (
               <li key={d.item} className="act-row" aria-label={d.title}>

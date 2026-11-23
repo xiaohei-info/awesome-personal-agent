@@ -227,18 +227,20 @@ const (
 )
 
 // ProposalSweep 是一条建议在跨来源合并里的归类记录。State 为 pending（待归类）或 done。
-// By 是判断方：generate（写作模型）或 rule（规则，没有调模型）。Run 是本批那次模型调用的 run id，Size 与 Chars 是同批条数与送出字数。
+// By 是判断方：generate（写作模型）或 rule（规则，没有调模型）。Run 是本批那次模型调用的 run id，Size 与 Chars 是同批条数与送出字数；
+// Deferred 是本批因资料超出预算、砍半后留到下一轮的条数（0 为没砍半）。
 type ProposalSweep struct {
-	State  string     `json:"state"`
-	Batch  string     `json:"batch,omitempty"`
-	Action string     `json:"action,omitempty"`
-	Target string     `json:"target,omitempty"`
-	Why    string     `json:"why,omitempty"`
-	By     string     `json:"by,omitempty"`
-	Run    string     `json:"run,omitempty"`
-	Size   int        `json:"size,omitempty"`
-	Chars  int        `json:"chars,omitempty"`
-	At     *time.Time `json:"at,omitempty"`
+	State    string     `json:"state"`
+	Batch    string     `json:"batch,omitempty"`
+	Action   string     `json:"action,omitempty"`
+	Target   string     `json:"target,omitempty"`
+	Why      string     `json:"why,omitempty"`
+	By       string     `json:"by,omitempty"`
+	Run      string     `json:"run,omitempty"`
+	Size     int        `json:"size,omitempty"`
+	Chars    int        `json:"chars,omitempty"`
+	Deferred int        `json:"deferred,omitempty"`
+	At       *time.Time `json:"at,omitempty"`
 }
 
 // Folded 为真表示这条建议被归类折叠进了别处（并入、合并或判定重复），且没有被撤销。

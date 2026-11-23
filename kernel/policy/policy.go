@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"slices"
@@ -179,14 +180,16 @@ const (
 )
 
 // MergeSettings 是跨来源合并任务本身的设置（§9.3）。零值即默认：全部来源参与、纳入已有事项与被忽略记录、
-// 攒够 20 条或最早一条等了 30 分钟成批、用内置提示词。用排除名单而不是勾选名单，以后新接的来源默认参与。
+// 攒够 20 条或最早一条等了 30 分钟成批、一批资料至多 DefaultMergeBudgetTokens、用内置提示词。用排除名单而不是勾选名单，以后新接的来源默认参与。
 type MergeSettings struct {
-	ExcludeSources []string   `json:"exclude_sources"`
-	SkipExisting   bool       `json:"skip_existing"`
-	BatchSize      int        `json:"batch_size"`   // 0 取默认
-	WaitMinutes    int        `json:"wait_minutes"` // 0 取默认
-	Prompt         string     `json:"prompt"`       // 空串用内置提示词
-	PromptAt       *time.Time `json:"prompt_at,omitempty"`
+	ExcludeSources []string `json:"exclude_sources"`
+	SkipExisting   bool     `json:"skip_existing"`
+	BatchSize      int      `json:"batch_size"`   // 0 取默认
+	WaitMinutes    int      `json:"wait_minutes"` // 0 取默认
+	// BudgetTokens 是一批打包给模型的资料上限（按 MergeCharsPerToken 估算的 token）；没有这个键取默认，给了就必须在范围内（0 也拒绝）。
+	BudgetTokens *int       `json:"budget_tokens,omitempty"`
+	Prompt       string     `json:"prompt"` // 空串用内置提示词
+	PromptAt     *time.Time `json:"prompt_at,omitempty"`
 }
 
 // 合并批量参数的默认值与范围。
@@ -194,6 +197,15 @@ const (
 	DefaultMergeBatch = 20
 	DefaultMergeWait  = 30
 	MaxMergePrompt    = 8000
+
+	// MergeCharsPerToken 是合并资料的 token 估算系数：每这么多个字符记 1 个 token（向上取整）。
+	// 写作模型由本人配置、分词各家不同，内核不带 tokenizer，按这个明写的系数估算（§9.3）。
+	MergeCharsPerToken = 1.5
+	// DefaultMergeBudgetTokens 与改动前借用的写作预算 24000 字等价：24000 ÷ 1.5 = 16000。
+	DefaultMergeBudgetTokens = 16000
+	// MinMergeBudgetTokens 装得下一条新建议带满 5 条候选（标题、摘要各按上限）；MaxMergeBudgetTokens 是默认的 4 倍，防单次调用成本失控。
+	MinMergeBudgetTokens = 2000
+	MaxMergeBudgetTokens = 64000
 )
 
 // MergePromptSections 是合并提示词必须有的段落；MergeActions 是提示词必须写到的结论词（输出结构只认这四个）。
@@ -207,6 +219,17 @@ func (m MergeSettings) Batch() int { return cmp.Or(m.BatchSize, DefaultMergeBatc
 func (m MergeSettings) Wait() time.Duration {
 	return time.Duration(cmp.Or(m.WaitMinutes, DefaultMergeWait)) * time.Minute
 }
+
+// Budget 是生效的资料上限（估算 token，未设取默认）。
+func (m MergeSettings) Budget() int {
+	if m.BudgetTokens == nil {
+		return DefaultMergeBudgetTokens
+	}
+	return *m.BudgetTokens
+}
+
+// MergeTokens 按 MergeCharsPerToken 把字符数估成 token 数，向上取整。
+func MergeTokens(chars int) int { return int(math.Ceil(float64(chars) / MergeCharsPerToken)) }
 
 // Includes 报告来源是否参与合并。没有来源的记录（本人或 Agent 直接建的）总是参与。
 func (m MergeSettings) Includes(source string) bool {
@@ -607,6 +630,9 @@ func normalize(p Policy) (Policy, error) {
 	}
 	if m := p.Merge; m.WaitMinutes != 0 && (m.WaitMinutes < 5 || m.WaitMinutes > 1440) {
 		return p, invalid("merge wait_minutes %d: use 5 to 1440", m.WaitMinutes)
+	}
+	if b := p.Merge.BudgetTokens; b != nil && (*b < MinMergeBudgetTokens || *b > MaxMergeBudgetTokens) {
+		return p, invalid("merge budget_tokens %d: use %d to %d", *b, MinMergeBudgetTokens, MaxMergeBudgetTokens)
 	}
 	if err := CheckMergePrompt(p.Merge.Prompt); err != nil {
 		return p, err

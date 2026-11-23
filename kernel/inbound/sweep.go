@@ -93,17 +93,18 @@ func markPending(tx *store.Tx, p *domain.Proposal, source string) error {
 
 // sweepIn 是一条归类结论。
 type sweepIn struct {
-	Item   string  `json:"item"`
-	Batch  string  `json:"batch"`
-	Action string  `json:"action"`
-	Target string  `json:"target,omitempty"`
-	Why    string  `json:"why"`
-	By     string  `json:"by"`
-	Run    string  `json:"run,omitempty"`
-	Size   int     `json:"size,omitempty"`
-	Chars  int     `json:"chars,omitempty"`
-	Hint   string  `json:"hint,omitempty"` // 拿不准时可能相同的那条
-	Score  float64 `json:"score,omitempty"`
+	Item     string  `json:"item"`
+	Batch    string  `json:"batch"`
+	Action   string  `json:"action"`
+	Target   string  `json:"target,omitempty"`
+	Why      string  `json:"why"`
+	By       string  `json:"by"`
+	Run      string  `json:"run,omitempty"`
+	Size     int     `json:"size,omitempty"`
+	Chars    int     `json:"chars,omitempty"`
+	Deferred int     `json:"deferred,omitempty"` // 超预算砍半后留到下一轮的条数
+	Hint     string  `json:"hint,omitempty"`     // 拿不准时可能相同的那条
+	Score    float64 `json:"score,omitempty"`
 }
 
 // Sweep 是维护循环的一步：结清不该归类的待归类建议，攒够一批就跑一批。一次至多跑一批。
@@ -303,7 +304,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, locality stri
 		}
 		return string(r)
 	}
-	budget := pol.GenerateEndpoint.MaterialBudget()
+	budget, total := pol.Merge.Budget(), len(ask)
 	var text string
 	var input map[string]any
 	for {
@@ -356,7 +357,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, locality stri
 			news = append(news, refs[m])
 		}
 		text, input = b.String(), map[string]any{"new": news, "candidates": cands, "today": s.o.Now().In(time.Local).Format("2006-01-02")}
-		if len([]rune(text)) <= budget || len(ask) == 1 {
+		if policy.MergeTokens(len([]rune(text))) <= budget || len(ask) == 1 {
 			for r, ref := range refs {
 				r.ref = ref
 			}
@@ -388,7 +389,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, locality stri
 	folded := map[string]sweepIn{} // 同批里已折叠的：并到它的跟着它走
 	var res []sweepIn
 	for _, m := range ask {
-		v := sweepIn{Item: m.it.ID, Batch: id, Action: domain.SweepKeep, By: "generate", Run: run, Size: size, Chars: chars, Why: "模型没有给这条结论，留着"}
+		v := sweepIn{Item: m.it.ID, Batch: id, Action: domain.SweepKeep, By: "generate", Run: run, Size: size, Chars: chars, Deferred: total - len(ask), Why: "模型没有给这条结论，留着"}
 		for _, d := range x.Decisions {
 			if d.New != m.ref {
 				continue
@@ -505,7 +506,7 @@ func registerSweep(x *command.Executor) error {
 				}
 			}
 			at := c.Now()
-			sw := domain.ProposalSweep{State: "done", Batch: v.Batch, Action: v.Action, Target: v.Target, Why: v.Why, By: v.By, Run: v.Run, Size: v.Size, Chars: v.Chars, At: &at}
+			sw := domain.ProposalSweep{State: "done", Batch: v.Batch, Action: v.Action, Target: v.Target, Why: v.Why, By: v.By, Run: v.Run, Size: v.Size, Chars: v.Chars, Deferred: v.Deferred, At: &at}
 			p := *it.Proposal
 			p.Sweep = &sw
 			if v.Action == domain.SweepKeep {

@@ -1,6 +1,7 @@
 package inbound
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -236,6 +237,65 @@ func TestMergeBatchSettings(t *testing.T) {
 		if strings.Contains(r.BodyText, batchMark) && !strings.Contains(r.BodyText, "自定义标记XYZ") {
 			t.Fatal("the owner's prompt must be sent")
 		}
+	}
+	e.verify()
+}
+
+// 资料上限（merge.budget_tokens）：同样 20 条，默认上限一次归完；改小到 2000 token 后超出，这批砍半，
+// 前一半落账并记下留到下一轮的条数，后一半仍待归类、下一轮归完；每次送出的资料都不超过上限。
+func TestMergeBatchBudgetHalves(t *testing.T) {
+	run := func(budget *int) *env {
+		e := newEnv(t, true)
+		e.svc.o.Now = e.Now
+		e.openItem("资产确认 B18630823")
+		e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 20; p.Merge.BudgetTokens = budget })
+		e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[]}`})
+		long := strings.Repeat("需要本人确认的资产信息与负责人说明", 6) // 标题按上限 120 字送出
+		for i := range 20 {
+			e.now = e.now.Add(time.Second)
+			e.emit(fmt.Sprintf("src_%02d", i), "ticket", ev(fmt.Sprintf("b%02d", i), "ticket.opened", fmt.Sprintf("%02d %s B18630823", i, long), nil))
+		}
+		if err := e.svc.Sweep(bg); err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	tally := func(e *env) (done, pending, deferred, chars int) {
+		for _, it := range e.proposed() {
+			switch sw := it.Proposal.Sweep; {
+			case sw == nil:
+			case sw.State == "pending":
+				pending++
+			default:
+				done++
+				deferred, chars = max(deferred, sw.Deferred), max(chars, sw.Chars)
+			}
+		}
+		return
+	}
+
+	e := run(nil)
+	done, pending, deferred, chars := tally(e)
+	if e.batchCalls() != 1 || done != 20 || pending != 0 || deferred != 0 || policy.MergeTokens(chars) > policy.DefaultMergeBudgetTokens {
+		t.Fatalf("default budget: calls %d, done %d, pending %d, deferred %d, %d chars", e.batchCalls(), done, pending, deferred, chars)
+	}
+	full := chars
+
+	small := policy.MinMergeBudgetTokens
+	e = run(&small)
+	done, pending, deferred, chars = tally(e)
+	if policy.MergeTokens(full) <= small {
+		t.Fatalf("the full batch (%d chars) must be over %d tokens for this test", full, small)
+	}
+	if e.batchCalls() != 1 || done != 10 || pending != 10 || deferred != 10 || chars == 0 || policy.MergeTokens(chars) > small {
+		t.Fatalf("over budget halves: calls %d, done %d, pending %d, deferred %d, %d chars", e.batchCalls(), done, pending, deferred, chars)
+	}
+	e.now = e.now.Add(31 * time.Minute) // 余下的不够一批，等满时间成批
+	if err := e.svc.Sweep(bg); err != nil {
+		t.Fatal(err)
+	}
+	if done, pending, _, _ = tally(e); e.batchCalls() != 2 || done != 20 || pending != 0 {
+		t.Fatalf("the rest goes next round: calls %d, done %d, pending %d", e.batchCalls(), done, pending)
 	}
 	e.verify()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -600,6 +601,32 @@ func TestOpenURLMatchesWebPreview(t *testing.T) {
 		p := Policy{NoteVaults: []NoteVault{{Name: c.Vault, OpenURL: c.Template}}}
 		if got := p.OpenURL(c.Vault, c.Path); got != c.Want {
 			t.Errorf("%q in %q: got %q, want %q", c.Path, c.Vault, got, c.Want)
+		}
+	}
+}
+
+// 合并的资料上限（budget_tokens）：没设过取默认，默认与改动前借用的写作预算等价；0、负数、过小、过大都拒绝并给出范围，不截到边界。
+func TestMergeBudgetTokens(t *testing.T) {
+	p := Default()
+	if p.Merge.BudgetTokens != nil || p.Merge.Budget() != DefaultMergeBudgetTokens {
+		t.Fatalf("default budget: %v %d", p.Merge.BudgetTokens, p.Merge.Budget())
+	}
+	if MergeTokens(DefaultGenerateMaxMaterialChars) != DefaultMergeBudgetTokens || MergeTokens(DefaultGenerateMaxMaterialChars+1) != DefaultMergeBudgetTokens+1 {
+		t.Fatalf("default must equal the old %d-character budget at %.1f characters per token", DefaultGenerateMaxMaterialChars, MergeCharsPerToken)
+	}
+	for _, n := range []int{0, -1, MinMergeBudgetTokens - 1, MaxMergeBudgetTokens + 1} {
+		p := Default()
+		p.Merge.BudgetTokens = &n
+		_, err := normalize(p)
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), fmt.Sprintf("use %d to %d", MinMergeBudgetTokens, MaxMergeBudgetTokens)) {
+			t.Errorf("budget %d: %v", n, err)
+		}
+	}
+	for _, n := range []int{MinMergeBudgetTokens, MaxMergeBudgetTokens} {
+		p := Default()
+		p.Merge.BudgetTokens = &n
+		if q, err := normalize(p); err != nil || q.Merge.Budget() != n {
+			t.Errorf("budget %d: %v", n, err)
 		}
 	}
 }

@@ -52,7 +52,12 @@ describe("设置 › 跨来源合并", () => {
     await waitFor(() => expect(src.getByLabelText("微信")).toBeChecked());
     expect(src.getByLabelText("大象")).toBeChecked();
     expect((await card("和哪些已有记录比")).getByRole("checkbox")).toBeChecked();
-    expect((await card("多久跑一批")).getByLabelText("攒够几条")).toHaveValue(20);
+    const batch = await card("批量参数");
+    expect(batch.getByLabelText("攒够几条")).toHaveValue(20);
+    expect(batch.getByLabelText("一批资料上限（token）")).toHaveValue(16000);
+    expect(batch.getByRole("note")).toHaveTextContent("一批打包给模型的资料上限：超了就把这批砍半，余下的留到下一轮");
+    expect(batch.getByRole("note")).toHaveTextContent("按约 1.5 个字符 ≈ 1 token 估算（不调用 tokenizer）");
+    expect(batch.getByRole("note")).toHaveTextContent("默认 16000（约合原先的 24000 字），可填 2000 到 64000");
     const p = await card("合并提示词");
     expect(p.getByRole("note")).toHaveTextContent("现在用的是内置默认");
     await waitFor(() => expect(p.getByLabelText("提示词正文")).toHaveValue(BUILTIN));
@@ -94,6 +99,30 @@ describe("设置 › 跨来源合并", () => {
     await waitFor(() => expect(s.puts.at(-1).merge.prompt).toBe(""));
     expect(await p.findByText("已恢复内置默认")).toBeInTheDocument();
     expect(box).toHaveValue(BUILTIN);
+  });
+
+  it("一批资料上限：改成 8000 随整段 merge 保存；改回默认不带这个键；0、负数、过小、过大、小数、空都不保存并写明范围", async () => {
+    const s = server({ exclude_sources: ["src_mail"], skip_existing: false, batch_size: 10, wait_minutes: 0, prompt: "" });
+    mount(s.impl);
+    const batch = await card("批量参数");
+    const box = batch.getByLabelText("一批资料上限（token）");
+    for (const bad of ["0", "-1", "1999", "64001", "2500.5", ""]) {
+      await userEvent.clear(box);
+      if (bad) await userEvent.type(box, bad);
+      await saveIn("批量参数");
+      expect(await batch.findByRole("alert"), bad).toHaveTextContent("资料上限填 2000 到 64000 之间的整数（token）");
+    }
+    expect(s.puts).toHaveLength(0);
+    await userEvent.clear(box);
+    await userEvent.type(box, "8000");
+    await saveIn("批量参数");
+    await waitFor(() => expect(s.puts.at(-1)).toEqual({ merge: { exclude_sources: ["src_mail"], skip_existing: false, batch_size: 10, wait_minutes: 0, budget_tokens: 8000, prompt: "" } }));
+    await waitFor(() => expect(box).toHaveValue(8000));
+    await userEvent.clear(box);
+    await userEvent.type(box, "16000");
+    await saveIn("批量参数");
+    await waitFor(() => expect(s.puts).toHaveLength(2));
+    expect(s.puts.at(-1).merge).not.toHaveProperty("budget_tokens");
   });
 
   it("关闭合并：只发 merge_judge", async () => {
