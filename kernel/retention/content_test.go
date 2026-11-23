@@ -25,7 +25,7 @@ const rawBody = "RAW-BODY-MARKER"
 func newContentEnv(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t, 30*24*time.Hour, 14*24*time.Hour)
-	for _, err := range []error{Register(e.x, e.lay.Blobs), registry.Register(e.x, registry.Options{Declared: func(s domain.Source) string { return "src " + s.ID }}), items.Register(e.x, items.NewKinds()), blobs.Register(e.x, e.lay.Blobs)} {
+	for _, err := range []error{registry.Register(e.x, registry.Options{Declared: func(s domain.Source) string { return "src " + s.ID }}), items.Register(e.x, items.NewKinds()), blobs.Register(e.x, e.lay.Blobs)} {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +298,7 @@ func TestSweepIncludesSourceContent(t *testing.T) {
 	e.source("src_a", 1)
 	sid := e.event("src_a", "m", domain.DispositionIgnored, "", "")
 	e.now = e.now.Add(48 * time.Hour)
-	if err := e.svc.Sweep(bg); err != nil {
+	if _, err := e.svc.Sweep(bg); err != nil {
 		t.Fatal(err)
 	}
 	if st, _, _ := e.content(sid); st != runner.StatePurged {

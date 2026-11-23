@@ -44,8 +44,8 @@ type ContentResult struct {
 	BlobsRemoved []string `json:"blobs_removed,omitempty"`
 }
 
-// Register 登记 retention.purge_content；blobDir 是 <APA_HOME>/blobs。
-func Register(x *command.Executor, blobDir string) error {
+// registerContent 登记 retention.purge_content；blobDir 是 <APA_HOME>/blobs。
+func registerContent(x *command.Executor, blobDir string) error {
 	return x.Register(command.Spec{
 		Name: CmdPurgeContent, Action: authz.ActionUpdateOwn,
 		Object: func(_ *store.Tx, raw json.RawMessage) (authz.Object, error) {

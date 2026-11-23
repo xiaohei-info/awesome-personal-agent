@@ -70,7 +70,7 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 	if c.MaxSubprocesses != 4 || c.MaxShortSubprocesses != 2 {
 		t.Fatal("quota defaults")
 	}
-	if c.IngestRetention != 30*24*time.Hour || c.RunRetention != 14*24*time.Hour {
+	if c.IngestRetention != 30*24*time.Hour || c.RunRetention != 30*24*time.Hour {
 		t.Fatal("retention defaults")
 	}
 	// 设计 §6.9：无人领取 30 分钟；失败退避 1、3、7、15、30 分钟。

@@ -4,6 +4,7 @@ package ledgerfixture
 
 import (
 	"fmt"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
@@ -52,7 +53,7 @@ var Modules = []store.Module{eventlog.Module, auth.Module, policy.Module, comman
 	delivery.Module, attention.Module, proc.Module, direct.Module, task.Module, followup.Module, rules.Module,
 	instances.Module, sregistry.Module, runner.Module, webhook.Module, channel.Module,
 	materials.Module, hosted.Module, search.Module, guideline.Module, agentsmd.Module, background.Module, chain.Module,
-	khealth.Module, kdoctor.Module, resume.Module, wake.Module, summaries.Module, connections.Module, secrets.Module}
+	khealth.Module, kdoctor.Module, resume.Module, wake.Module, summaries.Module, connections.Module, secrets.Module, retention.Module}
 
 // Latest 是主干当前登记的最高账本结构版本（发布物 schema.ledger）。
 func Latest() (int, error) {

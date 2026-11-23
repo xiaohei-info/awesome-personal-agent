@@ -212,6 +212,8 @@
 | | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
 | | `GET/PUT /settings/note-vaults` | 笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15） | 只有 Web 登录 |
+| | `GET /settings/retention` | 三项保留期与最近一次清理：`{"run_days", "ingest_days", "judgment_days", "defaults": {同前三项}, "last_sweep": null或{"at", "run_dirs", "run_dir_bytes", "ingest_bodies", "judgments", "skipped_in_flight": [运行 id], "error"?}}`；0 为不清理；ext 与 webhook 凭据不可读（主文档 §6.15） | observer |
+| | `PUT /settings/retention` | 改保留期：`{"run_days"?, "ingest_days"?, "judgment_days"?}`，缺的不改，至少一项；运行目录与请求体 0 或 1–3650，判断记录 0 或 30–3650，越界是 `invalid_request` 并写明范围；返回改后的三项；命令 `retention.set`，写 `retention.changed` | 只有 Web 登录 |
 | | 已有路由 POST /settings/grants 的新增请求体 | `actions` 为 `["import.apply"]` 时须带 `import: {"source", "max_records"}` 与不超过 7 天的 `expires_at`，不得带 `background`；`actions` 可含 `item.progress` | 只有 Web 登录 |
 | | 已有路由 /settings/model-endpoints 的新增字段 | `generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/trusted-senders` | 只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时只接受空名单（清掉以前填的、不生效的条目），非空为 400（`sender_unverifiable`）；名单为空即策略里没有这个键，Web 再次按"从未设置"预填本人 | 只有 Web 登录 |
@@ -423,7 +425,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `apa version` 与 `GET /version` 返回同一份内容：
 
 ```json
-{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 8}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
+{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 9}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
 `commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 8（版本 7 新增连接与凭据保管的三张表，已冻结）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。工作台能力迭代的全部结构变更收在一次迁移里，已合入，主干为 8（主文档 §16.5）；结构版本 8 在第一次被真实账本应用后冻结。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
@@ -439,6 +441,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 数据目录与备份 | 无主密钥 | `master.key`（0600）在升级后第一次启动时生成；`apa backup create` 默认带上，`--no-secrets` 不带并列入待办记录 | 恢复不带主密钥的备份时服务照常启动，连接显示要重新填写凭据 |
 | 渠道 ext 的名字 | 任意 | 不能以 `ch-` 开头（留给内置渠道连接的路由） | 已签发的密钥不受影响；新签发时拒绝这个前缀 |
 |---|---|---|---|
+| 运行目录默认保留期与清理时机 | 默认 14 天；清理在维护循环里每分钟跑 | 默认 30 天；清理在启动时跑一次，之后每天 04:10；三项保留期可在设置里改，存账本 | 默认值变更：没在 `config.yaml` 写 `run_retention_days` 的部署，到期时间由 14 天变 30 天（只是更晚删）；写了的不变；设置里改过的优先于配置。账本结构版本 8 → 9：只增 `retention_setting`、`retention_sweep` 两张表 |
 | 凭原话的第二档命令 | 只要求原话与会话引用非空 | 另要求 `X-APA-Session-Kind: direct` | 没有兼容期：缺这个头即退出码 23。harness 插件须与内核一同升级 |
 | `/settings/model-endpoints` | 一个 `model_endpoint` | `judge_endpoint`、`generate_endpoint`、顶层 `screening_timeout_ms` | 本版 `PUT` 仍接受旧形状；已存的策略版本不改写，读取时等同 `generate_endpoint` |
 | `GET /health` 的信号数 | 十一项 | 十三项，末尾追加两项 | 前十一项的 id 与顺序不变；按下标取信号的调用方不受影响，按总数断言的要改 |

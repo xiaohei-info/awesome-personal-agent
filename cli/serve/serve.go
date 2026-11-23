@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"io"
 	"net"
 	"os"
@@ -62,7 +63,7 @@ func registry() (*store.Registry, error) {
 		kprojects.Module, clock.Module, kitems.Module, core.Module, kcontext.Module, delegation.Module, executors.Module,
 		delivery.Module, attention.Module, proc.Module, direct.Module, task.Module, followup.Module, rules.Module,
 		instances.Module, sregistry.Module, runner.Module, webhook.Module, channel.Module,
-		materials.Module, hosted.Module, search.Module, guideline.Module, agentsmd.Module, background.Module, chain.Module, khealth.Module, kdoctor.Module, resume.Module, wake.Module, summaries.Module, connections.Module, secrets.Module} {
+		materials.Module, hosted.Module, search.Module, guideline.Module, agentsmd.Module, background.Module, chain.Module, khealth.Module, kdoctor.Module, resume.Module, wake.Module, summaries.Module, connections.Module, secrets.Module, retention.Module} {
 		if err := reg.Register(m); err != nil {
 			return nil, err
 		}
