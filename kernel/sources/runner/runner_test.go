@@ -1019,3 +1019,44 @@ func TestClassifyKeepsStderrTail(t *testing.T) {
 		}
 	}
 }
+
+// 来源失败的提醒线按机会周期分（§7.4）：拉取周期不超过重试封顶的高频来源连续临时失败到第 3 次才记 streak；
+// 失败时声明 chance_period 超过封顶的（每天一次的内容），失败一次就记；声明不合法按拉取周期。
+func TestStreakLineFollowsChancePeriod(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_hi", e.script("hi.sh", `echo 'net down' >&2; exit 1`), nil)
+	e.register("src_daily", e.script("daily.sh", `echo '{"chance_period":"24h"}'; echo 'topic missed' >&2; exit 1`), nil)
+	e.register("src_bad", e.script("bad.sh", `echo '{"chance_period":"soon"}'; exit 1`), nil)
+	e.r.Sync(bg)
+	streaks := func(id string) int64 {
+		return e.count(`SELECT COUNT(*) FROM eventlog_event WHERE object = ? AND type = ? AND json_extract(payload, '$.kind') = 'streak'`, id, domain.EvSourceFailed)
+	}
+	e.tick(3)
+	if a, b, c := streaks("src_hi"), streaks("src_daily"), streaks("src_bad"); a != 0 || b != 1 || c != 0 {
+		t.Fatalf("after 1 failure: hi=%d daily=%d bad=%d, want 0 1 0", a, b, c)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM eventlog_event WHERE object = 'src_daily' AND json_extract(payload, '$.chance_period') = '24h'`); n != 1 {
+		t.Fatalf("daily streak event without chance_period: %d", n)
+	}
+	for i := 0; i < 2; i++ { // 退避跳拍：每次推进一小时，保证三条都到期
+		e.advance(time.Hour)
+		e.tick(3)
+	}
+	if a, b, c := streaks("src_hi"), streaks("src_daily"), streaks("src_bad"); a != 1 || b != 3 || c != 1 {
+		t.Fatalf("after 3 failures: hi=%d daily=%d bad=%d, want 1 3 1", a, b, c)
+	}
+}
+
+func TestAlertAfterBoundary(t *testing.T) {
+	for _, c := range []struct {
+		d    time.Duration
+		want int
+	}{{10 * time.Minute, 3}, {LowFrequencyOver, 3}, {LowFrequencyOver + time.Minute, 1}, {24 * time.Hour, 1}} {
+		if got := AlertAfter(c.d); got != c.want {
+			t.Errorf("AlertAfter(%v) = %d, want %d", c.d, got, c.want)
+		}
+	}
+	if !AlertNow(1, "60m", "24h") || AlertNow(1, "60m", "") || !AlertNow(1, "25h", "") || !AlertNow(3, "10m", "") || AlertNow(2, "10m", "bogus") {
+		t.Fatal("AlertNow")
+	}
+}

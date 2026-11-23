@@ -84,6 +84,39 @@ func TestPushSourceFailingOncePerStreak(t *testing.T) {
 	}
 }
 
+// 低频来源失败一次就推（runner.AlertNow），文字说明为什么不等连续三次；同一串的下一次失败不再推第二条。
+func TestPushLowFrequencySourceOnFirstFailure(t *testing.T) {
+	e := setup(t)
+	last := t0.Add(-time.Hour)
+	p := NewPusher(e.att())
+	e.push(p)
+	e.source("src_dx", true, runner.Stats{ConsecutiveFailures: 1, LastSuccessAt: last})
+	e.event(domain.EvSourceFailed, "src_dx", "", map[string]any{"kind": "streak", "chance_period": "24h"})
+	e.push(p)
+	var title, summary string
+	e.update(func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT json_extract(content, '$.title'), json_extract(content, '$.summary') FROM delivery_delivery`)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			if err := r.Scan(&title, &summary); err != nil {
+				return err
+			}
+		}
+		return r.Err()
+	})
+	if want := "来源「src_dx」这次没读到"; title != want || summary != "这类内容每 24h 才有一次机会，所以失败一次就提醒。去来源页看失败原因；常见是本机工具没在跑或网络不通。" {
+		t.Fatalf("title %q summary %q", title, summary)
+	}
+	e.event(domain.EvSourceFailed, "src_dx", "", map[string]any{"kind": "streak", "chance_period": "24h"}) // 同一串的下一次失败
+	e.push(p)
+	if n, ids := e.deliveries(); n != 1 || ids[0] != fmt.Sprintf("push:source:src_dx:%d:fail", last.Unix()) {
+		t.Fatalf("one push per streak: %v", ids)
+	}
+}
+
 // 新建议攒多了：默认关；打开后攒够 Min 条推一次，冷却期内不再推。
 func TestPushNewProposalsThresholdAndCooldown(t *testing.T) {
 	e := setup(t)

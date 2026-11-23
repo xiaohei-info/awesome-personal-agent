@@ -127,7 +127,7 @@ type Disturb struct {
 	RemindOnDeadline bool              `json:"remind_on_deadline"`
 	// DailyCap 是每个自然日经渠道推到本人面前的提醒上限，0 不限（§7.4）；DefaultDailyCap 是缺省，旧版本策略文档没有此键时也取它。
 	DailyCap int `json:"daily_cap"`
-	// Mutes 按来源、项目或事项静音；到期（Until）后自动恢复。只在 Web 改。
+	// Mutes 按来源、项目或事项静音，或范围 all 暂停所有提醒；到期（Until）后自动恢复。只在 Web 改。
 	Mutes []Mute `json:"mutes"`
 	// Push 是"推送哪些事"的逐类开关（§7.4）：键为 PushCategories 之一；缺的类别取 PushDefaults。
 	// 旧版本策略文档没有此键，读作全部取默认。
@@ -302,9 +302,11 @@ const (
 	MuteSource  = "source"
 	MuteProject = "project"
 	MuteItem    = "item"
+	// MuteAll 是"暂停所有提醒"（设置 › 提醒与推送的总开关）：ID 为空；健康类也一并只留今天页，问题照样进等你决定。
+	MuteAll = "all"
 )
 
-// Mute 是一条静音：ID 为来源、项目或事项 id；Until 为空表示不到期。
+// Mute 是一条静音：ID 为来源、项目或事项 id（范围 all 时为空）；Until 为空表示不到期。
 type Mute struct {
 	Scope string     `json:"scope"`
 	ID    string     `json:"id"`
@@ -726,8 +728,14 @@ func normalize(p Policy) (Policy, error) {
 		p.Disturb.Mutes = []Mute{}
 	}
 	for i, m := range p.Disturb.Mutes {
+		if m.Scope == MuteAll {
+			if m.ID != "" {
+				return p, invalid("disturb mute %d: scope all takes no id", i)
+			}
+			continue
+		}
 		if !oneOf(m.Scope, MuteSource, MuteProject, MuteItem) || strings.TrimSpace(m.ID) == "" {
-			return p, invalid("disturb mute %d needs scope source|project|item and a non-empty id", i)
+			return p, invalid("disturb mute %d needs scope source|project|item and a non-empty id, or scope all without id", i)
 		}
 	}
 	if p.Disturb.MergeWindowSec < 0 {

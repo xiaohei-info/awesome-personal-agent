@@ -142,13 +142,14 @@ func (p *Pusher) notice(tx *store.Tx, pol policy.Policy, e domain.Event, fresh *
 	return attention.Notice{}, false, nil
 }
 
-// sourcePush：连续失败（第 3 次）、认证或配置失败、永久失败。同一串失败只推一次：投递 id 带上一次成功的时刻；
+// sourcePush：连续失败到提醒线（高频第 3 次，低频第 1 次，runner.AlertNow）、认证或配置失败、永久失败。同一串失败只推一次：投递 id 带上一次成功的时刻；
 // 来源已经恢复的不再推。
 func sourcePush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Notice, bool, error) {
 	r := pol.Disturb.PushRuleFor(policy.PushSourceFailing)
 	var pl struct {
 		Kind   string `json:"kind"`
 		Reason string `json:"reason"`
+		Chance string `json:"chance_period"`
 	}
 	if !r.On || json.Unmarshal(e.Payload, &pl) != nil {
 		return attention.Notice{}, false, nil
@@ -163,6 +164,11 @@ func sourcePush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Noti
 	}
 	name := orElse(src.Name, src.ID)
 	title, step := "来源「"+name+"」连续失败", "去来源页看失败原因；常见是本机工具没在跑或网络不通。"
+	summary := fmt.Sprintf("已连续失败 %d 次。", st.ConsecutiveFailures)
+	if pl.Kind == "streak" && st.ConsecutiveFailures < runner.StreakFailures { // 低频：失败一次就提醒
+		title = "来源「" + name + "」这次没读到"
+		summary = "这类内容每 " + orElse(pl.Chance, src.Schedule) + " 才有一次机会，所以失败一次就提醒。"
+	}
 	switch pl.Kind {
 	case "auth_or_config":
 		title, step = "来源「"+name+"」要重新登录或改配置", "去来源页按提示重新登录或补全配置，修好之前它不会再读到新内容。"
@@ -174,7 +180,7 @@ func sourcePush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Noti
 		suffix = "off"
 	}
 	return attention.Notice{ID: fmt.Sprintf("push:source:%s:%d:%s", src.ID, st.LastSuccessAt.Unix(), suffix), Item: src.ID, Class: domain.DeliveryHealth,
-		Content: domain.DeliveryContent{Title: title, Summary: fmt.Sprintf("已连续失败 %d 次。%s", st.ConsecutiveFailures, step), WebURL: "/sources/" + src.ID}}, true, nil
+		Content: domain.DeliveryContent{Title: title, Summary: summary + step, WebURL: "/sources/" + src.ID}}, true, nil
 }
 
 // runPush：任务型与后台运行失败或超时。模板型（简报、例行任务）归"简报或定时任务没出来"，其余归"Agent 运行失败"；

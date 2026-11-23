@@ -162,6 +162,35 @@ func TestMutes(t *testing.T) {
 	}
 }
 
+// 暂停所有提醒（范围 all）：决策、提醒、简报、注入与唤醒路由、健康类都只留 Web 未读；内部唤醒类不受影响；到期恢复。
+func TestPauseAll(t *testing.T) {
+	e := newEnv(t, Options{})
+	until := e.now.Add(time.Hour)
+	pol := capPolicy(0, policy.Mute{Scope: policy.MuteAll, Until: &until})
+	for _, c := range []struct {
+		id    string
+		class domain.DeliveryClass
+		route string
+		muted bool
+	}{
+		{"dec", domain.DeliveryDecision, "channel:x", true},
+		{"rem", domain.DeliveryReminder, RouteInject, true},
+		{"brief", domain.DeliveryBrief, "wake:agt_1", true},
+		{"health", domain.DeliveryHealth, "channel:x", true},
+		{"wake", domain.DeliveryWake, "wake:agt_1", false},
+		{"web", domain.DeliveryReminder, RouteWeb, false},
+	} {
+		d := e.gated(pol, c.id, "i-"+c.id, c.class, c.route, Target{})
+		if want := map[bool]string{true: SuppressedMuted, false: ""}[c.muted]; d.Suppressed != want || (c.muted && d.Route != RouteWeb) || (!c.muted && d.Route != c.route) {
+			t.Fatalf("%s: suppressed=%q route=%s want muted=%v", c.id, d.Suppressed, d.Route, c.muted)
+		}
+	}
+	e.now = until
+	if d := e.gated(pol, "after", "i-after", domain.DeliveryHealth, "channel:x", Target{}); d.Suppressed != "" || d.Route != "channel:x" {
+		t.Fatalf("pause must end at until: %+v", d)
+	}
+}
+
 // 静音的提醒不占日上限额度；被静音压的也不触发超限说明。
 func TestMutedDoesNotConsumeCap(t *testing.T) {
 	e := newEnv(t, Options{})

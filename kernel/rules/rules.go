@@ -111,6 +111,27 @@ func Classes(src PackSource) map[string]string {
 	return out
 }
 
+// ReminderProducers 返回当前已加载能力包里自带提醒的规则键（§7.4 投递矩阵的两行）：timers 是带 create_timer 动作的
+// （到期为"规则设的提醒"），alerts 是 then: alert 或 notify_urgent 的来源规则（"来源即时提醒"）。设置页据此只显示有产生方的行。
+func ReminderProducers(src PackSource) (timers, alerts []string) {
+	for _, d := range defs(src) {
+		for _, a := range d.Do {
+			if a["action"] == "create_timer" {
+				timers = append(timers, d.Key)
+				break
+			}
+		}
+	}
+	for _, p := range src.List() {
+		for _, r := range p.SourceRules {
+			if r.Then == "alert" || r.NotifyUrgent {
+				alerts = append(alerts, key(p.Name, groupSource, r.ID))
+			}
+		}
+	}
+	return timers, alerts
+}
+
 // Runners 返回当前已加载能力包里每条拉起后台运行的规则的运行者，键是规则键。
 func Runners(src PackSource) map[string]string {
 	out := map[string]string{}

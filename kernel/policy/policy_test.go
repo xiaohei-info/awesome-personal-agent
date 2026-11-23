@@ -293,6 +293,8 @@ func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
 		"negative window": func(p *Policy) { p.Disturb.MergeWindowSec = -1 },
 		"empty quiet":     func(p *Policy) { p.Disturb.Quiet = &Quiet{Start: "08:00", End: "08:00"} },
 		"bad zone":        func(p *Policy) { p.Disturb.Quiet = &Quiet{Start: "22:00", End: "07:00", Zone: "Nowhere/X"} },
+		"all with id":     func(p *Policy) { p.Disturb.Mutes = []Mute{{Scope: MuteAll, ID: "x"}} },
+		"source no id":    func(p *Policy) { p.Disturb.Mutes = []Mute{{Scope: MuteSource}} },
 	} {
 		p := Default()
 		f(&p)
@@ -302,6 +304,7 @@ func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
 	}
 	p := Default()
 	p.Disturb.Quiet = &Quiet{Start: "22:00", End: "07:00", Zone: "Asia/Shanghai"}
+	p.Disturb.Mutes = []Mute{{Scope: MuteAll}}
 	if _, err := normalize(p); err != nil {
 		t.Fatal(err)
 	}
