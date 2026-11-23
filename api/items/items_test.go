@@ -700,3 +700,29 @@ func TestListFilterByOrigin(t *testing.T) {
 		t.Fatalf("unknown source: %v", got)
 	}
 }
+
+// 「已完成」页的口径：phase=done 时给出 done_at——转入已完成的时刻；新建即已完成的迁移事项取 ext.workbench.completed 那天。
+func TestDoneAtOverHTTP(t *testing.T) {
+	e := setup(t)
+	a := e.create(e.web, `{"kind":"task","title":"a","phase":"open"}`)
+	if rec := e.do("POST", "/v1/items/"+a.ID+"/transition", `{"to":"done","reason":"ok"}`, e.web); rec.Code != 200 {
+		t.Fatalf("transition = %d %s", rec.Code, rec.Body)
+	}
+	m := e.create(e.web, `{"kind":"task","title":"m","phase":"done","ext":{"workbench":{"completed":"2026-11-18"}}}`)
+	var out struct {
+		DoneAt map[string]time.Time `json:"done_at"`
+	}
+	rec := e.do("GET", "/v1/items?phase=done", "", e.web)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.DoneAt) != 2 {
+		t.Fatalf("done_at = %d %s", rec.Code, rec.Body)
+	}
+	if d := out.DoneAt[a.ID]; time.Since(d) > time.Minute {
+		t.Fatalf("transitioned done_at = %v", d)
+	}
+	if d := out.DoneAt[m.ID].In(time.Local).Format("2006-01-02 15:04"); d != "2026-11-18 00:00" {
+		t.Fatalf("migrated done_at = %s", d)
+	}
+	if rec := e.do("GET", "/v1/items", "", e.web); strings.Contains(rec.Body.String(), "done_at") {
+		t.Fatalf("done_at only with phase=done: %s", rec.Body)
+	}
+}

@@ -37,6 +37,14 @@ const zh = {
   saveExecutors: "保存执行者",
   items: "事项",
   noItems: "这个项目还没有事项",
+  noActive: "这个项目现在没有进行中的事",
+  phaseGroup: { needs_input: "等你决定", open: "进行中", waiting: "在等别人" } as Record<string, string>,
+  planned: (d: string) => `计划 ${d}`,
+  proposed: (n: number) => `另有 ${n} 条建议还没处理`,
+  toProposals: "去看建议",
+  doneGroup: (n: number) => `已完成（${n}）`,
+  doneOn: (d: string) => `${d} 完成`,
+  settings: "项目设置：名称、仓库、执行者",
 };
 
 const en: typeof zh = {
@@ -75,6 +83,14 @@ const en: typeof zh = {
   saveExecutors: "Save executors",
   items: "Items",
   noItems: "No items in this project",
+  noActive: "Nothing in progress in this project",
+  phaseGroup: { needs_input: "For you to decide", open: "In progress", waiting: "Waiting on others" },
+  planned: (d) => `planned ${d}`,
+  proposed: (n) => `${n} more proposal${n === 1 ? "" : "s"} not handled yet`,
+  toProposals: "See proposals",
+  doneGroup: (n) => `Done (${n})`,
+  doneOn: (d) => `done ${d}`,
+  settings: "Project settings: name, repositories, executors",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

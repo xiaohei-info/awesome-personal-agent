@@ -136,6 +136,15 @@ describe("今天页（flow-web-workbench）", () => {
     await waitFor(() => expect(writes(s).map((c) => c.path)).toEqual(["/v1/deliveries/d3/read"]));
   });
 
+  it("底部一行完成计数并指向已完成页；做完的事不在今天页重复列出", async () => {
+    const now = new Date().toISOString();
+    const done = { items: [mk("WB-X", { phase: "done" })], done_at: { "WB-X": now } };
+    mount(server({ planned: [], due: [], pending: [], stale: [] }, () => false, { "/v1/items?phase=done": done }).impl);
+    expect(await screen.findByText(/今天完成 1 件 · 本周完成 1 件/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "看已完成" })).toHaveAttribute("href", "/done");
+    expect(screen.queryByText("事项 WB-X")).toBeNull();
+  });
+
   it("全空时只有一句话", async () => {
     mount(server({ planned: [], due: [], pending: [], stale: [] }).impl);
     expect(await screen.findByText("现在没有等你的事")).toBeInTheDocument();

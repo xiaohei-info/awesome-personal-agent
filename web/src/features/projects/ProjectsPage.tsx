@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
-import { PageHead } from "../../app/page";
+import { Go, PageHead } from "../../app/page";
+import { loadDone, type Done } from "../done/DonePage";
+import { hostClock } from "../items/schedule";
 import { ProjectMaterials } from "../materials-hosted/ProjectMaterials";
 import type { Item } from "../items/ItemsPage";
 import { useT } from "../../app/i18n";
@@ -119,12 +121,17 @@ function ProjectDetail() {
     <main>
       <p className="eyebrow"><Link to="/projects">{t.back}</Link></p>
       <h1>{p.name}</h1>
-      <EditForm key={p.id + p.name} p={p} onSaved={setP} />
-      {p.capture && <CaptureOutbound key={p.id + (p.capture_outbound ?? "")} p={p} onSaved={setP} />}
-      <Repos p={p} onChange={setP} />
-      <Executors p={p} onSaved={setP} />
+      {p.intro && <p className="lede">{p.intro}</p>}
       <ProjectItems id={p.id} />
       <ProjectMaterials project={p.id} />
+      {/* 进项目是来看事的：名称、仓库、执行者这些设置低频，收在页底，仍是它们唯一的编辑处。 */}
+      <details>
+        <summary>{t.settings}</summary>
+        <EditForm key={p.id + p.name} p={p} onSaved={setP} />
+        {p.capture && <CaptureOutbound key={p.id + (p.capture_outbound ?? "")} p={p} onSaved={setP} />}
+        <Repos p={p} onChange={setP} />
+        <Executors p={p} onSaved={setP} />
+      </details>
     </main>
   );
 }
@@ -326,25 +333,42 @@ function ExecutorName({ e }: { e: Executor }) {
   );
 }
 
+// 项目里的事按阶段分组（界面设计 §9.13）：等你决定、进行中、在等在前；已完成默认收起，最近完成的在前。
+// 建议不在这里处理，只给条数并指向建议页；不做了的不列。
+const GROUPS = ["needs_input", "open", "waiting"] as const;
+
 function ProjectItems({ id }: { id: string }) {
   const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<Item[] | null>(null);
+  const [done, setDone] = useState<Done[]>([]);
   const [error, setError] = useState<unknown>(null);
   useEffect(() => {
     api.get<{ items: Item[] }>("/items?project=" + encodeURIComponent(id)).then((r) => setItems(r.items), (e) => setError(e));
+    hostClock(api).then((c) => loadDone(api, c.utc_offset)).then((ds) => setDone(ds.filter((d) => d.item.project === id)), () => setDone([]));
   }, [api, id]);
+  const proposed = items?.filter((i) => i.phase === "proposed").length ?? 0;
+  const active = GROUPS.map((ph) => [ph, items?.filter((i) => i.phase === ph) ?? []] as const).filter(([, l]) => l.length);
+  const row = (i: Item, sub?: string) => (
+    <li key={i.id}><Go to={"/items/" + encodeURIComponent(i.id)}>{i.title}</Go>{sub && <span className="sub"> {sub}</span>}</li>
+  );
   return (
     <section aria-label={t.items}>
-      <h2>{t.items}</h2>
       {error != null && <ErrorNote error={error} />}
       {items && !items.length && <p className="sub">{t.noItems}</p>}
-      {!!items?.length && (
-        <ul className="rows">
-          {items.map((i) => (
-            <li key={i.id}><Link to={"/items/" + i.id}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span></li>
-          ))}
-        </ul>
+      {!!items?.length && !active.length && <p className="sub">{t.noActive}</p>}
+      {active.map(([ph, l]) => (
+        <section key={ph} aria-label={t.phaseGroup[ph]}>
+          <h2>{t.phaseGroup[ph]} <span className="sub">{l.length}</span></h2>
+          <ul className="rows">{l.map((i) => row(i, i.planned_for && t.planned(i.planned_for)))}</ul>
+        </section>
+      ))}
+      {proposed > 0 && <p className="sub">{t.proposed(proposed)} · <Link to="/proposals">{t.toProposals}</Link></p>}
+      {done.length > 0 && (
+        <details>
+          <summary>{t.doneGroup(done.length)}</summary>
+          <ul className="rows">{done.map((d) => row(d.item, t.doneOn(d.day)))}</ul>
+        </details>
       )}
     </section>
   );
