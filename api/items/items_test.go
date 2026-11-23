@@ -586,7 +586,7 @@ func TestTodayOverHTTP(t *testing.T) {
 	rec := e.do("GET", "/v1/today", "", obs)
 	var l map[string][]domain.Item
 	_ = json.Unmarshal(rec.Body.Bytes(), &l)
-	for _, k := range []string{"planned", "due", "pending", "stale"} {
+	for _, k := range []string{"planned", "due", "pending", "stale", "overdue", "high_priority"} {
 		if l[k] == nil {
 			t.Fatalf("group %s missing: %s", k, rec.Body)
 		}
@@ -782,5 +782,39 @@ func TestProgressRangeOverHTTP(t *testing.T) {
 		if rec := e.do("GET", "/v1/items?"+bad, "", e.web); rec.Code != 400 {
 			t.Fatalf("%s = %d %s", bad, rec.Code, rec.Body)
 		}
+	}
+}
+
+// 今天的逾期与高优先级两组（对齐工作台今日焦点）：截止本机日早于今天且未结束的进 overdue（按截止先后）；
+// 紧急与高、未结束的进 high_priority（紧急在前）；已完成的、普通优先级的不进；与 planned 重叠时各组都列，由读者去重。
+func TestTodayOverdueAndHighPriority(t *testing.T) {
+	e := setup(t)
+	day := func(n int) string { return time.Now().AddDate(0, 0, n).Format("2006-01-02") }
+	late2 := e.create(e.web, `{"kind":"task","title":"晚两天","phase":"open","deadline":"`+day(-2)+`T18:00:00`+time.Now().Format("-07:00")+`"}`)
+	late1 := e.create(e.web, `{"kind":"task","title":"晚一天","phase":"waiting","waiting_on":{"kind":"human","ref":"x"},"deadline":"`+day(-1)+`T09:00:00`+time.Now().Format("-07:00")+`"}`)
+	e.create(e.web, `{"kind":"task","title":"已完成的逾期","phase":"done","deadline":"`+day(-3)+`T09:00:00Z"}`)
+	e.create(e.web, `{"kind":"task","title":"明天到期","phase":"open","deadline":"`+day(1)+`T09:00:00Z"}`)
+	high := e.create(e.web, `{"kind":"task","title":"高","phase":"open","priority":"high","planned_for":"`+day(0)+`"}`)
+	urgent := e.create(e.web, `{"kind":"task","title":"紧急","phase":"open","priority":"urgent"}`)
+	e.create(e.web, `{"kind":"task","title":"普通","phase":"open","priority":"normal"}`)
+	e.create(e.web, `{"kind":"task","title":"高但完成了","phase":"done","priority":"high"}`)
+	var l map[string][]domain.Item
+	rec := e.do("GET", "/v1/today", "", e.web)
+	_ = json.Unmarshal(rec.Body.Bytes(), &l)
+	ids := func(g string) string {
+		var out []string
+		for _, it := range l[g] {
+			out = append(out, it.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	if got, want := ids("overdue"), late2.ID+","+late1.ID; got != want {
+		t.Fatalf("overdue = %s, want %s (%s)", got, want, rec.Body)
+	}
+	if got, want := ids("high_priority"), urgent.ID+","+high.ID; got != want {
+		t.Fatalf("high_priority = %s, want %s (%s)", got, want, rec.Body)
+	}
+	if ids("planned") != high.ID {
+		t.Fatalf("planned keeps its own rule: %s", ids("planned"))
 	}
 }

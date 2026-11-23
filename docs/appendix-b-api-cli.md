@@ -147,7 +147,7 @@
 | 分组 | 方法与路径 | 说明 | 凭据 |
 |---|---|---|---|
 | 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围） | 按 §14.3；导出 ext 密钥可 `GET` |
-| | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
+| | `GET /today` | 今天的清单，六组：`planned`、`due`、`pending`、`stale`、`overdue`（截止的本机日早于今天、未结束，按截止先后）、`high_priority`（紧急或高、未结束，紧急在前）；一件事可在几组里同时出现 | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
 | | 已有路由 GET /items 的新增查询参数 | `progress_from`、`progress_to`：只列进展日落在范围内的事项，响应另带 `progress`（主文档 §7.1） | observer |
 | | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate |
@@ -492,6 +492,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 
 跨来源相似合并与推送哪些事（2026-11-23）只做加法：`proposal` 增 `merges`、`similar`、`not_same`、`split_from`，策略增 `merge_judge` 与 `disturb.push`，`source.failed` 增 `kind: streak`，新增 `POST /source-events/{id}/split`。不改账本结构、不迁移：旧建议没有这些键，读作没有合并留痕；旧策略没有这些键，按缺省（合并判断方 `same`，推送前三类开、新建议关）。升级前已合并的建议只有 `sources`，没有留痕的来源也能拆，新建议用来源事件的标题与摘要。同日修订为批量归类，仍只做加法：`proposal` 增 `sweep`（`state`、`batch`、`action`、`target`、`why`、`by`、`run`、`size`、`chars`、`at`），`proposal.merges[]` 增 `why`、`batch`、`run`、`item`，策略增 `merge` 段，`merge_judge` 只剩 `same` 与 `off`（第一版的 `judge`、`generate` 未被任何实例保存过）；`/settings/model-endpoints` 不再有 `merge_judge` 段，移到 `/settings/merge`；内置模板 `merge-same*` 换成 `merge-batch`。升级前的建议没有 `sweep`，不进批、不回填，只作为比对对象。
+
+"今天"的逾期与高优先级（2026-11-23）只做加法：`GET /today` 增 `overdue`、`high_priority` 两组，旧的四组含义不变；简报与复盘资料 `due_waiting` 的 `reason` 增 `high_priority`。不改账本、不迁移；只认四组的调用方原样忽略新组。
 
 按进展日读事项（2026-11-23）只做加法：`GET /items` 增 `progress_from`、`progress_to`，带上时响应另有 `progress`。不改账本结构、不迁移；不带这两个参数时响应不变。
 

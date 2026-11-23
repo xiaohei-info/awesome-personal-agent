@@ -119,6 +119,8 @@ func TestBriefMaterialsCarryLedgerSectionsAndWindow(t *testing.T) {
 	}
 	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "待决事", "phase": "needs_input", "ask": map[string]any{"question": "要不要？", "free_text": true}})
 	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "今天到期", "phase": "open", "deadline": t0})
+	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "本人标了紧急", "phase": "open", "priority": "urgent"})
+	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "普通的事", "phase": "open", "priority": "normal"})
 	var done struct{ ID string }
 	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": "现场完成", "phase": "open"}).Value, &done)
 	e.must(owner, "item.transition", map[string]any{"id": done.ID, "to": "done", "reason": "ok", "evidence": "e"})
@@ -155,6 +157,10 @@ func TestBriefMaterialsCarryLedgerSectionsAndWindow(t *testing.T) {
 	}
 	if !strings.Contains(m["decisions"], "要不要？") || !strings.Contains(m["due_waiting"], "今天到期") || !strings.Contains(m["due_waiting"], "due_today") {
 		t.Fatalf("decisions %s due_waiting %s", m["decisions"], m["due_waiting"])
+	}
+	// 与"今天"同一口径：高优先级未结束的进到期与等待（high_priority），普通优先级、没截止的不进。
+	if !strings.Contains(m["due_waiting"], "本人标了紧急") || !strings.Contains(m["due_waiting"], "high_priority") || strings.Contains(m["due_waiting"], "普通的事") {
+		t.Fatalf("due_waiting must carry high-priority items: %s", m["due_waiting"])
 	}
 	if !strings.Contains(m["activity"], "LIVE-NOTE") || !strings.Contains(m["activity"], "现场完成") || strings.Contains(m["activity"], "IMPORTED-NOTE") {
 		t.Fatalf("activity must count live events only: %s", m["activity"])

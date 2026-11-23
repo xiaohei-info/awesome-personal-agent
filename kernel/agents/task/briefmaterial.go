@@ -233,7 +233,7 @@ type dueEntry struct {
 	Title        string        `json:"title"`
 	Project      string        `json:"project,omitempty"`
 	Phase        domain.Phase  `json:"phase"`
-	Reason       string        `json:"reason"` // due_today、due_tomorrow、due_next、overdue、echo、follow_up_due、stale
+	Reason       string        `json:"reason"` // due_today、due_tomorrow、due_next、overdue、echo、follow_up_due、high_priority、stale
 	Deadline     *time.Time    `json:"deadline,omitempty"`
 	LastProgress *progressNote `json:"last_progress,omitempty"`
 	WebURL       string        `json:"web_url,omitempty"`
@@ -703,7 +703,7 @@ func lastProgress(tx *store.Tx, id string, p briefPlan) (*progressNote, error) {
 }
 
 // dueSection 与"今天"视图同一口径：今天与明天到期的、已过期未完成的；窗口内收到回音回到 open 的；
-// 跟进到期仍在等的（等待事项的 follow-up 轮次提醒已记 followup.reminded 且之后没有进展）；久未推进的。
+// 跟进到期仍在等的（等待事项的 follow-up 轮次提醒已记 followup.reminded 且之后没有进展）；高优先级未结束的；久未推进的。
 // 周期超过两天的实例（复盘）另给下一个周期内到期的（due_next）。每条带当前阶段与最近一条进展。
 func dueSection(tx *store.Tx, all []domain.Item, td items.TodayList, w window, now time.Time, p briefPlan, pname func(string) string) ([]dueEntry, error) {
 	out := []dueEntry{}
@@ -760,6 +760,10 @@ func dueSection(tx *store.Tx, all []domain.Item, td items.TodayList, w window, n
 	})
 	if err != nil {
 		return nil, err
+	}
+	// 高优先级：与"今天"视图同一口径（紧急与高、未结束），本人标了重要的事不因没有截止而漏掉。
+	for _, it := range td.HighPriority {
+		add(it, "high_priority")
 	}
 	for _, it := range td.Stale {
 		add(it, "stale")

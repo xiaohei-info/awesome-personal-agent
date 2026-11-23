@@ -158,12 +158,16 @@ func (s *svc) progress() command.Spec {
 
 // ---- 今天 ----
 
-// TodayList 是"今天"的四组（§4.1、§7.1）。每组都不为 nil。
+// TodayList 是"今天"的六组（§4.1、§7.1）。每组都不为 nil；一件事可以同时在几组里（如计划今天又高优先级），由读者去重。
 type TodayList struct {
 	Planned []domain.Item `json:"planned"`
 	Due     []domain.Item `json:"due"`
 	Pending []domain.Item `json:"pending"`
 	Stale   []domain.Item `json:"stale"`
+	// Overdue：截止所在的本机日早于今天、还没结束的，按截止先后。
+	Overdue []domain.Item `json:"overdue"`
+	// HighPriority：优先级为紧急或高、还没结束的，紧急在前。
+	HighPriority []domain.Item `json:"high_priority"`
 }
 
 func active(it domain.Item) bool {
@@ -178,7 +182,7 @@ func TodayItems(tx *store.Tx, now time.Time) (TodayList, error) {
 
 // TodayItemsAfter 同 TodayItems，久未推进的阈值由调用方给（能力包 stale 规则的 stale_after）。
 func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (TodayList, error) {
-	l := TodayList{Planned: []domain.Item{}, Due: []domain.Item{}, Pending: []domain.Item{}, Stale: []domain.Item{}}
+	l := TodayList{Planned: []domain.Item{}, Due: []domain.Item{}, Pending: []domain.Item{}, Stale: []domain.Item{}, Overdue: []domain.Item{}, HighPriority: []domain.Item{}}
 	all, err := List(tx, Filter{})
 	if err != nil {
 		return l, err
@@ -195,6 +199,12 @@ func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (Tod
 		if it.Deadline != nil && Today(*it.Deadline) == today && active(it) {
 			l.Due = append(l.Due, it)
 		}
+		if it.Deadline != nil && Today(*it.Deadline) < today && active(it) {
+			l.Overdue = append(l.Overdue, it)
+		}
+		if (it.Priority == domain.PriorityUrgent || it.Priority == domain.PriorityHigh) && active(it) {
+			l.HighPriority = append(l.HighPriority, it)
+		}
 		if it.Phase == domain.PhaseNeedsInput {
 			l.Pending = append(l.Pending, it)
 		}
@@ -207,7 +217,18 @@ func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (Tod
 	slices.SortStableFunc(l.Planned, func(a, b domain.Item) int {
 		return cmp.Or(strings.Compare(a.PlannedFor, b.PlannedFor), strings.Compare(slotKey(a), slotKey(b)))
 	})
+	slices.SortStableFunc(l.Overdue, func(a, b domain.Item) int { return a.Deadline.Compare(*b.Deadline) })
+	slices.SortStableFunc(l.HighPriority, func(a, b domain.Item) int {
+		return cmp.Compare(b2i(a.Priority != domain.PriorityUrgent), b2i(b.Priority != domain.PriorityUrgent))
+	})
 	return l, nil
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // slotKey 让没有时段的排在有时段的之后（"~" 大于任何数字）。
