@@ -94,6 +94,7 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
       case "others": return { problem: t.others(r.n), button: t.look, to: r.to };
       case "stalled": return { problem: t.stalled, impact: t.stalledImpact, button: t.nudge, to: r.to };
       case "lag": return { problem: t.lag(r.n) };
+      case "capture": return { problem: t.captureLine(r.code ?? "", r.n, r.params?.at ?? ""), button: t.captureFix(r.code ?? ""), to: r.to };
       default: return { problem: t.unknown(r.n) };
     }
   };

@@ -107,7 +107,7 @@ func TestCreateAndUpdatePersist(t *testing.T) {
 	var out struct{ ID string }
 	_ = json.Unmarshal(r.Value, &out)
 	p := e.get(t, out.ID)
-	if p.Name != "Work" || p.Status != domain.ProjectActive || p.Capture || len(p.Tags) != 2 || p.AllowedExecutors != nil {
+	if p.Name != "Work" || p.Status != domain.ProjectActive || !p.Capture || len(p.Tags) != 2 || p.AllowedExecutors != nil {
 		t.Fatalf("created project: %+v", p)
 	}
 	ev := e.events(t)
@@ -567,5 +567,43 @@ func TestAllowedExecutorMatch(t *testing.T) {
 	}
 	if p := e.get(t, id); p.Restricted() {
 		t.Fatalf("rejected match changed the project: %+v", p)
+	}
+}
+
+// 对话捕获默认开启的一次性迁移：只补开还没开的项目，操作者是 kernel:defaults，重复执行不再写；已开的项目不动、不写事件。
+func TestSeedCaptureEnablesOnceAndIsIdempotent(t *testing.T) {
+	e := setup(t)
+	mk := func(name string) string {
+		var out struct{ ID string }
+		_ = json.Unmarshal(e.must(t, owner, "project.create", map[string]any{"name": name}).Value, &out)
+		return out.ID
+	}
+	off, on := mk("old"), mk("new")
+	e.must(t, owner, "project.update", map[string]any{"id": off, "capture": false}) // 升级前的项目：capture 是 false
+	before := len(e.events(t))
+	seed := func() {
+		t.Helper()
+		if err := SeedCapture(bg, e.x, e.st, "owner"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed()
+	if !e.get(t, off).Capture || !e.get(t, on).Capture {
+		t.Fatal("every project must have capture on after the migration")
+	}
+	ev := e.events(t)
+	if len(ev) != before+1 || ev[before].Object != off || ev[before].Actor.Principal != "kernel:defaults" || ev[before].Type != domain.EvProjectUpdated {
+		t.Fatalf("exactly one system event for the one project that was off: %+v", ev[before:])
+	}
+	seed()
+	seed()
+	if len(e.events(t)) != before+1 {
+		t.Fatal("repeated runs must not write again")
+	}
+	// 之后被直接调 API 关掉的，迁移不再把它打开（一次性）。
+	e.must(t, owner, "project.update", map[string]any{"id": off, "capture": false})
+	seed()
+	if e.get(t, off).Capture {
+		t.Fatal("the migration is one-time")
 	}
 }

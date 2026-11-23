@@ -204,6 +204,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     other_alerts: { label: "其他告警" },
     stalled_delegations: { label: "委派久无回音" },
     clock_lag: { label: "定时器迟到" },
+    capture_failures: { label: "聊天没记下" },
   },
   rejectReason: {
     hard_line: { label: "只有你本人能做" },
@@ -270,6 +271,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     "inbound.disposed": { label: "处理了来源消息" },
     "inbound.requeued": { label: "放回了积压" },
     "inbound.captured": { label: "从聊天里记下" },
+    "inbound.capture_failed": { label: "聊天没能记下" },
     "instance.created": { label: "新建了定时安排" },
     "instance.updated": { label: "修改了定时安排" },
     "instance.toggled": { label: "启停了定时安排" },
@@ -590,6 +592,7 @@ const en: typeof zh = {
     other_alerts: { label: "Other alerts" },
     stalled_delegations: { label: "Delegations gone quiet" },
     clock_lag: { label: "Timers running late" },
+    capture_failures: { label: "Chats not noted" },
   },
   rejectReason: {
     hard_line: { label: "Only you can do this" },
@@ -656,6 +659,7 @@ const en: typeof zh = {
     "inbound.disposed": { label: "handled a source message" },
     "inbound.requeued": { label: "put back in the backlog" },
     "inbound.captured": { label: "noted from a chat" },
+    "inbound.capture_failed": { label: "a chat could not be noted" },
     "instance.created": { label: "created a schedule" },
     "instance.updated": { label: "edited a schedule" },
     "instance.toggled": { label: "turned a schedule on or off" },

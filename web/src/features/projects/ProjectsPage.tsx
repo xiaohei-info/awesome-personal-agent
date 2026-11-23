@@ -27,7 +27,6 @@ export interface Project {
   allowed_executors: string[] | null;
   /** 按机器或宿主匹配的名单（§14.7）；与 allowed_executors 任一命中即允许。 */
   allowed_executor_match?: Match[];
-  capture?: boolean;
   /** 对话增量送外部模型的范围；null 为还没选，没有缺省值（§6.5、§14.14）。 */
   capture_outbound?: string | null;
 }
@@ -128,7 +127,8 @@ function ProjectDetail() {
       <details>
         <summary>{t.settings}</summary>
         <EditForm key={p.id + p.name} p={p} onSaved={setP} />
-        {p.capture && <CaptureOutbound key={p.id + (p.capture_outbound ?? "")} p={p} onSaved={setP} />}
+        {/* 对话捕获默认开启、没有开关；这里只选聊天内容发给外部模型的范围 */}
+        <CaptureOutbound key={p.id + (p.capture_outbound ?? "")} p={p} onSaved={setP} />
         <Repos p={p} onChange={setP} />
         <Executors p={p} onSaved={setP} />
       </details>
@@ -158,12 +158,11 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
   const [intro, setIntro] = useState(p.intro ?? "");
   const [tags, setTags] = useState((p.tags ?? []).join(", "));
   const [status, setStatus] = useState(p.status);
-  const [capture, setCapture] = useState(!!p.capture);
 
   const save = (e: FormEvent) => {
     e.preventDefault();
     // 不带 allowed_executors：它只能经 settings 路由修改（§14.7）。
-    return run(async () => onSaved(await api.patch<Project>("/projects/" + p.id, { name, intro, tags: splitTags(tags), status, capture })));
+    return run(async () => onSaved(await api.patch<Project>("/projects/" + p.id, { name, intro, tags: splitTags(tags), status })));
   };
   return (
     <form className="panel" onSubmit={save} aria-label={t.props}>
@@ -174,7 +173,6 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
         {t.status}
         <Pick k="projectStatus" value={status} onChange={setStatus} ids={PROJECT_STATUS} />
       </label>
-      <label><input type="checkbox" checked={capture} onChange={(e) => setCapture(e.target.checked)} /> {t.capture}</label>
       <button type="submit">{t.saveProject}</button>
       {error != null && <ErrorNote error={error} />}
     </form>

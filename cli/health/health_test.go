@@ -129,8 +129,8 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 		Signals []struct{ ID, Next string }
 	}
 	_ = json.Unmarshal([]byte(out), &rep)
-	if rep.Healthy || len(rep.Signals) != 13 {
-		t.Fatalf("want 13 signals and unhealthy: %s", out)
+	if rep.Healthy || len(rep.Signals) != 14 {
+		t.Fatalf("want 14 signals and unhealthy: %s", out)
 	}
 	for _, s := range rep.Signals {
 		if s.Next == "" {
@@ -142,7 +142,7 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 // --pretty：失败的信号带 why 与 next，正常的只标 ok；干净账本显示 healthy。
 func TestApaHealthPretty(t *testing.T) {
 	_, out, _ := newRig(t, nil).apa("health", "--pretty")
-	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 13 {
+	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 14 {
 		t.Fatalf("clean: %q", out)
 	}
 	_, out, _ = newRig(t, fakePacks{{Pack: "work", Reason: "bad"}}).apa("health", "--pretty")

@@ -8,8 +8,10 @@ helper process (`python capture/__init__.py`, JSON on stdin), prints nothing and
 continuation; any failure is swallowed and never reaches Hermes.
 
 Failures are not silent: every one is appended to the plugin-local log (command, status/reason; never credentials
-or conversation text). A kernel that answers but refuses is only logged. An unreachable kernel keeps the request
-(with its Idempotency-Key) in the state dir; the next hook re-sends it once the kernel is back (A.1).
+or conversation text) and noted as {at, class} in the state dir. The next request the kernel accepts carries the noted
+ones in its `failures` field, so the diagnostics page shows them (latest time, reason class; class only, no text).
+A kernel that answers but refuses is not re-sent. An unreachable kernel keeps the request (with its Idempotency-Key)
+in the state dir; the next hook re-sends it once the kernel is back (A.1).
 """
 import hashlib
 import importlib.util
@@ -60,6 +62,30 @@ def _log(env, reason):
         pass
 
 
+MAX_NOTED = 20
+
+
+def _fail(env, cls, reason):
+    """Log it and note {at, class} for the next request the kernel accepts. Class is one of kernel_unreachable,
+    no_credentials, kernel_refused, plugin_error; never text or credentials."""
+    _log(env, reason)
+    try:
+        f = _state_dir(env) / "failed.json"
+        noted = _noted(env)
+        noted.append({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "class": cls})
+        f.write_text(json.dumps(noted[-MAX_NOTED:]))
+    except OSError:
+        pass
+
+
+def _noted(env):
+    try:
+        v = json.loads((_state_dir(env) / "failed.json").read_text())
+        return v if isinstance(v, list) else []
+    except (OSError, ValueError):
+        return []
+
+
 def _spawn(payload):
     """Hand the payload (or None: only re-send what is kept) to a detached helper; returns at once."""
     p = subprocess.Popen([sys.executable, "-I", str(pathlib.Path(__file__).resolve())], stdin=subprocess.PIPE,
@@ -97,7 +123,7 @@ def on_session_end(session_id="", **_):
         _spawn({"text": text, "session": str(session_id), "path": run_context.session_cwd() or "", "host": socket.gethostname(),
                 "context": run_context.context_file()})
     except ValueError as e:  # a run without its context: nothing goes out under the gateway's credential
-        _log(os.environ, str(e).splitlines()[0])
+        _fail(os.environ, "no_credentials", str(e).splitlines()[0])
     except Exception:
         pass  # fail open: capture problems must never reach the conversation
 
@@ -126,22 +152,31 @@ def _post(item, env):
     try:
         url, token = _credentials(env, item.get("context"))
     except (OSError, ValueError) as e:
-        _log(env, "no usable credentials: " + type(e).__name__)
+        _fail(env, "no_credentials", "no usable credentials: " + type(e).__name__)
         return None
     if not (url and token):
-        _log(env, "no usable credentials")
+        _fail(env, "no_credentials", "no usable credentials")
         return None
-    req = urllib.request.Request(url.rstrip("/") + "/v1/capture", data=json.dumps(item["body"]).encode(), method="POST",
+    noted = _noted(env)
+    body = dict(item["body"], failures=noted) if noted else item["body"]
+    req = urllib.request.Request(url.rstrip("/") + "/v1/capture", data=json.dumps(body).encode(), method="POST",
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json",
                                           "X-APA-Session": item["session"], "X-APA-Harness": HARNESS,
                                           "Idempotency-Key": item["key"]})
     try:
         urllib.request.urlopen(req, timeout=TIMEOUT_SECS).read()
     except urllib.error.HTTPError as e:  # kernel reachable but refused: logged by us, health view by the kernel; no resend
-        _log(env, f"status={e.code} reason={e.reason}")
+        _fail(env, "kernel_refused", f"status={e.code} reason={e.reason}")
     except (urllib.error.URLError, OSError) as e:  # URLError, refused connection, timeout
-        _log(env, "kernel unreachable: " + str(getattr(e, "reason", e) or type(e).__name__))
+        _fail(env, "kernel_unreachable", "kernel unreachable: " + str(getattr(e, "reason", e) or type(e).__name__))
         return "unreachable"
+    else:  # delivered: the kernel has the noted failures now; drop exactly those (newer ones stay)
+        if noted:
+            try:
+                rest = [x for x in _noted(env) if x not in noted]
+                (_state_dir(env) / "failed.json").write_text(json.dumps(rest))
+            except OSError:
+                pass
     return None
 
 
@@ -165,7 +200,7 @@ def _send(payload, env):
             item = json.loads(claimed.read_text())
             outcome = _post(item, env)
         except (OSError, ValueError, KeyError) as e:
-            _log(env, "unusable kept request: " + type(e).__name__)
+            _fail(env, "plugin_error", "unusable kept request: " + type(e).__name__)
             outcome = None
         if outcome == "unreachable":
             claimed.rename(f)
@@ -182,4 +217,4 @@ if __name__ == "__main__":
     try:
         _send(json.load(sys.stdin), dict(os.environ))
     except Exception as e:
-        _log(dict(os.environ), "helper failed: " + type(e).__name__)
+        _fail(dict(os.environ), "plugin_error", "helper failed: " + type(e).__name__)

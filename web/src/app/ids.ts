@@ -101,7 +101,7 @@ export const SPOT_RESULT = ["should_see", "correct"] as const;
 /** 健康信号：api/health/health.go 的 sig(...) */
 export const HEALTH_SIGNAL = [
   "source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable",
-  "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag",
+  "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag", "capture_failures",
 ] as const;
 /** 自检项：kernel/doctor/report.go Order */
 export const DOCTOR_CHECK = ["data_dir", "config", "tier", "model_endpoint", "sources", "packs", "host_plugin", "overlaps", "channels", "secrets", "connections", "authz"] as const;
@@ -157,7 +157,7 @@ export const EVENT = [
   "decision.requested", "decision.resolved", "delegation.created", "delegation.reported", "command.rejected",
   "material.revised", "material.revision_proposed", "guideline.activated", "project.updated", "project.allowed_executors_changed",
   "rule.mode_changed", "allowlist.changed", "policy.changed", "grant.issued", "grant.revoked", "agent.configured", "agent.queued", "run.started", "run.finished",
-  "source.failed", "health.alert", "auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked", "authz.switched",
+  "source.failed", "health.alert", "inbound.capture_failed", "auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked", "authz.switched",
 ] as const;
 /** 内部审计事件类型（各模块写入，不在对外清单里；查不到的显示原值） */
 export const EVENT_INTERNAL = [

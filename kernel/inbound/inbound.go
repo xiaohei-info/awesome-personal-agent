@@ -330,7 +330,7 @@ func (s *Service) Register(x *command.Executor) error {
 		switch {
 		case c.Command == runner.CmdRunResult || c.Command == runner.CmdIngest:
 			s.process()
-		case c.Command == CmdCapture && len(c.Seqs) > 0:
+		case c.Command == CmdCapture && captured(c.Value): // 只在收下了增量时才触发处理；记失败类别的那几种没有新事件要处理
 			s.captures.Add(1)
 			go func() { // 捕获发生在插件钩子的时限内，模型调用不能占着请求
 				defer s.captures.Done()
@@ -339,6 +339,11 @@ func (s *Service) Register(x *command.Executor) error {
 		}
 	})
 	return nil
+}
+
+func captured(v json.RawMessage) bool {
+	var o CaptureOut
+	return json.Unmarshal(v, &o) == nil && o.Captured
 }
 
 func (s *Service) process() {

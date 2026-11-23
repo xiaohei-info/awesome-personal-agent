@@ -135,12 +135,12 @@ func (k *kernel) rejections(object string) (n int) {
 func TestCreateUpdateListShow(t *testing.T) {
 	k := newKernel(t)
 	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	// 建项目、改项目信息是一档；对话捕获开关是 3a，只整理的 Agent 为 23。
-	if r := k.apa(dlg, "project", "create", "--name", "Home", "--capture"); r.code != 23 {
-		t.Fatalf("create with capture must exit 23: %+v", r)
+	// 建项目、改项目信息是一档；对话捕获恒为开启，创建没有这一项（带 --capture 是用法错误）；update 上的开关仍是 3a。
+	if r := k.apa(dlg, "project", "create", "--name", "Home", "--capture"); r.code != 2 {
+		t.Fatalf("create has no --capture, must exit 2: %+v", r)
 	}
 	p := k.mustCreate(dlg, "--name", "Home", "--intro", "chores", "--tag", "a", "--tag", "b")
-	if p.Name != "Home" || p.Intro != "chores" || len(p.Tags) != 2 || p.Capture || p.Status != domain.ProjectActive {
+	if p.Name != "Home" || p.Intro != "chores" || len(p.Tags) != 2 || !p.Capture || p.Status != domain.ProjectActive {
 		t.Fatalf("created: %+v", p)
 	}
 	if r := k.apa(dlg, "project", "update", p.ID, "--capture=true"); r.code != 23 {
@@ -150,7 +150,7 @@ func TestCreateUpdateListShow(t *testing.T) {
 	if u.code != 0 {
 		t.Fatalf("update: %+v", u)
 	}
-	if got := u.project(t); got.Status != domain.ProjectPaused || got.Capture || got.Name != "Home" {
+	if got := u.project(t); got.Status != domain.ProjectPaused || !got.Capture || got.Name != "Home" {
 		t.Fatalf("update must be partial: %+v", got)
 	}
 	// observer 可读。
@@ -251,7 +251,7 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 	for _, args := range [][]string{
 		{"project"}, {"project", "bogus"}, {"project", "list", "x"}, {"project", "show"},
 		{"project", "create"}, {"project", "update"}, {"project", "update", "id"},
-		{"project", "update", "id", "--bogus", "1"}, {"project", "create", "--name", "a", "--capture=maybe"},
+		{"project", "update", "id", "--bogus", "1"}, {"project", "create", "--name", "a", "--capture=maybe"}, {"project", "update", "id", "--capture=maybe"},
 		{"project", "repos"}, {"project", "repos", "add"}, {"project", "repos", "add", "id"},
 		{"project", "repos", "add", "id", "--bogus"},
 	} {

@@ -75,7 +75,7 @@ func setup(t *testing.T) *env {
 	web := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	for cmd, in := range map[string]string{
 		registry.CmdRegisterExec: `{"id":"src_obd","command":"echo","schedule":"1m","timeout":30}`,
-		"project.create":         `{"name":"acc-open","status":"active","capture":true}`,
+		"project.create":         `{"name":"acc-open","status":"active"}`,
 	} {
 		if _, err := e.x.Do(bg, command.Request{Identity: web, Command: cmd, Input: json.RawMessage(in)}); err != nil {
 			t.Fatal(err)

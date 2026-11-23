@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ApiClient } from "./api";
 import { COUNTS_EVENT } from "./page";
 
-// 形状对应 GET /v1/health（api/health.Report，附录 B.2）：十三项信号、顺序固定，判定全在服务端；这里只归类给界面用。
+// 形状对应 GET /v1/health（api/health.Report，附录 B.2）：十四项信号、顺序固定，判定全在服务端；这里只归类给界面用。
 export interface Signal {
   id: string;
   ok: boolean;
@@ -15,6 +15,8 @@ export interface Signal {
   /** receipt_failures 的逐条原因（api/health.ReceiptRejection）：命令、退出码、原因码、凭据。 */
   receipts?: { object: string; command: string; exit: number; code?: string; reason?: string; credential: string }[];
   /** other_alerts 的逐条通知：动作没能完成的类别码、机制参数与受影响的事项（dropped：规则建的那一份已作废）。 */
+  /** capture_failures 按原因类别汇总（api/health.CaptureRow）：类别、次数、最近一次的时间、项目 id；不含对话内容与凭据。 */
+  captures?: { class: string; count: number; last_at: string; project?: string }[];
   notices?: { object: string; rule?: string; code?: string; params?: Record<string, string>; item?: string; dropped?: boolean }[];
 }
 export interface HealthReport {
@@ -139,6 +141,9 @@ export function rowsOf(s: Signal): Row[] {
     }
     case "clock_lag":
       return [row("lag", false, s.count)];
+    case "capture_failures":
+      // 没有对应项目是常态（有些聊天本来就不属于哪个项目）：仅供知晓，给去登记目录的入口；其余是插件或内核的问题，要你处理。
+      return (s.captures ?? []).map((x) => ({ ...row("capture", x.class !== "no_project", x.count, "/projects"), code: x.class, params: { at: x.last_at } }));
     default:
       return [row("unknown:" + s.id, true, s.count)];
   }

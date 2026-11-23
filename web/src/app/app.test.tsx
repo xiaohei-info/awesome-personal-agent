@@ -284,7 +284,7 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
 describe("状态灯（界面设计 §5.1）", () => {
   const ok = (id: string) => ({ id, ok: true, count: 0, next: "" });
   const IDS = ["source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable",
-    "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"];
+    "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag", "capture_failures"];
   const report = (over: Record<string, object>) => ({ healthy: true, signals: IDS.map((id) => ({ ...ok(id), ...over[id] })) });
   async function light(body: unknown) {
     sessionStorage.setItem("apa.csrf", "tok-1");

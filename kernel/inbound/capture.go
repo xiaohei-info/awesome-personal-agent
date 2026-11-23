@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -23,6 +24,8 @@ const (
 	CmdCapture = "inbound.capture"
 	// EvCaptured 是增量已收下的审计记录；只记事件 id 与项目，不含对话内容。
 	EvCaptured = "inbound.captured"
+	// EvCaptureFailed 是一次没能捕获的记录，诊断页据它列出最近失败；只记类别与时间，不含对话内容与凭据。
+	EvCaptureFailed = domain.EvCaptureFailed
 
 	// CaptureKind 是内部来源的语义类型，CaptureEvent 是事件类型（能力包规则可据此匹配）。
 	CaptureKind  = "capture"
@@ -38,14 +41,45 @@ const (
 	ReasonCaptureDisabled = "capture_disabled"
 )
 
-type captureIn struct {
-	Project string `json:"project,omitempty"`
-	Path    string `json:"path,omitempty"`
-	Host    string `json:"host,omitempty"`
-	Text    string `json:"text"`
+// 没能捕获的原因类别（EvCaptureFailed 的 class）。前两类内核自己判定；其余由插件在下一次成功连上内核时补报，
+// 内核不可达与没有凭据的那几次只有插件知道。
+const (
+	FailNoProject       = "no_project"       // 会话所在目录不属于任何项目：不捕获
+	FailDisabled        = "capture_disabled" // 项目的 capture 被直接调 API 关掉
+	FailUnreachable     = "kernel_unreachable"
+	FailNoCredentials   = "no_credentials"
+	FailRefused         = "kernel_refused" // 内核答了但拒绝（4xx、5xx）
+	FailPlugin          = "plugin_error"
+	maxReportedFailures = 20
+)
+
+var pluginFailClasses = map[string]bool{FailUnreachable: true, FailNoCredentials: true, FailRefused: true, FailPlugin: true}
+
+// reportedFailure 是插件补报的一次失败：发生时间与类别。
+type reportedFailure struct {
+	At    time.Time `json:"at"`
+	Class string    `json:"class"`
 }
 
-// CaptureOut 是 CmdCapture 的结果；Captured 为假时不写账本，Reason 说明原因（只写机制）。
+type captureIn struct {
+	Project  string            `json:"project,omitempty"`
+	Path     string            `json:"path,omitempty"`
+	Host     string            `json:"host,omitempty"`
+	Text     string            `json:"text"`
+	Failures []reportedFailure `json:"failures,omitempty"`
+}
+
+// failed 记一次没能捕获：只有类别与时间。at 为零取当前时刻。
+func failed(c *command.Ctx, class, project string, at time.Time) error {
+	if at.IsZero() || at.After(c.Now()) {
+		at = c.Now()
+	}
+	pl, _ := json.Marshal(map[string]string{"class": class, "project": project, "at": at.UTC().Format(time.RFC3339)})
+	_, err := c.Emit(domain.Event{Type: EvCaptureFailed, Object: "capture-failures", Reason: "conversation delta not captured: " + class, Payload: pl})
+	return err
+}
+
+// CaptureOut 是 CmdCapture 的结果；Captured 为假时不写来源事件，Reason 说明原因（只写机制）；没有项目与项目捕获被关掉时另记一条 EvCaptureFailed（只有类别与时间）。
 type CaptureOut struct {
 	Captured bool   `json:"captured"`
 	Reason   string `json:"reason,omitempty"`
@@ -86,19 +120,30 @@ func (s *Service) registerCapture(x *command.Executor) error {
 			if c.Caller.Level == authz.LevelRun {
 				return CaptureOut{Reason: ReasonRunIdentity}, nil
 			}
+			for i, f := range in.Failures {
+				if i == maxReportedFailures {
+					break
+				}
+				if !pluginFailClasses[f.Class] {
+					f.Class = FailPlugin
+				}
+				if err := failed(c, f.Class, "", f.At); err != nil {
+					return nil, err
+				}
+			}
 			id, err := projects.Resolve(c.Tx, projects.Scope{Flag: in.Project, Cwd: in.Path, Host: in.Host})
 			if err != nil {
 				return nil, err
 			}
 			if id == "" {
-				return CaptureOut{Reason: ReasonNoProject}, nil
+				return CaptureOut{Reason: ReasonNoProject}, failed(c, FailNoProject, "", time.Time{})
 			}
 			p, err := projects.Get(c.Tx, id)
 			if err != nil {
 				return nil, err
 			}
 			if !p.Capture {
-				return CaptureOut{Reason: ReasonCaptureDisabled, Project: id}, nil
+				return CaptureOut{Reason: ReasonCaptureDisabled, Project: id}, failed(c, FailDisabled, id, time.Time{})
 			}
 			// 事件 id 由内容决定：同一会话重复提交同一段增量不产生第二条来源事件。
 			sum := sha256.Sum256([]byte(id + "\x00" + c.Caller.Actor.Session + "\x00" + in.Text))

@@ -7,6 +7,7 @@ package projects
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -43,6 +44,34 @@ var Module = store.Module{Name: "projects", Migrations: []store.Migration{{
 	Version: 3, Ledger: 5, Name: "ledger-v5-allowed-executor-match",
 	SQL: `ALTER TABLE projects ADD COLUMN allowed_executor_match TEXT NOT NULL DEFAULT '[]';`,
 }}}
+
+// SeedCapture 是对话捕获改为默认开启的一次性迁移（§16.5）：启动时把还没开启的项目逐个开启，
+// 经 project.update 落账，操作者是 system（kernel:defaults）。已开启的项目不动、不写事件，重复执行不重复写；
+// 幂等键按项目固定，开启过之后即使被直接调 API 关掉，也不会被再次打开。
+func SeedCapture(ctx context.Context, x *command.Executor, st *store.Store, owner string) error {
+	var todo []string
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		ps, err := List(tx)
+		for _, p := range ps {
+			if !p.Capture {
+				todo = append(todo, p.ID)
+			}
+		}
+		return err
+	}); err != nil {
+		return err
+	}
+	system := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:defaults", Via: domain.ViaClock, OnBehalfOf: owner},
+		Level: authz.LevelDelegate}
+	for _, id := range todo {
+		raw, _ := json.Marshal(map[string]any{"id": id, "capture": true})
+		if _, err := x.Do(ctx, command.Request{Identity: system, Command: "project.update", Input: raw,
+			IdemKey: "defaults:capture:" + id, Owner: owner}); err != nil {
+			return fmt.Errorf("projects: enable capture for %s: %w", id, err)
+		}
+	}
+	return nil
+}
 
 // CmdSetCaptureOutbound 设置项目的 capture_outbound，只 Web。
 const CmdSetCaptureOutbound = "project.capture_outbound.set"
@@ -253,11 +282,10 @@ type ref struct {
 }
 
 type createIn struct {
-	Name    string               `json:"name"`
-	Intro   string               `json:"intro"`
-	Tags    []string             `json:"tags"`
-	Status  domain.ProjectStatus `json:"status"`
-	Capture bool                 `json:"capture"`
+	Name   string               `json:"name"`
+	Intro  string               `json:"intro"`
+	Tags   []string             `json:"tags"`
+	Status domain.ProjectStatus `json:"status"`
 }
 
 type updateIn struct {
@@ -425,11 +453,6 @@ func repoOwner(tx *store.Tx, remote string) (string, error) {
 func Register(x *command.Executor) error {
 	specs := []command.Spec{
 		{Name: "project.create", Action: authz.ActionManageProject, Tier: authz.TierOrganize, Page: "/projects",
-			TierFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
-				var v createIn
-				_ = decode(in, &v)
-				return captureTier(v.Capture), nil
-			},
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				var v createIn
 				return authz.Object{}, decode(in, &v)
@@ -455,7 +478,7 @@ func Register(x *command.Executor) error {
 				if v.Status == "" {
 					v.Status = domain.ProjectActive
 				}
-				p := domain.Project{ID: id, Name: v.Name, Intro: v.Intro, Tags: v.Tags, Status: v.Status, Capture: v.Capture}
+				p := domain.Project{ID: id, Name: v.Name, Intro: v.Intro, Tags: v.Tags, Status: v.Status, Capture: true} // 对话捕获默认开启，不再逐个项目打开
 				if err := save(c.Tx, p, true); err != nil {
 					return nil, err
 				}
@@ -642,7 +665,7 @@ func Register(x *command.Executor) error {
 	return nil
 }
 
-// captureTier：改对话捕获开关是 3a（改日常），其余项目信息是一档。
+// captureTier：改对话捕获字段是 3a（改日常），其余项目信息是一档。字段不再有 CLI 与 Web 入口，只有启动迁移（SeedCapture）与直接调 API 会写它。
 func captureTier(capture bool) authz.Tier {
 	if capture {
 		return authz.TierRules

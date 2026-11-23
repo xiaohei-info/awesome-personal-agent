@@ -122,3 +122,34 @@ func TestClockLagRecordedAndClearedAfterAnHour(t *testing.T) {
 		t.Fatalf("new lag: %+v", v.ClockLags)
 	}
 }
+
+// 捕获失败按原因类别汇总：次数与最近时间；只算最近 StaleAfter 内的；提醒级，不影响 Healthy；不含对话内容与凭据。
+func TestCaptureFailuresGroupedByClassWithinWindow(t *testing.T) {
+	e := setup(t)
+	add := func(class, project string, at time.Time) {
+		t.Helper()
+		pl, _ := json.Marshal(map[string]string{"class": class, "project": project, "at": at.UTC().Format(time.RFC3339)})
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, err := eventlog.Append(tx, domain.Event{Type: domain.EvCaptureFailed, Object: "capture-failures", At: at, Payload: pl,
+				Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent:x", Via: domain.ViaCLI}})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("no_project", "", t0.Add(-30*time.Hour)) // 出窗，不算
+	add("no_project", "", t0.Add(-3*time.Hour))
+	add("no_project", "", t0.Add(-1*time.Hour))
+	add("kernel_unreachable", "", t0.Add(-2*time.Hour))
+	v := e.collectAt(t0, 0)
+	want := []CaptureFailure{{Class: "no_project", Count: 2, LastAt: t0.Add(-time.Hour)}, {Class: "kernel_unreachable", Count: 1, LastAt: t0.Add(-2 * time.Hour)}}
+	if len(v.CaptureFailures) != 2 || v.CaptureFailures[0] != want[0] || v.CaptureFailures[1] != want[1] {
+		t.Fatalf("got %+v, want %+v", v.CaptureFailures, want)
+	}
+	if !v.Healthy() {
+		t.Fatal("capture failures are a reminder, not an error")
+	}
+	if v = e.collectAt(t0.Add(StaleAfter), 0); len(v.CaptureFailures) != 0 {
+		t.Fatalf("a day later nothing should be left: %+v", v.CaptureFailures)
+	}
+}

@@ -110,7 +110,7 @@ func TestBacklogRestoreOnUpgradedFixture(t *testing.T) {
 				Detail json.RawMessage
 			}
 		}
-		if code != 200 || json.Unmarshal(b, &h) != nil || len(h.Signals) != 13 {
+		if code != 200 || json.Unmarshal(b, &h) != nil || len(h.Signals) != 14 {
 			t.Fatalf("health: %d %s", code, b)
 		}
 		for _, s := range h.Signals {

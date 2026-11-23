@@ -37,7 +37,7 @@ var (
 	bg    = context.Background()
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	// 十类信号的固定顺序（设计 §15.2 表）。
-	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"}
+	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag", "capture_failures"}
 )
 
 type fakePacks []packs.Rejection
@@ -144,7 +144,7 @@ func (e *env) alert(object, reason string, payload any) {
 }
 
 // flow-health：全新账本返回固定顺序的十类信号，全部正常，且每类都带修复入口。
-func TestEmptyLedgerReportsThirteenHealthySignals(t *testing.T) {
+func TestEmptyLedgerReportsFourteenHealthySignals(t *testing.T) {
 	r := setup(t, nil).report(auth.Observer)
 	if !r.Healthy || len(r.Signals) != len(signalIDs) {
 		t.Fatalf("%+v", r)
@@ -279,7 +279,7 @@ func TestUnjudgedBacklogCountsOutboundUnset(t *testing.T) {
 	}
 }
 
-// ACT-HLT-03/05：时钟迟到是提醒级——severity=warning、why 说明机制，healthy 不变，信号仍恒为十三项。
+// ACT-HLT-03/05：时钟迟到是提醒级——severity=warning、why 说明机制，healthy 不变，信号仍恒为十四项。
 func TestClockLagIsWarningAndKeepsHealthy(t *testing.T) {
 	e := setup(t, nil)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
@@ -289,7 +289,7 @@ func TestClockLagIsWarningAndKeepsHealthy(t *testing.T) {
 	}
 	r := e.report(auth.Observer)
 	s := r.byID("clock_lag")
-	if len(r.Signals) != 13 || !r.Healthy || s.OK || s.Count != 1 || s.Severity != SeverityWarning || s.Why == "" || s.Next == "" {
+	if len(r.Signals) != 14 || !r.Healthy || s.OK || s.Count != 1 || s.Severity != SeverityWarning || s.Why == "" || s.Next == "" {
 		t.Fatalf("%+v", r)
 	}
 	if sd := r.byID("stalled_delegations"); !sd.OK || sd.Severity != "" {
@@ -381,5 +381,27 @@ func TestUnjudgedBacklogCarriesRejudgeDays(t *testing.T) {
 	e.srv = srv
 	if d, _ := e.report(auth.Observer).byID("unjudged_backlog").Detail.(map[string]any); d["rejudge_days"] != float64(7) {
 		t.Fatalf("window 7d: detail %+v", d)
+	}
+}
+
+// 捕获失败是提醒级：severity=warning、healthy 不变；逐类给出类别、次数、最近时间，不带对话内容与凭据。
+func TestCaptureFailuresIsWarningWithClassRows(t *testing.T) {
+	e := setup(t, nil)
+	at := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		pl, _ := json.Marshal(map[string]string{"class": "no_project", "at": at.Format(time.RFC3339)})
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvCaptureFailed, Object: "capture-failures", At: at, Payload: pl,
+			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent:x", Via: domain.ViaCLI}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report(auth.Observer)
+	s := r.byID("capture_failures")
+	if len(r.Signals) != 14 || !r.Healthy || s.OK || s.Count != 1 || s.Severity != SeverityWarning || s.Why == "" || s.Next == "" {
+		t.Fatalf("%+v", r)
+	}
+	if len(s.Captures) != 1 || s.Captures[0].Class != "no_project" || s.Captures[0].Count != 1 || !s.Captures[0].LastAt.Equal(at) {
+		t.Fatalf("%+v", s.Captures)
 	}
 }
