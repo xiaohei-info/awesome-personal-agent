@@ -24,6 +24,19 @@ type ItemQuery struct {
 // MaxRangeDays 是按日期范围读的最大跨度：月视图的 6 周加上前后余量。
 const MaxRangeDays = 62
 
+// CheckRange 校验一对日期范围参数（名为 fromName、toName）：两个都是 YYYY-MM-DD，to 不早于 from，跨度至多 MaxRangeDays 天。
+func CheckRange(fromName, toName, from, to string) error {
+	f, err1 := time.Parse("2006-01-02", from)
+	t, err2 := time.Parse("2006-01-02", to)
+	switch {
+	case err1 != nil || err2 != nil:
+		return domain.NewError(domain.CodeInvalidRequest, fromName+" and "+toName+" must both be YYYY-MM-DD", "e.g. "+fromName+"=2026-05-01&"+toName+"=2026-05-07")
+	case t.Before(f) || t.Sub(f) >= MaxRangeDays*24*time.Hour:
+		return domain.NewError(domain.CodeInvalidRequest, toName+" must not be before "+fromName+", and the range is at most 62 days", "narrow the range")
+	}
+	return nil
+}
+
 // ItemProgressText 返回每个事项全部进展文字（空格连接），供全文检索。
 func ItemProgressText(tx *store.Tx) (map[string]string, error) {
 	r, err := tx.Query("SELECT item, text FROM item_progress ORDER BY at, id")
@@ -58,13 +71,8 @@ func FilterItems(its []domain.Item, progress map[string]string, q ItemQuery) ([]
 		}
 	}
 	if q.From != "" || q.To != "" {
-		f, err1 := time.Parse("2006-01-02", q.From)
-		t, err2 := time.Parse("2006-01-02", q.To)
-		switch {
-		case err1 != nil || err2 != nil:
-			return nil, domain.NewError(domain.CodeInvalidRequest, "from and to must both be YYYY-MM-DD", "e.g. from=2026-05-01&to=2026-05-07")
-		case t.Before(f) || t.Sub(f) >= MaxRangeDays*24*time.Hour:
-			return nil, domain.NewError(domain.CodeInvalidRequest, "to must not be before from, and the range is at most 62 days", "narrow the range")
+		if err := CheckRange("from", "to", q.From, q.To); err != nil {
+			return nil, err
 		}
 	}
 	var less func(a, b domain.Item) int

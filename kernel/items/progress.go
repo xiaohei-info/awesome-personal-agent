@@ -65,6 +65,38 @@ func Progress(tx *store.Tx, item string) ([]domain.Progress, error) {
 	return out, r.Err()
 }
 
+// ProgressIn 返回进展日落在 [from, to]（YYYY-MM-DD，含首尾）里的进展，按事项分组、各自按记录先后。
+// 进展日是条目的所指日期 on；没写 on 的取记录时刻所在的本机日（与 Today 同一日界）。「已完成」页按周数进展用它（附录 B.2）。
+func ProgressIn(tx *store.Tx, from, to string) (map[string][]domain.Progress, error) {
+	f, err := time.ParseInLocation(dateLayout, from, time.Local)
+	if err != nil {
+		return nil, err
+	}
+	t, err := time.ParseInLocation(dateLayout, to, time.Local)
+	if err != nil {
+		return nil, err
+	}
+	r, err := tx.Query(`SELECT item, id, text, on_date, actor, at, precision FROM item_progress
+		WHERE (on_date <> '' AND on_date BETWEEN ? AND ?) OR (on_date = '' AND at >= ? AND at < ?) ORDER BY at, id`,
+		from, to, f.UnixNano(), t.AddDate(0, 0, 1).UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	out := map[string][]domain.Progress{}
+	for r.Next() {
+		var item string
+		var p domain.Progress
+		var at int64
+		if err := r.Scan(&item, &p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision); err != nil {
+			return nil, err
+		}
+		p.At = time.Unix(0, at).UTC()
+		out[item] = append(out[item], p)
+	}
+	return out, r.Err()
+}
+
 func (s *svc) progress() command.Spec {
 	parse := func(in json.RawMessage) (progressIn, error) {
 		var v progressIn

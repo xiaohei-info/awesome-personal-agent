@@ -149,6 +149,7 @@
 | 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围） | 按 §14.3；导出 ext 密钥可 `GET` |
 | | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
+| | 已有路由 GET /items 的新增查询参数 | `progress_from`、`progress_to`：只列进展日落在范围内的事项，响应另带 `progress`（主文档 §7.1） | observer |
 | | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate |
 | | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 登记或移除关联键 `{key, domain?}`（经 `item.relate`；`GET /items/{id}` 返回 `correlation_keys[]`） | 同 `relations` |
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
@@ -273,6 +274,8 @@
 事项字段 `planned_slot`：`POST /items`、`PATCH /items/{id}` 与导入的 `item` 可写，值为 `HH:MM - HH:MM`（本机时区的墙上时间，开始 00:00–23:59，结束 00:01–24:00 且晚于开始），`PATCH` 传 `null` 或空串清除；`GET` 在已设置时返回。写了时段而请求与事项上都没有计划日期、格式不对、跨午夜或结束不晚于开始时返回 400 `invalid_request`。不产生定时与提醒（主文档 §6.3）。事项事件的快照里随之带上这个字段。
 
 `GET /items?from=YYYY-MM-DD&to=YYYY-MM-DD`：按日期范围读，含首尾，`to` 不早于 `from`，跨度至多 62 天，两个参数须同时给，否则 400。收录 `planned_for` 落在范围内、或 `deadline` 所在的本机日落在范围内的事项，与其他筛选取交集；不按阶段过滤。带范围时响应另有 `today`（本机时区的今天）与 `utc_offset`（本机时区此刻的偏移，如 `+08:00`）。
+
+`GET /items?progress_from=YYYY-MM-DD&progress_to=YYYY-MM-DD`：按进展日读，含首尾，两个参数须同时给，`progress_to` 不早于 `progress_from`，跨度至多 62 天，否则 400。只收至少有一条进展的进展日落在范围内的事项（与其他筛选取交集，不按阶段过滤），响应另有 `progress`（事项 id → 落在范围内的进展条目，形状同 `GET /items/{id}` 的 `progress[]`，按记录先后）。进展日是条目的 `on`；没有 `on` 的取 `at` 所在的本机日。Web「已完成」页按它数一周的进展（界面设计 §9.13）。
 
 `GET /items?phase=done`：响应另有 `done_at`（事项 id → 进入已完成的时刻，UTC）：取最近一次转入 `done` 的事件时刻；新建时就是已完成的事项（工作台迁移写入）没有转入那一刻，取 `ext.workbench.completed` 那天的本机 00:00，没记完成日期的取 `ext.workbench.updated` 那天，两样都没有才用写入时刻。Web「已完成」页按它所在的本机日分周（界面设计 §9.13）。
 
@@ -489,6 +492,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 
 跨来源相似合并与推送哪些事（2026-11-23）只做加法：`proposal` 增 `merges`、`similar`、`not_same`、`split_from`，策略增 `merge_judge` 与 `disturb.push`，`source.failed` 增 `kind: streak`，新增 `POST /source-events/{id}/split`。不改账本结构、不迁移：旧建议没有这些键，读作没有合并留痕；旧策略没有这些键，按缺省（合并判断方 `same`，推送前三类开、新建议关）。升级前已合并的建议只有 `sources`，没有留痕的来源也能拆，新建议用来源事件的标题与摘要。同日修订为批量归类，仍只做加法：`proposal` 增 `sweep`（`state`、`batch`、`action`、`target`、`why`、`by`、`run`、`size`、`chars`、`at`），`proposal.merges[]` 增 `why`、`batch`、`run`、`item`，策略增 `merge` 段，`merge_judge` 只剩 `same` 与 `off`（第一版的 `judge`、`generate` 未被任何实例保存过）；`/settings/model-endpoints` 不再有 `merge_judge` 段，移到 `/settings/merge`；内置模板 `merge-same*` 换成 `merge-batch`。升级前的建议没有 `sweep`，不进批、不回填，只作为比对对象。
+
+按进展日读事项（2026-11-23）只做加法：`GET /items` 增 `progress_from`、`progress_to`，带上时响应另有 `progress`。不改账本结构、不迁移；不带这两个参数时响应不变。
 
 除下表外，v0.2.0 对 v0.1 的命令、路由、字段和事件都只做加法。
 

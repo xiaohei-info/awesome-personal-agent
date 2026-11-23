@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -87,11 +88,19 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	f := kitems.Filter{Phase: domain.Phase(q.Get("phase")), Kind: domain.Kind(q.Get("kind")),
 		Project: q.Get("project"), Assignee: q.Get("assignee"), OriginSource: q.Get("origin_source"), OriginRef: q.Get("origin_ref")}
 	sq := search.ItemQuery{Text: q.Get("q"), Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort"), From: q.Get("from"), To: q.Get("to")}
+	// progress_from、progress_to：只列这段日子里有进展的事项，并附上这些进展（「已完成」页按周数进展，附录 B.2）。
+	pf, pt := q.Get("progress_from"), q.Get("progress_to")
+	if pf != "" || pt != "" {
+		if err := search.CheckRange("progress_from", "progress_to", pf, pt); err != nil {
+			return err
+		}
+	}
 	var (
-		its  []domain.Item
-		prog map[string]string
-		rejs = map[string]Rejection{}
-		done map[string]time.Time
+		its    []domain.Item
+		prog   map[string]string
+		rejs   = map[string]Rejection{}
+		done   map[string]time.Time
+		within map[string][]domain.Progress
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if its, err = kitems.List(tx, f); err != nil {
@@ -101,6 +110,12 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			if done, err = kitems.DoneAt(tx); err != nil {
 				return err
 			}
+		}
+		if pf != "" {
+			if within, err = kitems.ProgressIn(tx, pf, pt); err != nil {
+				return err
+			}
+			its = slices.DeleteFunc(its, func(it domain.Item) bool { return within[it.ID] == nil })
 		}
 		if sq.Text != "" {
 			if prog, err = search.ItemProgressText(tx); err != nil {
@@ -134,6 +149,13 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			}
 		}
 		out["done_at"] = at
+	}
+	if within != nil {
+		at := map[string][]domain.Progress{}
+		for _, it := range its {
+			at[it.ID] = within[it.ID]
+		}
+		out["progress"] = at
 	}
 	if sq.From != "" { // 按范围读时给出本机日界，日历页不用浏览器时区猜（§7.1）
 		now := clock.Now().In(time.Local)

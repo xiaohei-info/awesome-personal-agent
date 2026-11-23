@@ -12,7 +12,8 @@ import type { Item } from "../items/ItemsPage";
 import { hostClock, hostParts, type HostClock } from "../items/schedule";
 import { strings } from "./strings";
 
-// 已完成（界面设计 §9.13）：这一周做成了什么。按完成那天（主机时区）算、周一开始；只读，点一件进事项详情。
+// 已完成（界面设计 §9.13）：这一周推进了什么、做成了什么（对齐工作台「本周回顾」）。完成按完成那天、进展按进展日（主机时区）算，周一开始；
+// 只读，点一件进事项详情；不主动提醒（同工作台）。
 // 完成时刻取自 GET /items?phase=done 的 done_at（附录 B.2）。不含简报（APA 自己写的），委派完成的算、标"委派"。
 // 按项目分组，组与组内都是最近完成的在前；没归项目的排最后。地址带 week，可收藏、从详情返回还在原周。
 
@@ -30,6 +31,27 @@ export async function loadDone(api: ApiClient, offset: string): Promise<Done[]> 
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+interface Progress { id: string; text: string; on?: string; at: string }
+/** 一条进展记录：同一件事同一天的几条算一条（迁移来的一篇笔记会拆成同日几条），与工作台本周回顾、周报取材同一口径。 */
+export interface DayRecord { day: string; lines: string[] }
+interface Row { item: Item; done?: Done; records: DayRecord[]; last: string }
+
+/** 这一周有进展的事（不含简报），GET /items?progress_from&progress_to（附录 B.2）；进展日是 on，没写 on 的取记录那天（主机时区）。 */
+export async function loadProgress(api: ApiClient, from: string, to: string, offset: string): Promise<{ item: Item; records: DayRecord[]; last: string }[]> {
+  const r = await api.get<{ items: Item[]; progress?: { [id: string]: Progress[] } }>(`/items?progress_from=${from}&progress_to=${to}`);
+  return r.items.filter((i) => i.kind !== "brief").map((i) => {
+    const days = new Map<string, string[]>();
+    for (const p of r.progress?.[i.id] ?? []) {
+      const day = p.on || hostParts(p.at, offset).date;
+      days.set(day, [...(days.get(day) ?? []), p.text]);
+    }
+    const ps = r.progress?.[i.id] ?? [];
+    return { item: i, records: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, lines]) => ({ day, lines })), last: ps.length ? ps[ps.length - 1].at : "" };
+  });
+}
+
+const firstLine = (s: string) => s.split("\n")[0];
+
 export function DonePage() {
   const { api } = useSession();
   const t = useT(strings);
@@ -37,21 +59,37 @@ export function DonePage() {
   const [params, setParams] = useSearchParams();
   const [clock, setClock] = useState<HostClock | null>(null);
   const [done, setDone] = useState<Done[] | null>(null);
+  const [moved, setMoved] = useState<{ week: string; list: Awaited<ReturnType<typeof loadProgress>> } | null>(null);
   const [error, setError] = useState<unknown>(null);
-
-  useEffect(() => void hostClock(api).then(setClock), [api]);
-  useEffect(() => void (clock && loadDone(api, clock.utc_offset).then(setDone, setError)), [api, clock]);
 
   const thisWeek = clock ? monday(clock.today) : "";
   const w = params.get("week");
   const week = w && DATE.test(w) ? monday(w) : thisWeek;
   const end = week && addDays(week, 6);
+
+  useEffect(() => void hostClock(api).then(setClock), [api]);
+  useEffect(() => void (clock && loadDone(api, clock.utc_offset).then(setDone, setError)), [api, clock]);
+  useEffect(() => void (clock && week && loadProgress(api, week, end, clock.utc_offset).then((list) => setMoved({ week, list }), setError)), [api, clock, week, end]);
+
   const go = (d: string) => setParams(d === thisWeek ? {} : { week: d });
   const list = done?.filter((d) => d.day >= week && d.day <= end) ?? [];
-  const groups = new Map<string, Done[]>();
-  for (const d of list) groups.set(d.item.project ?? "", [...(groups.get(d.item.project ?? "") ?? []), d]);
+  const progressed = moved?.week === week ? moved.list : [];
+  // 每件事一行：这周完成的带完成那天，这周有进展的带每天的进展；按项目分组，组与组内都是最近动过的在前，没归项目的排最后。
+  const rows = new Map<string, Row>();
+  for (const d of list) rows.set(d.item.id, { item: d.item, done: d, records: [], last: d.at });
+  for (const p of progressed) {
+    const r = rows.get(p.item.id);
+    if (r) { r.records = p.records; if (p.last > r.last) r.last = p.last; }
+    else rows.set(p.item.id, { item: p.item, records: p.records, last: p.last });
+  }
+  const groups = new Map<string, Row[]>();
+  for (const r of [...rows.values()].sort((a, b) => b.last.localeCompare(a.last))) groups.set(r.item.project ?? "", [...(groups.get(r.item.project ?? "") ?? []), r]);
   const ordered = [...groups].sort(([a], [b]) => Number(!a) - Number(!b));
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? "";
+  // 统计同工作台本周回顾：进展按条（同事同日算一条）、完成按件、涉及项目不算没归项目的。
+  const stats = (rs: Row[]) => ({ progress: rs.reduce((n, r) => n + r.records.length, 0), done: rs.filter((r) => r.done).length });
+  const all = stats([...rows.values()]);
+  const day = (d: string) => t.on(t.weekdays[(new Date(d + "T00:00:00Z").getUTCDay() + 6) % 7], d);
 
   return (
     <main>
@@ -67,34 +105,43 @@ export function DonePage() {
         </div>
       )}
       {error != null && <ErrorNote error={error} />}
-      {!done ? (
+      {!done || moved?.week !== week ? (
         error == null && <p role="status">{t.loading}</p>
-      ) : !list.length ? (
+      ) : !rows.size ? (
         <>
           <p className="empty">{week === thisWeek ? t.emptyThis : t.emptyPast}</p>
           {week === thisWeek && <p><button type="button" className="link" onClick={() => go(addDays(week, -7))}>{t.seeLast}</button></p>}
         </>
       ) : (
         <>
-          <p className="sub">{ordered.length > 1 ? t.total(list.length, ordered.length) : t.totalOne(list.length)}</p>
-          {ordered.map(([pid, ds]) => (
-            <section key={pid} aria-label={pid ? name(pid) : t.noProject}>
-              <h2>{pid ? <Link to={"/projects/" + encodeURIComponent(pid)}>{name(pid)}</Link> : t.noProject} <span className="sub">{t.count(ds.length)}</span></h2>
-              <ul className="rows">
-                {ds.map((d) => (
-                  <li key={d.item.id} className="act-row">
-                    <div>
-                      <Go to={"/items/" + encodeURIComponent(d.item.id)}>{d.item.title}</Go>
-                      <span className="sub">
-                        {t.on(t.weekdays[(new Date(d.day + "T00:00:00Z").getUTCDay() + 6) % 7], d.day)}
-                        {d.item.kind === "delegation" && <> · <Val k="itemKind" id="delegation" /></>}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
+          <p className="sub">{t.stats(all.progress, all.done, ordered.filter(([pid]) => pid).length)}</p>
+          {ordered.map(([pid, rs]) => {
+            const s = stats(rs);
+            return (
+              <section key={pid} aria-label={pid ? name(pid) : t.noProject}>
+                <h2>{pid ? <Link to={"/projects/" + encodeURIComponent(pid)}>{name(pid)}</Link> : t.noProject}</h2>
+                <p className="sub">{t.groupStats(s.progress, s.done)}</p>
+                <ul className="rows">
+                  {rs.map((r) => (
+                    <li key={r.item.id} className="act-row">
+                      <div>
+                        <Go to={"/items/" + encodeURIComponent(r.item.id)}>{r.item.title}</Go>
+                        <span className="sub">
+                          {r.done ? t.doneOn(day(r.done.day)) : <Val k="phase" id={r.item.phase} />}
+                          {r.item.kind === "delegation" && <> · <Val k="itemKind" id="delegation" /></>}
+                        </span>
+                        {r.records.length > 0 && (
+                          <ul className="sub" aria-label={t.progressOf(r.item.title)}>
+                            {r.records.map((x) => <li key={x.day} title={x.lines.join("\n")}>{day(x.day)} {x.lines.map(firstLine).join("；")}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
         </>
       )}
     </main>

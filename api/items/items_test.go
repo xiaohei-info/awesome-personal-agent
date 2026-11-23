@@ -730,3 +730,57 @@ func TestDoneAtOverHTTP(t *testing.T) {
 		t.Fatalf("done_at only with phase=done: %s", rec.Body)
 	}
 }
+
+// 「已完成」页的进展维度：progress_from/progress_to 只列这段日子里有进展的事项（不看阶段），附上落在范围里的进展；
+// 进展日是 on，没写 on 的取记录那天（本机日）。参数成对、跨度与 from/to 同口径，不合法 400。
+func TestProgressRangeOverHTTP(t *testing.T) {
+	e := setup(t)
+	today := time.Now().Format("2006-01-02")
+	lastWeek := time.Now().AddDate(0, 0, -8).Format("2006-01-02")
+	a := e.create(e.web, `{"kind":"task","title":"a","phase":"open"}`)
+	b := e.create(e.web, `{"kind":"task","title":"b","phase":"done"}`)
+	c := e.create(e.web, `{"kind":"task","title":"c","phase":"open"}`)
+	e.create(e.web, `{"kind":"task","title":"none","phase":"open"}`)
+	for _, w := range []struct{ id, body string }{
+		{a.ID, `{"text":"今天写的"}`},
+		{a.ID, `{"text":"补记上周的","on":"` + lastWeek + `"}`},
+		{b.ID, `{"text":"完成前的进展"}`},
+		{c.ID, `{"text":"只有上周的","on":"` + lastWeek + `"}`},
+	} {
+		if rec := e.do("POST", "/v1/items/"+w.id+"/progress", w.body, e.web); rec.Code != 201 {
+			t.Fatalf("progress = %d %s", rec.Code, rec.Body)
+		}
+	}
+	var out struct {
+		Items    []domain.Item
+		Progress map[string][]domain.Progress `json:"progress"`
+	}
+	rec := e.do("GET", "/v1/items?progress_from="+today+"&progress_to="+today, "", e.web)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 {
+		t.Fatalf("range = %d %s", rec.Code, rec.Body)
+	}
+	var ids []string
+	for _, it := range out.Items {
+		ids = append(ids, it.ID)
+	}
+	if strings.Join(sorted(ids...), ",") != strings.Join(sorted(a.ID, b.ID), ",") || len(out.Progress) != 2 {
+		t.Fatalf("items with progress today = %v, progress = %v", ids, out.Progress)
+	}
+	if p := out.Progress[a.ID]; len(p) != 1 || p[0].Text != "今天写的" {
+		t.Fatalf("a progress in range = %+v", p)
+	}
+	rec = e.do("GET", "/v1/items?progress_from="+lastWeek+"&progress_to="+lastWeek+"&phase=open", "", e.web)
+	out.Progress = nil
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Items) != 2 || len(out.Progress[c.ID]) != 1 || out.Progress[a.ID][0].Text != "补记上周的" {
+		t.Fatalf("on decides the day and combines with phase: %s", rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items", "", e.web); strings.Contains(rec.Body.String(), `"progress"`) {
+		t.Fatalf("progress only with progress_from/to: %s", rec.Body)
+	}
+	for _, bad := range []string{"progress_from=" + today, "progress_from=x&progress_to=y", "progress_from=" + today + "&progress_to=" + lastWeek, "progress_from=2026-01-01&progress_to=2026-06-01"} {
+		if rec := e.do("GET", "/v1/items?"+bad, "", e.web); rec.Code != 400 {
+			t.Fatalf("%s = %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+}
