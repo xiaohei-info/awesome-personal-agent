@@ -518,7 +518,7 @@ func attach() command.Spec {
 			if err := runner.SetAttachState(c.Tx, v.Event, state, v.Item); err != nil {
 				return nil, err
 			}
-			if v.Echo {
+			if v.Applied { // 回音与来源对象更新都是这条建议的消息：记进它的消息清单（§9.4），合并、归类、展示都按清单走
 				if err := addEchoSource(c, v); err != nil {
 					return nil, err
 				}
@@ -527,7 +527,7 @@ func attach() command.Spec {
 		}}
 }
 
-// addEchoSource：proposed 事项收到回音只更新"来自几个来源"，阶段不变；其他阶段不动。
+// addEchoSource：proposed 事项收到回音或来源对象更新，只更新"来自几个来源"，阶段不变；其他阶段不动。
 func addEchoSource(c *command.Ctx, v attachIn) error {
 	it, err := items.Get(c.Tx, v.Item)
 	if err != nil || it.Phase != domain.PhaseProposed {

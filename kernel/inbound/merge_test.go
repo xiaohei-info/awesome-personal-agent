@@ -283,3 +283,24 @@ func TestSamePRAcrossMailAndPlatformIsOneProposal(t *testing.T) {
 	}
 	e.verify()
 }
+
+// 没被折叠的平台建议：同一对象之后的更新（合并、改动、请求评审）挂到它上面时记进它的消息清单，卡片上「N 条消息 → 这一条」列得到；
+// 它们仍是挂靠消息（不是合并），没有合并留痕。
+func TestPlatformUpdatesAreListedOnTheProposal(t *testing.T) {
+	e := followEnv(t)
+	pr := func(id, typ string) map[string]any {
+		return ev(id, typ, "fix: 设置页保存按钮", map[string]any{"sender": "dev", "link": "https://github.com/org/app/pull/228", "correlation_keys": []string{"org/app#228"}})
+	}
+	e.emit("src_github", "pr", pr("h1", "pr.opened"))
+	e.emit("src_github", "pr", pr("h2", "pr.updated"), pr("h3", "pr.merged"), pr("h4", "notification.review_requested"))
+	ps := e.proposed()
+	if len(ps) != 1 || len(e.allItems()) != 1 || !slices.Equal(ps[0].Proposal.Sources, e.sev("src_github", "h1", "h2", "h3", "h4")) || len(ps[0].Proposal.Merges) != 0 {
+		t.Fatalf("one proposal listing all four: %+v", e.allItems())
+	}
+	for _, x := range e.events("src_github")[1:] {
+		if x.Item != ps[0].ID || x.Disposition != domain.DispositionAttached || x.AttachState != "processed" {
+			t.Fatalf("update stays an attached message: %+v", x)
+		}
+	}
+	e.verify()
+}
