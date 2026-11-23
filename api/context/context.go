@@ -9,6 +9,7 @@
 package context
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -115,6 +116,10 @@ func scoped(tx *store.Tx, p *core.Principal, res *kcontext.Result) error {
 			return t, nil
 		}
 		it, err := kitems.Get(tx, id)
+		var de *domain.Error
+		if id == "" || (errors.As(err, &de) && de.Code == domain.CodeNotFound) {
+			return readscope.Full, nil // 不挂事项的投递、已不在的事项：没有出自来源的内容可裁
+		}
 		if err != nil {
 			return readscope.None, err
 		}
