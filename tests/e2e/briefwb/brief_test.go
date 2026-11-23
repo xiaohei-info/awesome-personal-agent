@@ -476,7 +476,7 @@ func TestFlowBriefMaterial(t *testing.T) {
 		}
 	})
 
-	f.step("ACT-BRF-05 来源原文文件不超过外发范围与字符预算，且只读", func(t *testing.T) {
+	f.step("ACT-BRF-05 来源原文文件一律全文、不超过字符预算，且只读", func(t *testing.T) {
 		checkRaw(t, f, am)
 	})
 
@@ -547,34 +547,20 @@ func checkRaw(t *testing.T, f *fx, am runResult) {
 			}
 			r := d.Raw[0]
 			body := dgBody(strings.TrimPrefix(d.Title, "知会 "))
-			switch s.external {
-			case "full":
-				text, ok := am.Files[r.File]
-				if !ok || r.File == "" {
-					t.Fatalf("%s 应有原文文件: %+v", d.Event, r)
-				}
-				n := utf8.RuneCountInString(text)
-				if n > 20000 || r.Material.Original != 30000 || r.Material.Sent <= 0 || r.Material.Sent > n || r.Material.Scope != "full" {
-					t.Errorf("%s 文件 %d 个字符，material = %+v", d.Event, n, r.Material)
-				}
-				if !strings.Contains(text, fmt.Sprintf("原文 %d 个字符，写入 %d 个字符", r.Material.Original, r.Material.Sent)) {
-					t.Errorf("%s 的文件头应写明与条目同样的裁剪量 %+v:\n%.300s", d.Event, r.Material, text)
-				}
-				if !strings.Contains(text, body[:200]) {
-					t.Errorf("%s 的文件应是原文", d.Event)
-				}
-			case "excerpt":
-				text, ok := am.Files[r.File]
-				if !ok || r.File == "" || r.Material.Scope != "excerpt" {
-					t.Fatalf("%s 应有摘录文件: %+v", d.Event, r)
-				}
-				if !strings.Contains(text, body[:500]) || strings.Contains(text, body[:700]) {
-					t.Errorf("%s 的文件应是正文前 500 个字符的摘录", d.Event)
-				}
-			default: // none 与未选择
-				if r.File != "" || r.Material.Mode != "not_written" {
-					t.Errorf("%s（外发范围 %q）不应有原文文件: %+v", d.Event, s.external, r)
-				}
+			// 简报运行属于 APA 内部：来源送外部模型端点的范围（s.external）不管它，每个已登记来源都写全文文件，只按单文件预算裁（§14.14）。
+			text, ok := am.Files[r.File]
+			if !ok || r.File == "" {
+				t.Fatalf("%s（外发范围 %q）应有原文文件: %+v", d.Event, s.external, r)
+			}
+			n := utf8.RuneCountInString(text)
+			if n > 20000 || r.Material.Original != 30000 || r.Material.Sent <= 0 || r.Material.Sent > n || r.Material.Scope != "full" {
+				t.Errorf("%s 文件 %d 个字符，material = %+v", d.Event, n, r.Material)
+			}
+			if !strings.Contains(text, fmt.Sprintf("原文 %d 个字符，写入 %d 个字符", r.Material.Original, r.Material.Sent)) {
+				t.Errorf("%s 的文件头应写明与条目同样的裁剪量 %+v:\n%.300s", d.Event, r.Material, text)
+			}
+			if !strings.Contains(text, body[:700]) {
+				t.Errorf("%s 的文件应是原文（不止摘录的 500 字）", d.Event)
 			}
 		}
 	}

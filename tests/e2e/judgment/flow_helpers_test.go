@@ -231,6 +231,10 @@ func (f *fx) legacyJudgeEvents(t *testing.T) {
 		return string(out), code
 	}
 	// 旧判断来自 run.finished（category: judge），照常可读；载荷未被改写（逐条对夹具清单的哈希）。
+	// 升级后旧 token 是外部钥匙、回放只给信封；本人把内部用的钥匙改回 APA 内部后读得到载荷（§16.5）。
+	if err := srv.MarkTokensInternal(fx.M.WebSecret); err != nil {
+		t.Fatal(err)
+	}
 	out, code := runApa(del, "why", evID)
 	if code != 0 {
 		t.Fatalf("apa why %s 退出码 %d: %s", evID, code, out)

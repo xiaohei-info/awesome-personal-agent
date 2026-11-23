@@ -146,6 +146,19 @@ func TestExternalKeyItemsAndMaterialsTakeTheStrictestSource(t *testing.T) {
 	if ps := bd.Progress[it.ID]; len(ps) != 1 || ps[0].Text != "" {
 		t.Fatalf("progress by day follows the item's level: %+v", bd.Progress)
 	}
+	// 回放：元信息档只给信封（类型与时间线，不含载荷里的正文）；经过带进展正文，只在全文档位可读；不给的拒绝。
+	if code, body := getAs(k, meta, "/v1/why/"+it.ID); code != 200 || !strings.Contains(body, `"steps"`) || strings.Contains(body, "BODYWORD") || strings.Contains(body, "进进进") {
+		t.Fatalf("meta replay is envelope only: %d %.300s", code, body)
+	}
+	if code, _ := getAs(k, meta, "/v1/items/"+it.ID+"/trace"); code != 403 {
+		t.Fatalf("trace below full is refused: %d", code)
+	}
+	if code, _ := getAs(k, none, "/v1/why/"+it.ID); code != 403 {
+		t.Fatalf("replay of an unreachable item is refused: %d", code)
+	}
+	if code, _ := getAs(k, internal, "/v1/items/"+it.ID+"/trace"); code != 200 { // 内部钥匙按凭据级别，不看档位
+		t.Fatalf("internal trace: %d", code)
+	}
 	if strings.Contains(getBody(k, none, "/v1/today"), it.ID) {
 		t.Fatal("today must leave out an unreachable item")
 	}

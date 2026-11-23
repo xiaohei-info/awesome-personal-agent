@@ -51,19 +51,25 @@ func readable(p *core.Principal) error {
 	return nil
 }
 
-// replayLevel 是回放与经过对外部钥匙的口径（§14.14）：回放里有事项快照、进展与来源原文，按档位拆不干净，
-// 所以事项、材料、来源事件只在全文档位可回放，否则按够不到拒绝；其余对象（运行等）只给信封，与 observer 同。
-// 内部钥匙、运行凭据与 Web 照旧按凭据级别裁剪。
-func replayLevel(tx *store.Tx, p *core.Principal, id string) (authz.Level, error) {
+// replayLevel 是回放与经过对外部钥匙的口径（§14.14）：载荷里有事项快照、进展与来源原文，按档位拆不干净。
+// 事项、材料、来源事件在全文档位按凭据级别回放；envelope 为真（回放 /why）时元信息与摘录档只给信封（与 observer 同：
+// 类型、时间、操作者、授权单号与判断结论，不含载荷、理由与证据），为假（经过 trace，行里带进展正文）时只在全文档位可读；
+// 不给一律拒绝。其余对象（运行等）只给信封。内部钥匙、运行凭据与 Web 照旧按凭据级别裁剪。
+func replayLevel(tx *store.Tx, p *core.Principal, id string, envelope bool) (authz.Level, error) {
 	if !p.Caller.External() {
 		return p.Caller.Level, nil
 	}
 	rs := readscope.New(tx, p.Caller)
 	full := func(t string, err error) (authz.Level, error) {
-		if err == nil && t != readscope.Full {
-			err = readscope.Denied()
+		switch {
+		case err != nil:
+			return "", err
+		case t == readscope.Full:
+			return p.Caller.Level, nil
+		case t != readscope.None && envelope:
+			return authz.LevelObserver, nil
 		}
-		return p.Caller.Level, err
+		return "", readscope.Denied()
 	}
 	if it, err := kitems.Get(tx, id); err == nil {
 		return full(rs.ItemTier(it))
@@ -94,7 +100,7 @@ func (h *handlers) why(w http.ResponseWriter, r *http.Request, p *core.Principal
 		if err != nil {
 			return err
 		}
-		level, err := replayLevel(tx, p, id)
+		level, err := replayLevel(tx, p, id, true)
 		if err != nil {
 			return err
 		}
@@ -196,7 +202,7 @@ func (h *handlers) messageTrace(w http.ResponseWriter, r *http.Request, p *core.
 		if !p.Web && inbound.IsCaptureSource(ev.SourceID) { // 对话内容只给本人；其他凭据与不存在一样
 			return domain.NewError(domain.CodeNotFound, "source event not found", "check the id")
 		}
-		level, err := replayLevel(tx, p, id)
+		level, err := replayLevel(tx, p, id, false)
 		if err != nil {
 			return err
 		}
@@ -223,7 +229,7 @@ func (h *handlers) itemTrace(w http.ResponseWriter, r *http.Request, p *core.Pri
 		if _, err := kitems.Get(tx, id); err != nil {
 			return err
 		}
-		level, err := replayLevel(tx, p, id)
+		level, err := replayLevel(tx, p, id, false)
 		if err != nil {
 			return err
 		}
