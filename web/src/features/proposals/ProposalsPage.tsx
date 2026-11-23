@@ -516,12 +516,14 @@ export function ProposalsPage() {
     .join(" · ");
 
   const batch = async () => {
+    const ids = visible.filter((i) => i.proposal?.recommend).map((i) => i.id);
+    if (ids.length === 0) return; // 没有可见的推荐就不发请求：服务端也拒绝缺范围的请求
     setConfirming(false);
     setBatching(true);
     setError(null);
     setOutcome(null);
     try {
-      const filter = { ...(source && { source }), ...(project && { project }), ids: visible.filter((i) => i.proposal?.recommend).map((i) => i.id) };
+      const filter = { ...(source && { source }), ...(project && { project }), ids };
       const r = await api.post<{ results: BatchResult[] }>("/proposals/batch", { mode: "recommended", filter });
       const title = (id: string) => all.find((i) => i.id === id)?.title ?? id;
       setOutcome({
@@ -669,8 +671,8 @@ export function ProposalsPage() {
             </label>
             {confirming ? (
               <>
-                <span>{plan}</span>
-                <button disabled={batching} onClick={batch}>{t.confirmBatch}</button>
+                <span>{recommended === 0 ? t.batchNoneVisible : plan}</span>
+                <button disabled={batching || recommended === 0} onClick={batch}>{t.confirmBatch}</button>
                 <button onClick={() => setConfirming(false)}>{t.cancel}</button>
               </>
             ) : (

@@ -855,3 +855,64 @@ describe("按推荐处理不碰折叠里的建议", () => {
     expect(post(s.calls)).toEqual({ mode: "recommended", filter: { ids: ["dec", "d1", "g1"] } });
   });
 });
+
+// 唯一含推荐的组被收起后，确认不能再发出"没有范围"的请求（服务端缺范围会拒绝，前端同处兜住）。
+describe("按推荐处理：确认框打开后收起唯一含推荐的组", () => {
+  const items = [
+    prop("g1", { title: "PR 通知", origin: { source: "src_gh" }, proposal: { recommend: "dismiss", low_confidence: false } as any }),
+    prop("d2", { title: "日常二", origin: { source: "src_mail_qq" } }),
+  ];
+  const srv = () => {
+    const calls: { path: string; body?: any }[] = [];
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      calls.push({ path: url, body: init.body ? JSON.parse(init.body as string) : undefined });
+      if (url === "/v1/projects") return json(200, { projects: [] });
+      if (url === "/v1/sources") return json(200, { sources: [] });
+      if (url === "/v1/items?phase=proposed") return json(200, { items, last_rejections: {}, origins: { g1: { type: "pr.opened", object: "o/r/pull/1" } } });
+      if (url === "/v1/proposals/batch") return json(200, { results: [] });
+      return json(404, { code: "not_found", why: url, next: "x" });
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  };
+  const batchCalls = (calls: { path: string; body?: any }[]) => calls.filter((c) => c.path === "/v1/proposals/batch");
+
+  it("展开 → 打开确认 → 收起：确认置灰并写明原因，点了也不发请求；再展开恢复，请求带 ids", async () => {
+    const s = srv();
+    mount(s.impl);
+    const hosted = (await screen.findByRole("group", { name: "代码托管通知" })) as HTMLDetailsElement;
+    await userEvent.click(within(hosted).getByText(/已收起/));
+    await userEvent.click(screen.getByRole("button", { name: "按推荐处理 1 条" }));
+    await userEvent.click(within(hosted).getByText(/代码托管通知/)); // 收起
+    expect(hosted.open).toBe(false);
+    const ok = screen.getByRole("button", { name: "确认按推荐处理" });
+    expect(ok).toBeDisabled();
+    expect(screen.getByText(/没有带推荐的.*不能确认/)).toBeInTheDocument();
+    await userEvent.click(ok);
+    expect(batchCalls(s.calls)).toHaveLength(0);
+    await userEvent.click(within(hosted).getByText(/代码托管通知/)); // 再展开
+    await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
+    await waitFor(() => expect(batchCalls(s.calls)).toHaveLength(1));
+    expect(batchCalls(s.calls)[0].body).toEqual({ mode: "recommended", filter: { ids: ["g1"] } });
+  });
+
+  it("折叠组内的建议在任何操作顺序下都不进批量：只要请求发出，ids 就不含 g1", async () => {
+    const orders: Array<Array<"open" | "toggle">> = [["toggle", "toggle", "open"], ["open", "toggle", "toggle", "toggle"], ["toggle", "open", "toggle"], ["open"]];
+    for (const order of orders) {
+      document.body.innerHTML = "";
+      const s = srv();
+      mount(s.impl);
+      const hosted = (await screen.findByRole("group", { name: "代码托管通知" })) as HTMLDetailsElement;
+      for (const step of order) {
+        if (step === "toggle") await userEvent.click(within(hosted).getByText(/代码托管通知/));
+        else {
+          const b = screen.queryByRole("button", { name: /^按推荐处理 \d+ 条$/ });
+          if (b && !(b as HTMLButtonElement).disabled) await userEvent.click(b);
+        }
+      }
+      const ok = screen.queryByRole("button", { name: "确认按推荐处理" });
+      if (ok && !(ok as HTMLButtonElement).disabled) await userEvent.click(ok);
+      if (!hosted.open) expect(batchCalls(s.calls), order.join(">")).toHaveLength(0);
+      for (const c of batchCalls(s.calls)) expect(hosted.open && c.body.filter.ids, order.join(">")).toEqual(["g1"]);
+    }
+  });
+});
