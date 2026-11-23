@@ -83,17 +83,6 @@ const zh = {
   willCall: (u: string) => `将请求：${u}`,
   stored: (n: number) => `暂停期间积下 ${n} 条`,
   pausedNote: "配置和密钥都保留",
-  mergeTitle: "跨来源合并由谁判断",
-  mergeLede: "同一件事从几处来时由谁判断；判为是才合成一条，可一键拆开",
-  mergeChoice: { same: "与生成事项和建议相同（默认）", judge: "只用打分模型", generate: "只用写作模型", off: "关闭合并" } as Record<string, string>,
-  mergeHint: {
-    same: "打分模型先答，拿不准再问写作模型；和筛选来源消息是同一条链路",
-    judge: "更快更省；拿不准时只提示，不合并",
-    generate: "每次都问写作模型",
-    off: "只按来源自己的编号去重，不做相似合并，也不调模型",
-  } as Record<string, string>,
-  mergeMissing: "（这个模型还没配置，配置之前只提示、不合并）",
-  mergeSave: "保存合并设置",
 };
 
 const en: typeof zh = {
@@ -178,17 +167,6 @@ const en: typeof zh = {
   willCall: (u) => `Will call: ${u}`,
   stored: (n) => `${n} held while paused`,
   pausedNote: "Settings and keys are kept",
-  mergeTitle: "Who decides cross-source merges",
-  mergeLede: "Who decides whether things arriving from several sources are the same; only a yes merges them, unsure ones are only hinted, and merges can be split.",
-  mergeChoice: { same: "Same as drafting items and proposals (default)", judge: "Scoring model only", generate: "Writing model only", off: "Turn merging off" },
-  mergeHint: {
-    same: "The scoring model answers first, the writing model when it is unsure: the chain that screens source messages",
-    judge: "Faster and cheaper; when unsure it only hints",
-    generate: "Always asks the writing model",
-    off: "Only de-duplicates by each source's own ids; no similarity merge, no model calls",
-  },
-  mergeMissing: " (this model is not configured yet: until then it only hints)",
-  mergeSave: "Save merge setting",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

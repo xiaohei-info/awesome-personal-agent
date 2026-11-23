@@ -26,13 +26,15 @@ export interface Proposal {
   origin?: { source: string; actor?: string };
   // 入站流水线写入的建议信息（主文档 §6.3）；agent 直接提出的建议没有 recommend。
   proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[];
-    merges?: Merge[]; similar?: { item: string; score: number }[]; split_from?: string };
+    merges?: Merge[]; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep };
 }
-/** 一次合并的留痕（§9.3 跨来源合并）：并入的来源事件、当时的候选内容与依据。 */
-interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; at: string }
+/** 一次合并的留痕（§9.3 跨来源合并）：并入的来源事件、当时的内容、判断方与理由；item 是被折叠的那条建议（批量归类才有）。 */
+interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; why?: string; batch?: string; item?: string; at: string }
+/** 批量归类的记录：结论、去处、理由、判断方。 */
+interface Sweep { state: string; action?: string; target?: string; why?: string; by?: string; at?: string }
 interface SourceRead { event: { id: string; source_id: string; subject: string; summary?: string; occurred_at: string; link?: string } }
 
-type Action = "accept" | "dismiss" | "attach" | "handoff" | "split";
+type Action = "accept" | "dismiss" | "attach" | "handoff" | "split" | "unmerge";
 /** 处理完的一行回执：说清结果，并给去处（界面设计 §5.2、§7 路径一）。 */
 interface Receipt { id: string; title: string; text: string; to?: string; missing?: boolean }
 interface BatchResult { id: string; do: string; ok: boolean; why?: string }
@@ -99,7 +101,7 @@ function Card({ item, rejection, candidates, onAct, ready }: { item: Proposal; r
         </p>
       )}
       {p && <Similar p={p} />}
-      {p?.sources && p.sources.length > 1 && <Sources item={item} onSplit={(event) => onAct(item.id, "split", { event })} />}
+      {p?.sources && p.sources.length > 1 && <Sources item={item} onSplit={(event) => onAct(item.id, "split", { event })} onUnmerge={(member) => onAct(member, "unmerge", {})} />}
       <RejectionNote rejection={rejection} what="handle" />
       <div className="actions">
         <button disabled={busy} className={ready ? "primary" : undefined} onClick={() => act("handoff", {})}>{t.acceptHandoff}</button>
@@ -140,6 +142,7 @@ function Similar({ p }: { p: NonNullable<Proposal["proposal"]> }) {
   return (
     <>
       {p.split_from && <p className="sub"><ItemName id={p.split_from} say={t.splitFrom} /></p>}
+      {p.sweep?.action === "undone" && p.sweep.target && <p className="sub"><ItemName id={p.sweep.target} say={t.undoneFrom} /></p>}
       {p.similar?.map((x) => (
         <p key={x.item} className="sub">
           <Link to={"/items/" + encodeURIComponent(x.item)}><ItemName id={x.item} say={t.similar} /></Link> · {t.similarWhy(x.score)}
@@ -154,8 +157,8 @@ function ItemName({ id, say }: { id: string; say: (title: string) => string }) {
   return <>{say(title || "…")}</>;
 }
 
-/** 来自几个来源时展开看每个来源：名字、时间、原话或摘要、原文，并入的那几个写明依据并可一键拆出。 */
-function Sources({ item, onSplit }: { item: Proposal; onSplit: (event: string) => Promise<void> }) {
+/** 来自几个来源时展开看每个来源：名字、时间、原话或摘要、原文链接；并入的那几个写明何时、由谁、凭什么合并，并可一键撤销或拆出。 */
+function Sources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event: string) => Promise<void>; onUnmerge: (member: string) => Promise<void> }) {
   const t = useT(strings);
   const { api } = useSession();
   const sourceName = useNames("source");
@@ -168,6 +171,7 @@ function Sources({ item, onSplit }: { item: Proposal; onSplit: (event: string) =
       .then(setRows);
   };
   const merges = new Map((p.merges ?? []).map((m) => [m.event, m]));
+  const run = (f: () => Promise<void>) => async () => { setBusy(true); try { await f(); } finally { setBusy(false); } };
   return (
     <details onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && load()}>
       <summary>{t.sourcesHead}</summary>
@@ -176,25 +180,85 @@ function Sources({ item, onSplit }: { item: Proposal; onSplit: (event: string) =
           {rows.map((ev, i) => {
             const m = merges.get(ev.id);
             const when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleString() : "";
+            const why = !m ? (i === 0 ? t.first : "") : [t.mergedBy[m.by] ?? t.mergedBy.default, m.score ? t.score(m.score) : "", t.mergedAt(new Date(m.at).toLocaleString())].filter(Boolean).join(" · ");
             return (
               <li key={ev.id} className="act-row" aria-label={sourceName(m?.source || ev.source_id) || ev.id}>
                 <div>
                   <span>{sourceName(m?.source || ev.source_id)} · {when}</span>
                   <span className="sub">{m?.title || ev.subject}{(m?.summary || ev.summary) ? " — " + (m?.summary || ev.summary) : ""}</span>
                   <span className="sub">
-                    {i === 0 && !m ? t.first : m ? [t.mergedBy[m.by] ?? t.mergedBy.default, m.score ? t.score(m.score) : ""].filter(Boolean).join(" · ") : ""}
+                    {why}
                     {m?.judgment && <> · <Link to={"/judgment?id=" + encodeURIComponent(m.judgment)}>{t.seeJudgment}</Link></>}
                     {" · "}<Link to={"/sources/events/" + encodeURIComponent(ev.id)}>{t.original}</Link>
+                    {ev.link && <> · <a href={ev.link} target="_blank" rel="noreferrer">{t.link}</a></>}
                   </span>
+                  {m?.why && <span className="sub">{t.reasonIs(m.why)}</span>}
                 </div>
-                {i > 0 && (
-                  <button type="button" title={t.splitWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onSplit(ev.id); } finally { setBusy(false); } }}>{t.splitOut}</button>
+                {m?.item ? (
+                  <button type="button" title={t.unmergeWhy} disabled={busy} onClick={run(() => onUnmerge(m.item!))}>{t.unmerge}</button>
+                ) : i > 0 && (
+                  <button type="button" title={t.splitWhy} disabled={busy} onClick={run(() => onSplit(ev.id))}>{t.splitOut}</button>
                 )}
               </li>
             );
           })}
         </ul>
       )}
+    </details>
+  );
+}
+
+interface Activity {
+  days: number; pending: number; model_calls: number; chars: number;
+  batches: { batch: string; at: string; size: number; run?: string; chars: number;
+    decisions: { item: string; title: string; source?: string; action: string; target?: string; target_title?: string; why?: string; by: string }[] }[];
+}
+
+/** 最近自动归类（§9.3）：每一批归了几条、调了几次模型、送出多少字；每条写明去处与理由，折叠掉的可以一键撤销。 */
+function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => Promise<void>; reload: number }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const sourceName = useNames("source");
+  const [a, setA] = useState<Activity | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.get<Activity>("/merge/activity?days=7").then(setA, () => setA(null));
+  }, [api, reload]);
+  if (!a || (a.batches.length === 0 && a.pending === 0)) return null;
+  const all = a.batches.flatMap((b) => b.decisions);
+  const n = (k: string) => all.filter((d) => d.action === k).length;
+  const parts = (["attach", "merge", "duplicate", "keep", "undone"] as const).filter((k) => n(k) > 0).map((k) => t.actionCount(t.sweepAction[k], n(k)));
+  return (
+    <details className="panel" aria-label={t.activityHead}>
+      <summary>{t.activitySummary(a.days, parts.join("、") || t.nothingYet, a.model_calls, a.chars, a.pending)}</summary>
+      {a.batches.map((b) => (
+        <section key={b.batch} aria-label={t.batchHead(new Date(b.at).toLocaleString())}>
+          <h3>{t.batchHead(new Date(b.at).toLocaleString())}</h3>
+          <p className="sub">{t.batchCost(b.size, !!b.run, b.chars)}</p>
+          <ul className="rows">
+            {b.decisions.map((d) => (
+              <li key={d.item} className="act-row" aria-label={d.title}>
+                <div>
+                  <span>
+                    <Link to={"/items/" + encodeURIComponent(d.item)}>{d.title}</Link>
+                    {d.source && <span className="sub"> · {sourceName(d.source)}</span>}
+                  </span>
+                  <span className="sub">
+                    {t.sweepAction[d.action] ?? d.action}
+                    {d.target && <> → <Link to={"/items/" + encodeURIComponent(d.target)}>「{d.target_title || "…"}」</Link></>}
+                    {" · "}{t.sweepBy[d.by] ?? d.by}
+                  </span>
+                  {d.why && <span className="sub">{t.reasonIs(d.why)}</span>}
+                </div>
+                {(d.action === "attach" || d.action === "merge" || d.action === "duplicate") && (
+                  <button type="button" title={t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(d.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      <p className="sub"><Link to="/settings/merge">{t.mergeSettings}</Link></p>
     </details>
   );
 }
@@ -214,6 +278,7 @@ export function ProposalsPage() {
   const [batching, setBatching] = useState(false);
   const [outcome, setOutcome] = useState<{ done: number; skipped: { title: string; why: string }[] } | null>(null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [activityTick, setActivityTick] = useState(0);
   const it = useT(itemStrings);
   const handoff = useHandoff();
   const pre = handoffPrereqs(it, handoff, true);
@@ -261,6 +326,10 @@ export function ProposalsPage() {
         await api.post(path + "/accept", {});
         const who = handoff.preview?.selected?.agent_name;
         setReceipts((r) => [...r, { id, title, to: "/items/" + encodeURIComponent(id) + "#agent", text: ready ? t.handedTo(who || t.agent) : t.acceptedNotHanded, missing: !ready }]);
+      } else if (action === "unmerge") {
+        await api.post(path + "/unmerge", {});
+        setReceipts((x) => [...x, { id, title: item?.title ?? t.foldedOne, text: t.unmergeDone, to: path }]);
+        setActivityTick((n) => n + 1);
       } else if (action === "split") {
         const r = await api.post<{ item: string }>("/source-events/" + encodeURIComponent((body as { event: string }).event) + "/split", { from: id });
         setReceipts((x) => [...x, { id, title, text: t.splitDone, to: "/items/" + encodeURIComponent(r.item) }]);
@@ -314,6 +383,7 @@ export function ProposalsPage() {
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
+      <MergeActivity onUnmerge={(member) => act(member, "unmerge", {})} reload={activityTick} />
       {error != null && (
         <div>
           <ErrorNote error={error} />

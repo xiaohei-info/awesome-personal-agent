@@ -112,17 +112,38 @@ func (p *Pusher) delivery(tx *store.Tx, pol policy.Policy, e domain.Event, fresh
 		return sourcePush(tx, pol, e)
 	case domain.EvRunFinished:
 		return runPush(tx, pol, e)
-	case domain.EvItemCreated:
+	case domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged:
+		// 攒的条数按合并之后计（§7.4、§9.3）：建立时加一，被跨来源合并折叠时减一；合并开启时等这条归类完（留着）再看攒够没有，
+		// 免得成批之前就按未合并的条数推了。
 		r := pol.Disturb.PushRuleFor(policy.PushNewProposals)
 		var pl struct {
+			Op   string `json:"op"`
 			Item struct {
-				Phase domain.Phase `json:"phase"`
+				Phase    domain.Phase `json:"phase"`
+				Proposal *struct {
+					Sweep *struct {
+						State string `json:"state"`
+					} `json:"sweep"`
+				} `json:"proposal"`
 			} `json:"item"`
 		}
-		if json.Unmarshal(e.Payload, &pl) != nil || pl.Item.Phase != domain.PhaseProposed {
+		if json.Unmarshal(e.Payload, &pl) != nil {
 			return domain.Delivery{}, false, nil
 		}
-		*fresh++
+		settled := pl.Item.Phase == domain.PhaseProposed && pl.Item.Proposal != nil && (pl.Item.Proposal.Sweep == nil || pl.Item.Proposal.Sweep.State == "done")
+		switch {
+		case e.Type == domain.EvItemCreated && pl.Item.Phase == domain.PhaseProposed:
+			*fresh++
+			if pol.MergeJudge != policy.MergeOff {
+				return domain.Delivery{}, false, nil
+			}
+		case e.Type == domain.EvItemPhaseChanged && pl.Op == "merge.fold":
+			*fresh = max(*fresh-1, 0)
+			return domain.Delivery{}, false, nil
+		case e.Type == domain.EvItemUpdated && settled:
+		default:
+			return domain.Delivery{}, false, nil
+		}
 		if !r.On || *fresh < r.Min || (!last.IsZero() && e.At.Sub(*last) < proposalCooldown) {
 			return domain.Delivery{}, false, nil
 		}

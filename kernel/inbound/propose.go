@@ -139,14 +139,13 @@ const mergeWindow = 7 * 24 * time.Hour
 // 不开放给 item.create（附录 B：proposal 只读）：MergeKey 记到来源事件；
 // Merge 为真时事项 Item 是已有建议，事件并入它（记入 proposal.sources）；
 // New 为真时 Item 是刚为该事件建出的建议，写入它的 proposal（来源、合并键，命中已接受事项时 AttachTo 推荐补到它）。
-// Trace 是并入时的留痕（候选内容与依据，§9.3 跨来源合并）；Similar 是新建议上只提示的相似建议。
+// Trace 是合并键命中并入时的留痕（候选内容与依据，§9.3）。
 type mergeFields struct {
-	MergeKey string                   `json:"merge_key,omitempty"`
-	Merge    bool                     `json:"merge,omitempty"`
-	New      bool                     `json:"new,omitempty"`
-	AttachTo string                   `json:"attach_to,omitempty"`
-	Trace    *domain.ProposalMerge    `json:"trace,omitempty"`
-	Similar  []domain.ProposalSimilar `json:"similar,omitempty"`
+	MergeKey string                `json:"merge_key,omitempty"`
+	Merge    bool                  `json:"merge,omitempty"`
+	New      bool                  `json:"new,omitempty"`
+	AttachTo string                `json:"attach_to,omitempty"`
+	Trace    *domain.ProposalMerge `json:"trace,omitempty"`
 }
 
 // applyMerge 在处置命令的事务里落下合并键与建议信息，并追加对应的 item.updated。
@@ -182,7 +181,11 @@ func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 			p.Sources = append(p.Sources, ev.ID)
 		}
 		p.MergeKey = m.MergeKey
-		p.Similar = m.Similar
+		if cur.Phase == domain.PhaseProposed { // 规则已自动接受的不再归类
+			if err := markPending(c.Tx, &p, ev.SourceID); err != nil {
+				return err
+			}
+		}
 		if m.AttachTo != "" { // 命中已接受事项：推荐固定为补到它，覆盖起草的推荐
 			if _, err := items.Get(c.Tx, m.AttachTo); err != nil {
 				return err
@@ -300,7 +303,7 @@ func (s *Service) planMerge(ctx context.Context, key string) (into, attachTo str
 }
 
 // place 为来源事件找到它的建议：合并键命中可并入的建议就返回那条（并标记 Merge），否则新建，
-// 命中已接受事项时新建的建议推荐补到它。调用方把返回的 mergeFields 带进处置命令。
+// 命中已接受事项时新建的建议推荐补到它。语义相近的跨来源合并不在这里当场做，由批量归类（Sweep）做。调用方把返回的 mergeFields 带进处置命令。
 func (s *Service) place(ctx context.Context, id command.Identity, rule string, src domain.Source, ev domain.SourceEvent, p proposal, project string) (string, mergeFields, error) {
 	key := mergeKeyOf(ev)
 	into, attachTo, err := s.planMerge(ctx, key)
@@ -311,19 +314,8 @@ func (s *Service) place(ctx context.Context, id command.Identity, rule string, s
 	if into != "" {
 		return into, mergeFields{MergeKey: key, Merge: true, Trace: keyTrace}, nil
 	}
-	var hints []domain.ProposalSimilar
-	if attachTo == "" { // 命中已接受事项时推荐补到它，不再找相似的建议
-		var trace *domain.ProposalMerge
-		if into, trace, hints, err = s.findSimilar(ctx, src, ev, p.title, p.summary); err != nil {
-			return "", mergeFields{}, err
-		}
-		if into != "" {
-			trace.Kind, trace.Project = p.kind, project
-			return into, mergeFields{MergeKey: key, Merge: true, Trace: trace}, nil
-		}
-	}
 	item, err := s.createItem(ctx, id, rule, src, ev, p, project)
-	return item, mergeFields{MergeKey: key, New: true, AttachTo: attachTo, Similar: hints}, err
+	return item, mergeFields{MergeKey: key, New: true, AttachTo: attachTo}, err
 }
 
 // resumeFields 是上一轮建好事项却没记完处置时的合并信息：接着写建议信息；推荐补到哪里按当前账本重新找。

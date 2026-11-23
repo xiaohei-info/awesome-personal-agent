@@ -2,6 +2,7 @@ package items
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -128,4 +129,25 @@ func Relate(tx *store.Tx, from, to, typ string, at time.Time) (json.RawMessage, 
 	}
 	b, err := marshalPayload(payload{Op: "relate", Item: cur, Relation: &rel})
 	return b, err == nil, err
+}
+
+// AppendProgress 在调用方事务内给事项追加一条进展（与 item.progress 同一落法）。调用方追加返回的事件并对 item 做一次 command.Bump。
+func AppendProgress(tx *store.Tx, item, text, actor string, at time.Time) (Write, error) {
+	cur, err := Get(tx, item)
+	if err != nil {
+		return Write{}, err
+	}
+	prev, err := Progress(tx, item)
+	if err != nil {
+		return Write{}, err
+	}
+	p := domain.Progress{ID: fmt.Sprintf("%s.p%06d", item, len(prev)+1), Text: text, Actor: actor, At: at.UTC()}
+	if err := insertProgress(tx, item, p); err != nil {
+		return Write{}, err
+	}
+	cur = stamped(cur, at)
+	if err := save(tx, cur); err != nil {
+		return Write{}, err
+	}
+	return write(domain.EvItemProgressAdded, item, payload{Op: "progress", Item: cur, Progress: &p})
 }

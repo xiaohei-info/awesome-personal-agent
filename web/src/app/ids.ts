@@ -191,6 +191,4 @@ export const PACK_BAND: Record<string, { low?: number; high?: number }> = {
   "delivery-defer": { high: 0.85 },
   "follow-up-defer": { high: 0.85 },
   "delegation-screen": { low: 0.2 },
-  "merge-same": { low: 0.3, high: 0.8 },
-  "merge-same-judge": { low: 0.3, high: 0.8 },
 };

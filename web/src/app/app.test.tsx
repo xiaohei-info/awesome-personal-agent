@@ -335,7 +335,7 @@ describe("设置的分组（界面设计 §3.1）", () => {
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
     expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "Agent 与模型", "连接", "数据与安全"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与打扰", "我来拍板", "Agent", "模型", "提醒渠道", "笔记库", "对外接口", "登录与会话", "存储", "永久删除",
+      "通用", "提醒与打扰", "我来拍板", "Agent", "模型", "跨来源合并", "提醒渠道", "笔记库", "对外接口", "登录与会话", "存储", "永久删除",
     ]);
     expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
   });

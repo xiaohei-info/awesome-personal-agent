@@ -5,6 +5,7 @@ package policy
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,13 +172,76 @@ func (d Disturb) PushRuleFor(cat string) PushRule {
 // DefaultDailyCap 是日上限缺省值（§7.4）。
 const DefaultDailyCap = 20
 
-// 跨来源合并的判断方（MergeJudge 的取值）。
+// 执行跨来源合并的 Agent（MergeJudge 的取值）：same 与生成事项和建议相同（写作模型，整批一次调用）；off 关闭合并，只走规则。
 const (
-	MergeSame         = "same"
-	MergeJudgeOnly    = "judge"
-	MergeGenerateOnly = "generate"
-	MergeOff          = "off"
+	MergeSame = "same"
+	MergeOff  = "off"
 )
+
+// MergeSettings 是跨来源合并任务本身的设置（§9.3）。零值即默认：全部来源参与、纳入已有事项与被忽略记录、
+// 攒够 20 条或最早一条等了 30 分钟成批、用内置提示词。用排除名单而不是勾选名单，以后新接的来源默认参与。
+type MergeSettings struct {
+	ExcludeSources []string   `json:"exclude_sources"`
+	SkipExisting   bool       `json:"skip_existing"`
+	BatchSize      int        `json:"batch_size"`   // 0 取默认
+	WaitMinutes    int        `json:"wait_minutes"` // 0 取默认
+	Prompt         string     `json:"prompt"`       // 空串用内置提示词
+	PromptAt       *time.Time `json:"prompt_at,omitempty"`
+}
+
+// 合并批量参数的默认值与范围。
+const (
+	DefaultMergeBatch = 20
+	DefaultMergeWait  = 30
+	MaxMergePrompt    = 8000
+)
+
+// MergePromptSections 是合并提示词必须有的段落；MergeActions 是提示词必须写到的结论词（输出结构只认这四个）。
+var (
+	MergePromptSections = []string{"## 任务", "## 四种结论", "## 判定依据", "## 不许做的事"}
+	MergeActions        = []string{"attach", "merge", "duplicate", "keep"}
+)
+
+// Batch 与 Wait 是生效的批量参数（未设取默认）。
+func (m MergeSettings) Batch() int { return cmp.Or(m.BatchSize, DefaultMergeBatch) }
+func (m MergeSettings) Wait() time.Duration {
+	return time.Duration(cmp.Or(m.WaitMinutes, DefaultMergeWait)) * time.Minute
+}
+
+// Includes 报告来源是否参与合并。没有来源的记录（本人或 Agent 直接建的）总是参与。
+func (m MergeSettings) Includes(source string) bool {
+	return source == "" || !slices.Contains(m.ExcludeSources, source)
+}
+
+// CheckMergePrompt 校验本人改过的合并提示词：四段齐全且各段有内容、四个结论词都写到、不超长。空串表示用内置的，合法。
+func CheckMergePrompt(body string) error {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	if n := len([]rune(body)); n > MaxMergePrompt {
+		return invalid("merge prompt is %d characters; keep it within %d", n, MaxMergePrompt)
+	}
+	for i, h := range MergePromptSections {
+		at := strings.Index(body, h)
+		if at < 0 {
+			return invalid("merge prompt is missing the section %q", h)
+		}
+		rest := body[at+len(h):]
+		end := len(rest)
+		if j := strings.Index(rest, "\n## "); j >= 0 {
+			end = j
+		}
+		if strings.TrimSpace(rest[:end]) == "" {
+			return invalid("merge prompt section %q is empty", MergePromptSections[i])
+		}
+	}
+	for _, a := range MergeActions {
+		if !strings.Contains(body, a) {
+			return invalid("merge prompt never mentions the conclusion %q", a)
+		}
+	}
+	return nil
+}
 
 // Mute 的 Scope 取值。
 const (
@@ -358,9 +422,11 @@ type Policy struct {
 	// ModelsPaused 为真时两个端点的配置与密钥原样保留，但内核按两者都未配置运行（Current 给出的就是这个视图，§8.7）。
 	// 没有任何端点时规整为假。只在 Web 改。
 	ModelsPaused bool `json:"models_paused"`
-	// MergeJudge 是跨来源相似合并由谁判断（§9.3）：same（缺省，与生成事项和建议相同：打分模型先答、拿不准交写作模型）、
-	// judge（只用打分模型）、generate（只用写作模型）、off（关闭，只按来源幂等键与合并键去重）。旧文档没有此键读作 same。
+	// MergeJudge 是执行跨来源合并的 Agent（§9.3）：same（缺省，与生成事项和建议相同：写作模型，整批一次调用）、
+	// off（关闭，只按来源幂等键与合并键去重）。旧文档没有此键读作 same。
 	MergeJudge string `json:"merge_judge,omitempty"`
+	// Merge 是合并任务本身的设置；旧文档没有此键读作全部默认。
+	Merge MergeSettings `json:"merge"`
 	// NoteVaults 是笔记库登记（§6.13、§12.8）：名字在实例内唯一，OpenURL 是"在笔记应用打开"的 URL 模板。
 	// 已存的策略版本没有这个键，读作没有登记，不改写。只在 Web 改。
 	NoteVaults []NoteVault `json:"note_vaults"`
@@ -533,8 +599,17 @@ func oneOf(v string, set ...string) bool {
 
 // normalize 校验并规整 p；失败返回 ErrInvalid。
 func normalize(p Policy) (Policy, error) {
-	if !oneOf(p.MergeJudge, "", MergeSame, MergeJudgeOnly, MergeGenerateOnly, MergeOff) {
-		return p, invalid("merge_judge %q: use same, judge, generate or off", p.MergeJudge)
+	if !oneOf(p.MergeJudge, "", MergeSame, MergeOff) {
+		return p, invalid("merge_judge %q: use same or off", p.MergeJudge)
+	}
+	if m := p.Merge; m.BatchSize != 0 && (m.BatchSize < 2 || m.BatchSize > 50) {
+		return p, invalid("merge batch_size %d: use 2 to 50", m.BatchSize)
+	}
+	if m := p.Merge; m.WaitMinutes != 0 && (m.WaitMinutes < 5 || m.WaitMinutes > 1440) {
+		return p, invalid("merge wait_minutes %d: use 5 to 1440", m.WaitMinutes)
+	}
+	if err := CheckMergePrompt(p.Merge.Prompt); err != nil {
+		return p, err
 	}
 	for k, r := range p.Disturb.Push {
 		if !slices.Contains(PushCategories, k) {

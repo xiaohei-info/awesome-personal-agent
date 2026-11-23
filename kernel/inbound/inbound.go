@@ -134,6 +134,9 @@ type Service struct {
 	// rejudging 让同一时刻只有一轮自动重判；probe 是模型仍不可用时的退避（只在内存，重启后立即再探一次）。
 	rejudging sync.Mutex
 	probe     probeState
+	// sweeping 让同一时刻只有一批合并归类；sweepAfter 是模型调用失败后的退避（只在内存）。
+	sweeping   sync.Mutex
+	sweepAfter time.Time
 	// captures 跟踪捕获触发的后台处理；测试在关账本前等它们退出，否则提交后钩子会撞上已关闭的连接。
 	captures sync.WaitGroup
 }
@@ -309,6 +312,12 @@ func (s *Service) Register(x *command.Executor) error {
 		return err
 	}
 	if err := registerSplit(x); err != nil {
+		return err
+	}
+	if err := registerSweep(x); err != nil {
+		return err
+	}
+	if err := registerUnmerge(x); err != nil {
 		return err
 	}
 	if err := RegisterAttach(x); err != nil {
@@ -1351,16 +1360,6 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 			cp = project
 		}
 		trace := &domain.ProposalMerge{Title: p.title, Summary: p.summary, Kind: p.kind, Project: cp, By: "merge_key"}
-		var hints []domain.ProposalSimilar
-		if into == "" && attachTo == "" {
-			var st *domain.ProposalMerge
-			if into, st, hints, err = s.findSimilar(ctx, src, ev, p.title, p.summary); err != nil {
-				return err
-			}
-			if into != "" {
-				st.Kind, st.Project, trace = p.kind, cp, st
-			}
-		}
 		if into != "" {
 			ids, places = append(ids, into), append(places, placed{into, mergeFields{MergeKey: key, Merge: true, Trace: trace}})
 			continue
@@ -1369,7 +1368,7 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		if err != nil {
 			return err
 		}
-		ids, places = append(ids, id), append(places, placed{id, mergeFields{MergeKey: key, New: true, AttachTo: attachTo, Similar: hints}})
+		ids, places = append(ids, id), append(places, placed{id, mergeFields{MergeKey: key, New: true, AttachTo: attachTo}})
 	}
 	d := disposeIn{Event: ev.ID, Rule: m.key(), Judgment: a.judgment, Material: &mat.Trace}
 	if len(ids) == 0 {

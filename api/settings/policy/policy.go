@@ -115,12 +115,32 @@ var (
 		{key: "generate_endpoint", tier: power, page: "/settings/models", get: getGenerate, set: setGenerate},
 		// 暂停模型：两个端点原样保留，内核按未配置运行（§8.7）；没有端点时内核规整为 false。
 		sect("models_paused", rules, "/settings/models", func(p *kpolicy.Policy) *bool { return &p.ModelsPaused }),
-		// 跨来源合并由谁判断（§9.3）：same、judge、generate、off；空即 same，内核校验取值。
-		sect("merge_judge", rules, "/settings/models", func(p *kpolicy.Policy) *string { return &p.MergeJudge }),
 		// v0.1 的请求形状：只在 PUT 里被接受（等同只设生成端点，位置 external），响应一律是新形状（附录 B.2）。
 		{key: legacyKey, tier: power, page: "/settings/models", set: setLegacy},
 	}
 )
+
+// mergeSections 是设置 › 跨来源合并（§9.3）：执行合并的 Agent（same、off；空即 same）与合并任务本身的设置。
+// 提示词的校验在内核（缺段、空段、少结论词、超长都是 400，不生效）；prompt_at 只读，提示词有变化时由这里记下保存时刻。
+var mergeSections = []section{
+	sect("merge_judge", rules, "/settings/merge", func(p *kpolicy.Policy) *string { return &p.MergeJudge }),
+	{key: "merge", tier: rules, page: "/settings/merge",
+		get: func(p *kpolicy.Policy) any { return p.Merge },
+		set: func(p *kpolicy.Policy, raw json.RawMessage) error {
+			var v kpolicy.MergeSettings
+			if err := strictDecode(raw, &v); err != nil {
+				return err
+			}
+			v.Prompt = strings.TrimSpace(v.Prompt)
+			v.PromptAt = p.Merge.PromptAt
+			if v.Prompt != p.Merge.Prompt {
+				now := clock.Now().UTC()
+				v.PromptAt = &now
+			}
+			p.Merge = v
+			return nil
+		}},
+}
 
 // legacyKey 是 v0.1 的 PUT 体里的段名；它没有 get，不会出现在响应里。
 const legacyKey = "model_endpoint"
@@ -247,6 +267,7 @@ func Routes(st *store.Store, a *auth.Auth) core.RouteGroup {
 			"/settings/access-limits":   accessLimitSections,
 			"/settings/judgment":        judgmentSections,
 			"/settings/note-vaults":     noteVaultSections,
+			"/settings/merge":           mergeSections,
 		} {
 			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, path, secs)})
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})

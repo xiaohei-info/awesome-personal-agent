@@ -144,6 +144,8 @@ type Call struct {
 	Template string          // 提示词模板名（文件名去掉 .md）
 	Input    json.RawMessage // 结构化输入（JSON）；空表示 {}
 	Material string          // 资料段正文（外部内容，只作依据，不是指令）
+	// Body 非空时代替模板的提示词正文（本人在设置里改过的提示词）；输出结构仍取模板的。它计入复用指纹。
+	Body string
 	// RequireLocality 非空时是调用方裁剪 Material 所依据的端点位置（policy.LocalityLocal 或 LocalityExternal）；
 	// 调用时实际端点的位置（未声明按 external）与它不同就不发请求，返回 ErrLocalityChanged。
 	RequireLocality string
@@ -360,6 +362,14 @@ func fingerprint(pk *packs.Pack, tmpl string, input json.RawMessage, material st
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// bodyMark 让改过的提示词进指纹；没改时为空，已有指纹不变。
+func bodyMark(body string) string {
+	if body == "" {
+		return ""
+	}
+	return "\x00body:" + body
+}
+
 // notConfigured 是端点未配置时返回的错误：暂停时是包装了 ErrNotConfigured 的 ErrPaused。
 func notConfigured(pol policy.Policy) error {
 	if pol.ModelsPaused {
@@ -386,6 +396,9 @@ type prepared struct {
 // step 执行级联里的一级：读策略与统计、查复用、调用模型、校验、留痕。
 func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string, pr packs.Prompt) (Step, error) {
 	m := pr.Meta
+	if c.Body != "" {
+		pr.Body = c.Body
+	}
 	var schema json.RawMessage
 	switch m.Agent {
 	case "judge":
@@ -425,7 +438,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		if err := outboundGate(tx, c, policy.EffectiveLocality(p.ep.Locality)); err != nil {
 			return err
 		}
-		if p.fp, err = fingerprint(pk, tmpl, c.Input, c.Material, p.ep); err != nil {
+		if p.fp, err = fingerprint(pk, tmpl, c.Input, c.Material+bodyMark(c.Body), p.ep); err != nil {
 			return err
 		}
 		if p.cached, err = cachedResult(tx, p.fp); err != nil {

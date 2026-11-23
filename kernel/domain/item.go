@@ -213,9 +213,41 @@ type Proposal struct {
 	NotSame []string `json:"not_same,omitempty"`
 	// SplitFrom 是这条建议从哪条建议里拆出来的。
 	SplitFrom string `json:"split_from,omitempty"`
+	// Sweep 是跨来源合并的批量归类（§9.3）：新建议记 pending，归类后记结论与依据。升级前的建议没有，不回填。
+	Sweep *ProposalSweep `json:"sweep,omitempty"`
 }
 
-// ProposalMerge 是一次合并的留痕。By 取 merge_key（合并键相同）、classifier（打分模型判断）、chat（写作模型判断）。
+// 跨来源合并的归类结论（ProposalSweep.Action）。
+const (
+	SweepKeep      = "keep"      // 留着：照常作为建议
+	SweepMerge     = "merge"     // 合并成一条建议：来源并入去处，这条折叠
+	SweepAttach    = "attach"    // 并入已有事项：去处追加补充进展，这条折叠
+	SweepDuplicate = "duplicate" // 判定重复：这条折叠
+	SweepUndone    = "undone"    // 本人撤销了折叠
+)
+
+// ProposalSweep 是一条建议在跨来源合并里的归类记录。State 为 pending（待归类）或 done。
+// By 是判断方：generate（写作模型）或 rule（规则，没有调模型）。Run 是本批那次模型调用的 run id，Size 与 Chars 是同批条数与送出字数。
+type ProposalSweep struct {
+	State  string     `json:"state"`
+	Batch  string     `json:"batch,omitempty"`
+	Action string     `json:"action,omitempty"`
+	Target string     `json:"target,omitempty"`
+	Why    string     `json:"why,omitempty"`
+	By     string     `json:"by,omitempty"`
+	Run    string     `json:"run,omitempty"`
+	Size   int        `json:"size,omitempty"`
+	Chars  int        `json:"chars,omitempty"`
+	At     *time.Time `json:"at,omitempty"`
+}
+
+// Folded 为真表示这条建议被归类折叠进了别处（并入、合并或判定重复），且没有被撤销。
+func (s *ProposalSweep) Folded() bool {
+	return s != nil && (s.Action == SweepMerge || s.Action == SweepAttach || s.Action == SweepDuplicate)
+}
+
+// ProposalMerge 是一次合并的留痕。By 取 merge_key（合并键相同）、generate（批量归类里写作模型判断）；
+// 第一版逐条合并的旧留痕还有 classifier、chat。Item 是批量归类时被折叠的那条建议（撤销时据此恢复），旧留痕没有。
 type ProposalMerge struct {
 	Event    string    `json:"event"`
 	Source   string    `json:"source"`
@@ -226,6 +258,10 @@ type ProposalMerge struct {
 	By       string    `json:"by"`
 	Score    float64   `json:"score,omitempty"`    // 相似度（0 到 1）；合并键相同时为 0
 	Judgment string    `json:"judgment,omitempty"` // 判断记录 id
+	Why      string    `json:"why,omitempty"`      // 判定理由
+	Batch    string    `json:"batch,omitempty"`
+	Run      string    `json:"run,omitempty"`
+	Item     string    `json:"item,omitempty"`
 	At       time.Time `json:"at"`
 }
 

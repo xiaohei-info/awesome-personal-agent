@@ -95,6 +95,10 @@ func TestPushNewProposalsThresholdAndCooldown(t *testing.T) {
 		t.Fatal("new proposals are off by default")
 	}
 	e.setPush(policy.PushNewProposals, policy.PushRule{On: true, Min: 2})
+	e.update(func(tx *store.Tx) error { // 合并关闭：建立时就看攒够没有（开启时见 TestPushNewProposalsCountsAfterMerge）
+		_, err := policy.Update(tx, owner.Actor, "merge", func(p *policy.Policy) error { p.MergeJudge = policy.MergeOff; return nil })
+		return err
+	})
 	created()
 	created()
 	created()
@@ -102,5 +106,35 @@ func TestPushNewProposalsThresholdAndCooldown(t *testing.T) {
 	e.push(p)
 	if n, ids := e.deliveries(); n != 1 {
 		t.Fatalf("want one push within the cooldown, got %v", ids)
+	}
+}
+
+// 跨来源合并开启时：建立时只计数，归类完（留着）才看攒够没有；折叠掉的扣回，所以按合并之后的条数推。
+func TestPushNewProposalsCountsAfterMerge(t *testing.T) {
+	e := setup(t)
+	p := NewPusher(e.q)
+	e.push(p)
+	e.setPush(policy.PushNewProposals, policy.PushRule{On: true, Min: 2})
+	item := func(id, phase, state string) map[string]any {
+		return map[string]any{"id": id, "phase": phase, "proposal": map[string]any{"sweep": map[string]any{"state": state}}}
+	}
+	e.event(domain.EvItemCreated, "itm_a", "", map[string]any{"item": map[string]any{"id": "itm_a", "phase": "proposed"}})
+	e.event(domain.EvItemCreated, "itm_b", "", map[string]any{"item": map[string]any{"id": "itm_b", "phase": "proposed"}})
+	e.event(domain.EvItemUpdated, "itm_b", "", map[string]any{"op": "update", "item": item("itm_b", "proposed", "pending")})
+	e.push(p)
+	if n, ids := e.deliveries(); n != 0 {
+		t.Fatalf("two created but not yet merged must not push: %v", ids)
+	}
+	e.event(domain.EvItemPhaseChanged, "itm_b", "", map[string]any{"op": "merge.fold", "item": item("itm_b", "dropped", "done")})
+	e.event(domain.EvItemUpdated, "itm_a", "", map[string]any{"op": "update", "item": item("itm_a", "proposed", "done")})
+	e.push(p)
+	if n, ids := e.deliveries(); n != 0 {
+		t.Fatalf("one proposal left after the merge is below the threshold, got %v", ids)
+	}
+	e.event(domain.EvItemCreated, "itm_c", "", map[string]any{"item": map[string]any{"id": "itm_c", "phase": "proposed"}})
+	e.event(domain.EvItemUpdated, "itm_c", "", map[string]any{"op": "update", "item": item("itm_c", "proposed", "done")})
+	e.push(p)
+	if n, ids := e.deliveries(); n != 1 {
+		t.Fatalf("two kept after merging reach the threshold, got %v", ids)
 	}
 }

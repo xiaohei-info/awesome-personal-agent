@@ -55,7 +55,6 @@ interface Doc {
   judge_endpoint: Endpoint | null;
   generate_endpoint: Endpoint | null;
   models_paused?: boolean;
-  merge_judge?: string;
 }
 interface ProbeResult {
   status: "ok" | "warning" | "error";
@@ -160,7 +159,6 @@ export function SettingsModelsPage() {
       )}
       <EndpointCard kind="generate" doc={doc.generate_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ generate_endpoint: e as Endpoint | null })} />
       <EndpointCard kind="judge" doc={doc.judge_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ judge_endpoint: e as Endpoint | null })} />
-      <MergeJudge value={doc.merge_judge || "same"} judgeName={doc.judge_endpoint ? t.protocolNames[doc.judge_endpoint.protocol ?? ""] ?? "" : ""} judge={!!doc.judge_endpoint} generate={!!doc.generate_endpoint} save={(v) => save({ merge_judge: v })} />
       <details className="panel">
         <summary>{t.advanced}</summary>
       </details>
@@ -205,32 +203,6 @@ function PauseSwitch({ paused, save }: { paused: boolean; save: (on: boolean) =>
       {paused && <small className="sub">{t.pausedNote}</small>}
       {paused && stored && stored.n > 0 && <p className="sub">{t.stored(stored.n)}{hint && ` · ${hint}`}</p>}
       {err && <p role="alert">{err}</p>}
-    </section>
-  );
-}
-
-// 跨来源合并由谁判断（§9.3）：同一件事从几个来源来时，由谁回答"是不是同一件事"。默认与生成事项和建议相同；可以关掉。
-const MERGE_CHOICES = ["same", "judge", "generate", "off"] as const;
-function MergeJudge({ value, judgeName, judge, generate, save }: { value: string; judgeName: string; judge: boolean; generate: boolean; save: (v: string) => Promise<number> }) {
-  const t = useT(strings);
-  const [pick, setPick] = useState(value);
-  useEffect(() => setPick(value), [value]);
-  const s = useSaver(() => save(pick));
-  const missing = (v: string) => (v === "judge" && !judge) || (v === "generate" && !generate) || (v === "same" && !judge && !generate);
-  return (
-    <section className="panel" aria-label={t.mergeTitle}>
-      <h2>{t.mergeTitle}</h2>
-      <p className="sub">{t.mergeLede}</p>
-      <fieldset>
-        {MERGE_CHOICES.map((v) => (
-          <label key={v} className="row">
-            <input type="radio" name="merge_judge" value={v} checked={pick === v} onChange={() => setPick(v)} />
-            <span>{t.mergeChoice[v]}{v === "judge" && judgeName ? t.paren(judgeName) : ""}</span>
-            <small className="sub">{t.mergeHint[v]}{missing(v) ? t.mergeMissing : ""}</small>
-          </label>
-        ))}
-      </fieldset>
-      <SaveLine busy={s.busy} status={s.status} onSave={s.save} label={t.mergeSave} />
     </section>
   );
 }

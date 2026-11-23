@@ -48,6 +48,7 @@ func Routes(st *store.Store, x *command.Executor, ps Packs) core.RouteGroup {
 	a := &api{st, x, ps}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/packs", Handler: readable(a.packs)})
+		r.Handle(core.Route{Method: "GET", Path: "/packs/{pack}/prompts/{name}", Handler: readable(a.prompt)})
 		r.Handle(core.Route{Method: "GET", Path: "/instances", Handler: readable(a.listInstances)})
 		r.Handle(core.Route{Method: "POST", Path: "/instances", Handler: a.createInstance})
 		r.Handle(core.Route{Method: "PATCH", Path: "/instances/{id}", Handler: a.patchInstance})
@@ -65,6 +66,19 @@ func readable(h core.Handler) core.Handler {
 		}
 		return h(w, r, p)
 	}
+}
+
+// prompt 返回已加载能力包里一个提示词的正文（不含头部声明），供设置页显示内置默认与"恢复默认"（§9.3）。
+func (a *api) prompt(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+	for _, pk := range a.ps.List() {
+		if pk.Name != r.PathValue("pack") {
+			continue
+		}
+		if pr, ok := pk.Prompts[r.PathValue("name")]; ok {
+			return core.WriteJSON(w, http.StatusOK, map[string]string{"pack": pk.Name, "name": r.PathValue("name"), "agent": pr.Meta.Agent, "body": pr.Body})
+		}
+	}
+	return domain.NewError(domain.CodeNotFound, "no such prompt in the loaded packs", "list packs with GET /packs")
 }
 
 func invalid(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
