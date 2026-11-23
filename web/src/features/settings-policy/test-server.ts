@@ -64,10 +64,74 @@ export function deriveDelivery(d: Record<string, any>, packs: Record<string, str
   return { default_channel: def, rows };
 }
 
-export function policyServer(opts: { preview?: Record<string, unknown>; instances?: Record<string, unknown>[]; webOnlyDenied?: boolean; agents?: Record<string, unknown>[]; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[] } = {}) {
+// 线上 2026-11-23 23:05 的策略 v28（disturb 段，只读账本取得；渠道连接 id 换成占位）、两个定时安排、规则模式，
+// 以及 GET /settings/notify/overview 按同一时刻数据的形状（设计 v2 §1.3 的计数）。各页"用当前数据渲染出预览"的测试都用它。
+export const V28 = {
+  disturb: {
+    routes: { brief: "inject", decision: "channel:ch-iphone", health: "web", reminder: "channel:ch-iphone", wake: "web" },
+    quiet: { start: "23:00", end: "08:00", zone: "Asia/Shanghai" }, quiet_exempt: true, merge_window_sec: 1800, remind_on_deadline: true, daily_cap: 20, mutes: [],
+    proactive: { on: true, since: "2026-11-23T11:49:29Z", work_start: "09:00", work_end: "18:00", workdays: [1, 2, 3, 4, 5], shift: true, start: true, end: true, lead_min: 0, dedup_min: 60, max_items: 20, max_batches: 6 },
+    delivery: {
+      default_channel: "channel:ch-iphone",
+      rows: {
+        agent_answered: { agent: "main", user: "off" }, decision: { agent: "main", user: "default" }, followup: { agent: "main", user: "off" },
+        health: { agent: "off", user: "off" }, new_proposals: { agent: "off", user: "default" }, overdue: { agent: "main", user: "off" },
+        rule_reminder: { agent: "main", user: "off" }, run_failed: { agent: "off", user: "default" }, scheduled: { agent: "main", user: "off" },
+        source_alert: { agent: "off", user: "default" }, source_failing: { agent: "off", user: "default" }, stale: { agent: "main", user: "off" },
+        "task_failed:brief": { agent: "off", user: "default" }, "task_failed:other": { agent: "off", user: "default" }, "task_failed:review": { agent: "off", user: "default" },
+        "task_failed:routine": { agent: "off", user: "default" }, "task_result:brief": { agent: "main", user: "off", else: "next_chat" },
+        "task_result:other": { agent: "next_chat", user: "off" }, "task_result:review": { agent: "main", user: "off", else: "next_chat" }, "task_result:routine": { agent: "main", user: "off" },
+      },
+    },
+  },
+  instances: [
+    { id: "ins_b6b2", pack: "review", params: { schedule: "30 17 * * 5" }, enabled: true },
+    { id: "ins_fe17", pack: "brief", params: { schedule: "CRON_TZ=Asia/Shanghai 0 8 * * *" }, enabled: true },
+  ],
+  rules: [
+    { key: "brief/clock_rules/scheduled-brief", pack: "brief", group: "clock_rules", id: "scheduled-brief", mode: "auto", class: "action" },
+    { key: "follow-up/clock_rules/follow-up-interval", pack: "follow-up", group: "clock_rules", id: "follow-up-interval", mode: "auto", class: "reminder" },
+    { key: "follow-up/clock_rules/stale-check", pack: "follow-up", group: "clock_rules", id: "stale-check", mode: "auto", class: "reminder" },
+    { key: "review/clock_rules/scheduled-review", pack: "review", group: "clock_rules", id: "scheduled-review", mode: "off", class: "action" },
+    { key: "routine/clock_rules/scheduled-routine", pack: "routine", group: "clock_rules", id: "scheduled-routine", mode: "observe", class: "action" },
+  ],
+  connections: [{ id: "ch-iphone", name: "iPhone", enabled: true }],
+};
+
+/** 内核 policy.FixedRows 的顺序（行表本身由 homes.check.test.ts 对照内核源码）。 */
+const FIXED = ["decision", "agent_answered", "scheduled", "overdue", "followup", "stale", "rule_reminder",
+  ...["brief", "review", "routine", "other"].map((t) => "task_result:" + t), ...["brief", "review", "routine", "other"].map((t) => "task_failed:" + t),
+  "source_failing", "run_failed", "health", "new_proposals", "source_alert"];
+
+export function v28Overview() {
+  const counts: Record<string, [number, number]> = { decision: [5, 10], source_failing: [1, 1], health: [5, 0], "instance:ins_fe17": [7, 7] };
+  const unproduced = ["rule_reminder", "source_alert", "task_result:brief", "task_result:review", "task_result:routine", "task_result:other", "task_failed:brief", "task_failed:review", "task_failed:routine", "task_failed:other"];
+  const row = (key: string, extra: Record<string, unknown> = {}) => ({ key, produced: !unproduced.includes(key), events: counts[key]?.[0] ?? 0, pushed: counts[key]?.[1] ?? 0, ...extra });
+  return {
+    since: "2026-11-16T15:05:00Z",
+    rows: [
+      ...FIXED.map((k) => row(k)),
+      row("instance:ins_b6b2", { blocked: "rule_off" }), row("instance_failed:ins_b6b2", { blocked: "rule_off" }),
+      row("instance:ins_fe17"), row("instance_failed:ins_fe17"),
+    ],
+    now: { decisions_pending: 0, deadlines: 0, overdue: 0, waiting: 0, stale_now: 0, stale_from: "2026-12-06T02:00:00Z", proposals_new: 275, rule_observed: { "routine/clock_rules/scheduled-routine": 0 } },
+    source_alert: { streak_failures: 3, low_frequency_over_sec: 3600, sources: [
+      { id: "src_daxiang", name: "Daxiang", schedule: "60m", alert_after: 3 }, { id: "src_mail", name: "Gmail", schedule: "10m", alert_after: 3 },
+    ] },
+  };
+}
+
+export function policyServer(opts: { preview?: Record<string, unknown>; instances?: Record<string, unknown>[]; webOnlyDenied?: boolean; agents?: Record<string, unknown>[]; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[]; v28?: boolean; rules?: { key: string; mode: string }[] } = {}) {
   let version = 1;
   const doc = initialDoc();
+  if (opts.v28) {
+    version = 28;
+    doc.disturb = structuredClone(V28.disturb);
+    opts = { instances: V28.instances, connections: V28.connections, rules: V28.rules, extKeys: [], ...opts };
+  }
   if (opts.routes) doc.disturb.routes = opts.routes;
+  const rules = structuredClone(opts.rules ?? []);
+  const patches: { url: string; body: any }[] = [];
   const puts: { path: string; body: any; csrf?: string }[] = [];
   const tiers: { url: string; body: any }[] = [];
   const previews: any[] = [];
@@ -83,6 +147,17 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
       return json(200, opts.preview ?? { total: 0, batches: 0, next_count: 0, route: "web", blocked: "main_not_set", entries: [] });
     }
     if (url === "/v1/instances") return json(200, { instances: opts.instances ?? [] });
+    if (url === "/v1/settings/notify/overview") return opts.v28 ? json(200, v28Overview()) : err(404, "not_found", "no such route");
+    if (url === "/v1/rules" && method === "GET") return json(200, { rules });
+    const rm = /^\/v1\/rules\/([^/]+)\/mode$/.exec(url);
+    if (rm && method === "PATCH") {
+      const body = JSON.parse(init.body as string);
+      patches.push({ url, body });
+      const r = rules.find((x) => x.key === decodeURIComponent(rm[1]));
+      if (!r) return err(404, "not_found", "no such rule");
+      r.mode = body.mode;
+      return json(200, r);
+    }
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
     if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: (doc.persona_lang || (url.endsWith("locale=zh") ? "zh" : "en")) === "zh" ? "Default tone (zh)" : "Default tone (en)" });
@@ -115,5 +190,5 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
     if (JSON.stringify(doc) !== before) version++;
     return json(200, render());
   }) as unknown as typeof fetch;
-  return { impl, puts, doc, tiers, previews };
+  return { impl, puts, doc, tiers, previews, patches, rules };
 }

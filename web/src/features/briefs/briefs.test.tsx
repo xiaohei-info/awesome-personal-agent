@@ -1,4 +1,4 @@
-import { cleanup as cleanupAll, render, screen, within } from "@testing-library/react";
+import { cleanup as cleanupAll, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -19,7 +19,7 @@ const packs = [{ name: "brief", instance_params: {}, default_instruction: DEF },
 const routines = [{ id: "ins_r", pack: "routine", params: { schedule: "CRON_TZ=UTC 0 9 * * 1", mode: "create_item", title: "{date} 周报" }, enabled: true }];
 const instances = [{ id: "ins_1", pack: "brief", params: { schedule: "30 8 * * 1-5" }, enabled: true }, { id: "ins_2", pack: "follow-up", params: {}, enabled: true }];
 
-interface Calls { posts: { body: unknown; csrf: string | null }[]; urls: string[]; patches?: { url: string; body: unknown }[] }
+interface Calls { posts: { body: unknown; csrf: string | null }[]; urls: string[]; patches?: { url: string; body: unknown }[]; puts?: any[] }
 function server(o: { delivery?: unknown; patchFail?: boolean; fail?: boolean; items?: unknown[]; reject?: boolean; routine?: boolean; host?: string; caps?: Record<string, string>; ready?: boolean; instances?: unknown[] } = {}, calls: Calls = { posts: [], urls: [] }) {
   const f = (async (url: string, init?: RequestInit) => {
     calls.urls.push(url);
@@ -31,7 +31,12 @@ function server(o: { delivery?: unknown; patchFail?: boolean; fail?: boolean; it
       const it = (o.items ?? items).find((x) => (x as { id: string }).id === decodeURIComponent(one[1]));
       return it ? json(200, { item: it, relations: [] }) : json(404, { code: "not_found", why: "no such item", next: "" });
     }
-    if (url === "/v1/settings/policy" && o.delivery) return json(200, { version: 3, disturb: { delivery: o.delivery } });
+    if (url === "/v1/settings/policy" && o.delivery && init?.method === "PUT") {
+      const body = JSON.parse(init.body as string);
+      (calls.puts ??= []).push(body);
+      return json(200, { version: 4, disturb: { ...body.disturb, delivery: body.disturb.delivery ?? o.delivery } });
+    }
+    if (url === "/v1/settings/policy" && o.delivery) return json(200, { version: 3, disturb: { daily_cap: 20, mutes: [], delivery: o.delivery } });
     if (url === "/v1/packs") return json(200, { packs: o.routine ? [...packs, { name: "routine", instance_params: {} }] : packs });
     if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: { agent_name: o.host, permission_cap: o.caps?.[o.host ?? ""] ?? "read" }, reason: "" });
     const ip = url.match(/^\/v1\/instances\/([^/]+)$/);
@@ -193,20 +198,27 @@ describe("简报页", () => {
     expect(screen.queryByText("30 8 * * 1-5")).not.toBeInTheDocument();
   });
 
-  it("每张卡只读写明结果送到哪（取自投递矩阵：按实例覆盖或跟随类型），链到提醒与推送的对应行；取不到矩阵时不显示", async () => {
-    const delivery = { default_channel: "channel:ch-1", rows: { "task_result:brief": { agent: "main", user: "off" }, "task_result:review": { agent: "off", user: "default" } } };
-    mount(server({ delivery, instances: [...instances, { id: "ins_v", pack: "review", params: { schedule: "30 17 * * 5" }, enabled: true }] }));
-    const line1 = await screen.findByText("结果送到：推到对话里（马上）");
-    expect(line1.closest("p")!.querySelector("a")).toHaveAttribute("href", "/settings/notify#row-task_result:brief");
-    expect(screen.getByText("结果送到：默认渠道")).toBeInTheDocument();
-    cleanupAll();
-    mount(server({ delivery: { default_channel: "", rows: { "task_result:brief": { agent: "main", user: "off" }, "instance:ins_1": { agent: "off", user: "off" } } } }));
-    const own = await screen.findByText("结果送到：今天页的提醒");
-    expect(own.closest("p")!.querySelector("a")).toHaveAttribute("href", "/settings/notify#row-instance:ins_1");
+  it("每张卡上改这份结果怎么送、没出来时（唯一可编辑处）：没存实例行时按类型行显示生效值；改了只写这个实例的行，其余原样带回；取不到矩阵时不显示", async () => {
+    const delivery = { default_channel: "channel:ch-1", rows: { "task_result:brief": { agent: "main", user: "off", else: "next_chat" }, "task_result:review": { agent: "off", user: "default" }, "task_failed:brief": { agent: "off", user: "default" } } };
+    const calls: Calls = { posts: [], urls: [] };
+    mount(server({ delivery, instances: [...instances, { id: "ins_v", pack: "review", params: { schedule: "30 17 * * 5" }, enabled: true }] }, calls));
+    const brief = within(await screen.findByRole("group", { name: "简报" }));
+    const result = within(await brief.findByRole("radiogroup", { name: "结果怎么送" }));
+    expect(result.getByRole("radio", { name: "在对话里马上告诉我" })).toBeChecked();
+    expect(within(brief.getByRole("radiogroup", { name: "没出来时" })).getByRole("radio", { name: /^推到手机/ })).toBeChecked();
+    expect(within(screen.getByRole("group", { name: "复盘" }).querySelector('[data-reminder="instance:ins_v"]') as HTMLElement).getByRole("radio", { name: /^推到手机/ })).toBeChecked();
+    expect(within(brief.getByRole("radiogroup", { name: "没出来时" })).queryByRole("radio", { name: "下次聊天时告诉我" })).toBeNull(); // 告警类不给"下次聊天时"
+    await userEvent.click(result.getByRole("radio", { name: "下次聊天时告诉我" }));
+    await waitFor(() => expect(calls.puts).toHaveLength(1));
+    const rows = calls.puts![0].disturb.delivery.rows;
+    expect(rows["instance:ins_1"]).toEqual({ agent: "next_chat", user: "off" });
+    expect(rows["task_result:brief"]).toEqual(delivery.rows["task_result:brief"]);
+    expect(Object.keys(rows).sort()).toEqual(["instance:ins_1", "task_failed:brief", "task_result:brief", "task_result:review"]);
+    expect(calls.puts![0].disturb).not.toHaveProperty("delivery_saved");
     cleanupAll();
     mount(server());
     await screen.findByText(/工作日 08:30/);
-    expect(screen.queryByText(/结果送到/)).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "结果怎么送" })).toBeNull();
   });
 
   it("Agent 还不能后台运行时卡片写明等它接入并链到设置；「立即跑一次」不可点", async () => {

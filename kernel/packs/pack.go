@@ -70,9 +70,10 @@ type ClockRule struct {
 	// 提醒类规则的参数（C.4）；到期行为由内核固定，不写 do[]。
 	// 三个新字段带 omitempty：规则 hash 取自 json 序列化，没写这些字段的规则必须与 v0.1 账本里存的 hash 逐字相同，
 	// 否则升级后第一次对账会把没变过的规则当成"内容变化"（§14.8）。
-	RemindRounds *int   `yaml:"remind_rounds" json:",omitempty"` // 只用于 follow_up，默认 2
-	DeferWith    string `yaml:"defer_with" json:",omitempty"`    // 只用于 follow_up：yes_no 判断型模板名
-	StaleAfter   string `yaml:"stale_after" json:",omitempty"`   // 只用于 stale，默认 14d
+	RemindRounds *int `yaml:"remind_rounds" json:",omitempty"` // 只用于 follow_up，默认 2
+	// DeferWith 是已取消（2026-11-23）的跟进推迟判断模板：旧覆盖包里写了照常加载、内核不再读；json 标签不变，免得改动没写它的规则 hash。
+	DeferWith  string `yaml:"defer_with" json:",omitempty"`
+	StaleAfter string `yaml:"stale_after" json:",omitempty"` // 只用于 stale，默认 14d
 }
 
 // NoPrescreen 是 prescreen 的保留字：extract 出口跳过预筛（附录 C.5）。
@@ -544,8 +545,8 @@ func checkReminderRule(r ClockRule) error {
 	if reminder && len(r.Do) > 0 {
 		return fmt.Errorf("%s: a %s rule cannot carry do[] (v0.1 used it to call a judge): delete do[]; expiry behaviour is fixed by the kernel (C.4)", where, r.Type)
 	}
-	if r.Type != "follow_up" && (r.RemindRounds != nil || r.DeferWith != "") {
-		return fmt.Errorf("%s: remind_rounds and defer_with are only for follow_up rules", where)
+	if r.Type != "follow_up" && r.RemindRounds != nil {
+		return fmt.Errorf("%s: remind_rounds is only for follow_up rules", where)
 	}
 	if r.Type == "follow_up" && r.RemindRounds != nil && *r.RemindRounds < 1 {
 		return fmt.Errorf("%s: remind_rounds must be at least 1", where)
@@ -702,7 +703,7 @@ func loadParts(p *Pack, files map[string][]byte, names []string, schema func(str
 	return checkPromptRefs(p)
 }
 
-// checkPromptRefs 校验跨模板的引用：relay_to 只能由生成型指向本包的任务型模板，defer_with 指向本包的 yes_no 判断型模板。
+// checkPromptRefs 校验跨模板的引用：relay_to 只能由生成型指向本包的任务型模板。
 func checkPromptRefs(p *Pack) error {
 	names := make([]string, 0, len(p.Prompts))
 	for n := range p.Prompts {
@@ -727,14 +728,6 @@ func checkPromptRefs(p *Pack) error {
 			return fmt.Errorf("prompts/%s.md: relay_to %q does not exist in prompts/", n, to)
 		case t.Meta.Agent != "task":
 			return fmt.Errorf("prompts/%s.md: relay_to %q must be a task prompt (generate relays to task only)", n, to)
-		}
-	}
-	for _, r := range p.ClockRules {
-		if r.DeferWith == "" {
-			continue
-		}
-		if t, ok := p.Prompts[r.DeferWith]; !ok || t.Meta.Agent != "judge" || t.Meta.QuestionType != "yes_no" {
-			return fmt.Errorf("clock_rules.%s: defer_with %q must be a yes_no judge prompt in prompts/", r.ID, r.DeferWith)
 		}
 	}
 	return nil

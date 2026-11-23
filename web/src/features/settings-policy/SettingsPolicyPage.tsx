@@ -5,11 +5,12 @@ import { useNamed } from "../../app/names";
 import { useSession } from "../../app/session";
 import { entryOf, useLabel } from "../../app/values";
 import type { Agent, AgentView } from "../settings-agents/AgentPick";
+import { Reminder, ReminderScope } from "../settings-notify/Reminder";
 import { Card, PolicyPage, useDraft, usePolicyDocs } from "./shared";
 import { strings } from "./strings";
 
 // 设置 › 我来拍板（路径 /settings，沿用原地址；设计 §14.3）：每个 Agent 能替你做到哪一档，就在这里改——这是档位唯一可编辑的地方，
-// Agent 页只读一行。档位读 GET /agents（判定读的同一份），写 PUT /settings/agents/{id}/tier；它属 3b，网页可能要求再输一次口令（api 统一弹框）。
+// Agent 页只读一行。「有问题等你决定时」怎么通知你也在这里（设计 v2 §4，即改即存，3a；与档位卡分开，不要口令）。档位读 GET /agents（判定读的同一份），写 PUT /settings/agents/{id}/tier；它属 3b，网页可能要求再输一次口令（api 统一弹框）。
 export function SettingsPolicyPage() {
   const t = useT(strings);
   const { api } = useSession();
@@ -29,6 +30,13 @@ export function SettingsPolicyPage() {
         <>
           {view.agents.length === 0 && <p className="empty">{t.noAgents}</p>}
           {view.agents.map((a) => <TierCard key={a.id} a={a} version={pol.version} reload={reload} />)}
+          <ReminderScope>
+            <section aria-label={t.notifyCard} className="panel stack" id="notify">
+              <h2>{t.notifyCard}</h2>
+              <Reminder row="decision" />
+              <Reminder row="agent_answered" />
+            </section>
+          </ReminderScope>
           <section aria-label={t.hardLine} className="panel stack">
             <h2>{t.hardLine}</h2>
             <p className="sub">{t.hardLineWhat} · {t.hardLineHow}</p>

@@ -12,7 +12,7 @@ import (
 const proactiveOn = `{"on":true,"since":"2000-01-01T00:00:00Z","work_start":"09:00","work_end":"18:00","workdays":[1,2,3,4,5],"shift":true,"start":true,"end":true,"lead_min":0,"dedup_min":60,"max_items":20,"max_batches":6}`
 
 func disturbWith(proactive string) string {
-	return `{"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0,"remind_on_deadline":true,"daily_cap":20,"mutes":[],"followup_defer":false,"proactive":` + proactive + `}}`
+	return `{"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0,"remind_on_deadline":true,"daily_cap":20,"mutes":[],"proactive":` + proactive + `}}`
 }
 
 // 开启时刻只由设置接口记：从关到开记现在（请求体里带的不认），一直开着沿用原值，关掉清空；不合法的设置 400 不生效。

@@ -225,110 +225,37 @@ func TestFlowFollowUp(t *testing.T) {
 		}
 	})
 
-	deferCalls := func() (n int) {
-		for _, b := range f.Cls.Batches() {
-			if strings.Contains(b.BodyText, "可以晚点提") {
-				n++
-			}
-		}
-		return n
-	}
-	policyDefer := func() bool {
+	// 推迟判断（followup_defer、follow-up-defer）已取消（2026-11-23）：ACT-FUP-10、11 随之取消，ACT-FUP-09 改为锁住"跟进不调模型、键不再出现"。
+	disturbKeys := func() map[string]json.RawMessage {
 		return decode[struct {
-			Disturb struct {
-				FollowupDefer bool `json:"followup_defer"`
-			} `json:"disturb"`
-		}](t, f.webOK("GET", "/settings/policy", "", 200)).Disturb.FollowupDefer
-	}
-	setDefer := func(on bool) {
-		t.Helper()
-		v := "false"
-		if on {
-			v = "true"
-		}
-		f.webOK("PUT", "/settings/policy", `{"disturb":{"routes":{"brief":"web","decision":"web","health":"web","reminder":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":false,"followup_defer":`+v+`}}`, 200)
-		if policyDefer() != on {
-			t.Fatalf("disturb.followup_defer 应为 %v", on)
-		}
+			Disturb map[string]json.RawMessage `json:"disturb"`
+		}](t, f.webOK("GET", "/settings/policy", "", 200)).Disturb
 	}
 
-	step(t, "ACT-FUP-09 推迟判断默认关闭", func(t *testing.T) {
-		if policyDefer() {
-			t.Fatal("disturb.followup_defer 默认应为 false")
+	step(t, "ACT-FUP-09 跟进到期不问模型，followup_defer 不再出现、旧客户端带着它照常保存", func(t *testing.T) {
+		if _, ok := disturbKeys()["followup_defer"]; ok {
+			t.Fatal("GET /settings/policy 不应再有 disturb.followup_defer")
+		}
+		f.webOK("PUT", "/settings/policy", `{"disturb":{"routes":{"brief":"web","decision":"web","health":"web","reminder":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":false,"followup_defer":true}}`, 200)
+		if _, ok := disturbKeys()["followup_defer"]; ok {
+			t.Fatal("PUT 带的 followup_defer 应被忽略，读回不应出现")
 		}
 		f.Cls, f.ModelStub = nil, nil
 		f.WireEndpoints() // 按 ACT-ENV-04、05 恢复两个替身并接线
 		f.Cls.SetDefaultPYes(0.95)
+		clsBefore, modelBefore := len(f.Cls.Batches()), len(f.ModelStub.Requests())
 		fu7 := f.newItem("FU-7")
 		f.wait(fu7)
 		f.advanceUntilReminded(fu7, 1)
-		if f.reminders(fu7) != 1 {
-			t.Errorf("FU-7 应照常收到第一轮提醒: %+v", f.unread())
+		if f.reminders(fu7) != 1 || len(f.events(fu7, "followup.deferred")) != 0 {
+			t.Errorf("FU-7 应照常收到第一轮提醒、不被跳过: %+v", f.unread())
 		}
-		if n := deferCalls(); n != 0 {
-			t.Errorf("未开启时不得问推迟判断，CLS 收到 %d 道题", n)
+		if len(f.Cls.Batches()) != clsBefore || len(f.ModelStub.Requests()) != modelBefore {
+			t.Errorf("跟进不得调用模型: CLS %d→%d MODEL %d→%d", clsBefore, len(f.Cls.Batches()), modelBefore, len(f.ModelStub.Requests()))
 		}
-	})
-
-	step(t, "ACT-FUP-10 开启推迟判断后至多连续跳过一轮，且不替本人选动作", func(t *testing.T) {
-		setDefer(true)
-		fu8 := f.newItem("FU-8")
-		f.wait(fu8)
-		before := len(f.show(fu8).Progress)
-		f.TCAdvance(65)
-		waitFor(t, "第一次到期应问一道推迟判断并跳过一轮", settle, func() bool { return len(f.events(fu8, "followup.deferred")) == 1 })
-		if n := deferCalls(); n < 1 {
-			t.Error("第一次到期 CLS_LOG 应有一道 follow-up-defer 题")
-		}
-		if f.reminded(fu8) != 0 || f.reminders(fu8) != 0 {
-			t.Error("判断为可以晚点时第一轮不应提醒")
-		}
-		f.advanceUntilReminded(fu8, 1) // 第二次到期即使判断仍为"可以晚点"也照常提醒
-		it := f.show(fu8)
-		if it.Phase != "waiting" || len(it.Progress) != before {
-			t.Errorf("判断不得改变事项状态: phase=%s progress %d→%d", it.Phase, before, len(it.Progress))
-		}
-		if len(f.events(fu8, "followup.deferred")) != 1 {
-			t.Error("至多连续跳过一轮")
-		}
-		if out := f.apa(f.OBS, 0, "judgment", "stats", "--use", "followup_defer").Stdout; !strings.Contains(out, "followup_defer") {
-			t.Errorf("判断记录应可见用途 followup_defer: %s", out)
-		}
-	})
-
-	step(t, "ACT-FUP-11 推迟判断低于上限或端点不可用时照常提醒", func(t *testing.T) {
-		f.Cls.SetDefaultPYes(0.50)
-		fu9 := f.newItem("FU-9")
-		f.wait(fu9)
-		f.advanceUntilReminded(fu9, 1)
-		if f.reminders(fu9) != 1 || len(f.events(fu9, "followup.deferred")) != 0 {
-			t.Errorf("0.50 低于上限 0.85 取否：FU-9 应按时收到第一轮提醒且不被跳过: %+v", f.unread())
-		}
-		f.Cls.Close()
-		f.ModelStub.Close()
-		fu10 := f.newItem("FU-10")
-		f.wait(fu10)
-		f.advanceUntilReminded(fu10, 1)
-		if f.reminders(fu10) != 1 || len(f.events(fu10, "followup.deferred")) != 0 {
-			t.Errorf("端点不可用时未定也取否：FU-10 应按时收到第一轮提醒且不被跳过: %+v", f.unread())
-		}
-		waitFor(t, "端点不可用时健康视图 model_unavailable 有信号", settle, func() bool {
-			for _, s := range decode[struct {
-				Signals []struct {
-					ID string `json:"id"`
-					OK bool   `json:"ok"`
-				} `json:"signals"`
-			}](t, f.apa(f.OBS, 0, "health").Stdout).Signals {
-				if s.ID == "model_unavailable" {
-					return !s.OK
-				}
-			}
-			return false
-		})
 	})
 
 	step(t, "ACT-FUP-12 覆盖包里 follow_up 规则带 do[] 被拒绝", func(t *testing.T) {
-		setDefer(false)
 		f.Cls, f.ModelStub = nil, nil
 		f.WireEndpoints()
 		f.shortPack(func(s string) string {
@@ -370,9 +297,6 @@ func TestFlowFollowUp(t *testing.T) {
 		})
 		if r := f.rules()["follow-up-interval"]; r.Mode != "auto" {
 			t.Errorf("follow-up-interval 应为内置定义的 auto: %+v", r)
-		}
-		if policyDefer() {
-			t.Error("followup_defer 应为关闭")
 		}
 	})
 }

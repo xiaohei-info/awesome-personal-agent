@@ -591,7 +591,7 @@ func templateAgents(ph PackHealth) map[string]string {
 
 func attribute(m ModelIssue, agents map[string]string, judgeOn bool) string {
 	agent := agents[m.template]
-	if agent == "" { // 模板不在已加载的包里：初筛与跟进推迟是判断型，其余起草是生成型
+	if agent == "" { // 模板不在已加载的包里：初筛与跟进推迟（已取消，升级前留下的告警）是判断型，其余起草是生成型
 		agent = EndpointGenerate
 		if m.Kind == ScreeningKind || m.Kind == FollowupKind {
 			agent = EndpointJudge

@@ -245,8 +245,9 @@ requirements:
 - id: REQ-K16-2
   source: docs/solution-design.md#7.3, 8.9 (K-16)
   summary: follow-up-defer 默认关闭；开启后只回答'这一轮可以晚点提吗'，只能推迟提醒，不能替本人选动作
-  disposition: in-scope
+  disposition: out-of-scope
   verification: action
+  reason: 已取消（2026-11-23）：跟进推迟判断随 disturb.followup_defer 删除（本人批准的 v2 方案，设计 docs/solution-design.md §7.3、§21.1 决定 88）；推迟多久不可预期、推迟了也不告诉本人，28 个策略版本从未开启、判断记录 0 条。跟进不再调用模型，由 REQ-K16-1 覆盖
 - id: REQ-K16-3
   source: docs/appendix-c-capability-pack.md#C.4, C.11 (K-16 迁移)
   summary: 用户覆盖包里 follow_up 规则带 do[] 被拒绝并提示删除；已排的跟进定时不变，到期按新梯度处理
@@ -260,8 +261,9 @@ requirements:
 - id: REQ-K18-1
   source: docs/solution-design.md#7.4, 8.9 (K-18, R-02)
   summary: threshold_judge 开启后只回答'可以晚点送吗'，是则推迟到合并窗口后单独投递；不再有'只留 Web'去向；未定按立即送
-  disposition: in-scope
+  disposition: out-of-scope
   verification: action
+  reason: 已取消（2026-11-23）：投递推迟判定随 disturb.threshold_judge 删除（本人批准的 v2 方案，设计 docs/solution-design.md §7.4、§21.1 决定 88）；推迟多久不可预期、推迟了也不告诉本人，少打扰由安静时段、每天上限、合并与暂停承担；28 个策略版本从未开启、判断记录 0 条
 - id: REQ-K19-1
   source: docs/solution-design.md#15.2; docs/appendix-b-api-cli.md#B.2 (K-19)
   summary: GET /health 十三项信号：前十一项 id 与顺序不变，末尾追加 stalled_delegations（默认 24h 无回执）与 clock_lag，级别都是提醒
@@ -1072,7 +1074,7 @@ flows:
     kind: business-action
     step: 内置判断模板的不确定带起始值
     how: 查看仓库内置包的模板 front matter：`packs/inbound-triage/prompts/triage-screen.md`、`capture-prescreen.md`，`packs/decision-card/prompts/web-only-screening.md`、`delivery-defer.md`，`packs/follow-up/prompts/follow-up-defer.md`，`packs/delegation-verify/prompts/delegation-screen.md`（以 `GET /packs` 列出的实际路径为准）；再对 ACT-CAS-02 与一次 web_only 初筛（flow-screening ACT-SCR-07）的判断记录查看 `band` 字段。
-    expected: '通过：triage-screen 为 `{low: 0.15, high: 0.60}`；capture-prescreen 下限 0.10；web-only-screening 下限 0.20；delivery-defer 与 follow-up-defer 上限 0.85；delegation-screen 下限 0.20；只写一端的模板在判断记录里 `band.low` 等于 `band.high`；ACT-CAS-02 的记录 `band` 为 0.15/0.60。失败：任一起始值与 §8.9 不符，或单端模板在记录里出现中间带。'
+    expected: '通过：triage-screen 为 `{low: 0.15, high: 0.60}`；capture-prescreen 下限 0.10；web-only-screening 下限 0.20；delivery-defer 与 follow-up-defer 上限 0.85；delegation-screen 下限 0.20；只写一端的模板在判断记录里 `band.low` 等于 `band.high`；ACT-CAS-02 的记录 `band` 为 0.15/0.60。失败：任一起始值与 §8.9 不符，或单端模板在记录里出现中间带。（其中 delivery-defer、follow-up-defer 两项已取消（2026-11-23），见 REQ-K18-1、REQ-K16-2：两个模板已删除，不按缺失判失败。）'
     requirement_ids:
     - REQ-V08-1
   - id: ACT-CAS-22
@@ -3291,21 +3293,21 @@ flows:
     - REQ-K16-1
   - id: ACT-FUP-09
     kind: business-action
-    step: 推迟判断默认关闭
+    step: 已取消（2026-11-23），见 REQ-K16-2：推迟判断默认关闭
     how: '按 ACT-ENV-04、ACT-ENV-05 恢复 CLS_STUB 与 MODEL_STUB，在 `$CLS_CASES` 给模板 follow-up-defer 配 p_yes=0.95。运行 `curl -s $APA_URL/v1/settings/policy -H "Authorization: Bearer $OBS"` 查看 disturb.followup_defer。新建 FU-7 转 waiting，等待 2 分钟后查看 Web 未读与 `$CLS_LOG`、`$MODEL_LOG`。'
     expected: 通过：disturb.followup_defer=false；FU-7 照常收到第一轮提醒；两个替身日志里没有 follow-up-defer 的题。失败：默认开启，或未开启时仍问了判断型。
     requirement_ids:
     - REQ-K16-2
   - id: ACT-FUP-10
     kind: business-action
-    step: 开启推迟判断后至多连续跳过一轮，且不替本人选动作
+    step: 已取消（2026-11-23），见 REQ-K16-2：开启推迟判断后至多连续跳过一轮，且不替本人选动作
     how: 在 Web 设置页打扰策略里开启"跟进推迟判断"（disturb.followup_defer=true）。新建 FU-8 转 waiting；CLS_STUB 对 follow-up-defer 保持 p_yes=0.95。记录接下来 4 分钟内 FU-8 的提醒与 `$CLS_LOG`，运行 `apa item show <FU-8> --output json` 与 `apa judgment show`（按 FU-8 过滤，命令写法按附录 B.1）。
     expected: 通过：第一次到期 CLS_LOG 有一道 follow-up-defer 题，没有提醒（跳过一轮）；第二次到期即使判断仍为"可以晚点"也照常发出提醒；FU-8 阶段始终为 waiting，没有因判断新增进展、dropped 或 needs_input；判断记录可见用途 followup_defer。失败：连续跳过两轮及以上，或判断结果改变了事项状态。
     requirement_ids:
     - REQ-K16-2
   - id: ACT-FUP-11
     kind: business-action
-    step: 推迟判断低于上限或端点不可用时照常提醒
+    step: 已取消（2026-11-23），见 REQ-K16-2：推迟判断低于上限或端点不可用时照常提醒
     how: 保持 followup_defer 开启。把 CLS_STUB 对 follow-up-defer 改为 p_yes=0.50，新建 FU-9 转 waiting，等待 2 分钟查看提醒；再停止 CLS_STUB 与 MODEL_STUB，新建 FU-10 转 waiting，等待 2 分钟后查看提醒与 `apa health`。
     expected: 通过：FU-9 与 FU-10 都按时收到第一轮提醒（0.50 低于上限 0.85 取"否"；端点不可用时未定也取"否"）；健康视图 model_unavailable 有信号；跟进没有被跳过或丢失。失败：任一条提醒缺失或延后超过一轮。
     requirement_ids:
@@ -3738,26 +3740,26 @@ flows:
     expected: 通过：旧投递状态 superseded，领取不到旧版本。失败：还能领到旧投递。
   - id: ACT-DLV-08
     kind: flow-step
-    step: 准备投递推迟判定
+    step: 已取消（2026-11-23），见 REQ-K18-1：准备投递推迟判定
     how: 负责人：验收执行者。时机：ACT-DLV-07 判定完成之后、ACT-DLV-09 开始之前。在 Web 设置页开启投递推迟判定（`disturb.threshold_judge`），合并窗口设为 2 分钟，路由：普通决策到 acc-chan。在 `$CLS_CASES` 为模板 `delivery-defer` 配置按事项标题关键字匹配：`acc-defer-high` → p_yes 0.95；`acc-defer-low` → p_yes 0.50；`acc-defer-err` → 单题错误 internal；`acc-defer-slow` → 时延超过判断端点 timeout_ms。在 `$MODEL_CASES` 为同样的关键字配置 answer=yes、sufficient=true（用来证明不会升级到对话端点）。记下两份日志当前行数。
     expected: 通过：`GET /v1/settings/policy` 显示 threshold_judge 为 true；`CLS_STUB` 已加载四个用例。失败：设置未生效。
   - id: ACT-DLV-09
     kind: business-action
-    step: 推迟判定高于上限时推迟到合并窗口后单独投递
+    step: 已取消（2026-11-23），见 REQ-K18-1：推迟判定高于上限时推迟到合并窗口后单独投递
     how: 用 `APA_TOKEN=$WRK apa item add` 建标题含 acc-defer-high 的事项，`apa ask` 提交带两个选项的普通决策；同一窗口内再产生两条低优先级提醒。立即用 CHAN 请求 `GET /v1/deliveries/next?wait=5`，合并窗口结束后再领取；查看 `$CLS_LOG`、`$MODEL_LOG` 新增内容。
     expected: 通过：立即领取不到这条决策；窗口结束后领到它，作为单独一条投递，不并入两条提醒的摘要；`$CLS_LOG` 有一道 delivery-defer 题；`$MODEL_LOG` 没有这道题（single_shot 不升级）。失败：立即送出、被并入摘要、只留在 Web 未读，或对话端点也答了这道题。
     requirement_ids:
     - REQ-K18-1
   - id: ACT-DLV-10
     kind: business-action
-    step: 推迟判定低于上限时按优先级立即路由
+    step: 已取消（2026-11-23），见 REQ-K18-1：推迟判定低于上限时按优先级立即路由
     how: 建标题含 acc-defer-low 的事项并提交普通决策，用 CHAN 请求 `GET /v1/deliveries/next?wait=5`。
     expected: 通过：立即领到这条决策，路由与关闭推迟判定时相同。失败：被推迟或只留 Web。
     requirement_ids:
     - REQ-K18-1
   - id: ACT-DLV-11
     kind: business-action
-    step: 推迟判定未定时取"否"按规则路由
+    step: 已取消（2026-11-23），见 REQ-K18-1：推迟判定未定时取"否"按规则路由
     how: 建标题含 acc-defer-err 的事项并提交普通决策，用 CHAN 请求 `GET /v1/deliveries/next?wait=5`，查看 `$MODEL_LOG` 与该事项的判断记录（`apa why <事项 id>`）。
     expected: 通过：立即领到这条决策；判断记录显示这一级出错、按保守默认"否"定案；`$MODEL_LOG` 没有这道题。失败：被推迟、被丢弃，或升级到对话端点。
     requirement_ids:
@@ -3765,21 +3767,21 @@ flows:
     - REQ-V08-1
   - id: ACT-DLV-12
     kind: business-action
-    step: 判断端点超时或不可用时按规则路由且不重试
+    step: 已取消（2026-11-23），见 REQ-K18-1：判断端点超时或不可用时按规则路由且不重试
     how: 建标题含 acc-defer-slow 的事项并提交普通决策；之后把 `CLS_STUB` 切到整批 503，再建一个标题含 acc-defer-high 的事项提交普通决策。用 CHAN 领取，统计 `$CLS_LOG` 中这两道题各自的请求次数。结束后把 `CLS_STUB` 恢复正常。
     expected: 通过：两条决策都在超时或失败后立即按优先级送达，不推迟；每道题只请求一次（single_shot 不重试）；两条都不只留 Web。失败：决策被挡住、重试，或只留在 Web 未读。
     requirement_ids:
     - REQ-K18-1
   - id: ACT-DLV-13
     kind: business-action
-    step: 推迟判定关闭时不发起判断
+    step: 已取消（2026-11-23），见 REQ-K18-1：推迟判定关闭时不发起判断
     how: 在 Web 设置页关闭投递推迟判定，建标题含 acc-defer-high 的事项并提交普通决策，用 CHAN 领取并查看 `$CLS_LOG`。
     expected: 通过：立即送达；`$CLS_LOG` 没有新的 delivery-defer 题。失败：关闭后仍发起判断或推迟。
     requirement_ids:
     - REQ-K18-1
   - id: ACT-DLV-14
     kind: business-action
-    step: 升级后已开启的推迟判定保持开启并按新语义工作
+    step: 已取消（2026-11-23），见 REQ-K18-1：升级后已开启的推迟判定保持开启并按新语义工作
     how: '`cp -R $LEDGER_FIXTURE_V2 $FX_HOME`，选用夹具里开启了 threshold_judge 的那份策略版本（夹具说明里给出），用待测版本以 `APA_HOME=$FX_HOME apa serve` 启动（另用一个端口），判断端点指向 `CLS_STUB`。读 `GET /v1/settings/policy`；建标题含 acc-defer-high 的事项提交普通决策，用该实例的渠道密钥领取。结束后停止该实例并删除 $FX_HOME。'
     expected: 通过：threshold_judge 仍为 true；决策被推迟到合并窗口之后单独投递，没有任何决策因模型判定只留 Web 未读。失败：设置被关闭或改名，或仍出现"只留 Web"的去向。
     requirement_ids:
@@ -3788,7 +3790,7 @@ flows:
     kind: business-action
     step: 新安装的日上限缺省为 20
     how: 在一个新 `APA_HOME`（`apa init` 后未改任何设置）上读 `GET /v1/settings/policy` 的 disturb 段。
-    expected: 通过：`daily_cap` 为 20，`mutes` 为空列表，`followup_defer` 为 false。失败：缺键或缺省值不同。
+    expected: 通过：`daily_cap` 为 20，`mutes` 为空列表，`followup_defer` 为 false。失败：缺键或缺省值不同。（其中 `followup_defer` 一项已取消（2026-11-23），见 REQ-K16-2：该键不再返回，不按缺键判失败。）
     requirement_ids:
     - REQ-N17-1
   - id: ACT-DLV-16

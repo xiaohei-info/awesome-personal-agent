@@ -19,7 +19,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	fu "github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
@@ -112,14 +111,9 @@ func setup(t *testing.T) *env {
 	if key == "" {
 		t.Fatal("follow-up pack declares no follow_up clock rule")
 	}
-	judge, err := direct.New(direct.Options{Store: st, Packs: ld, Model: &model.Client{}, Now: now,
-		Sleep: func(context.Context, time.Duration) error { return nil }, Attempts: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
 	e.q = delivery.New(delivery.Options{Now: now})
 	a := attention.New(attention.Options{Queue: e.q, Now: now})
-	e.svc, err = fu.New(fu.Options{Store: st, Exec: e.x, Judge: judge, Reminder: a, Packs: ld, Pack: "follow-up", Owner: "owner", Now: now})
+	e.svc, err = fu.New(fu.Options{Store: st, Exec: e.x, Reminder: a, Packs: ld, Pack: "follow-up", Owner: "owner", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,34 +331,23 @@ func TestSilentDelegationIsFollowedUp(t *testing.T) {
 	}
 }
 
-// 包的声明：跟进间隔时钟规则初始 observe，提示词类别与级联链，包内无 harness 名。
+// 包的声明：两条提醒类时钟规则，不带提示词（推迟判断模板 follow-up-defer 已取消，2026-11-23）。
 func TestPackDeclarations(t *testing.T) {
 	_, p := loadPack(t)
 	if len(p.ClockRules) != 2 {
 		t.Fatalf("clock rules: %+v", p.ClockRules)
 	}
 	if r := p.ClockRules[0]; r.ID != "follow-up-interval" || r.Type != "follow_up" || r.Schedule != "72h" || len(r.Do) != 0 ||
-		r.RemindRounds == nil || *r.RemindRounds != 2 || r.DeferWith != "follow-up-defer" {
+		r.RemindRounds == nil || *r.RemindRounds != 2 || r.DeferWith != "" {
 		t.Fatalf("follow-up-interval: %+v", r)
 	}
 	if r := p.ClockRules[1]; r.ID != "stale-check" || r.Type != "stale" || r.StaleAfter != "14d" || len(r.Do) != 0 {
 		t.Fatalf("stale-check: %+v", r)
 	}
-	d := p.Prompts["follow-up-defer"].Meta
-	if d.Agent != "judge" || d.QuestionType != "yes_no" || d.OnUndecided != "no" || d.Band == nil || *d.Band.Low != 0.85 {
-		t.Fatalf("follow-up-defer: %+v", d)
-	}
-	if len(p.Prompts) != 1 {
-		t.Errorf("v0.1 judge, generate and task templates must be removed: %v", p.Prompts)
+	if len(p.Prompts) != 0 {
+		t.Errorf("follow-up carries no prompts: %v", p.Prompts)
 	}
 	if len(p.EventRules) != 0 || len(p.SourceRules) != 0 {
 		t.Error("follow-up declares a clock rule only")
-	}
-	for name, pr := range p.Prompts {
-		for _, h := range []string{"claude", "codex", "hermes", "openclaw", "himalaya"} {
-			if strings.Contains(strings.ToLower(pr.Body), h) {
-				t.Errorf("prompt %s mentions harness/tool name %q", name, h)
-			}
-		}
 	}
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "../../app/session";
+import { PageReminder, SourceAlertRule } from "../settings-notify/Reminder";
 import { PageHead } from "../../app/page";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
@@ -216,6 +217,7 @@ function SourcesHome() {
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
+      <PageReminder row="source_failing"><SourceAlertRule /></PageReminder>
       {error !== null && <ErrorNote error={error} />}
       {notice && <p role="status">{notice}</p>}
       {waiting > 0 && <p className="badge warn"><Link to={MODEL_SOURCES}>{t.unsetNotice(waiting)}</Link></p>}

@@ -8,10 +8,8 @@
 //     ——下一轮在提醒产出时就已排好。轮次用完仍无进展，经 decision.request 把事项转 needs_input 问去留
 //     （继续等、我来处理、放弃），不静默丢弃，也不自己 dropped。
 //   - 新进展（item.progress_added）、新挂靠消息（followmsg.attached）、阶段变化都让轮次清零。
-//   - 推迟判断：策略 disturb.followup_defer 开启（默认关闭）且规则声明 defer_with 时，每轮提醒前经级联问一道是非题
-//     "这一轮可以晚点提吗"。只能跳过这一轮的提醒，至多连续跳过一轮，不计入轮次，不替本人选动作，也不改事项。
-//     否、未定、端点不可用或判断失败都照常提醒；失败另记一条 health.alert（模型不可用）。
-//   - 间隔、轮数与推迟模板取自能力包的 follow_up 时钟规则，每次使用时从加载器读（热加载后立即生效）；
+//   - 不调模型：到期即按梯度提醒（推迟判断 followup_defer 已取消（2026-11-23），旧策略里的这个键读入后忽略）。
+//   - 间隔与轮数取自能力包的 follow_up 时钟规则，每次使用时从加载器读（热加载后立即生效）；
 //     模式是该规则在规则状态里的当前模式——auto 才提醒，observe 只记 rule.observed（不提醒），off 不运行。
 //     不是 auto 的到期轮次照常再排下一轮，切到 auto 后在途的等待事项不会漏掉。
 //   - 写入一律经命令模型（自己的 followup.settle 与决策模块的 decision.request、事项的 item.transition）；
@@ -27,7 +25,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -54,7 +51,7 @@ const (
 // 本模块自己追加的审计事件（不在对外事件类型表里，apa why 可见）。
 const (
 	EvReminded = "followup.reminded" // 已按梯度产出提醒
-	EvDeferred = "followup.deferred" // 推迟判断为"可以晚点"，跳过这一轮提醒
+	// followup.deferred（推迟判断跳过一轮）已取消（2026-11-23）：不再产出，账本里旧的照常可读。
 )
 
 const (
@@ -80,7 +77,7 @@ CREATE TABLE followup_pending (
 	attempts INTEGER NOT NULL DEFAULT 0
 );`,
 }, {
-	// 轮次状态：rounds 是自上次清零以来已产出的提醒数；deferred 为 1 表示上一轮被推迟判断跳过（这一轮不再问）；
+	// 轮次状态：rounds 是自上次清零以来已产出的提醒数；deferred 是已取消的推迟判断留下的列（不再读写，结构只增不改）；
 	// waiting_on 是转 needs_input 问去留时存下的等待对象，供"继续等"恢复。
 	Version: 2, Ledger: 3, Name: "ledger-v3-followup-rounds",
 	SQL: `CREATE TABLE followup_state (
@@ -94,11 +91,6 @@ CREATE TABLE followup_resume (
 	seq INTEGER NOT NULL
 );`,
 }}}
-
-// Judge 是级联判断入口（*direct.Service 满足它）。
-type Judge interface {
-	Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error)
-}
 
 // Reminder 是触达的提醒入口（*attention.Attention 满足它）：提醒受静默与合并约束，同一 (kind, 事项, due) 只提醒一次。
 type Reminder interface {
@@ -114,10 +106,9 @@ type PackSource interface {
 type Options struct {
 	Store    *store.Store
 	Exec     *command.Executor
-	Judge    Judge
 	Reminder Reminder
 	Packs    PackSource
-	// Pack 是声明 follow_up 时钟规则的能力包名；间隔、轮数与推迟模板都从该规则取。
+	// Pack 是声明 follow_up 时钟规则的能力包名；间隔与轮数都从该规则取。
 	Pack  string
 	Owner string // 规则式动作的 on_behalf_of，默认 "owner"
 	Now   func() time.Time
@@ -128,8 +119,8 @@ type Service struct{ o Options }
 
 // New 校验配置并返回服务。
 func New(o Options) (*Service, error) {
-	if o.Store == nil || o.Exec == nil || o.Judge == nil || o.Reminder == nil || o.Packs == nil || o.Pack == "" {
-		return nil, errors.New("followup: Store, Exec, Judge, Reminder, Packs and Pack are required")
+	if o.Store == nil || o.Exec == nil || o.Reminder == nil || o.Packs == nil || o.Pack == "" {
+		return nil, errors.New("followup: Store, Exec, Reminder, Packs and Pack are required")
 	}
 	if o.Owner == "" {
 		o.Owner = "owner"
@@ -142,8 +133,8 @@ func New(o Options) (*Service, error) {
 
 // rule 是跟进间隔时钟规则的当前声明。
 type rule struct {
-	key, schedule, deferWith string
-	rounds                   int
+	key, schedule string
+	rounds        int
 }
 
 // rule 从加载器取当前生效的 follow_up 规则；包未加载或没有这类规则时 ok 为假，跟进不运行。
@@ -160,7 +151,7 @@ func (s *Service) rule() (r rule, ok bool) {
 		if cr.RemindRounds != nil {
 			rounds = *cr.RemindRounds
 		}
-		return rule{key: rules.ClockKey(p.Name, cr.ID), schedule: cr.Schedule, deferWith: cr.DeferWith, rounds: rounds}, true
+		return rule{key: rules.ClockKey(p.Name, cr.ID), schedule: cr.Schedule, rounds: rounds}, true
 	}
 	return rule{}, false
 }
@@ -380,19 +371,16 @@ type pending struct {
 // state 是一个事项当前的轮次状态；没有记录等同于全零。
 type state struct {
 	rounds   int64
-	deferred bool
 	waitedOn string
 }
 
 func loadState(tx *store.Tx, item string) (st state, err error) {
-	r, err := tx.Query(`SELECT rounds, deferred, waiting_on FROM followup_state WHERE item = ?`, item)
+	r, err := tx.Query(`SELECT rounds, waiting_on FROM followup_state WHERE item = ?`, item)
 	if err != nil {
 		return st, err
 	}
 	if r.Next() {
-		var d int64
-		err = r.Scan(&st.rounds, &d, &st.waitedOn)
-		st.deferred = d != 0
+		err = r.Scan(&st.rounds, &st.waitedOn)
 	}
 	if cerr := r.Close(); err == nil {
 		err = cerr
@@ -432,7 +420,7 @@ func (s *Service) load(ctx context.Context, key string) (ps []pending, pol polic
 // 规则不是 auto 时不提醒：observe 记一条 rule.observed，off 什么都不记，两者都清掉这条待跟进并再排下一轮。
 func (s *Service) Drain(ctx context.Context) error {
 	r, ok := s.rule()
-	ps, pol, pv, m, err := s.load(ctx, r.key)
+	ps, _, pv, m, err := s.load(ctx, r.key)
 	if err != nil {
 		return err
 	}
@@ -441,7 +429,7 @@ func (s *Service) Drain(ctx context.Context) error {
 		if !ok || m != rules.ModeAuto {
 			err = s.skip(ctx, p, r, ok, m, pv)
 		} else {
-			err = s.handle(ctx, p, r, pol, pv)
+			err = s.handle(ctx, p, r)
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("followup: %s: %w", p.item, err))
@@ -478,7 +466,7 @@ func (s *Service) skip(ctx context.Context, p pending, r rule, ok bool, m string
 	})
 }
 
-func (s *Service) handle(ctx context.Context, p pending, r rule, pol policy.Policy, pv int) error {
+func (s *Service) handle(ctx context.Context, p pending, r rule) error {
 	var it domain.Item
 	var st state
 	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
@@ -500,32 +488,8 @@ func (s *Service) handle(ctx context.Context, p pending, r rule, pol policy.Poli
 		}
 		return s.clear(ctx, p.id)
 	}
-	action := "remind"
-	if pol.Disturb.FollowupDefer && r.deferWith != "" && !st.deferred && s.canDefer(ctx, p, r, it, st, pv) {
-		action = "skip"
-	}
-	_, err = s.run(ctx, r, it.ID, key, "followup.settle", map[string]any{"id": it.ID, "pending": p.id, "action": action, "due": p.due})
+	_, err = s.run(ctx, r, it.ID, key, "followup.settle", map[string]any{"id": it.ID, "pending": p.id, "action": "remind", "due": p.due})
 	return err
-}
-
-// canDefer 问推迟判断："这一轮可以晚点提吗"。只有明确答"是"才为真；否、未定、端点不可用与判断失败都返回假（照常提醒），
-// 后两种另记 health.alert，不让跟进因模型而丢失或延后。
-func (s *Service) canDefer(ctx context.Context, p pending, r rule, it domain.Item, st state, pv int) bool {
-	in, _ := json.Marshal(map[string]any{"item": it.ID, "waiting_on": it.WaitingOn, "round": st.rounds + 1, "remind_rounds": r.rounds, "due": p.due})
-	material := it.Body
-	if material == "" {
-		material = it.Summary
-	}
-	v, err := s.o.Judge.Judge(ctx, direct.JudgeCall{Pack: s.o.Pack, Template: r.deferWith, Input: in, MaterialText: material,
-		Subject: it.ID, Project: it.Project, NoStats: true})
-	if err == nil && v.Unavailable {
-		err = errors.New("no judge endpoint or chat endpoint answered")
-	}
-	if err != nil {
-		_ = s.failed(ctx, p, r, err)
-		return false
-	}
-	return v.Answer == "yes"
 }
 
 // askKeep 把轮次用完的事项转 needs_input 问去留，并存下等待对象供"继续等"恢复。
@@ -637,32 +601,16 @@ func (s *Service) clear(ctx context.Context, id int64) error {
 	})
 }
 
-// failed 记一条推迟判断失败的 health.alert；跟进本身不受影响（照常提醒）。
-func (s *Service) failed(ctx context.Context, p pending, r rule, cause error) error {
-	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
-		pv, _, err := policy.Current(tx)
-		if err != nil {
-			return err
-		}
-		// kind 与 template 供健康视图归类（模型不可用）并在同一模板之后成功调用时清除，字面值见 kernel/health.FollowupKind。
-		body, _ := json.Marshal(map[string]string{"kind": "followup", "template": r.deferWith, "rule": r.key, "item": p.item, "error": cause.Error()})
-		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: p.item, Actor: r.actor(),
-			Basis: &domain.Basis{PolicyVersion: pv, RuleID: r.key}, Reason: "follow-up defer judgement failed, reminding as scheduled: " + cause.Error(),
-			Payload: body, At: s.o.Now()})
-		return err
-	})
-}
-
 // ---- followup.settle ----
 
 type settleIn struct {
 	ID      string    `json:"id"`
 	Pending int64     `json:"pending"`
-	Action  string    `json:"action"` // remind：产出提醒；skip：推迟判断跳过这一轮
+	Action  string    `json:"action"` // remind：产出提醒（推迟判断的 skip 已取消，2026-11-23）
 	Due     time.Time `json:"due"`
 }
 
-// Register 登记 followup.settle：提醒（或推迟跳过）、记轮次、再排下一轮 Timer、清掉这条待跟进。
+// Register 登记 followup.settle：提醒、记轮次、再排下一轮 Timer、清掉这条待跟进。
 // 都在同一事务里完成，崩溃不会留下"提醒已出、待跟进还在"的半截状态。
 func (s *Service) Register() error {
 	parse := func(in json.RawMessage) (v settleIn, err error) {
@@ -684,8 +632,8 @@ func (s *Service) Register() error {
 		},
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, err := parse(in)
-			if err == nil && (v.ID == "" || v.Due.IsZero() || (v.Action != "remind" && v.Action != "skip")) {
-				err = invalid("followup.settle needs an item id, the round's due time and action remind or skip")
+			if err == nil && (v.ID == "" || v.Due.IsZero() || v.Action != "remind") {
+				err = invalid("followup.settle needs an item id, the round's due time and action remind")
 			}
 			return err
 		},
@@ -705,18 +653,12 @@ func (s *Service) Register() error {
 			if !ok {
 				return nil, invalid("pack " + s.o.Pack + " has no follow_up clock rule")
 			}
-			typ := EvDeferred
-			if v.Action == "remind" {
-				typ = EvReminded
-				if err := s.o.Reminder.RemindWith(c.Tx, it, remindKind, v.Due, "该跟进了："+it.Title,
-					fmt.Sprintf("事项已等待 %s「%s」到期仍无进展，可以主动问一句。选「已催」记一条进展，「再等」等下一轮，「放弃」结束这件事。", it.WaitingOn.Kind, it.WaitingOn.Ref),
-					ReminderOptions); err != nil {
-					return nil, err
-				}
-				_, err = c.Tx.Exec(`INSERT INTO followup_state (item, rounds) VALUES (?, 1) ON CONFLICT(item) DO UPDATE SET rounds = rounds + 1, deferred = 0`, it.ID)
-			} else {
-				_, err = c.Tx.Exec(`INSERT INTO followup_state (item, deferred) VALUES (?, 1) ON CONFLICT(item) DO UPDATE SET deferred = 1`, it.ID)
+			if err := s.o.Reminder.RemindWith(c.Tx, it, remindKind, v.Due, "该跟进了："+it.Title,
+				fmt.Sprintf("事项已等待 %s「%s」到期仍无进展，可以主动问一句。选「已催」记一条进展，「再等」等下一轮，「放弃」结束这件事。", it.WaitingOn.Kind, it.WaitingOn.Ref),
+				ReminderOptions); err != nil {
+				return nil, err
 			}
+			_, err = c.Tx.Exec(`INSERT INTO followup_state (item, rounds) VALUES (?, 1) ON CONFLICT(item) DO UPDATE SET rounds = rounds + 1`, it.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -728,7 +670,7 @@ func (s *Service) Register() error {
 				return nil, err
 			}
 			p, _ := json.Marshal(map[string]any{"outcome": v.Action, "next": next})
-			_, err = c.Emit(domain.Event{Type: typ, Object: it.ID, Reason: "follow-up " + v.Action, Payload: p})
+			_, err = c.Emit(domain.Event{Type: EvReminded, Object: it.ID, Reason: "follow-up " + v.Action, Payload: p})
 			return map[string]string{"outcome": v.Action}, err
 		}})
 }

@@ -7,6 +7,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -470,6 +471,8 @@ type resultIn struct {
 	Events     []parsedEvent `json:"events,omitempty"`
 	Rejects    []Reject      `json:"rejects,omitempty"`
 	Cursor     string        `json:"cursor,omitempty"`
+	// ChancePeriod 是失败退出时来源声明的"这次没拿到的内容多久才有一次机会"（§9.2）；没声明为空，按拉取周期算。
+	ChancePeriod string `json:"chance_period,omitempty"`
 }
 
 // classify 把 Run 的终态映射成处置类别（§9.2 的退出码表）。
@@ -518,6 +521,9 @@ func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 	}
 	in.Class, in.Reason = classify(run, res.Reason)
 	in.Timeout = run.State == domain.RunTimeout
+	if in.Class == clsTransient && !res.Overflow {
+		in.ChancePeriod = chancePeriod(res.Stdout)
+	}
 	if in.Class == clsOK {
 		p := parse(res.Stdout, r.maxEvent())
 		in.Events, in.Rejects = p.events, p.rejects
@@ -631,7 +637,7 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 		case clsTransient:
 			st.LastFailureKind = "transient"
 			st.NextAttemptAt = nextAttempt(in.FinishedAt, src.Schedule, st.ConsecutiveFailures)
-			if st.ConsecutiveFailures == StreakFailures { // 连续临时失败到第 3 次记一条，推送"来源连续失败"按它产出（§7.4）
+			if AlertNow(st.ConsecutiveFailures, src.Schedule, in.ChancePeriod) { // 到了提醒线记一条，推送"来源连续失败"按它产出（§7.4）
 				if err := r.failed(c, src, in, "streak"); err != nil {
 					return nil, err
 				}
@@ -665,8 +671,52 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 	return map[string]any{"id": src.ID, "class": in.Class, "cursor": cursor}, nil
 }
 
-// StreakFailures 是记 source.failed（kind: streak）的连续临时失败次数。
+// StreakFailures 是高频来源记 source.failed（kind: streak）的连续临时失败次数：拉取周期不超过重试封顶（maxBackoff）的来源，
+// 这几次重试都落在封顶之内，偶发的网络或本机工具抖动多在其间自愈，连续到这一次才算真读不到。
 const StreakFailures = 3
+
+// LowFrequencyOver 是低频的界线，取重试封顶 maxBackoff：机会周期（来源声明的 chance_period，没声明时取拉取周期）超过它的，
+// 下一次机会已在封顶之外，等满 StreakFailures 次就是丢掉几个整周期（每天一次的内容就是三天），所以失败一次就提醒（§7.4）。
+const LowFrequencyOver = maxBackoff
+
+// AlertAfter 是机会周期为 period 时，连续临时失败到第几次提醒：超过 LowFrequencyOver 为 1，否则 StreakFailures。
+func AlertAfter(period time.Duration) int {
+	if period > LowFrequencyOver {
+		return 1
+	}
+	return StreakFailures
+}
+
+// AlertNow 报告这一次临时失败（这串的第 n 次）是否记 source.failed（kind: streak）：高频到第 StreakFailures 次记一次；
+// 低频（声明或拉取周期超过 LowFrequencyOver）每次都记，每次都是一次丢掉的机会；同一串的推送由投递 id 去重，只推一次。
+func AlertNow(n int, schedule, chance string) bool {
+	if n == StreakFailures {
+		return true
+	}
+	return AlertAfter(chanceOf(schedule, chance)) == 1
+}
+
+// chanceOf 是一次失败的机会周期：来源声明了就用它，否则取拉取周期；都不合法时为 0（按高频）。
+func chanceOf(schedule, chance string) time.Duration {
+	if d, err := time.ParseDuration(chance); err == nil && d > 0 {
+		return d
+	}
+	d, _ := time.ParseDuration(schedule)
+	return d
+}
+
+// chancePeriod 读失败退出时 stdout 的末行 {"chance_period": "<时长>"}（§9.2）；不是这一形状或时长不合法时为空。
+func chancePeriod(stdout []byte) string {
+	lines := bytes.Split(bytes.TrimSpace(stdout), []byte("\n"))
+	var m map[string]string
+	if json.Unmarshal(bytes.TrimSpace(lines[len(lines)-1]), &m) != nil || len(m) != 1 {
+		return ""
+	}
+	if d, err := time.ParseDuration(m["chance_period"]); err != nil || d <= 0 {
+		return ""
+	}
+	return m["chance_period"]
+}
 
 // IdentityTimeout 是 identity 模式一次运行的超时（秒）。
 const IdentityTimeout = 10
@@ -806,7 +856,11 @@ func writeRejects(tx *store.Tx, source, run string, at time.Time, rejects []Reje
 }
 
 func (r *Runner) failed(c *command.Ctx, src domain.Source, in resultIn, kind string) error {
-	payload, _ := json.Marshal(map[string]any{"source_id": src.ID, "run_id": in.RunID, "kind": kind, "reason": in.Reason})
+	body := map[string]any{"source_id": src.ID, "run_id": in.RunID, "kind": kind, "reason": in.Reason}
+	if in.ChancePeriod != "" {
+		body["chance_period"] = in.ChancePeriod
+	}
+	payload, _ := json.Marshal(body)
 	_, err := c.Emit(domain.Event{Type: domain.EvSourceFailed, Object: src.ID, Payload: payload})
 	return err
 }

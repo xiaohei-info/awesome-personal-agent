@@ -23,7 +23,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -43,6 +42,7 @@ const (
 	first = 48 * time.Hour // 包里 follow_up 规则的 schedule，每一轮都按它
 
 	// packYAML 的 %s 是 schedule；规则省略 mode，提醒类初始 auto（C.4）。
+	// defer_with 与 deferMD 是已取消（2026-11-23）的推迟判断写法：照旧写着的覆盖包照常加载、内核不再问它（见 TestNoModelCallEvenWithOldDeferWith）。
 	packYAML = `name: fu
 version: 1.0.0
 description: follow up
@@ -120,14 +120,9 @@ func setup(t *testing.T, configured bool) *env {
 	e.ld = packs.New(packs.Options{DataDir: e.dir, Kinds: items.NewKinds()})
 	e.schedule(first.String())
 	ld := e.ld
-	judge, err := direct.New(direct.Options{Store: st, Packs: ld, Model: &model.Client{}, Now: now,
-		Sleep: func(context.Context, time.Duration) error { return nil }, Attempts: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
 	e.q = delivery.New(delivery.Options{Now: now})
 	e.a = attention.New(attention.Options{Queue: e.q, Now: now})
-	e.svc, err = New(Options{Store: st, Exec: e.x, Judge: judge, Reminder: e.a, Packs: ld, Pack: "fu", Owner: "owner", Now: now})
+	e.svc, err = New(Options{Store: st, Exec: e.x, Reminder: e.a, Packs: ld, Pack: "fu", Owner: "owner", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,17 +304,6 @@ func (e *env) round() {
 func (e *env) progress(id, text string) {
 	e.t.Helper()
 	e.do("item.progress", map[string]any{"id": id, "text": text})
-}
-
-func (e *env) deferOn(on bool) {
-	e.t.Helper()
-	err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "disturb", func(p *policy.Policy) error { p.Disturb.FollowupDefer = on; return nil })
-		return err
-	})
-	if err != nil {
-		e.t.Fatal(err)
-	}
 }
 
 func (e *env) calls() int { return len(e.stub.Requests()) + len(e.cls.Batches()) }
@@ -537,71 +521,15 @@ func TestExecutorWaitIsFollowedUp(t *testing.T) {
 	}
 }
 
-// ACT-FUP-09：推迟判断默认关闭——不问任何端点，照常提醒。
-func TestDeferIsOffByDefault(t *testing.T) {
+// 跟进到期不调模型（推迟判断已取消，2026-11-23）：两个端点都配了、分类端点会答"可以晚点"、覆盖包仍写着 defer_with，
+// 第一轮照常提醒，不发任何判断请求、不写判断记录、不记健康告警。
+func TestNoModelCallEvenWithOldDeferWith(t *testing.T) {
 	e := setup(t, true)
 	e.cls.SetDefaultPYes(0.95)
 	id := e.waiting(domain.WaitingHuman, "小王")
 	e.round()
-	if len(e.reminders(id)) != 1 || e.calls() != 0 || len(e.judgments()) != 0 {
-		t.Fatalf("reminders=%d calls=%d", len(e.reminders(id)), e.calls())
-	}
-}
-
-// ACT-FUP-10：开启后判断为"可以晚点"至多连续跳过一轮；不替本人选动作，事项不变；记录用途 followup_defer。
-func TestDeferSkipsAtMostOneRoundAndNeverChangesTheItem(t *testing.T) {
-	e := setup(t, true)
-	e.deferOn(true)
-	e.cls.SetDefaultPYes(0.95)
-	id := e.waiting(domain.WaitingHuman, "小王")
-	e.round() // 第一次到期：问了，跳过，没有提醒
-	if len(e.reminders(id)) != 0 || len(e.cls.Batches()) != 1 || e.events(id, EvDeferred) != 1 {
-		t.Fatalf("round1: reminders=%d batches=%d deferred=%d", len(e.reminders(id)), len(e.cls.Batches()), e.events(id, EvDeferred))
-	}
-	e.round() // 第二次到期：判断仍为"可以晚点"，也照常提醒，且这一轮不再问
-	if len(e.reminders(id)) != 1 || len(e.cls.Batches()) != 1 {
-		t.Fatalf("round2: reminders=%d batches=%d", len(e.reminders(id)), len(e.cls.Batches()))
-	}
-	it := e.get(id)
-	if it.Phase != domain.PhaseWaiting || len(e.progressOf(id)) != 0 {
-		t.Fatalf("judgement changed the item: %s", it.Phase)
-	}
-	rs := e.judgments()
-	if len(rs) != 1 || rs[0].Use != "followup_defer" || rs[0].Subject != id {
-		t.Fatalf("records %+v", rs)
-	}
-	e.round() // 提醒之后下一轮重新可问：再跳过一次，不计入轮次，所以还有第二条、第三条提醒
-	if len(e.reminders(id)) != 1 || e.events(id, EvDeferred) != 2 {
-		t.Fatalf("round3: reminders=%d deferred=%d", len(e.reminders(id)), e.events(id, EvDeferred))
-	}
-	e.round()
-	e.round()
-	e.round()
-	if len(e.reminders(id)) != 2 || e.get(id).Phase != domain.PhaseNeedsInput {
-		t.Fatalf("reminders=%d phase=%s", len(e.reminders(id)), e.get(id).Phase)
-	}
-}
-
-// ACT-FUP-11：低于上限取"否"照常提醒。
-func TestDeferBelowBandRemindsAsScheduled(t *testing.T) {
-	e := setup(t, true)
-	e.deferOn(true)
-	e.cls.SetDefaultPYes(0.5)
-	id := e.waiting(domain.WaitingHuman, "小王")
-	e.round()
-	if len(e.reminders(id)) != 1 || len(e.cls.Batches()) != 1 || e.events(id, EvDeferred) != 0 {
-		t.Fatalf("reminders=%d batches=%d", len(e.reminders(id)), len(e.cls.Batches()))
-	}
-}
-
-// ACT-FUP-11：端点不可用时未定取"否"，照常提醒，另记 health.alert（模型不可用），跟进不丢。
-func TestDeferUnavailableRemindsAsScheduledAndAlerts(t *testing.T) {
-	e := setup(t, false)
-	e.deferOn(true)
-	id := e.waiting(domain.WaitingHuman, "小王")
-	e.round()
-	if len(e.reminders(id)) != 1 || e.get(id).Phase != domain.PhaseWaiting || e.events(id, domain.EvHealthAlert) != 1 || e.pending() != 0 {
-		t.Fatalf("reminders=%d alerts=%d pending=%d", len(e.reminders(id)), e.events(id, domain.EvHealthAlert), e.pending())
+	if len(e.reminders(id)) != 1 || e.calls() != 0 || len(e.judgments()) != 0 || e.events(id, domain.EvHealthAlert) != 0 || e.events(id, EvReminded) != 1 {
+		t.Fatalf("reminders=%d calls=%d judgments=%d alerts=%d", len(e.reminders(id)), e.calls(), len(e.judgments()), e.events(id, domain.EvHealthAlert))
 	}
 }
 
@@ -633,7 +561,7 @@ func TestOptionValidation(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("missing deps accepted")
 	}
-	ok := Options{Store: &store.Store{}, Exec: &command.Executor{}, Judge: &direct.Service{}, Reminder: &attention.Attention{}, Packs: packs.New(packs.Options{}), Pack: "p"}
+	ok := Options{Store: &store.Store{}, Exec: &command.Executor{}, Reminder: &attention.Attention{}, Packs: packs.New(packs.Options{}), Pack: "p"}
 	bad := ok
 	bad.Packs = nil
 	if _, err := New(bad); err == nil {
@@ -721,7 +649,7 @@ func TestScheduledTimerSurvivesRestartAndFiresAsLadder(t *testing.T) {
 // restart 模拟重启：新建服务实例接着同一账本，立即追赶一次事件。
 func (e *env) restart() {
 	e.t.Helper()
-	svc, err := New(Options{Store: e.st, Exec: e.x, Judge: e.svc.o.Judge, Reminder: e.a, Packs: e.ld, Pack: "fu", Owner: "owner", Now: func() time.Time { return e.now }})
+	svc, err := New(Options{Store: e.st, Exec: e.x, Reminder: e.a, Packs: e.ld, Pack: "fu", Owner: "owner", Now: func() time.Time { return e.now }})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -776,13 +704,15 @@ func TestResumeIsDroppedWhenItemMovedOn(t *testing.T) {
 	}
 }
 
-// followup.settle 拒绝不明动作；包里没有 follow_up 规则时到期的待跟进被清掉，不提醒也不留下。
+// followup.settle 只接受 remind；包里没有 follow_up 规则时到期的待跟进被清掉，不提醒也不留下。
 func TestSettleValidationAndPackWithoutRule(t *testing.T) {
 	e := setup(t, false)
 	id := e.waiting(domain.WaitingHuman, "小王")
-	in, _ := json.Marshal(map[string]any{"id": id, "pending": 1, "action": "bogus", "due": t0})
-	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "followup.settle", Input: in, Owner: "owner"}); err == nil {
-		t.Fatal("bad action accepted")
+	for _, action := range []string{"bogus", "skip"} { // skip 是已取消的推迟判断用的动作
+		in, _ := json.Marshal(map[string]any{"id": id, "pending": 1, "action": action, "due": t0})
+		if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "followup.settle", Input: in, Owner: "owner"}); err == nil {
+			t.Fatalf("action %q accepted", action)
+		}
 	}
 	e.advance(first) // 到期登记待跟进，再卸掉包
 	if err := os.RemoveAll(filepath.Join(e.dir, "fu")); err != nil {

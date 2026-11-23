@@ -119,9 +119,12 @@ var disturbSection = section{
 }
 
 // disturbBody 是 disturb 段的请求与响应形状：策略的 disturb 加只读的 delivery_saved。
+// threshold_judge、followup_defer 是已取消（2026-11-23）的两个开关：旧客户端照旧整段回传时接受并忽略，响应里不再出现。
 type disturbBody struct {
 	kpolicy.Disturb
-	DeliverySaved *bool `json:"delivery_saved,omitempty"`
+	DeliverySaved  *bool `json:"delivery_saved,omitempty"`
+	ThresholdJudge *bool `json:"threshold_judge,omitempty"`
+	FollowupDefer  *bool `json:"followup_defer,omitempty"`
 }
 
 // instancePacks 是全部定时任务实例 id → 类型，用于换算按实例覆盖的矩阵行。

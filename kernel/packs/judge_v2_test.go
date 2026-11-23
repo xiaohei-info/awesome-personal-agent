@@ -160,7 +160,6 @@ func TestReminderRulesRejectDo(t *testing.T) {
 		{"remind_rounds on recur", "clock_rules:\n  - {id: f, type: recur, schedule: 72h, remind_rounds: 2}\n", "follow_up"},
 		{"stale_after on follow_up", "clock_rules:\n  - {id: f, type: follow_up, schedule: 72h, stale_after: 14d}\n", "stale_after"},
 		{"stale_after garbage", "clock_rules:\n  - {id: f, type: stale, schedule: 24h, stale_after: soon}\n", "stale_after"},
-		{"defer_with missing prompt", "clock_rules:\n  - {id: f, type: follow_up, schedule: 72h, defer_with: nope}\n", "defer_with"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -171,9 +170,9 @@ func TestReminderRulesRejectDo(t *testing.T) {
 			}
 		})
 	}
-	good := "clock_rules:\n  - {id: f, type: follow_up, schedule: 72h, remind_rounds: 2, defer_with: d}\n"
-	prompts := map[string]string{"d": "---\nagent: judge\nquestion_type: yes_no\non_undecided: \"no\"\n---\nq\n"}
-	if got := validate(t, v2Head+good, prompts); got != "" {
+	// defer_with 是已取消（2026-11-23）的推迟判断模板：旧覆盖包照旧写着（哪怕模板已不在）也照常加载，内核不再读它。
+	good := "clock_rules:\n  - {id: f, type: follow_up, schedule: 72h, remind_rounds: 2, defer_with: nope}\n"
+	if got := validate(t, v2Head+good, nil); got != "" {
 		t.Fatalf("valid follow_up rule rejected: %s", got)
 	}
 }
@@ -231,7 +230,7 @@ func TestFollowUpOverrideWithDoRejectedBuiltinEffective(t *testing.T) {
 	data := t.TempDir()
 	writePack(t, data, map[string]string{
 		"follow-up/pack.yaml":                  "name: follow-up\nversion: 1\ndescription: d\nclock_rules:\n  - id: follow-up-interval\n    type: follow_up\n    schedule: 72h\n    do: [{action: call_agent, prompt: follow-up-defer}]\n",
-		"follow-up/prompts/follow-up-defer.md": mustBuiltin(t, "follow-up/prompts/follow-up-defer.md"),
+		"follow-up/prompts/follow-up-defer.md": "---\nagent: judge\nquestion_type: yes_no\non_undecided: \"no\"\n---\nq\n",
 	})
 	l, rej := load(t, Options{Builtin: rootpacks.FS, DataDir: data, Kinds: newKinds()})
 	if len(rej) != 1 || !strings.Contains(rej[0].Reason, "follow-up-interval") || !strings.Contains(rej[0].Reason, "delete do[]") {
@@ -244,7 +243,7 @@ func TestFollowUpOverrideWithDoRejectedBuiltinEffective(t *testing.T) {
 	var found bool
 	for _, r := range p.ClockRules {
 		if r.ID == "follow-up-interval" {
-			found = r.Schedule == "72h" && len(r.Do) == 0 && *r.RemindRounds == 2 && r.DeferWith == "follow-up-defer"
+			found = r.Schedule == "72h" && len(r.Do) == 0 && *r.RemindRounds == 2 && r.DeferWith == ""
 		}
 	}
 	if !found {
@@ -265,9 +264,7 @@ func TestBuiltinJudgeTemplatesUseV2Fields(t *testing.T) {
 		singleShot  bool
 	}
 	for _, w := range []want{
-		{"decision-card", "delivery-defer", 0.85, 0.85, "no", true},
 		{"decision-card", "web-only-screening", 0.20, 0.20, "yes", true},
-		{"follow-up", "follow-up-defer", 0.85, 0.85, "no", false},
 		{"delegation-verify", "delegation-screen", 0.20, 0.20, "yes", false},
 	} {
 		p, _ := l.Get(w.pack)

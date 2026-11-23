@@ -635,8 +635,7 @@ func TestBuiltinBandStartingValues(t *testing.T) {
 		low, high  float64
 	}{
 		{"inbound-triage", "triage-screen", 0.15, 0.60}, {"inbound-triage", "capture-prescreen", 0.10, 0.10},
-		{"decision-card", "web-only-screening", 0.20, 0.20}, {"decision-card", "delivery-defer", 0.85, 0.85},
-		{"follow-up", "follow-up-defer", 0.85, 0.85}, {"delegation-verify", "delegation-screen", 0.20, 0.20},
+		{"decision-card", "web-only-screening", 0.20, 0.20}, {"delegation-verify", "delegation-screen", 0.20, 0.20},
 	} {
 		pk, ok := ld.Get(w.pack)
 		if !ok {
@@ -645,6 +644,14 @@ func TestBuiltinBandStartingValues(t *testing.T) {
 		m := pk.Prompts[w.tmpl].Meta
 		if m.Agent != "judge" || m.Band == nil || *m.Band.Low != w.low || *m.Band.High != w.high {
 			t.Errorf("%s/%s: %+v", w.pack, w.tmpl, m.Band)
+		}
+	}
+	// 两个推迟判断模板已取消（2026-11-23）：内置包里不再有它们。
+	for pack, tmpl := range map[string]string{"decision-card": "delivery-defer", "follow-up": "follow-up-defer"} {
+		if pk, ok := ld.Get(pack); !ok {
+			t.Fatalf("pack %s not loaded", pack)
+		} else if _, has := pk.Prompts[tmpl]; has {
+			t.Errorf("%s/%s is still shipped", pack, tmpl)
 		}
 	}
 }

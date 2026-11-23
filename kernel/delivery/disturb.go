@@ -31,7 +31,8 @@ type Target struct {
 //   - 静音：投递的事项、项目或来源命中未到期的静音，决策/提醒/简报改为只留 Web 未读（含注入路由）；
 //   - 日上限：经渠道推送的决策/提醒/简报每个自然日不超过 DailyCap 条（0 不限），超出的只留 Web 未读，
 //     并在当天第一次超限时补发一条说明；
-//   - 健康类、唤醒类、web_only 决策、豁免的临期决策不受日上限；健康与唤醒也不受静音；注入与 Web 路由不计入日上限。
+//   - 健康类、唤醒类、web_only 决策、豁免的临期决策不受日上限；健康与唤醒也不受静音，范围 all（暂停所有提醒）也不例外：
+//     来源连续失败、Agent 运行失败等健康类照常送达；注入与 Web 路由不计入日上限。
 //
 // 自然日按静默时段的时区算，未设置取 UTC。同 id 重复调用返回首次结果，不重复计数或补发说明。
 func (q *Queue) CreateGated(tx *store.Tx, pol policy.Policy, d domain.Delivery, t Target) (domain.Delivery, bool, error) {
@@ -72,6 +73,8 @@ func muted(mutes []policy.Mute, item string, t Target, now time.Time) bool {
 			continue
 		}
 		switch {
+		case m.Scope == policy.MuteAll:
+			return true
 		case m.Scope == policy.MuteItem && m.ID == item,
 			m.Scope == policy.MuteProject && t.Project != "" && m.ID == t.Project,
 			m.Scope == policy.MuteSource && t.Source != "" && m.ID == t.Source:
@@ -162,4 +165,23 @@ func (q *Queue) noticeOnce(tx *store.Tx, pol policy.Policy, over domain.Delivery
 		},
 	})
 	return err
+}
+
+// Sent 是一条投递的计数口径（设置页预览，§3.3）：id、事项、路由与被压原因。
+type Sent struct {
+	ID, Item, Route, Suppressed string
+}
+
+// Since 返回 from 起建的全部投递（不含超限说明），供各类提醒的"近 7 天"计数。只读。
+func Since(tx *store.Tx, from time.Time) ([]Sent, error) {
+	var out []Sent
+	err := query(tx, func(r *store.Rows) error {
+		var s Sent
+		if err := r.Scan(&s.ID, &s.Item, &s.Route, &s.Suppressed); err != nil {
+			return err
+		}
+		out = append(out, s)
+		return nil
+	}, `SELECT id, item, route, suppressed FROM delivery_delivery WHERE created_at >= ? AND id NOT LIKE ? ORDER BY id`, ns(from), noticePrefix+"%")
+	return out, err
 }

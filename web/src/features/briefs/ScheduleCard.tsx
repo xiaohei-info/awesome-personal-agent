@@ -8,21 +8,20 @@ import { useLabel } from "../../app/values";
 import { useRaw } from "../../app/raw";
 import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
 import { AgentPick } from "../settings-agents/AgentPick";
-import { instanceTarget, recordOnly, summary, type Delivery } from "../settings-notify/matrix";
+import { InstanceReminders } from "../settings-notify/Reminder";
 import { strings } from "./strings";
 import type { Instance } from "./Routine";
 
 // 简报、复盘实例的卡片（§4.1 简报页）：收起时一行摘要，展开后改「什么时候、看哪些项目、跑什么」，并可启停、立即跑一次。
 // 改动走 PATCH /v1/instances/{id}（instance.update 整体替换 params，其余参数原样带回）；立即跑一次走 POST /v1/instances/{id}/run。
 // 「让 Agent 写什么」是实例参数 instruction：没写时用包的 default_instruction（GET /v1/packs），随新版默认更新；写回与默认相同即视为没写。
-// 「结果送到」只读，取自投递矩阵（按实例覆盖或跟随类型），在设置 › 提醒与推送里改。
+// 「结果怎么送」「没出来时」两个单选就在卡上（设计 v2 §4：设置安排时一起设，这是它们唯一可编辑的位置）。
 // 资料信封、写回格式与权限是模板的固定部分，不在这里。表单与服务端返回的实例不一致（有没保存的改动）时不能「立即跑一次」，
 // 免得跑的是旧配置；保存成功后以服务端返回的实例为准，改动标记随之清掉。
 export const MAX_INSTRUCTION = 2000; // 与内核 packs.MaxInstructionRunes 一致
 
-export function ScheduleCard({ i, fallback, agentReady, last, open, delivery, onChange }: {
+export function ScheduleCard({ i, fallback, agentReady, last, open, onChange }: {
   i: Instance;
-  delivery?: Delivery; // 取不到时不显示「结果送到」
   open?: boolean; // 从已生成的简报点来源进来时展开
   fallback: string; // 包的默认内容要求
   agentReady: boolean;
@@ -125,22 +124,9 @@ export function ScheduleCard({ i, fallback, agentReady, last, open, delivery, on
           {dirty ? <span className="sub">{t.saveFirst}</span> : note && <span role="status" className="sub">{note}</span>}
         </div>
       </form>
-      {delivery && <ResultTo i={i} d={delivery} />}
+      <InstanceReminders i={i} />
       {last && <p className="sub"><Link to={`/briefs/${encodeURIComponent(last.id)}`}>{t.last(last.at ? new Date(last.at).toLocaleString(locale()) : "")}</Link></p>}
     </details>
-  );
-}
-
-/** 结果送到哪（只读）：链到矩阵里这个实例或它的类型那一行。 */
-function ResultTo({ i, d }: { i: Instance; d: Delivery }) {
-  const t = useT(strings);
-  const { target, own } = instanceTarget(d, i.id, i.pack);
-  const row = own ? "instance:" + i.id : "task_result:" + i.pack;
-  return (
-    <p className="sub">
-      <span>{t.resultTo(summary(target, t.resultParts, recordOnly(row, i.pack)))}</span>{" "}
-      <Link to={"/settings/notify#row-" + row}>{t.resultChange}</Link>
-    </p>
   );
 }
 

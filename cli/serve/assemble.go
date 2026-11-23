@@ -305,8 +305,8 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		}}); err != nil {
 		return nil, err
 	}
-	// 间隔、模板与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
-	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Packs: ld, Owner: owner,
+	// 间隔、轮数与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
+	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Reminder: att, Packs: ld, Owner: owner,
 		Pack: "follow-up"}); err != nil {
 		return nil, err
 	}
@@ -454,7 +454,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
-		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), creds,
+		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), apipolicy.OverviewRoutes(st, ld, k.stale.After), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
 		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x, st, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {

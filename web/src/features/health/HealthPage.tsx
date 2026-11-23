@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
+import { PageReminder } from "../settings-notify/Reminder";
 import { Go, PageHead } from "../../app/page";
 import { useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
@@ -160,6 +161,7 @@ export function HealthPage() {
   return (
     <main className="status-page">
       <PageHead>{head}</PageHead>
+      <PageReminder row="health" />
       {error != null && (
         <>
           <ErrorNote error={error} />

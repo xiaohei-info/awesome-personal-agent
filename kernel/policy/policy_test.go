@@ -293,6 +293,8 @@ func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
 		"negative window": func(p *Policy) { p.Disturb.MergeWindowSec = -1 },
 		"empty quiet":     func(p *Policy) { p.Disturb.Quiet = &Quiet{Start: "08:00", End: "08:00"} },
 		"bad zone":        func(p *Policy) { p.Disturb.Quiet = &Quiet{Start: "22:00", End: "07:00", Zone: "Nowhere/X"} },
+		"all with id":     func(p *Policy) { p.Disturb.Mutes = []Mute{{Scope: MuteAll, ID: "x"}} },
+		"source no id":    func(p *Policy) { p.Disturb.Mutes = []Mute{{Scope: MuteSource}} },
 	} {
 		p := Default()
 		f(&p)
@@ -302,6 +304,7 @@ func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
 	}
 	p := Default()
 	p.Disturb.Quiet = &Quiet{Start: "22:00", End: "07:00", Zone: "Asia/Shanghai"}
+	p.Disturb.Mutes = []Mute{{Scope: MuteAll}}
 	if _, err := normalize(p); err != nil {
 		t.Fatal(err)
 	}
@@ -706,5 +709,35 @@ func TestWebSimilarityTiersMatchKernel(t *testing.T) {
 	}
 	if out, _ := json.Marshal(m); strings.Contains(string(out), "similarity") {
 		t.Fatalf("the default tier is not written: %s", out)
+	}
+}
+
+// 已取消（2026-11-23）的 threshold_judge、followup_defer：旧版本策略里写着（哪怕是开）照常读入并忽略；
+// 只因这两个键不同不产生新版本，下一次真正的改动写出的新版本不再带它们，旧版本逐字节不变。
+func TestCancelledDisturbSwitchesReadAndDropped(t *testing.T) {
+	s := open(t)
+	b, _ := json.Marshal(Default())
+	var doc map[string]json.RawMessage
+	_ = json.Unmarshal(b, &doc)
+	var d map[string]json.RawMessage
+	_ = json.Unmarshal(doc["disturb"], &d)
+	d["threshold_judge"], d["followup_defer"] = json.RawMessage("true"), json.RawMessage("true")
+	doc["disturb"], _ = json.Marshal(d)
+	old, _ := json.Marshal(doc)
+	if err := s.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := tx.Exec("INSERT INTO policy_version (version, doc, at) VALUES (1, ?, 1)", string(old))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if v := must(t, s, func(*Policy) error { return nil }); v != 1 {
+		t.Fatalf("no-op save over the cancelled keys bumped version to %d", v)
+	}
+	if v := must(t, s, func(p *Policy) error { p.Disturb.DailyCap = 5; return nil }); v != 2 {
+		t.Fatalf("version = %d, want 2", v)
+	}
+	docs := storedDocs(t, s)
+	if docs[0] != string(old) || strings.Contains(docs[1], "threshold_judge") || strings.Contains(docs[1], "followup_defer") || !strings.Contains(docs[1], `"daily_cap":5`) {
+		t.Fatalf("stored docs: %v", docs)
 	}
 }

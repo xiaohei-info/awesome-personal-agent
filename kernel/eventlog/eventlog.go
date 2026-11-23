@@ -308,3 +308,14 @@ func SeenHarness(tx *store.Tx) (map[string]string, error) {
 		WHERE json_extract(actor, '$.harness') <> '' GROUP BY json_extract(actor, '$.principal')`)
 	return out, err
 }
+
+// CountSince 是 from 起类型为 typ 的现场事件条数（不含导入与墓碑）；path 非空时另要求载荷里 path 处的值等于 value。只读，设置页预览用。
+func CountSince(tx *store.Tx, typ string, from time.Time, path, value string) (int64, error) {
+	sql, args := "SELECT COUNT(*) FROM eventlog_event WHERE type = ? AND at >= ? AND tombstone = 0"+live, []any{typ, from.UnixNano()}
+	if path != "" {
+		sql, args = sql+" AND json_extract(payload, ?) = ?", append(args, path, value)
+	}
+	var n int64
+	err := queryRows(tx, func(r *store.Rows) error { return r.Scan(&n) }, sql, args...)
+	return n, err
+}

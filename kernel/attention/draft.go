@@ -4,46 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 决策卡片文案（生成型）与投递阈值（判断型）由 decision-card 内置包声明（§7.4、§8.1、§13.5）。
+// 决策卡片文案（生成型）由 decision-card 内置包声明（§7.4、§8.1、§13.5）。
 //
 // 时序：reconcile 发现待决决策的某个版本还没起草，就登记一行 pending 并暂不投递（与"初筛返回前不投递"同理）；
 // Drafts 在事务外调模型，写回结果后在同一事务里重算该事项，投递随之产出。
 // 退化：没配 Drafter 或模型端点时不登记、不等待；调用失败、输出不合 schema、信息不足或置信度不足时，
-// 内容与路由按规则，失败另记 health.alert（kind=decision-card，只进健康视图，不出投递）。
+// 内容按规则，失败另记 health.alert（kind=decision-card，只进健康视图，不出投递）。路由只由投递矩阵定，不问模型。
 const (
-	DraftPack         = "decision-card"
-	TemplateCard      = "decision-card-copy"
-	TemplateThreshold = delivery.DeferTemplate
+	DraftPack    = "decision-card"
+	TemplateCard = "decision-card-copy"
 	// DraftAlertKind 是起草失败 health.alert 的 payload.kind。
 	DraftAlertKind = "decision-card"
 )
-
-// VerdictDefer 是投递推迟判定（delivery-defer，是非题）的"是"：推迟到合并窗口结束后单独投递。其余一律按规则路由（§7.4）。
-const VerdictDefer = "yes"
 
 const (
 	draftPending = "pending"
 	draftDone    = "done"
 )
 
-// Drafter 是判断型与生成型调用（*direct.Service 满足它）。
+// Drafter 是生成型调用（*direct.Service 满足它）。
 // 装配处给它一个 Attempts=1 的实例：起草挡在投递前，失败按规则继续，不退避重试。
 type Drafter interface {
 	Do(ctx context.Context, c direct.Call) (direct.Outcome, error)
-	delivery.Judge
 }
 
 var draftActor = domain.Actor{Type: domain.ActorSystem, Principal: "system:decision-card", Via: domain.ViaClock}
@@ -63,8 +55,7 @@ type Card struct {
 
 // drafted 是一个版本的起草结果；零值表示按规则。
 type drafted struct {
-	Card    *Card
-	Verdict string
+	Card *Card
 }
 
 // content 按规则组装决策投递内容，有卡片时用卡片文案替换标题、摘要、选项说明与推荐。
@@ -120,8 +111,8 @@ func (a *Attention) draft(tx *store.Tx, pol policy.Policy, it domain.Item, ver i
 		state, card string
 		d           drafted
 	)
-	if err := scan(tx, func(r *store.Rows) error { return r.Scan(&v, &state, &card, &d.Verdict) },
-		`SELECT version, state, card, verdict FROM attention_draft WHERE item = ?`, it.ID); err != nil {
+	if err := scan(tx, func(r *store.Rows) error { return r.Scan(&v, &state, &card) },
+		`SELECT version, state, card FROM attention_draft WHERE item = ?`, it.ID); err != nil {
 		return d, false, err
 	}
 	if state != "" && v == ver {
@@ -134,7 +125,7 @@ func (a *Attention) draft(tx *store.Tx, pol policy.Policy, it domain.Item, ver i
 		return d, state == draftDone, nil
 	}
 	_, err := tx.Exec(`INSERT INTO attention_draft (item, version, state) VALUES (?, ?, ?)
-		ON CONFLICT(item) DO UPDATE SET version = excluded.version, state = excluded.state, card = '', verdict = ''`, it.ID, ver, draftPending)
+		ON CONFLICT(item) DO UPDATE SET version = excluded.version, state = excluded.state, card = ''`, it.ID, ver, draftPending)
 	a.draftDue.Store(true)
 	return drafted{}, false, err
 }
@@ -146,8 +137,7 @@ type pendingDraft struct {
 	item    string
 	version int64
 	card    direct.Call
-	judge   *direct.JudgeCall // 策略开启投递推迟判定时才有
-	stale   bool              // 事项已删或已无决策请求：不调用，写回后由重算清掉
+	stale   bool // 事项已删或已无决策请求：不调用，写回后由重算清掉
 }
 
 // Drafts 起草全部 pending 的决策：事务外调模型，逐个写回并重算投递。只有存储错误才返回；
@@ -158,7 +148,7 @@ func (a *Attention) Drafts(ctx context.Context, st *store.Store) error {
 	}
 	var todo []pendingDraft
 	if err := st.View(ctx, func(tx *store.Tx) error {
-		pv, pol, err := policy.Current(tx)
+		pv, _, err := policy.Current(tx)
 		if err != nil {
 			return err
 		}
@@ -187,7 +177,7 @@ func (a *Attention) Drafts(ctx context.Context, st *store.Store) error {
 			if err != nil {
 				return err
 			}
-			p.card, p.judge = draftCalls(pol, pv, it, depth, a.o.Now())
+			p.card = draftCall(pv, it, depth)
 			todo = append(todo, p)
 		}
 		return nil
@@ -196,30 +186,24 @@ func (a *Attention) Drafts(ctx context.Context, st *store.Store) error {
 	}
 	for _, p := range todo {
 		if p.stale {
-			if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, "", "", nil, nil, nil) }); err != nil {
+			if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, "", nil) }); err != nil {
 				return err
 			}
 			continue
 		}
 		card, cardErr := a.callCard(ctx, p.card)
-		var verdict string
-		var ref *record.Ref
-		var judgeErr error
-		if p.judge != nil {
-			verdict, ref, judgeErr = a.callJudge(ctx, *p.judge)
-		}
 		if ctx.Err() != nil {
 			return ctx.Err() // 停机：留着 pending，下次启动接着做
 		}
-		if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, card, verdict, ref, cardErr, judgeErr) }); err != nil {
+		if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, card, cardErr) }); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// draftCalls 组织两次调用的输入。事项正文是外部内容，只进资料段；阈值判定只看结构化状态。
-func draftCalls(pol policy.Policy, pv int, it domain.Item, depth int, now time.Time) (direct.Call, *direct.JudgeCall) {
+// draftCall 组织起草调用的输入。事项正文是外部内容，只进资料段。
+func draftCall(pv int, it domain.Item, depth int) direct.Call {
 	ask := it.Ask
 	opts := make([]map[string]string, len(ask.Options))
 	for i, o := range ask.Options {
@@ -231,12 +215,7 @@ func draftCalls(pol policy.Policy, pv int, it domain.Item, depth int, now time.T
 	card := base
 	card.Template, card.Input, card.Material = TemplateCard, in, it.Body
 	card.Basis = &domain.Basis{PolicyVersion: pv, RuleID: DraftPack + "/" + TemplateCard}
-	if !pol.Disturb.ThresholdJudge {
-		return card, nil
-	}
-	_, quiet := quietEnd(pol, now)
-	judge := delivery.DeferCall(it, quiet, now)
-	return card, &judge
+	return card
 }
 
 // callCard 返回卡片 JSON；信息不足或未配置返回空、无错误（按规则）。
@@ -253,20 +232,6 @@ func (a *Attention) callCard(ctx context.Context, c direct.Call) (string, error)
 	return string(b), err
 }
 
-// callJudge 返回推迟判定："yes" 才推迟；否、未定按规则路由。超时、不可用、出错返回错误（不重试）。
-// ref 是已写入的判断记录引用（没有记录为 nil），无论结论与错误都要带回，供 settleDraft 写 Event。
-func (a *Attention) callJudge(ctx context.Context, c direct.JudgeCall) (verdict string, ref *record.Ref, err error) {
-	ok, v, err := delivery.CanDefer(ctx, a.o.Drafter, c)
-	if v.Written {
-		r := record.RefOf(v.Record)
-		ref = &r
-	}
-	if err != nil || !ok {
-		return "", ref, err
-	}
-	return VerdictDefer, ref, nil
-}
-
 // ignorable：模型端点在两次读策略之间被清空、或外发范围不允许送出，都不算失败。
 func ignorable(err error) error {
 	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, direct.ErrOutboundBlocked) { // 外发范围未选或 none：不起草；选定范围不会自动重起草，等事项下次变更
@@ -276,44 +241,22 @@ func ignorable(err error) error {
 }
 
 // settleDraft 写回起草结果并重算事项。事项已变到别的版本（行被重置或删掉）时什么都不写，新版本另起草。
-func (a *Attention) settleDraft(tx *store.Tx, p pendingDraft, card, verdict string, ref *record.Ref, cardErr, judgeErr error) error {
-	n, err := tx.Exec(`UPDATE attention_draft SET state = ?, card = ?, verdict = ? WHERE item = ? AND version = ? AND state = ?`,
-		draftDone, card, verdict, p.item, p.version, draftPending)
+// verdict 列是旧版投递推迟判定留下的，不再写也不再读（结构只增不改，§16.5）。
+func (a *Attention) settleDraft(tx *store.Tx, p pendingDraft, card string, cardErr error) error {
+	n, err := tx.Exec(`UPDATE attention_draft SET state = ?, card = ? WHERE item = ? AND version = ? AND state = ?`,
+		draftDone, card, p.item, p.version, draftPending)
 	if err != nil || n == 0 {
 		return err
 	}
-	// 用了判断结果的命令在自己的 Event 载荷带 judgment，apa why 据此展开（§6.7）；成功时同模板的 run.finished 也清掉该模板的旧健康告警。
-	if ref != nil {
-		state := domain.RunSucceeded
-		if judgeErr != nil {
-			state = domain.RunFailed
-		}
+	// 起草失败记一条，带所用模板：健康视图据此归类，并在同一模板之后成功调用时清除（字面值见 kernel/health.DraftKind）。
+	if cardErr != nil {
 		depth, err := items.ChainDepth(tx, p.item)
 		if err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(map[string]any{"category": domain.RunJudge, "template": TemplateThreshold, "state": state, "judgment": ref.Judgment,
-			"answer": ref.Answer, "decided_by": ref.DecidedBy})
-		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: p.item, Actor: draftActor,
-			Reason: "judge " + string(state), Payload: payload, ChainDepth: depth, At: a.o.Now()}); err != nil {
-			return err
-		}
-	}
-	// 每个失败的调用各记一条，带所用模板：健康视图据此归类，并在同一模板之后成功调用时清除（字面值见 kernel/health.DraftKind）。
-	for _, f := range []struct {
-		tmpl string
-		err  error
-	}{{TemplateCard, cardErr}, {TemplateThreshold, judgeErr}} {
-		if f.err == nil {
-			continue
-		}
-		depth, err := items.ChainDepth(tx, p.item)
-		if err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]string{"kind": DraftAlertKind, "template": f.tmpl, "reason": f.err.Error()})
+		payload, _ := json.Marshal(map[string]string{"kind": DraftAlertKind, "template": TemplateCard, "reason": cardErr.Error()})
 		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: p.item, Actor: draftActor,
-			Reason: f.tmpl + " draft failed; delivered by policy rules: " + f.err.Error(), Payload: payload, ChainDepth: depth, At: a.o.Now()}); err != nil {
+			Reason: TemplateCard + " draft failed; delivered by policy rules: " + cardErr.Error(), Payload: payload, ChainDepth: depth, At: a.o.Now()}); err != nil {
 			return err
 		}
 	}

@@ -103,9 +103,9 @@ describe("设置 › 提醒渠道：内置渠道", () => {
     const a = within(await screen.findByRole("region", { name: "我的 iPhone" }));
     expect(a.getByText("在用")).toBeInTheDocument();
     expect(a.getByText("只能看")).toBeInTheDocument();
-    expect(a.getByText(/用来送：问题卡/)).toBeInTheDocument(); // 只读，按矩阵：旧路由换算后问题卡走默认渠道，默认渠道就是它
+    expect(a.getByText(/推到这里的有：有问题等你决定时/)).toBeInTheDocument(); // 只读，按矩阵：旧路由换算后问题卡走默认渠道，默认渠道就是它
     expect(a.getByText("默认渠道")).toBeInTheDocument();
-    expect(a.getByRole("link", { name: "去改" })).toHaveAttribute("href", "/settings/notify");
+    expect(a.getByRole("link", { name: "去改" })).toHaveAttribute("href", "/settings/notify#overview");
     const b = within(screen.getByRole("region", { name: "备用手机" }));
     expect(b.getByText("有问题")).toBeInTheDocument();
     expect(b.getByRole("alert")).toHaveTextContent("密钥没填或已失效，重新填写");

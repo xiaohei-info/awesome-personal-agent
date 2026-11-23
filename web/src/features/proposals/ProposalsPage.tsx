@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { PageReminder, ProposalsMin } from "../settings-notify/Reminder";
 import { ApiError, type ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
@@ -585,6 +586,7 @@ export function ProposalsPage() {
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
+      <PageReminder row="new_proposals"><ProposalsMin /></PageReminder>
       <MergeActivity onUnmerge={(member) => act(member, "unmerge", {})} reload={activityTick} />
       {error != null && (
         <div>

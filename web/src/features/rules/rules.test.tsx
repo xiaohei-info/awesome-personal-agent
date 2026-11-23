@@ -14,14 +14,26 @@ const K3 = "gone/event_rules/x"; // 包已不在：没有 class
 const K4 = "background-run/event_rules/handle"; // 以 Agent 本人身份运行
 const N1 = "周期简报", N2 = "14 天没动静的事项问我一声";
 
-function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
+// v28 的到点提醒、截止已过、跟进与停滞都是"在对话里马上告诉我"（线上 2026-11-23 的值）。
+const MATRIX = { default_channel: "channel:ch-iphone", rows: { scheduled: { agent: "main", user: "off" }, overdue: { agent: "main", user: "off" }, followup: { agent: "main", user: "off" }, stale: { agent: "main", user: "off" } } };
+const PROACTIVE = { on: true, work_start: "09:00", work_end: "18:00", workdays: [1, 2, 3, 4, 5], shift: true, start: true, end: true, lead_min: 0, dedup_min: 60, max_items: 20, max_batches: 6 };
+const OVERVIEW = {
+  since: "2026-11-16T15:05:00Z",
+  rows: ["scheduled", "overdue", "followup", "stale"].map((key) => ({ key, produced: true, events: 0, pushed: 0 })),
+  now: { decisions_pending: 0, deadlines: 0, overdue: 0, waiting: 0, stale_now: 0, stale_from: "2026-12-06T02:00:00Z", proposals_new: 275, rule_observed: { [K2]: 4 } },
+  source_alert: { streak_failures: 3, low_frequency_over_sec: 3600, sources: [] },
+};
+
+function server(opts: { denied?: boolean; auditFails?: boolean; matrix?: boolean } = {}) {
   const rules = [
     { key: K1, pack: "brief", group: "event_rules", id: "tag-hit", mode: "observe", hash: "h1", class: "action" },
     { key: K2, pack: "follow-up", group: "clock_rules", id: "stale-check", mode: "auto", hash: "h2", class: "reminder" },
     { key: K3, pack: "gone", group: "event_rules", id: "x", mode: "off", hash: "h3" },
     { key: K4, pack: "background-run", group: "event_rules", id: "handle", mode: "auto", hash: "h4", class: "action", runner: "main_session" },
+    { key: "follow-up/clock_rules/follow-up-interval", pack: "follow-up", group: "clock_rules", id: "follow-up-interval", mode: "auto", hash: "h5", class: "reminder" },
   ];
   let launch: any = { by_harness: { hermes: "wake" }, by_rule: {} };
+  let disturb: any = opts.matrix ? { remind_on_deadline: true, daily_cap: 20, mutes: [], merge_window_sec: 1800, proactive: PROACTIVE, delivery: MATRIX } : undefined;
   const puts: any[] = [];
   const now = Date.now();
   const observed = [
@@ -40,9 +52,10 @@ function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
     if (url === "/v1/settings/policy") {
       if (method === "PUT") {
         puts.push(JSON.parse(init.body as string));
-        launch = puts.at(-1).main_session_launch;
+        if (puts.at(-1).main_session_launch) launch = puts.at(-1).main_session_launch;
+        if (puts.at(-1).disturb) disturb = { ...puts.at(-1).disturb, delivery: puts.at(-1).disturb.delivery ?? disturb.delivery }; // 没带矩阵时沿用已存的（同服务端）
       }
-      return json(200, { version: 1, main_session_launch: launch });
+      return json(200, { version: 1, main_session_launch: launch, ...(disturb ? { disturb } : {}) });
     }
     const m = /^\/v1\/rules\/([^/]+)\/mode$/.exec(url);
     if (m && method === "PATCH") {
@@ -62,9 +75,11 @@ function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
       return json(200, { events: observed.filter((e) => e.type === q.get("type") && e.actor.principal === q.get("actor")) });
     }
     if (url.startsWith("/v1/items/")) return json(404, { code: "not_found", why: "no", next: "" });
+    if (url === "/v1/settings/notify/overview" && opts.matrix) return json(200, OVERVIEW);
+    if (url === "/v1/settings/proactive/preview" && opts.matrix) return json(200, { total: 3, batches: 1, next_count: 3, route: "wake:agt", entries: [] });
     return json(404, { code: "not_found", why: "no such route", next: "" });
   }) as unknown as typeof fetch;
-  return { impl, patches, audits, rules, puts };
+  return { impl, patches, audits, rules, puts, disturb: () => disturb };
 }
 
 function mount(fetchImpl: typeof fetch) {
@@ -80,18 +95,64 @@ const checked = async (name: string) => ((await modes(name)).getAllByRole("radio
 
 beforeEach(() => sessionStorage.clear());
 
-describe("设置 › 自动动手（原 自动规则 › 规则）", () => {
-  it("ACT-RULE-03: 按类别分「替我动手 / 其他」，名字是中文，模式是「关 / 试运行 / 开」；提醒类规则不在这里（开关在提醒与推送的矩阵行）", async () => {
+describe("设置 › 自动规则（原 自动动手）", () => {
+  it("ACT-RULE-03: 按类别分「替我动手 / 其他」，名字是中文，模式是「关 / 试运行 / 开」；提醒类规则不在列表里（由「提醒我」的单选写模式），取不到矩阵时「提醒我」不显示", async () => {
     mount(server().impl);
     const act = within(await screen.findByRole("region", { name: "替我动手" }));
     expect(screen.queryByRole("region", { name: "提醒我" })).toBeNull();
     expect(screen.queryByText(N2)).toBeNull();
     expect(screen.queryByRole("radiogroup", { name: `${N2}：开关` })).toBeNull();
-    expect(screen.getByRole("link", { name: "跟进与停滞提醒的开关在「提醒与推送」" })).toHaveAttribute("href", "/settings/notify");
+    expect(screen.queryByRole("link", { name: /提醒与推送/ })).toBeNull();
     expect(act.getByText(N1)).toBeInTheDocument();
     expect(await checked(N1)).toBe("试运行");
     expect(within(screen.getByRole("region", { name: "其他" })).getByText("x")).toBeInTheDocument();
     expect(screen.queryByText(K1)).not.toBeInTheDocument(); // 原始 key 只在「显示原始值」里
+  });
+
+  it("提醒我：v28 的四类都是「在对话里马上告诉我」，各带一句后果与按当前数据的预览；跟进选不提醒只切规则模式为关，不改去处", async () => {
+    const s = server({ matrix: true });
+    mount(s.impl);
+    const g = within(await screen.findByRole("region", { name: "提醒我" }));
+    for (const name of ["到点提醒", "截止已过", "等待到期跟进", "14 天没动静"]) {
+      expect(within(await g.findByRole("radiogroup", { name })).getByRole("radio", { name: "在对话里马上告诉我" })).toBeChecked();
+    }
+    expect(await g.findByText("接下来 24 小时 3 条，合成 1 条消息")).toBeInTheDocument();
+    expect(g.getByText("现在没有带截止的事项，开着也暂时不会提醒")).toBeInTheDocument();
+    expect(g.getByText("现在没有在等的事项")).toBeInTheDocument();
+    expect(g.getByText(/^现在没有；最早 12 月 6 日才可能有$/)).toBeInTheDocument();
+    expect(g.getByText("在等的事每 72 小时提醒一次，两轮后问去留；选不提醒：也不再问去留。")).toBeInTheDocument();
+    expect(screen.getByRole("main")).not.toHaveTextContent(/产生|推给 Agent|主会话|Agent 收不到时/);
+    await userEvent.click(within(g.getByRole("radiogroup", { name: "等待到期跟进" })).getByRole("radio", { name: "不提醒（在今天页里能看到）" }));
+    await waitFor(() => expect(s.patches).toEqual([{ path: `/v1/rules/${encodeURIComponent("follow-up/clock_rules/follow-up-interval")}/mode`, body: { mode: "off" }, csrf: "tok-1" }]));
+    expect(s.puts).toEqual([]);
+  });
+
+  it("提醒我：截止已过选不提醒只关 remind_on_deadline；到点提醒改成下次聊天时只写这一行，开着的 proactive 原样带回；「什么时候提醒」里没有第二个开关", async () => {
+    const s = server({ matrix: true });
+    mount(s.impl);
+    const g = within(await screen.findByRole("region", { name: "提醒我" }));
+    await userEvent.click(within(await g.findByRole("radiogroup", { name: "截止已过" })).getByRole("radio", { name: "不提醒（在今天页里能看到）" }));
+    await waitFor(() => expect(s.puts).toHaveLength(1));
+    expect(s.puts[0].disturb.remind_on_deadline).toBe(false);
+    expect(s.puts[0].disturb).not.toHaveProperty("delivery");
+    await userEvent.click(within(g.getByRole("radiogroup", { name: "到点提醒" })).getByRole("radio", { name: "下次聊天时告诉我" }));
+    await waitFor(() => expect(s.puts).toHaveLength(2));
+    expect(s.puts[1].disturb.delivery.rows).toEqual({ ...MATRIX.rows, scheduled: { agent: "next_chat", user: "off" } });
+    expect(s.puts[1].disturb.proactive).toEqual(PROACTIVE);
+    expect(s.puts[1].disturb.remind_on_deadline).toBe(false);
+    await userEvent.click(g.getByText("什么时候提醒"));
+    expect(g.queryByRole("switch")).toBeNull();
+  });
+
+  it("提醒我：规则在试运行时单选在「不提醒」，写明本周本来会提醒几次，点「改成正式」切开", async () => {
+    const s = server({ matrix: true });
+    s.rules[1].mode = "observe";
+    mount(s.impl);
+    const row = within(await screen.findByRole("group", { name: "14 天没动静" }));
+    expect(await row.findByText("试运行中：本周本来会提醒 4 次")).toBeInTheDocument();
+    expect(row.getByRole("radio", { name: "不提醒（在今天页里能看到）" })).toBeChecked();
+    await userEvent.click(row.getByRole("button", { name: "改成正式" }));
+    await waitFor(() => expect(s.patches.at(-1)).toMatchObject({ body: { mode: "auto" } }));
   });
 
   it("ACT-RULE-03: 本人切开，请求带 CSRF，路径为编码后的规则 key，页面显示服务端返回的模式", async () => {

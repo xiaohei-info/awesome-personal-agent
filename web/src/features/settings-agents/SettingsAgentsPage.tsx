@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Route, Routes } from "react-router-dom";
+import { PageReminder } from "../settings-notify/Reminder";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
 import { EntityPick } from "../../app/names";
@@ -62,6 +63,7 @@ function AgentList() {
           <h2>{t.common}</h2>
           <Persona doc={pol} save={save} />
           {data && <Other data={data} list={list} reload={load} onError={setError} secret={secret} onSecret={setSecret} />}
+          <PageReminder row="run_failed" />
         </>
       )}
     </PolicyPage>
