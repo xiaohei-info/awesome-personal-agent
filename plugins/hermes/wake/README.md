@@ -15,3 +15,9 @@ Flow per `class: wake` delivery: claim → `POST /runs/{id}/credential` → `ctx
 (`external_ref` = run id). Any failure → `/fail` (kernel backs off and retries); no chat-channel message is sent.
 The run credential lives in memory only and reaches the turn via `apa_wake_cli` (`APA_RUN` + `APA_TOKEN`), re-exchanged
 before expiry. Decide/accept/dismiss under it return exit 4 from the kernel.
+
+Run-less deliveries on the same route (the kernel's proactive reminders, and brief/review/routine results the owner
+chose to push into the main session; design §7.4) are notices: claim → `ctx.inject_message(facts)` → ack
+(`external_ref` = `main-session`). No credential is exchanged, so nothing changes for the run boundary above. The text is
+the kernel's title and lines plus one sentence on what to do next. A refused injection is failed back (kernel backoff,
+then Web unread); a notice whose ack was lost is re-acked, not injected a second time, by the same gateway process.

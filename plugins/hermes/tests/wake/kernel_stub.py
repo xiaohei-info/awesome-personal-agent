@@ -18,6 +18,7 @@ class Kernel:
         self.cli_calls = []    # (run header, bearer) seen on run-identity requests
         self.exchanges = 0
         self.fail_exchange = False
+        self.fail_ack = False
         self.ttl = "2099-01-01T00:00:00Z"
         k = self
 
@@ -58,6 +59,8 @@ class Kernel:
                     k.exchanges += 1
                     return self._send(200, {"run": parts[3], "token": f"apa_run_{parts[3]}_{k.exchanges}", "expires_at": k.ttl})
                 k.reports.append((parts[4], parts[3], body))
+                if parts[4] == "ack" and k.fail_ack:
+                    return self._send(500, {"error": "ack lost"})
                 self._send(200, {"id": parts[3]})
 
             def log_message(self, *a):
@@ -70,6 +73,11 @@ class Kernel:
     def wake(self, did="wake_r1", run="r1", version=1):
         self.deliveries.append({"id": did, "item": "it1", "run": run, "class": "wake", "route": "wake", "version": version,
                                 "content": {"title": f"wake {run}"}})
+
+    def notice(self, did="schedbatch:1", cls="reminder", title="到点提醒：1 件事", summary="· [14:00] 开始｜14:00 - 15:00 写周报（it1）"):
+        """A run-less delivery on the wake route (the kernel's proactive reminder or a scheduled-task output)."""
+        self.deliveries.append({"id": did, "item": "attention:schedule", "run": "", "class": cls, "route": "wake", "version": 1,
+                                "content": {"title": title, "summary": summary}})
 
     def stop(self):
         self.srv.shutdown()

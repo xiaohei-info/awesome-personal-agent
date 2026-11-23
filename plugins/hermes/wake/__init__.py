@@ -8,6 +8,11 @@ The plugin only
   4. keeps the credential in memory and hands it only to `apa_wake_cli`, which runs `apa` with APA_RUN/APA_TOKEN.
 The credential is never put in the message, the environment of the gateway, or other tools.
 
+Deliveries on the same route that carry no run (class reminder, brief or health: the kernel's proactive reminders and
+scheduled-task outputs routed to the main session, design §7.4) are notices, not runs: the plugin injects their facts
+(title and summary as the kernel wrote them) and acks; no credential is exchanged. The main session then acts with its
+own tools as in chat. A notice whose ack was lost is not injected twice by this process (it only re-acks).
+
 Explicit opt-in: the loop starts only when readiness.py finds nothing missing (APA_WAKE_SESSION_KEY names the main
 session to wake, plugins.entries.apa-wake.allow_gateway_injection: true, APA_URL and APA_TOKEN). The same judgment is
 what apa-headless declares, so the ledger never offers waking that would fail. Otherwise the harness stays headless-only.
@@ -41,6 +46,7 @@ BACKOFF_SECS = 5
 REFRESH_MARGIN_SECS = 30
 
 _runs = {}  # run id -> {"token", "expires": epoch secs}; in memory only
+_injected = set()  # notice delivery ids already injected by this process; a lost ack must not inject twice
 _lock = threading.Lock()
 stop = threading.Event()  # set by tests; Hermes ends the daemon thread with the process
 
@@ -92,8 +98,40 @@ def message(d):
             f"accept or dismiss for the owner: if the owner must decide, ask and end the run as needs_input.")
 
 
+NOTICE_KIND = {"reminder": "APA 提醒", "brief": "APA 简报", "health": "APA 需要你看一下"}
+
+
+def notice(d):
+    """A run-less delivery as one short message: what it is, the kernel's lines, and what can be done next."""
+    c = d.get("content") or {}
+    head = f"[{NOTICE_KIND.get(d.get('class'), 'APA')}] {c.get('title', '')}".rstrip()
+    body = (c.get("summary") or "").strip()
+    tail = ("这是 APA 主动推来的消息，转告本人即可；要看详情、改期、标完成，照常用 apa 命令"
+            "（如 apa item show <事项 id>）。不必回复 APA。")
+    return "\n".join(x for x in (head, body, tail) if x)
+
+
+def handle_notice(ctx, d, session_key):
+    """Inject a run-less delivery and ack it; no credential is involved. Failures go back to the kernel."""
+    ver = d["version"]
+    if d["id"] not in _injected:
+        try:
+            if not ctx.inject_message(notice(d), session_key=session_key):
+                raise WakeError("Hermes refused the injection (allow_gateway_injection, live gateway, session key)")
+        except Exception as e:  # noqa: BLE001 - any failure goes back to the kernel, which retries with backoff
+            try:
+                _http("POST", f"/deliveries/{d['id']}/fail", {"version": ver, "reason": str(e)[:200]})
+            except WakeError as e2:
+                log.warning("apa-wake: fail report for %s lost: %s", d["id"], e2)
+            raise
+        _injected.add(d["id"])
+    _http("POST", f"/deliveries/{d['id']}/ack", {"version": ver, "external_ref": "main-session"})
+
+
 def handle(ctx, d, session_key):
     """One claimed delivery: exchange, inject, ack. Failures are reported back so the kernel can retry."""
+    if not d.get("run") and d.get("class") != "wake":
+        return handle_notice(ctx, d, session_key)
     ver = d["version"]
     try:
         if not d.get("run"):
