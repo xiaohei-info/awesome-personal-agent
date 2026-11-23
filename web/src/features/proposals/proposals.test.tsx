@@ -547,8 +547,11 @@ describe("建议页降噪：折叠、合组与批量忽略", () => {
     gh8: { type: "pr.opened", object: "o/r/pull/8" }, dec: { type: "pr.opened", object: "o/r/pull/9" },
     urg: { type: "mail.received" }, m1: { type: "mail.received" }, m2: { type: "mail.received" },
   };
-  function backend(batch?: (body: any, key: string) => Response) {
-    let live = [...items];
+  // 替身按 POST /proposals/batch 的契约应答：忽略记批次号，phase=dropped 给 dismissals，undo 按批改回。seed 是已经忽略过的。
+  function backend(batch?: (body: any, key: string) => Response, seed: Record<string, { batch?: string; reason?: string; at: string }> = {}) {
+    let live = items.filter((i) => !seed[i.id]);
+    const dismissed: Record<string, { batch?: string; reason?: string; at: string }> = { ...seed };
+    let n = 0;
     const calls: { method: string; path: string; body?: any; key?: string }[] = [];
     const impl = (async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? "GET";
@@ -557,18 +560,22 @@ describe("建议页降噪：折叠、合组与批量忽略", () => {
       if (url === "/v1/projects") return json(200, { projects: [] });
       if (url === "/v1/sources") return json(200, { sources: [{ id: "src_gh", name: "GitHub" }, { id: "src_mail_qq", name: "QQ 邮箱" }] });
       if (url === "/v1/items?phase=proposed") return json(200, { items: live, last_rejections: {}, origins });
+      if (url === "/v1/items?phase=dropped") return json(200, { items: items.filter((i) => dismissed[i.id]), last_rejections: {}, dismissals: dismissed });
       if (url === "/v1/proposals/batch") {
         const r = batch?.(body, calls.at(-1)!.key!);
         if (r) return r;
+        if (body.mode === "undo") {
+          const ids = Object.keys(dismissed).filter((id) => dismissed[id].batch === body.batch);
+          ids.forEach((id) => delete dismissed[id]);
+          live = [...live, ...items.filter((i) => ids.includes(i.id))];
+          return json(200, { results: ids.map((id) => ({ id, do: "undo", ok: true, batch: body.batch })) });
+        }
+        const b = "pb_" + String(++n).padStart(12, "0");
         const ids: string[] = body.mode === "ended" ? body.filter.ids : body.actions.map((a: any) => a.id);
         const ok = ids.filter((id) => body.mode !== "ended" || (origins as any)[id]?.ended);
         live = live.filter((i) => !ok.includes(i.id));
-        return json(200, { results: ids.map((id) => (ok.includes(id) ? { id, do: "dismiss", ok: true } : { id, do: "dismiss", ok: false, code: "conflict", why: "the upstream object is not verifiably merged or closed; left as is" })) });
-      }
-      const tr = url.match(/^\/v1\/items\/(.+)\/transition$/);
-      if (tr && method === "POST") {
-        live = [...live, items.find((i) => i.id === tr[1])!];
-        return json(200, { id: tr[1] });
+        ok.forEach((id) => (dismissed[id] = { batch: b, reason: "r", at: "2030-01-03T00:00:00Z" }));
+        return json(200, { results: ids.map((id) => (ok.includes(id) ? { id, do: "dismiss", ok: true, batch: b } : { id, do: "dismiss", ok: false, code: "conflict", why: "the upstream object is not verifiably merged or closed; left as is", batch: b })) });
       }
       return json(404, { code: "not_found", why: url, next: "x" });
     }) as unknown as typeof fetch;
@@ -613,7 +620,7 @@ describe("建议页降噪：折叠、合组与批量忽略", () => {
     for (const n of ["接受", "补到已有事项", "忽略"]) expect(within(within(g).getByRole("article", { name: "PR 7 开了" })).getByRole("button", { name: n })).toBeEnabled();
   });
 
-  it("忽略已合并或关闭的：先写明条数与依据，确认才发 ended，带幂等键；拿不准的不动并说明；可一键撤销改回建议", async () => {
+  it("忽略已合并或关闭的：先写明条数与依据，确认才发 ended，带幂等键；拿不准的不动并说明；回执上按批撤销，也要二次确认", async () => {
     const s = backend();
     mount(s.impl);
     const box = await hosted();
@@ -631,12 +638,14 @@ describe("建议页降噪：折叠、合组与批量忽略", () => {
     const undo = screen.getByRole("status", { name: "批量忽略" });
     expect(undo).toHaveTextContent("已批量忽略 2 条");
     await userEvent.click(within(undo).getByRole("button", { name: "撤销" }));
-    await waitFor(() => expect(s.calls.filter((c) => c.path.endsWith("/transition")).map((c) => [c.path, c.body])).toEqual([
-      ["/v1/items/gh7/transition", { to: "proposed", reason: "撤销批量忽略" }],
-      ["/v1/items/ml7/transition", { to: "proposed", reason: "撤销批量忽略" }],
-    ]));
+    expect(within(undo).getByRole("group", { name: "确认批量忽略" })).toHaveTextContent("将把这批 2 条改回建议，回到原来的分组；之后在别处改过的不动");
+    expect(s.calls.filter((c) => c.body?.mode === "undo")).toHaveLength(0);
+    await userEvent.click(within(undo).getByRole("button", { name: "确认撤销 2 条" }));
+    await waitFor(() => expect(s.calls.filter((c) => c.body?.mode === "undo").map((c) => c.body)).toEqual([{ mode: "undo", batch: "pb_000000000001" }]));
+    expect(s.calls.find((c) => c.body?.mode === "undo")!.key).toMatch(/^[0-9a-f-]{36}$/);
+    expect(s.calls.some((c) => c.path.endsWith("/transition"))).toBe(false);
+    expect(await screen.findByRole("status", { name: "批量忽略" })).toHaveTextContent("已改回建议 2 条");
     expect(await screen.findByRole("article", { name: "PR 7 开了" })).toBeInTheDocument();
-    expect(screen.queryByRole("status", { name: "批量忽略" })).toBeNull();
   });
 
   it("幂等：一次确认没有确知结果时留在确认里，重发用同一个幂等键", async () => {
@@ -664,5 +673,40 @@ describe("建议页降噪：折叠、合组与批量忽略", () => {
     await userEvent.selectOptions(screen.getByLabelText("分组"), "type");
     const mail = screen.getByRole("group", { name: "邮件" });
     expect(within(mail).getAllByRole("article")).toHaveLength(2);
+  });
+
+  it("已忽略：按批列出（哪一次、理由、时刻），逐条忽略的只列出；按批撤销要二次确认；撤销后回到原来的分组与折叠", async () => {
+    const at = "2030-01-03T08:00:00Z";
+    const s = backend(undefined, {
+      gh7: { batch: "pb_aaaaaaaaaaaa", reason: "upstream o/r/pull/7 ended: pr.merged sev_m7 at 2030-01-02T00:00:00Z", at },
+      m1: { batch: "pb_aaaaaaaaaaaa", reason: "批量忽略：QQ 邮箱", at },
+      m2: { reason: "不需要", at: "2030-01-01T08:00:00Z" },
+    });
+    mount(s.impl);
+    await hosted();
+    expect(screen.queryByRole("article", { name: "PR 7 开了" })).toBeNull();
+    await userEvent.selectOptions(screen.getByLabelText("显示"), "ignored");
+    const head = `${new Date(at).toLocaleString()} 批量忽略 2 条`;
+    const batch = await screen.findByRole("region", { name: head });
+    expect(batch).toHaveTextContent("每条理由不同，见下");
+    expect(within(batch).getByRole("listitem", { name: "PR 7 开了" })).toHaveTextContent(`GitHub · ${new Date(at).toLocaleString()} · 理由：upstream o/r/pull/7 ended: pr.merged sev_m7`);
+    expect(within(batch).getByRole("listitem", { name: "普通邮件一" })).toHaveTextContent("理由：批量忽略：QQ 邮箱");
+    const single = screen.getByRole("region", { name: "逐条忽略的 1 条" });
+    expect(within(single).getByRole("listitem", { name: "普通邮件二" })).toHaveTextContent("理由：不需要");
+    expect(within(single).queryByRole("button")).toBeNull();
+
+    await userEvent.click(within(batch).getByRole("button", { name: "撤销这一批（2 条）…" }));
+    expect(s.calls.some((c) => c.body?.mode === "undo")).toBe(false);
+    await userEvent.click(within(batch).getByRole("button", { name: "确认撤销 2 条" }));
+    await waitFor(() => expect(s.calls.filter((c) => c.body?.mode === "undo").map((c) => c.body)).toEqual([{ mode: "undo", batch: "pb_aaaaaaaaaaaa" }]));
+    expect(await screen.findByRole("status", { name: "批量忽略" })).toHaveTextContent("已改回建议 2 条");
+    await waitFor(() => expect(screen.queryByRole("region", { name: head })).toBeNull());
+    expect(screen.getByRole("region", { name: "逐条忽略的 1 条" })).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("显示"), "pending");
+    const box = await hosted();
+    expect(box.open).toBe(false); // 回到折叠里
+    expect(within(within(box).getByRole("region", { name: PR7 })).getByRole("article", { name: "PR 7 开了" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "QQ 邮箱" })).getByRole("article", { name: "普通邮件一" })).toBeInTheDocument();
   });
 });

@@ -108,8 +108,18 @@ const zh = {
   ignored: (n: number) => `已批量忽略 ${n} 条`,
   undoHead: "批量忽略",
   undo: "撤销",
-  undoReason: "撤销批量忽略",
-  undoPartial: (back: number, left: number) => `已改回建议 ${back} 条；${left} 条在别处改过，没有改回`,
+  show: "显示",
+  showPending: "待处理",
+  showIgnored: "已忽略",
+  ignoredEmpty: "没有忽略过的建议",
+  batchIgnored: (when: string, n: number) => `${when} 批量忽略 ${n} 条`,
+  singleIgnored: (n: number) => `逐条忽略的 ${n} 条`,
+  noReason: "没写理由",
+  reasonsVary: "每条理由不同，见下",
+  undoBatch: (n: number) => `撤销这一批（${n} 条）…`,
+  undoPlan: (n: number) => `将把这批 ${n} 条改回建议，回到原来的分组；之后在别处改过的不动`,
+  confirmUndo: (n: number) => `确认撤销 ${n} 条`,
+  undone: (n: number) => `已改回建议 ${n} 条`,
 };
 
 const en: typeof zh = {
@@ -219,8 +229,18 @@ const en: typeof zh = {
   ignored: (n) => `Ignored ${n} in bulk`,
   undoHead: "Bulk ignore",
   undo: "Undo",
-  undoReason: "Undo bulk ignore",
-  undoPartial: (back, left) => `${back} back in proposals; ${left} were changed elsewhere and stay as they are`,
+  show: "Show",
+  showPending: "To handle",
+  showIgnored: "Ignored",
+  ignoredEmpty: "No ignored proposals",
+  batchIgnored: (when, n) => `${n} ignored together at ${when}`,
+  singleIgnored: (n) => `${n} ignored one by one`,
+  noReason: "no reason given",
+  reasonsVary: "Reasons differ; see each",
+  undoBatch: (n) => `Undo this batch (${n})…`,
+  undoPlan: (n) => `Puts these ${n} back into proposals and their groups; ones changed since stay`,
+  confirmUndo: (n) => `Confirm undo of ${n}`,
+  undone: (n) => `${n} back in proposals`,
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

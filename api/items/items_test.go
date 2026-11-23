@@ -835,3 +835,34 @@ func TestOriginsOnlyForProposed(t *testing.T) {
 		t.Fatalf("origins only with phase=proposed: %s", rec.Body)
 	}
 }
+
+// 已忽略与按批撤销经 HTTP：批量忽略的结果带批次号；phase=dropped 给出 dismissals（批次、理由、时刻）；undo 按批改回建议。
+func TestDismissalsAndUndoOverHTTP(t *testing.T) {
+	e := setup(t)
+	p := e.create(e.web, `{"kind":"task","title":"p","phase":"proposed"}`)
+	rec := e.do("POST", "/v1/proposals/batch", `{"mode":"explicit","actions":[{"id":"`+p.ID+`","do":"dismiss","reason":"批量忽略：邮件"}]}`, e.web)
+	var res struct {
+		Results []inbound.BatchResult `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || len(res.Results) != 1 || !res.Results[0].OK || !strings.HasPrefix(res.Results[0].Batch, "pb_") {
+		t.Fatalf("batch = %d %s", rec.Code, rec.Body)
+	}
+	batch := res.Results[0].Batch
+	var out struct {
+		Dismissals map[string]inbound.Dismissal `json:"dismissals"`
+	}
+	rec = e.do("GET", "/v1/items?phase=dropped", "", e.web)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Dismissals[p.ID].Batch != batch || out.Dismissals[p.ID].Reason != "批量忽略：邮件" || len(out.Dismissals) != 1 {
+		t.Fatalf("dismissals = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items?phase=open", "", e.web); strings.Contains(rec.Body.String(), "dismissals") {
+		t.Fatalf("dismissals only with phase=dropped: %s", rec.Body)
+	}
+	rec = e.do("POST", "/v1/proposals/batch", `{"mode":"undo","batch":"`+batch+`"}`, e.web)
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || len(res.Results) != 1 || !res.Results[0].OK {
+		t.Fatalf("undo = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items?phase=proposed", "", e.web); !strings.Contains(rec.Body.String(), p.ID) {
+		t.Fatalf("back in proposals: %s", rec.Body)
+	}
+}

@@ -40,7 +40,9 @@ interface SourceRead { event: { id: string; source_id: string; subject: string; 
 type Action = "accept" | "dismiss" | "attach" | "handoff" | "split" | "unmerge";
 /** 处理完的一行回执：说清结果，并给去处（界面设计 §5.2、§7 路径一）。 */
 interface Receipt { id: string; title: string; text: string; to?: string; missing?: boolean }
-interface BatchResult { id: string; do: string; ok: boolean; code?: string; why?: string }
+interface BatchResult { id: string; do: string; ok: boolean; code?: string; why?: string; batch?: string }
+/** GET /items?phase=dropped 的 dismissals：这次忽略属于哪一批（逐条的没有）、理由、时刻。 */
+interface Dismissal { batch?: string; reason?: string; at: string }
 
 
 
@@ -341,8 +343,8 @@ function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => P
   );
 }
 
-/** 批量忽略的两步：先写明会忽略几条、依据是什么，再确认；幂等键在确认前生成，同一次确认重发不多改，成功后换新键。 */
-function BulkIgnore({ n, label, plan, onConfirm }: { n: number; label: string; plan: string; onConfirm: (key: string) => Promise<boolean> }) {
+/** 批量忽略与按批撤销的两步：先写明会改几条、依据是什么，再确认；幂等键在确认前生成，同一次确认重发不多改，成功后换新键。 */
+function BulkIgnore({ n, label, plan, confirm, onConfirm }: { n: number; label: string; plan: string; confirm?: string; onConfirm: (key: string) => Promise<boolean> }) {
   const t = useT(strings);
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -351,9 +353,58 @@ function BulkIgnore({ n, label, plan, onConfirm }: { n: number; label: string; p
   return (
     <p role="group" aria-label={t.confirmHead}>
       <span>{plan}</span>{" "}
-      <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { if (await onConfirm(key.current)) { key.current = crypto.randomUUID(); setAsking(false); } } finally { setBusy(false); } }}>{t.confirmIgnore(n)}</button>{" "}
+      <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { if (await onConfirm(key.current)) { key.current = crypto.randomUUID(); setAsking(false); } } finally { setBusy(false); } }}>{confirm ?? t.confirmIgnore(n)}</button>{" "}
       <button type="button" disabled={busy} onClick={() => setAsking(false)}>{t.cancel}</button>
     </p>
+  );
+}
+
+/** 已忽略：按批列出被批量忽略的建议（哪一次、理由、时刻），每批可撤销；逐条忽略的只列出。撤销后它们回到原来的分组与折叠。 */
+function Ignored({ undoBatch, tick }: { undoBatch: (batch: string, key: string) => Promise<boolean>; tick: number }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const sourceName = useNames("source");
+  const [data, setData] = useState<{ items: Proposal[]; dismissals: Record<string, Dismissal> } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const reload = useCallback(
+    () => api.get<{ items: Proposal[]; dismissals?: Record<string, Dismissal> }>("/items?phase=dropped").then((r) => setData({ items: r.items, dismissals: r.dismissals ?? {} }), setError),
+    [api],
+  );
+  useEffect(() => {
+    reload();
+  }, [reload, tick]);
+  if (error != null) return <ErrorNote error={error} />;
+  if (!data) return <p role="status">{t.loading}</p>;
+  const mine = data.items.filter((i) => data.dismissals[i.id]);
+  if (mine.length === 0) return <p className="empty">{t.ignoredEmpty}</p>;
+  const at = (i: Proposal) => data.dismissals[i.id].at;
+  const batches = groupBy(mine, (i) => data.dismissals[i.id].batch ?? "")
+    .sort((a, b) => (a[0] === "" ? 1 : b[0] === "" ? -1 : at(b[1][0]).localeCompare(at(a[1][0]))));
+  return (
+    <>
+      {batches.map(([batch, its]) => {
+        const reasons = [...new Set(its.map((i) => data.dismissals[i.id].reason ?? ""))];
+        const head = batch ? t.batchIgnored(new Date(at(its[0])).toLocaleString(), its.length) : t.singleIgnored(its.length);
+        return (
+          <section key={batch || "single"} aria-label={head} className="group">
+            <h3>{head}</h3>
+            {batch && <p className="sub">{reasons.length === 1 ? t.reasonIs(reasons[0] || t.noReason) : t.reasonsVary}</p>}
+            {batch && (
+              <BulkIgnore n={its.length} label={t.undoBatch(its.length)} plan={t.undoPlan(its.length)} confirm={t.confirmUndo(its.length)}
+                onConfirm={async (key) => { const ok = await undoBatch(batch, key); await reload(); return ok; }} />
+            )}
+            <ul className="rows">
+              {its.map((i) => (
+                <li key={i.id} aria-label={i.title}>
+                  <Link to={"/items/" + encodeURIComponent(i.id)}>{i.title}</Link>
+                  <span className="sub"> · {sourceName(i.origin?.source ?? "") || t.noSource} · {new Date(at(i)).toLocaleString()}{(!batch || reasons.length > 1) && data.dismissals[i.id].reason ? " · " + t.reasonIs(data.dismissals[i.id].reason!) : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </>
   );
 }
 
@@ -366,7 +417,9 @@ export function ProposalsPage() {
   const [items, setItems] = useState<Proposal[] | null>(null);
   const [origins, setOrigins] = useState<Record<string, Origin>>({});
   const [axis, setAxis] = useState<"source" | "type">("source");
-  const [undo, setUndo] = useState<{ ids: string[]; note?: string } | null>(null);
+  const [undo, setUndo] = useState<{ batch: string; n: number } | null>(null);
+  const [view, setView] = useState<"pending" | "ignored">("pending");
+  const [ignoredTick, setIgnoredTick] = useState(0);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
   const [error, setError] = useState<unknown>(null);
   const [source, setSource] = useState("");
@@ -376,6 +429,7 @@ export function ProposalsPage() {
   const [outcome, setOutcome] = useState<{ done: number; skipped: { title: string; why: string }[] } | null>(null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [activityTick, setActivityTick] = useState(0);
+  const [note, setNote] = useState("");
   const it = useT(itemStrings);
   const handoff = useHandoff();
   const pre = handoffPrereqs(it, handoff, true);
@@ -487,9 +541,9 @@ export function ProposalsPage() {
     try {
       const r = await api.post<{ results: BatchResult[] }>("/proposals/batch", body, { "Idempotency-Key": key });
       const title = (id: string) => all.find((i) => i.id === id)?.title ?? id;
-      const ok = r.results.filter((x) => x.ok).map((x) => x.id);
+      const ok = r.results.filter((x) => x.ok);
       setOutcome({ done: ok.length, skipped: r.results.filter((x) => !x.ok).map((x) => ({ title: title(x.id), why: x.code === "conflict" && (body as { mode: string }).mode === "ended" ? t.notEnded : x.why ?? t.notHandled })) });
-      if (ok.length) setUndo({ ids: ok });
+      if (ok.length && ok[0].batch) setUndo({ batch: ok[0].batch, n: ok.length });
       sent = true;
     } catch (e) {
       setError(e); // 没有确知的结果：留在确认里，重发用同一个幂等键
@@ -498,24 +552,22 @@ export function ProposalsPage() {
     window.dispatchEvent(new Event(COUNTS_EVENT));
     return sent;
   };
-  // shortcut: 撤销入口只在这一页这一次处理后的回执里，离开页面后要逐条经 POST /items/{id}/transition 改回；需要事后批量找回时再加"最近批量忽略"列表。
-  const undoIgnore = async () => {
-    if (!undo) return;
+  // 按批撤销：内核只改回这一批里此后没在别处改过阶段的；再撤一次是 0 条。回执与「已忽略」共用。
+  const undoBatch = async (batch: string, key: string): Promise<boolean> => {
     setError(null);
-    let back = 0;
-    const failed: string[] = [];
-    for (const id of undo.ids) {
-      try {
-        await api.post("/items/" + encodeURIComponent(id) + "/transition", { to: "proposed", reason: t.undoReason });
-        back++;
-      } catch {
-        failed.push(id); // 别处已改过（例如已重新打开）：保持服务端现状
-      }
-    }
-    setUndo(failed.length ? { ids: failed, note: t.undoPartial(back, failed.length) } : null);
     setOutcome(null);
+    try {
+      const r = await api.post<{ results: BatchResult[] }>("/proposals/batch", { mode: "undo", batch }, { "Idempotency-Key": key });
+      setUndo(null);
+      setNote(t.undone(r.results.filter((x) => x.ok).length));
+    } catch (e) {
+      setError(e);
+      return false;
+    }
     await load();
+    setIgnoredTick((n) => n + 1);
     window.dispatchEvent(new Event(COUNTS_EVENT));
+    return true;
   };
   const parts = arrange(shown, origins);
   const ended = parts.hosted.filter((i) => origins[i.id]?.ended);
@@ -560,11 +612,19 @@ export function ProposalsPage() {
           )}
         </div>
       )}
+      <label>
+        {t.show}
+        <select value={view} onChange={(e) => { setView(e.target.value as "pending" | "ignored"); setNote(""); }}>
+          <option value="pending">{t.showPending}</option>
+          <option value="ignored">{t.showIgnored}</option>
+        </select>
+      </label>
+      {note && <p role="status" aria-label={t.undoHead}>{note}</p>}
       {undo && (
-        <p role="status" aria-label={t.undoHead}>
-          {undo.note ?? t.ignored(undo.ids.length)}{" "}
-          <button type="button" onClick={() => void undoIgnore()}>{t.undo}</button>
-        </p>
+        <div role="status" aria-label={t.undoHead}>
+          {t.ignored(undo.n)}
+          <BulkIgnore n={undo.n} label={t.undo} plan={t.undoPlan(undo.n)} confirm={t.confirmUndo(undo.n)} onConfirm={(key) => undoBatch(undo.batch, key)} />
+        </div>
       )}
       {receipts.length > 0 && (
         <ul className="rows" aria-label={t.receipts}>
@@ -576,7 +636,9 @@ export function ProposalsPage() {
           ))}
         </ul>
       )}
-      {items === null ? (
+      {view === "ignored" ? (
+        <Ignored undoBatch={undoBatch} tick={ignoredTick} />
+      ) : items === null ? (
         error == null && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
         <p className="empty">{t.empty}</p>

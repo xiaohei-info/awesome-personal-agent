@@ -601,3 +601,88 @@ func TestBatchEndedOnlyOnVerifiableEvidence(t *testing.T) {
 	}
 	e.verify()
 }
+
+func (e *env) dismissals(ids ...string) map[string]Dismissal {
+	e.t.Helper()
+	var its []domain.Item
+	for _, id := range ids {
+		its = append(its, e.item(id))
+	}
+	var out map[string]Dismissal
+	e.view(func(tx *store.Tx) {
+		var err error
+		if out, err = Dismissals(tx, its); err != nil {
+			e.t.Fatal(err)
+		}
+	})
+	return out
+}
+
+// 按批撤销：批量忽略的每条在事件里记同一个批次号；撤销只改回这一批里最近一次阶段变更仍是这次忽略的，
+// 别的批、逐条忽略的、之后在别处改过阶段的都不动；再撤一次是 0 条；改回后逐条接受照常。
+func TestBatchUndoOneBatch(t *testing.T) {
+	e := attachEnv(t)
+	a, b, c, other := e.proposalOf("u-1", "一"), e.proposalOf("u-2", "二"), e.proposalOf("u-3", "三"), e.proposalOf("u-4", "四")
+	res, err := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner", IdemKey: "ig-1"},
+		BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: a, Do: "dismiss", Reason: "批量忽略：邮件"}, {ID: b, Do: "dismiss", Reason: "批量忽略：邮件"}}})
+	if err != nil || len(res) != 2 || !res[0].OK || !res[1].OK || !batchRe.MatchString(res[0].Batch) || res[1].Batch != res[0].Batch {
+		t.Fatalf("batch ignore: %+v %v", res, err)
+	}
+	x := res[0].Batch
+	again, _ := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner", IdemKey: "ig-1"},
+		BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: a, Do: "dismiss", Reason: "批量忽略：邮件"}, {ID: b, Do: "dismiss", Reason: "批量忽略：邮件"}}})
+	if len(again) != 2 || !again[0].OK || again[0].Batch != x {
+		t.Fatalf("a replay with the same key keeps the batch: %+v", again)
+	}
+	y, _ := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner", IdemKey: "ig-2"}, BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: other, Do: "dismiss"}}})
+	if y[0].Batch == x || y[0].Batch == "" {
+		t.Fatalf("another batch needs its own id: %+v", y)
+	}
+	e.must("proposal.dismiss", map[string]any{"id": c, "reason": "逐条"})
+	// b 之后在别处重开又放弃：最近一次阶段变更不再是这次忽略。
+	e.must("item.transition", map[string]any{"id": b, "to": "open", "reason": "reopen"})
+	e.must("item.transition", map[string]any{"id": b, "to": "dropped", "reason": "drop"})
+
+	ds := e.dismissals(a, b, c, other)
+	if d := ds[a]; d.Batch != x || d.Reason != "批量忽略：邮件" || d.At.IsZero() || d.Actor.Principal != owner.Actor.Principal {
+		t.Fatalf("dismissal of a: %+v", d)
+	}
+	if _, ok := ds[b]; ok || ds[c].Batch != "" || ds[c].Reason != "逐条" || ds[other].Batch != y[0].Batch || len(ds) != 3 {
+		t.Fatalf("dismissals: %+v", ds)
+	}
+
+	u := command.Request{Identity: owner, Owner: "owner", IdemKey: "undo-1"}
+	out, err := Batch(bg, e.x, e.st, u, BatchRequest{Mode: BatchUndo, Batch: x})
+	if err != nil || len(out) != 1 || out[0].ID != a || !out[0].OK || out[0].Do != "undo" || out[0].Batch != x {
+		t.Fatalf("undo: %+v %v", out, err)
+	}
+	for id, want := range map[string]domain.Phase{a: domain.PhaseProposed, b: domain.PhaseDropped, c: domain.PhaseDropped, other: domain.PhaseDropped} {
+		if got := e.item(id).Phase; got != want {
+			t.Errorf("%s: %s, want %s", id, got, want)
+		}
+	}
+	if r := lastReason(e.eventsOf(a)); r != "undo batch ignore "+x {
+		t.Errorf("undo reason: %q", r)
+	}
+	n := len(e.eventsOf(a))
+	for _, req := range []command.Request{u, {Identity: owner, Owner: "owner"}} {
+		if out, err := Batch(bg, e.x, e.st, req, BatchRequest{Mode: BatchUndo, Batch: x}); err != nil || len(out) != 0 {
+			t.Fatalf("a second undo changes nothing: %+v %v", out, err)
+		}
+	}
+	if len(e.eventsOf(a)) != n {
+		t.Fatal("a second undo must not add events")
+	}
+	if _, err := e.do(owner, "proposal.accept", "", map[string]any{"id": a}); err != nil || e.item(a).Phase != domain.PhaseOpen {
+		t.Fatalf("accept after undo: %v", err)
+	}
+	for name, br := range map[string]BatchRequest{"no batch": {Mode: BatchUndo}, "bad batch": {Mode: BatchUndo, Batch: "x"}, "with ids": {Mode: BatchUndo, Batch: x, Filter: BatchFilter{IDs: []string{a}}}} {
+		if _, err := Batch(bg, e.x, e.st, u, br); exitOf(err) != domain.ExitUsage {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := e.do(owner, "proposal.dismiss", "", map[string]any{"id": e.proposalOf("u-5", "五"), "batch": "nope"}); exitOf(err) != domain.ExitUsage {
+		t.Errorf("a malformed batch on a single dismiss must be refused: %v", err)
+	}
+	e.verify()
+}
