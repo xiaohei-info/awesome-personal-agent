@@ -15,7 +15,14 @@ const ACTIONS = ["attach", "merge", "duplicate", "keep"];
 const DEFAULT_BATCH = 20;
 const DEFAULT_WAIT = 30;
 
-interface Merge { exclude_sources?: string[] | null; skip_existing?: boolean; batch_size?: number; wait_minutes?: number; budget_tokens?: number; prompt?: string; prompt_at?: string }
+interface Merge { exclude_sources?: string[] | null; skip_existing?: boolean; batch_size?: number; wait_minutes?: number; budget_tokens?: number; prompt?: string; prompt_at?: string; similarity?: string }
+
+// 相似度档位（§9.3）：与内核 policy.SimilarityMin 同值，由 kernel/policy 的 TestWebSimilarityTiersMatchKernel 锁住。空串是默认档。
+export const SIMILARITY_TIERS = [
+  { id: "loose", min: 0.25 },
+  { id: "", min: 0.3 },
+  { id: "strict", min: 0.4 },
+] as const;
 
 export function SettingsMergePage() {
   const t = useT(strings);
@@ -28,6 +35,7 @@ export function SettingsMergePage() {
           <AgentCard doc={d} save={save} />
           <SourcesCard doc={d} save={save} />
           <ExistingCard doc={d} save={save} />
+          <SimilarityCard doc={d} save={save} />
           <BatchCard doc={d} save={save} />
           <PromptCard doc={d} save={save} />
           <Cost />
@@ -92,6 +100,26 @@ function ExistingCard({ doc, save }: { doc: Doc; save: Save }) {
         <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} />
         <span>{t.existingLabel}</span>
       </label>
+    </Card>
+  );
+}
+
+function SimilarityCard({ doc, save }: { doc: Doc; save: Save }) {
+  const t = useT(strings);
+  const m = doc.merge as Merge;
+  const value = m.similarity ?? "";
+  const [pick, setPick, dirty] = useDraft(value, () => value);
+  return (
+    <Card title={t.simTitle} hint={t.simHint} dirty={dirty} onSave={() => putMerge(doc, save, { similarity: pick || undefined })}>
+      <fieldset>
+        {SIMILARITY_TIERS.map((x) => (
+          <label key={x.id} className="row">
+            <input type="radio" name="similarity" value={x.id} checked={pick === x.id} onChange={() => setPick(x.id)} />
+            <span>{t.simChoice(t.simName[x.id], x.min.toFixed(2))}</span>
+            <small className="sub">{t.simWhy[x.id]}</small>
+          </label>
+        ))}
+      </fieldset>
     </Card>
   );
 }

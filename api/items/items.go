@@ -102,6 +102,8 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		done   map[string]time.Time
 		undone map[string]bool
 		within map[string][]domain.Progress
+		origin map[string]inbound.Origin
+		dis    map[string]inbound.Dismissal
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if its, err = kitems.List(tx, f); err != nil {
@@ -130,7 +132,13 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 				rejs[it.ID] = *rj
 			}
 		}
-		return nil
+		switch f.Phase {
+		case domain.PhaseProposed:
+			origin, err = inbound.Origins(tx, its)
+		case domain.PhaseDropped:
+			dis, err = inbound.Dismissals(tx, its)
+		}
+		return err
 	}); err != nil {
 		return err
 	}
@@ -157,6 +165,24 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			}
 		}
 		out["done_unknown"] = unknown
+	}
+	if origin != nil { // 只读建议时给出各条的来源事件类型、上游对象与对象已结束的依据，建议页据此分组（附录 B.2）
+		at := map[string]inbound.Origin{}
+		for _, it := range its {
+			if o, ok := origin[it.ID]; ok {
+				at[it.ID] = o
+			}
+		}
+		out["origins"] = at
+	}
+	if dis != nil { // 只读已放弃时给出忽略记录（批次、理由、时刻），建议页的「已忽略」据此按批列出与撤销（附录 B.2）
+		at := map[string]inbound.Dismissal{}
+		for _, it := range its {
+			if d, ok := dis[it.ID]; ok {
+				at[it.ID] = d
+			}
+		}
+		out["dismissals"] = at
 	}
 	if within != nil {
 		at := map[string][]domain.Progress{}

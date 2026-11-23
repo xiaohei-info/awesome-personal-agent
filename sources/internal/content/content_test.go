@@ -132,3 +132,29 @@ func TestNotificationLink(t *testing.T) {
 		}
 	}
 }
+
+// 旧通知邮件的正文回填：只认通知地址发来的、带「view it on GitHub」页脚且全文只说一个 PR 或 issue 的；其余一律不给。
+func TestNotificationBodyLink(t *testing.T) {
+	const pr = "https://github.com/o/r/pull/226"
+	foot := func(url string) string {
+		return "@me 请看一下。\n\n—\nReply to this email directly, view it on GitHub:\n" + url + "\nYou are receiving this because you were mentioned."
+	}
+	for _, c := range []struct {
+		name, sender, body, want string
+	}{
+		{"footer with a comment anchor", "notifications@github.com", foot(pr + "#issuecomment-1"), pr},
+		{"footer in angle brackets, display-name sender", "Someone <notifications@github.com>", "x\nview it on GitHub: <" + pr + "/files>\n", pr},
+		{"issue", "notifications@github.com", foot("https://github.com/o/r/issues/9"), "https://github.com/o/r/issues/9"},
+		{"same PR mentioned again in the body", "notifications@github.com", "改动见 " + pr + "/commits\n" + foot(pr), pr},
+		{"no footer, only a link in the text", "notifications@github.com", "见 " + pr, ""},
+		{"footer points at a workflow run", "notifications@github.com", foot("https://github.com/o/r/actions/runs/1"), ""},
+		{"body names another PR too", "notifications@github.com", "依赖 https://github.com/o/r/pull/225\n" + foot(pr), ""},
+		{"prefix-only number is a different PR", "notifications@github.com", "见 https://github.com/o/r/pull/2260\n" + foot(pr), ""},
+		{"not the platform's address", "someone@example.com", foot(pr), ""},
+		{"empty body", "notifications@github.com", "", ""},
+	} {
+		if got := NotificationBodyLink(c.sender, c.body); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}

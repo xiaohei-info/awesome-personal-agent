@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -65,7 +66,10 @@ type answerIn struct {
 type proposalIn struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason"`
+	Batch  string `json:"batch,omitempty"` // 批量处理时由 inbound.Batch 填（pb_ 加 12 位十六进制），记在事件载荷里
 }
+
+var batchID = regexp.MustCompile(`^pb_[0-9a-f]{12}$`)
 
 type ref struct {
 	ID string `json:"id"`
@@ -314,6 +318,9 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 			if it.Phase != domain.PhaseProposed {
 				return conflict("the item is not a pending proposal", "re-read the item; the first answer stands")
 			}
+			if v.Batch != "" && !batchID.MatchString(v.Batch) {
+				return invalid("batch must look like pb_ followed by 12 hex digits")
+			}
 			return nil
 		},
 		Apply: func(c *command.Ctx) (any, error) {
@@ -322,6 +329,9 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 				it.Phase = to
 				return nil
 			})
+			if err == nil && v.Batch != "" {
+				snap, err = items.TagBatch(snap, v.Batch)
+			}
 			if err != nil {
 				return nil, err
 			}

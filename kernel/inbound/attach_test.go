@@ -3,6 +3,7 @@ package inbound
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -481,4 +482,207 @@ func TestPrefetchSkipsAttachedEvents(t *testing.T) {
 	if bs := e.cls.Batches(); len(bs) != 1 || bs[0].Questions != 1 {
 		t.Fatalf("classifier batches %+v, want one batch with only the new event", bs)
 	}
+}
+
+// propose 发一条 ticket.opened 并返回它生成的建议。
+func (e *env) propose(src, id, subject string, extra map[string]any) string {
+	e.t.Helper()
+	e.emit(src, "ticket", ev(id, "ticket.opened", subject, extra))
+	for _, se := range e.events(src) {
+		if se.DedupeKey.EventID == id && se.Item != "" {
+			return se.Item
+		}
+	}
+	e.t.Fatalf("event %s produced no proposal", id)
+	return ""
+}
+
+// 按上游已结束批量忽略：只认结构化依据——同一链接上的 .merged，或之后再无动静的 .closed；别的来源的通知凭关联键以对象路径开头归到对象。
+// 关闭后又有动静、编号只是前缀相同的，一律拿不准、不动。依据写进每条忽略理由；同一幂等键重放不多改；改回建议后逐条接受照常。
+func TestBatchEndedOnlyOnVerifiableEvidence(t *testing.T) {
+	e := attachEnv(t)
+	link := func(n int) map[string]any { return map[string]any{"link": fmt.Sprintf("https://code.test/o/r/pull/%d", n)} }
+	merged := e.propose("src_t", "pr-7", "PR 7", link(7))
+	e.emit("src_t", "ticket", ev("pr-7-m", "ticket.merged", "PR 7", link(7)))
+	reopened := e.propose("src_t", "pr-8", "PR 8", link(8))
+	e.emit("src_t", "ticket", ev("pr-8-c", "ticket.closed", "PR 8", link(8)))
+	upd := ev("pr-8-u", "ticket.updated", "PR 8", link(8))
+	upd["occurred_at"] = "2026-03-02T00:00:00Z"
+	e.emit("src_t", "ticket", upd)
+	closed := e.propose("src_t", "pr-9", "PR 9", link(9))
+	e.emit("src_t", "ticket", ev("pr-9-c", "ticket.closed", "PR 9", link(9)))
+	mail := e.propose("src_m", "m-1", "Re: PR 7 的通知", map[string]any{"correlation_keys": []string{"thread:o/r/pull/7/issue_event/1@code.test"}})
+	prefix := e.propose("src_m", "m-2", "Re: PR 70 的通知", map[string]any{"correlation_keys": []string{"thread:o/r/pull/70@code.test"}})
+	plain := e.openItem("不是建议")
+
+	var (
+		os  map[string]Origin
+		its []domain.Item
+	)
+	for _, id := range []string{merged, reopened, closed, mail, prefix} {
+		its = append(its, e.item(id))
+	}
+	e.view(func(tx *store.Tx) {
+		var err error
+		if os, err = Origins(tx, its); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if o := os[merged]; o.Type != "ticket.opened" || o.Object != "o/r/pull/7" || o.Ended == nil || o.Ended.Type != "ticket.merged" {
+		t.Fatalf("merged: %+v", o)
+	}
+	if o := os[closed]; o.Ended == nil || o.Ended.Type != "ticket.closed" {
+		t.Fatalf("closed with nothing after: %+v", o)
+	}
+	if o := os[reopened]; o.Object != "o/r/pull/8" || o.Ended != nil {
+		t.Fatalf("closed then updated is not certain: %+v", o)
+	}
+	if o := os[mail]; o.Object != "o/r/pull/7" || o.Ended == nil || o.Ended.Event != os[merged].Ended.Event {
+		t.Fatalf("notification by correlation key: %+v", o)
+	}
+	if o := os[prefix]; o.Object != "" || o.Ended != nil {
+		t.Fatalf("pull/70 must not match pull/7: %+v", o)
+	}
+
+	ids := []string{merged, reopened, closed, mail, prefix, plain}
+	req := command.Request{Identity: owner, Owner: "owner", IdemKey: "ended-1"}
+	res, err := Batch(bg, e.x, e.st, req, BatchRequest{Mode: BatchEnded, Filter: BatchFilter{IDs: ids}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := map[string]bool{}
+	for _, r := range res {
+		ok[r.ID] = r.OK
+		if !r.OK && r.Code != domain.CodeConflict {
+			t.Errorf("%s: %+v", r.ID, r)
+		}
+	}
+	if len(res) != 6 || !ok[merged] || !ok[closed] || !ok[mail] || ok[reopened] || ok[prefix] || ok[plain] {
+		t.Fatalf("results: %+v", res)
+	}
+	for id, want := range map[string]domain.Phase{merged: domain.PhaseDropped, closed: domain.PhaseDropped, mail: domain.PhaseDropped, reopened: domain.PhaseProposed, prefix: domain.PhaseProposed, plain: domain.PhaseOpen} {
+		if got := e.item(id).Phase; got != want {
+			t.Errorf("%s: phase %s, want %s", id, got, want)
+		}
+	}
+	if r := lastReason(e.eventsOf(mail)); r != "upstream o/r/pull/7 ended: ticket.merged "+os[merged].Ended.Event+" at 2026-03-01T00:00:00Z" {
+		t.Errorf("the evidence must be in the reason: %q", r)
+	}
+	// 幂等：同一键重放得到同样的结果、不多记事件；不带键再来一次，已忽略的是冲突，同样不多改。
+	before := len(e.eventsOf(merged))
+	again, err := Batch(bg, e.x, e.st, req, BatchRequest{Mode: BatchEnded, Filter: BatchFilter{IDs: ids}})
+	if err != nil || len(again) != 6 {
+		t.Fatalf("replay: %+v %v", again, err)
+	}
+	for i := range again {
+		if again[i].ID != res[i].ID || again[i].OK != res[i].OK {
+			t.Fatalf("replay differs: %+v vs %+v", again, res)
+		}
+	}
+	nokey, _ := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner"}, BatchRequest{Mode: BatchEnded, Filter: BatchFilter{IDs: []string{merged}}})
+	if len(nokey) != 1 || nokey[0].OK || nokey[0].Code != domain.CodeConflict || len(e.eventsOf(merged)) != before {
+		t.Fatalf("second ignore must change nothing: %+v, events %d → %d", nokey, before, len(e.eventsOf(merged)))
+	}
+	// 撤销：改回建议，来源与建议信息原样；之后逐条接受照常。
+	src := e.item(merged).Proposal.Sources
+	e.must("item.transition", map[string]any{"id": merged, "to": "proposed", "reason": "undo batch ignore"})
+	if it := e.item(merged); it.Phase != domain.PhaseProposed || !slices.Equal(it.Proposal.Sources, src) {
+		t.Fatalf("undo: %+v", it)
+	}
+	if _, err := e.do(owner, "proposal.accept", "", map[string]any{"id": merged}); err != nil || e.item(merged).Phase != domain.PhaseOpen {
+		t.Fatalf("accept after undo: %v %s", err, e.item(merged).Phase)
+	}
+	// 形态：ended 只收 ids。
+	for name, b := range map[string]BatchRequest{"no ids": {Mode: BatchEnded}, "with source": {Mode: BatchEnded, Filter: BatchFilter{IDs: ids, Source: "src_t"}},
+		"with actions": {Mode: BatchEnded, Filter: BatchFilter{IDs: ids}, Actions: []BatchAction{{ID: merged, Do: "dismiss"}}}} {
+		if _, err := Batch(bg, e.x, e.st, req, b); exitOf(err) != domain.ExitUsage {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	e.verify()
+}
+
+func (e *env) dismissals(ids ...string) map[string]Dismissal {
+	e.t.Helper()
+	var its []domain.Item
+	for _, id := range ids {
+		its = append(its, e.item(id))
+	}
+	var out map[string]Dismissal
+	e.view(func(tx *store.Tx) {
+		var err error
+		if out, err = Dismissals(tx, its); err != nil {
+			e.t.Fatal(err)
+		}
+	})
+	return out
+}
+
+// 按批撤销：批量忽略的每条在事件里记同一个批次号；撤销只改回这一批里最近一次阶段变更仍是这次忽略的，
+// 别的批、逐条忽略的、之后在别处改过阶段的都不动；再撤一次是 0 条；改回后逐条接受照常。
+func TestBatchUndoOneBatch(t *testing.T) {
+	e := attachEnv(t)
+	a, b, c, other := e.proposalOf("u-1", "一"), e.proposalOf("u-2", "二"), e.proposalOf("u-3", "三"), e.proposalOf("u-4", "四")
+	res, err := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner", IdemKey: "ig-1"},
+		BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: a, Do: "dismiss", Reason: "批量忽略：邮件"}, {ID: b, Do: "dismiss", Reason: "批量忽略：邮件"}}})
+	if err != nil || len(res) != 2 || !res[0].OK || !res[1].OK || !batchRe.MatchString(res[0].Batch) || res[1].Batch != res[0].Batch {
+		t.Fatalf("batch ignore: %+v %v", res, err)
+	}
+	x := res[0].Batch
+	again, _ := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner", IdemKey: "ig-1"},
+		BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: a, Do: "dismiss", Reason: "批量忽略：邮件"}, {ID: b, Do: "dismiss", Reason: "批量忽略：邮件"}}})
+	if len(again) != 2 || !again[0].OK || again[0].Batch != x {
+		t.Fatalf("a replay with the same key keeps the batch: %+v", again)
+	}
+	y, _ := Batch(bg, e.x, e.st, command.Request{Identity: owner, Owner: "owner", IdemKey: "ig-2"}, BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: other, Do: "dismiss"}}})
+	if y[0].Batch == x || y[0].Batch == "" {
+		t.Fatalf("another batch needs its own id: %+v", y)
+	}
+	e.must("proposal.dismiss", map[string]any{"id": c, "reason": "逐条"})
+	// b 之后在别处重开又放弃：最近一次阶段变更不再是这次忽略。
+	e.must("item.transition", map[string]any{"id": b, "to": "open", "reason": "reopen"})
+	e.must("item.transition", map[string]any{"id": b, "to": "dropped", "reason": "drop"})
+
+	ds := e.dismissals(a, b, c, other)
+	if d := ds[a]; d.Batch != x || d.Reason != "批量忽略：邮件" || d.At.IsZero() || d.Actor.Principal != owner.Actor.Principal {
+		t.Fatalf("dismissal of a: %+v", d)
+	}
+	if _, ok := ds[b]; ok || ds[c].Batch != "" || ds[c].Reason != "逐条" || ds[other].Batch != y[0].Batch || len(ds) != 3 {
+		t.Fatalf("dismissals: %+v", ds)
+	}
+
+	u := command.Request{Identity: owner, Owner: "owner", IdemKey: "undo-1"}
+	out, err := Batch(bg, e.x, e.st, u, BatchRequest{Mode: BatchUndo, Batch: x})
+	if err != nil || len(out) != 1 || out[0].ID != a || !out[0].OK || out[0].Do != "undo" || out[0].Batch != x {
+		t.Fatalf("undo: %+v %v", out, err)
+	}
+	for id, want := range map[string]domain.Phase{a: domain.PhaseProposed, b: domain.PhaseDropped, c: domain.PhaseDropped, other: domain.PhaseDropped} {
+		if got := e.item(id).Phase; got != want {
+			t.Errorf("%s: %s, want %s", id, got, want)
+		}
+	}
+	if r := lastReason(e.eventsOf(a)); r != "undo batch ignore "+x {
+		t.Errorf("undo reason: %q", r)
+	}
+	n := len(e.eventsOf(a))
+	for _, req := range []command.Request{u, {Identity: owner, Owner: "owner"}} {
+		if out, err := Batch(bg, e.x, e.st, req, BatchRequest{Mode: BatchUndo, Batch: x}); err != nil || len(out) != 0 {
+			t.Fatalf("a second undo changes nothing: %+v %v", out, err)
+		}
+	}
+	if len(e.eventsOf(a)) != n {
+		t.Fatal("a second undo must not add events")
+	}
+	if _, err := e.do(owner, "proposal.accept", "", map[string]any{"id": a}); err != nil || e.item(a).Phase != domain.PhaseOpen {
+		t.Fatalf("accept after undo: %v", err)
+	}
+	for name, br := range map[string]BatchRequest{"no batch": {Mode: BatchUndo}, "bad batch": {Mode: BatchUndo, Batch: "x"}, "with ids": {Mode: BatchUndo, Batch: x, Filter: BatchFilter{IDs: []string{a}}}} {
+		if _, err := Batch(bg, e.x, e.st, u, br); exitOf(err) != domain.ExitUsage {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := e.do(owner, "proposal.dismiss", "", map[string]any{"id": e.proposalOf("u-5", "五"), "batch": "nope"}); exitOf(err) != domain.ExitUsage {
+		t.Errorf("a malformed batch on a single dismiss must be refused: %v", err)
+	}
+	e.verify()
 }

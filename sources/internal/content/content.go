@@ -105,10 +105,7 @@ var githubThreadRe = regexp.MustCompile(`(?i)^<?([a-z0-9_.-]+)/([a-z0-9_.-]+)/(p
 // 与 github 来源同一对象的事件链接逐字相同，内核据此按"同一链接"把邮件与平台事件并成一条建议（§9.3 合并键）。
 // 发件人不是该平台的通知地址、或 ids（自己的 Message-ID、References、In-Reply-To）里没有这种写法时返回空：宁可不补，不猜。
 func NotificationLink(sender string, ids ...string) string {
-	if i := strings.LastIndex(sender, "<"); i >= 0 {
-		sender = strings.TrimSuffix(sender[i+1:], ">")
-	}
-	if !strings.HasSuffix(strings.ToLower(strings.TrimSpace(sender)), "@github.com") {
+	if !fromGitHub(sender) {
 		return ""
 	}
 	for _, s := range ids {
@@ -119,4 +116,41 @@ func NotificationLink(sender string, ids ...string) string {
 		}
 	}
 	return ""
+}
+
+func fromGitHub(sender string) bool {
+	if i := strings.LastIndex(sender, "<"); i >= 0 {
+		sender = strings.TrimSuffix(sender[i+1:], ">")
+	}
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(sender)), "@github.com")
+}
+
+// githubFooterRe 是通知邮件纯文本正文的固定页脚「… view it on GitHub: <链接>」；githubObjectRe 是正文里任何一处 PR 或 issue 的链接。
+var (
+	githubFooterRe = regexp.MustCompile(`(?i)view it on GitHub:?\s*<?(https://github\.com/[^\s<>]+)`)
+	githubObjectRe = regexp.MustCompile(`https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/(pull|issues)/(\d+)`)
+)
+
+// NotificationBodyLink 从通知邮件的正文里取它所说对象的规范链接，给没有线程头的旧邮件回填用（附录 D.2）。
+// 只在发件人是该平台的通知地址、正文有「view it on GitHub」页脚且页脚指向一个 PR 或 issue、
+// 并且正文里出现的每一个 PR 或 issue 链接都是同一个对象时才给；否则返回空。不看标题，不猜。
+func NotificationBodyLink(sender, body string) string {
+	if !fromGitHub(sender) {
+		return ""
+	}
+	f := githubFooterRe.FindStringSubmatch(body)
+	if f == nil {
+		return ""
+	}
+	m := githubObjectRe.FindStringSubmatch(f[1])
+	if m == nil || !strings.HasPrefix(f[1], m[0]) || (len(f[1]) > len(m[0]) && !strings.ContainsRune("/#?", rune(f[1][len(m[0])]))) {
+		return "" // 页脚指向别处（运行记录、仓库首页），或编号后还连着别的字符
+	}
+	link := m[0]
+	for _, o := range githubObjectRe.FindAllString(body, -1) {
+		if o != link { // 正文还说到别的 PR 或 issue：拿不准是哪一个
+			return ""
+		}
+	}
+	return link
 }

@@ -688,3 +688,23 @@ func TestWebBudgetConstantsMatchKernel(t *testing.T) {
 		}
 	}
 }
+
+// 相似度档位：网页的三档与内核同值；默认档（空串）等于改成档位前写死的 0.30；旧策略文档没有这个键读作默认档。
+func TestWebSimilarityTiersMatchKernel(t *testing.T) {
+	b, err := os.ReadFile("../../web/src/features/settings-merge/SettingsMergePage.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, min := range SimilarityMin {
+		if want := fmt.Sprintf("{ id: %q, min: %v }", id, min); !strings.Contains(string(b), want) {
+			t.Errorf("SettingsMergePage.tsx lacks %s", want)
+		}
+	}
+	var m MergeSettings
+	if err := json.Unmarshal([]byte(`{"exclude_sources":null,"skip_existing":false,"batch_size":0,"wait_minutes":0,"prompt":""}`), &m); err != nil || m.MinScore() != 0.30 {
+		t.Fatalf("an old document reads as the default tier 0.30: %v %v", m.MinScore(), err)
+	}
+	if out, _ := json.Marshal(m); strings.Contains(string(out), "similarity") {
+		t.Fatalf("the default tier is not written: %s", out)
+	}
+}

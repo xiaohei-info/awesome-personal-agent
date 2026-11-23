@@ -190,7 +190,21 @@ type MergeSettings struct {
 	BudgetTokens *int       `json:"budget_tokens,omitempty"`
 	Prompt       string     `json:"prompt"` // 空串用内置提示词
 	PromptAt     *time.Time `json:"prompt_at,omitempty"`
+	// Similarity 是规则初筛的相似度档位：loose、strict；空即默认档（与改成档位前写死的 0.30 相同）。
+	Similarity string `json:"similarity,omitempty"`
 }
+
+// 规则初筛的相似度档位（§9.3）：宽 0.25、默认 0.30、严 0.40。
+const (
+	SimilarityLoose  = "loose"
+	SimilarityStrict = "strict"
+)
+
+// SimilarityMin 是各档的相似度下限；空串是默认档。
+var SimilarityMin = map[string]float64{SimilarityLoose: 0.25, "": 0.30, SimilarityStrict: 0.40}
+
+// MinScore 是生效的相似度下限。
+func (m MergeSettings) MinScore() float64 { return SimilarityMin[m.Similarity] }
 
 // 合并批量参数的默认值与范围。
 const (
@@ -658,6 +672,9 @@ func normalize(p Policy) (Policy, error) {
 	}
 	if err := CheckMergePrompt(p.Merge.Prompt); err != nil {
 		return p, err
+	}
+	if _, ok := SimilarityMin[p.Merge.Similarity]; !ok {
+		return p, invalid("merge similarity %q: use loose or strict, or leave it empty for the default", p.Merge.Similarity)
 	}
 	for k, r := range p.Disturb.Push {
 		if !slices.Contains(PushCategories, k) {

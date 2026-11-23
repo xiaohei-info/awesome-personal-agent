@@ -27,6 +27,17 @@ type payload struct {
 	To        string   `json:"to,omitempty"`       // proposal.attach：并入的目标事项
 	Proposal  string   `json:"proposal,omitempty"` // proposal.attached：被并入的建议
 	Messages  []string `json:"messages,omitempty"` // proposal.attach：改挂到目标的来源事件
+	Batch     string   `json:"batch,omitempty"`    // proposal.dismiss：批量忽略的批次（§7.2），按批撤销据此找回
+}
+
+// TagBatch 在 Revise 给出的快照上记下批量忽略的批次。
+func TagBatch(snapshot json.RawMessage, batch string) (json.RawMessage, error) {
+	var p payload
+	if err := json.Unmarshal(snapshot, &p); err != nil {
+		return nil, err
+	}
+	p.Batch = batch
+	return json.Marshal(p)
 }
 
 var itemEvents = []string{domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvDecisionRequested, domain.EvDecisionResolved,
