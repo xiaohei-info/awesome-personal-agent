@@ -13,6 +13,7 @@
 | **入门** | | | |
 | `apa init [--reset-password]` | 建立数据目录，设置 Web 登录口令（不少于 12 个字符）；`--reset-password` 只重设口令，账本不动（主文档 §14.13） | 主机本地 | |
 | `apa serve` | 启动内核与 Web | 主机本地 | |
+| `apa repair-merges [--dry-run]` | 一次性修复（2026-11-23，主文档 §9.3）：把归类折叠掉的建议名下漏搬的消息搬到去处（每条在去处记合并留痕，`item` 为被折那条，判断方、理由、批次、分数同那次折叠），把仍是建议的名下挂着、没记进 `proposal.sources` 的消息补记进去；可重复执行，第二遍零写入。`apa serve` 占着监听端口时拒绝（退出码 6），先停服务；有未应用的迁移时拒绝。`--dry-run` 在账本的在线副本上照做一遍、输出同样的结果后删掉副本，服务开着也能跑，不动账本。输出 `{"ok", "dry_run", "items", "messages", "repaired": [{"item", "title", "into", "events"}]}`，`into` 等于 `item` 表示补记自己 | 主机本地 | |
 | `apa login` | 保存 APA 地址与 token | 任意 token | 3 |
 | `apa guide [主题] [--template]` | 输出使用说明，只写机制；`--template` 输出常驻指令模板 | 无 | |
 | `apa declare <文件>` | 提交插件声明（无头运行；旧插件的 `executors[]` 仍被接受，确认后并入执行者名录），本人在 Web 确认后生效 | worker | 4 |
@@ -199,7 +200,7 @@
 | | `POST /source-events/{id}/propose` | 把未判定事件或 digest 事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/split` | 把误并入一条建议的来源事件拆出来另成一条建议（`inbound.split`，主文档 §9.3）：请求体 `{"from": "<建议 id>"}`，返回 `{"item": "<新建议 id>"}` | Web 登录、delegate |
 | | `POST /items/{id}/unmerge` | 撤销跨来源合并的一条折叠（`inbound.unmerge`，一档，主文档 §9.3）：被折叠的建议回到 proposed，`proposal.sweep.action` 记 `undone`，与去处互记 `not_same`；合并的来源事件与留痕从去处移回，并入的在去处追加一条撤回说明。返回 `{"item": "<id>"}`；不是被折叠的或已撤销过是 409 |
-| | `GET /merge/activity?days=7` | 最近自动归类（读）：`{"days", "pending", "model_calls", "chars", "batches": [{"batch", "at", "size", "run"?, "chars", "decisions": [{"item", "title", "source"?, "sources", "action", "target"?, "target_title"?, "target_phase"?, "why"?, "by", "hint"?}]}]}`；`days` 至多 90 |；`sources` 是这条建议带着的消息条数（折叠时一起并进去处）
+| | `GET /merge/activity?days=7` | 最近自动归类（读）：`{"days", "pending", "model_calls", "chars", "batches": [{"batch", "at", "size", "run"?, "chars", "decisions": [{"item", "title", "source"?, "sources", "action", "target"?, "target_title"?, "target_phase"?, "why"?, "by", "hint"?}]}]}`；`days` 至多 90；`sources` 是这条建议带着的消息条数：合并进别处的，按去处上从它搬去的合并留痕计（含不在它 `sources` 里的挂靠消息），其余按它自己的 `proposal.sources` |
 | | `GET /packs/{pack}/prompts/{name}` | 已加载能力包里一个提示词的正文（不含头部声明）：`{"pack", "name", "agent", "body"}`；设置 › 跨来源合并用它显示内置默认与"恢复默认" |
 | | `POST /source-events/{id}/ignore`，`POST /source-events/ignore` | 忽略未判定事件：单条；或批量，请求体 `{"source"}` 按来源、`{"all": true}` 全部 | Web 登录、delegate |
 | | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate |
@@ -495,7 +496,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 "今天"的逾期与高优先级（2026-11-23）只做加法：`GET /today` 增 `overdue`、`high_priority` 两组，旧的四组含义不变；简报与复盘资料 `due_waiting` 的 `reason` 增 `high_priority`。不改账本、不迁移；只认四组的调用方原样忽略新组。
 
-合并结果按"N 条消息 → 这一条"展示（2026-11-23）只做加法：`GET /merge/activity` 每条结论增 `sources`（这条建议带着的消息条数）；邮件来源的事件在代码托管平台的通知邮件上增 `link`（所说 PR 或 issue 的规范链接，附录 D.2），其他邮件仍没有 `link`。不改账本结构、不迁移、不回填：已入账的旧通知邮件没有 `link`，与平台事件仍由批量归类判断。
+合并结果按"N 条消息 → 这一条"展示（2026-11-23）只做加法：`GET /merge/activity` 每条结论增 `sources`（这条建议带着的消息条数）；邮件来源的事件在代码托管平台的通知邮件上增 `link`（所说 PR 或 issue 的规范链接，附录 D.2），其他邮件仍没有 `link`。不改账本结构、不迁移、不回填：已入账的旧通知邮件没有 `link`，与平台事件仍由批量归类判断。同日追加：归类折叠时被折那条名下的消息（含挂靠消息）全部搬到去处，"并入已有事项"也搬；仍是建议的事项收到来源对象更新时，消息记进它的 `proposal.sources`（此前只有回音记进去）。仍不改账本结构；存量用 `apa repair-merges` 一次性补齐（可重复执行），不随升级自动做。**调用方要注意的**：按 `proposal.sources` 取建议原文的调用方（如简报资料）会多拿到这些更新。
 
 对话捕获默认开启（2026-11-23）只做加法：新建项目的 `capture` 恒为 `true`，`POST /projects` 与 `apa project create` 不再接收 `capture`（带了是 400 与退出码 2）；已有项目升级后由启动迁移一次性补开（经 `project.update`，操作者 `kernel:defaults`，幂等，不改账本结构）；`PATCH /projects/{id}` 与 `apa project update --capture` 仍在（3a，默认已开，一般用不到），Web 项目页不再有这个开关。`POST /capture` 增可选 `failures`，`GET /health` 增第十四项 `capture_failures`，新增内部事件 `inbound.capture_failed`（不在 B.4 对外稳定集合里）。
 

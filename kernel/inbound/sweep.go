@@ -521,29 +521,7 @@ func registerSweep(x *command.Executor) error {
 			}
 			switch v.Action {
 			case domain.SweepMerge:
-				tp := domain.Proposal{}
-				if t.Proposal != nil {
-					tp = *t.Proposal
-				}
-				for _, ev := range it.Proposal.Sources {
-					sev, err := runner.Event(c.Tx, ev)
-					if err != nil {
-						return nil, err
-					}
-					if !slices.Contains(tp.Sources, ev) {
-						tp.Sources = append(slices.Clone(tp.Sources), ev)
-					}
-					tp.Merges = append(slices.Clone(tp.Merges), domain.ProposalMerge{Event: ev, Source: sev.SourceID, Title: it.Title, Summary: it.Summary,
-						Kind: it.Kind, Project: it.Project, By: v.By, Score: v.Score, Why: v.Why, Batch: v.Batch, Run: v.Run, Item: it.ID, At: at})
-					if err := runner.Repoint(c.Tx, ev, it.ID, t.ID); err != nil {
-						return nil, err
-					}
-				}
-				w, err := items.SetProposal(c.Tx, t.ID, tp, at)
-				if err != nil {
-					return nil, err
-				}
-				if err := emitWrite(c, w, "merge batch "+v.Batch+": merged "+it.ID+" in"); err != nil {
+				if _, err := moveHeld(c, it, t.ID, it.Proposal.Sources, sw, v.Score, "merge batch "+v.Batch+": merged "+it.ID+" in"); err != nil {
 					return nil, err
 				}
 			case domain.SweepAttach:
@@ -561,6 +539,9 @@ func registerSweep(x *command.Executor) error {
 				if err := emitWrite(c, w, "merge batch "+v.Batch+": attached "+it.ID); err != nil {
 					return nil, err
 				}
+				if _, err := moveHeld(c, it, t.ID, it.Proposal.Sources, sw, v.Score, "merge batch "+v.Batch+": moved messages of "+it.ID+" in"); err != nil {
+					return nil, err
+				}
 			}
 			_, _, snap, err := items.Revise(c.Tx, it.ID, "merge.fold", at, func(x *domain.Item) error {
 				x.Phase, x.Proposal = domain.PhaseDropped, &p
@@ -571,6 +552,71 @@ func registerSweep(x *command.Executor) error {
 			}
 			return nil, emitWrite(c, items.Write{Type: domain.EvItemPhaseChanged, Object: it.ID, Payload: snap}, "merge batch "+v.Batch+": "+v.Action+" into "+v.Target)
 		}})
+}
+
+// moveHeld 把被折叠的 it 名下的消息搬到去处 to（§9.3）：建出它的、合并进它的、挂在它名下的，按落盘先后；
+// 每条记进 to 的 proposal.sources，并在 to 上记一条合并留痕（item 记 it，判断方、理由、批次取 sw），事件改指向 to。
+// also 是 it 的 sources（可能含已不指向它的旧记录，折叠时一并记上）；修复时传 nil，只搬仍指向它的。没有可搬的什么都不写。
+func moveHeld(c *command.Ctx, it domain.Item, to string, also []string, sw domain.ProposalSweep, score float64, reason string) (int, error) {
+	held, err := runner.Held(c.Tx, it.ID, also)
+	if err != nil || len(held) == 0 {
+		return 0, err
+	}
+	t, err := items.Get(c.Tx, to)
+	if err != nil {
+		return 0, err
+	}
+	tp, at := domain.Proposal{}, c.Now()
+	if t.Proposal != nil {
+		tp = *t.Proposal
+	}
+	for _, sev := range held {
+		if !slices.Contains(tp.Sources, sev.ID) {
+			tp.Sources = append(slices.Clone(tp.Sources), sev.ID)
+		}
+		tp.Merges = append(slices.Clone(tp.Merges), domain.ProposalMerge{Event: sev.ID, Source: sev.SourceID, Title: it.Title, Summary: it.Summary,
+			Kind: it.Kind, Project: it.Project, By: sw.By, Score: score, Why: sw.Why, Batch: sw.Batch, Run: sw.Run, Item: it.ID, At: at})
+		if err := runner.Repoint(c.Tx, sev.ID, it.ID, to); err != nil {
+			return 0, err
+		}
+	}
+	w, err := items.SetProposal(c.Tx, to, tp, at)
+	if err != nil {
+		return 0, err
+	}
+	return len(held), emitWrite(c, w, reason)
+}
+
+// moveBack 撤销 moveHeld：按去处 t 上记着从 it 搬来的留痕，把这些事件改指回 it，删掉留痕与 sources；notSame 时去处记下与 it 不是同一件。
+func moveBack(c *command.Ctx, it, t domain.Item, notSame bool, at time.Time) error {
+	if t.Proposal == nil {
+		return nil
+	}
+	tp := *t.Proposal
+	var moved []string
+	tp.Merges = slices.DeleteFunc(slices.Clone(tp.Merges), func(m domain.ProposalMerge) bool {
+		if m.Item == it.ID {
+			moved = append(moved, m.Event)
+		}
+		return m.Item == it.ID
+	})
+	if len(moved) == 0 && !notSame {
+		return nil
+	}
+	tp.Sources = slices.DeleteFunc(slices.Clone(tp.Sources), func(e string) bool { return slices.Contains(moved, e) })
+	if notSame && !slices.Contains(tp.NotSame, it.ID) {
+		tp.NotSame = append(slices.Clone(tp.NotSame), it.ID)
+	}
+	for _, ev := range moved {
+		if err := runner.Repoint(c.Tx, ev, t.ID, it.ID); err != nil {
+			return err
+		}
+	}
+	w, err := items.SetProposal(c.Tx, t.ID, tp, at)
+	if err != nil {
+		return err
+	}
+	return emitWrite(c, w, "unmerge "+it.ID)
 }
 
 // ---- 撤销 ----
@@ -623,32 +669,14 @@ func registerUnmerge(x *command.Executor) error {
 			case errors.As(err, &de) && de.Code == domain.CodeNotFound: // 去处已清除：只恢复这一条
 			case err != nil:
 				return nil, err
-			case sw.Action == domain.SweepMerge && t.Proposal != nil:
-				tp := *t.Proposal
-				var moved []string
-				tp.Merges = slices.DeleteFunc(slices.Clone(tp.Merges), func(m domain.ProposalMerge) bool {
-					if m.Item == it.ID {
-						moved = append(moved, m.Event)
-					}
-					return m.Item == it.ID
-				})
-				tp.Sources = slices.DeleteFunc(slices.Clone(tp.Sources), func(e string) bool { return slices.Contains(moved, e) })
-				if !slices.Contains(tp.NotSame, it.ID) {
-					tp.NotSame = append(slices.Clone(tp.NotSame), it.ID)
-				}
-				for _, ev := range moved {
-					if err := runner.Repoint(c.Tx, ev, t.ID, it.ID); err != nil {
-						return nil, err
-					}
-				}
-				w, err := items.SetProposal(c.Tx, t.ID, tp, at)
-				if err != nil {
-					return nil, err
-				}
-				if err := emitWrite(c, w, "unmerge "+it.ID); err != nil {
+			case sw.Action == domain.SweepMerge:
+				if err := moveBack(c, it, t, true, at); err != nil {
 					return nil, err
 				}
 			case sw.Action == domain.SweepAttach:
+				if err := moveBack(c, it, t, false, at); err != nil {
+					return nil, err
+				}
 				w, err := items.AppendProgress(c.Tx, t.ID, "撤回上一条补充：「"+it.Title+"」经本人确认不是这件事，已退回建议。", sweepActor, at)
 				if err != nil {
 					return nil, err

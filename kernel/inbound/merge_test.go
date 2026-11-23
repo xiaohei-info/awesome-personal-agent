@@ -219,10 +219,9 @@ func TestItemCreateRejectsProposal(t *testing.T) {
 	}
 }
 
-// 线上 2026-11-23 那批的形状（同一个 PR 的通知分三次拉取，来自两个邮箱和代码托管平台；邮件适配器已按附录 D.2 补上 PR 链接；
-// 跟进消息归属照线上接入）：每一轮里后到的、以及之后几轮的，都按"同一链接"并进第一条，从头到尾只建 1 条建议，没有建了又丢的中间建议；
-// 同一会话的回信与平台上同一 PR 的更新挂到这一条上，不改它的标题（它不是那个 PR 的事件建出的）；归类时它照常进批，没有可合的，留着。
-func TestSamePRAcrossMailAndPlatformIsOneProposal(t *testing.T) {
+// followEnv 是开着归类、接上跟进消息归属（同 apa serve）的入站环境。
+func followEnv(t *testing.T) *env {
+	t.Helper()
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	fm, err := followmsg.New(followmsg.Options{Store: e.st, Exec: e.x, Owner: "owner"})
@@ -233,6 +232,14 @@ func TestSamePRAcrossMailAndPlatformIsOneProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.svc.o.Intercept = fm.Intercept
+	return e
+}
+
+// 线上 2026-11-23 那批的形状（同一个 PR 的通知分三次拉取，来自两个邮箱和代码托管平台；邮件适配器已按附录 D.2 补上 PR 链接；
+// 跟进消息归属照线上接入）：每一轮里后到的、以及之后几轮的，都按"同一链接"并进第一条，从头到尾只建 1 条建议，没有建了又丢的中间建议；
+// 同一会话的回信与平台上同一 PR 的更新挂到这一条上，不改它的标题（它不是那个 PR 的事件建出的）；归类时它照常进批，没有可合的，留着。
+func TestSamePRAcrossMailAndPlatformIsOneProposal(t *testing.T) {
+	e := followEnv(t)
 	const gh, link = "notifications@github.com", "https://github.com/org/app/pull/227"
 	subj := "[org/app] feat(desktop): 能力页「帮我安装」卡片移到最上方并改标题 (PR #227)"
 	mail := func(id, subject, thread string) map[string]any {
@@ -273,6 +280,27 @@ func TestSamePRAcrossMailAndPlatformIsOneProposal(t *testing.T) {
 	all = e.allItems()
 	if len(all) != 1 || all[0].Phase != domain.PhaseProposed || all[0].Proposal.Sweep.State != "done" || all[0].Proposal.Sweep.Action != domain.SweepKeep || e.batchCalls() != 0 {
 		t.Fatalf("the sweep keeps the single proposal without a model call: %+v, calls %d", all, e.batchCalls())
+	}
+	e.verify()
+}
+
+// 没被折叠的平台建议：同一对象之后的更新（合并、改动、请求评审）挂到它上面时记进它的消息清单，卡片上「N 条消息 → 这一条」列得到；
+// 它们仍是挂靠消息（不是合并），没有合并留痕。
+func TestPlatformUpdatesAreListedOnTheProposal(t *testing.T) {
+	e := followEnv(t)
+	pr := func(id, typ string) map[string]any {
+		return ev(id, typ, "fix: 设置页保存按钮", map[string]any{"sender": "dev", "link": "https://github.com/org/app/pull/228", "correlation_keys": []string{"org/app#228"}})
+	}
+	e.emit("src_github", "pr", pr("h1", "pr.opened"))
+	e.emit("src_github", "pr", pr("h2", "pr.updated"), pr("h3", "pr.merged"), pr("h4", "notification.review_requested"))
+	ps := e.proposed()
+	if len(ps) != 1 || len(e.allItems()) != 1 || !slices.Equal(ps[0].Proposal.Sources, e.sev("src_github", "h1", "h2", "h3", "h4")) || len(ps[0].Proposal.Merges) != 0 {
+		t.Fatalf("one proposal listing all four: %+v", e.allItems())
+	}
+	for _, x := range e.events("src_github")[1:] {
+		if x.Item != ps[0].ID || x.Disposition != domain.DispositionAttached || x.AttachState != "processed" {
+			t.Fatalf("update stays an attached message: %+v", x)
+		}
 	}
 	e.verify()
 }

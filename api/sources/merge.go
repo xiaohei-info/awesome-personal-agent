@@ -89,6 +89,7 @@ func (a *api) mergeActivity(w http.ResponseWriter, r *http.Request, _ *core.Prin
 		}
 		if t, ok := byID[sw.Target]; ok {
 			d.TargetTitle, d.TargetPhase = t.Title, t.Phase
+			d.Sources = carried(it, t)
 		}
 		for _, h := range it.Proposal.Similar {
 			d.Hint = h.Item
@@ -102,4 +103,18 @@ func (a *api) mergeActivity(w http.ResponseWriter, r *http.Request, _ *core.Prin
 	}
 	slices.SortFunc(out, func(x, y *mergeBatch) int { return y.At.Compare(x.At) })
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"days": days, "pending": pending, "model_calls": calls, "chars": chars, "batches": out})
+}
+
+// carried 是一条建议带着几条消息：合并进别处的，以去处上记着从它搬来的留痕为准（含不在它 sources 里的挂靠消息）；其余是它自己的 sources。
+func carried(it, t domain.Item) int {
+	if it.Proposal.Sweep.Action != domain.SweepMerge || t.Proposal == nil {
+		return len(it.Proposal.Sources)
+	}
+	n := 0
+	for _, m := range t.Proposal.Merges {
+		if m.Item == it.ID {
+			n++
+		}
+	}
+	return n
 }

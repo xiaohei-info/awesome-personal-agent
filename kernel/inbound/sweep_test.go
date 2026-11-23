@@ -11,6 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
@@ -342,4 +343,162 @@ func TestSimilarScore(t *testing.T) {
 			t.Errorf("%q vs %q: score %.2f", c.a, c.b, similarScore(c.a, "", c.b, ""))
 		}
 	}
+}
+
+// pr227 是线上 PR #227（2026-11-23，脱敏）在邮件还没带 PR 链接时的形状：两封通知标题只差 "Re:"，建成两条建议
+// （keep、mid；同标题的一封按规则合入 mid，一封回信挂到 mid）；平台上的 PR 再建一条 gp，它之后的三条更新（合并、改动、请求评审）
+// 按"来源对象更新"挂到 gp。i、m、g 是三个来源的事件，按到达先后。
+func pr227(e *env) (keep, mid, gp domain.Item, i, m, g []string) {
+	e.t.Helper()
+	const gh, link = "notifications@github.com", "https://github.com/org/app/pull/227"
+	subj := "[org/app] feat(desktop): 能力页「帮我安装」卡片移到最上方并改标题 (PR #227)"
+	mail := func(id, subject, thread string) map[string]any {
+		return ev(id, "mail.received", subject, map[string]any{"sender": gh, "correlation_keys": []string{thread}})
+	}
+	pr := func(id, typ string) map[string]any {
+		return ev(id, typ, "feat(desktop): 能力页「帮我安装」卡片移到最上方并改标题", map[string]any{"sender": "dev", "link": link, "correlation_keys": []string{"org/app#227"}})
+	}
+	e.emit("src_mail_icloud", "mail", mail("i1", "Re: "+subj, "<org/app/pull/227/issue_event/101@github.com>"))
+	e.now = e.now.Add(time.Minute) // 同批按建立先后编号
+	e.emit("src_mail_icloud", "mail", mail("i2", subj, "<org/app/pull/227@github.com>"))
+	e.now = e.now.Add(time.Minute)
+	e.emit("src_mail", "mail", mail("m1", subj, "<org/app/pull/227/review/202@github.com>"), mail("m2", "Re: "+subj, "<org/app/pull/227/review/202@github.com>"))
+	e.now = e.now.Add(time.Minute)
+	e.emit("src_github", "pr", pr("g1", "pr.opened"), pr("g2", "pr.merged"), pr("g3", "pr.updated"), pr("g4", "notification.review_requested"))
+	keep, mid, gp = e.byTitle("Re: "+subj), e.byTitle(subj), e.byTitle("feat(desktop): 能力页「帮我安装」卡片移到最上方并改标题")
+	return keep, mid, gp, e.sev("src_mail_icloud", "i1", "i2"), e.sev("src_mail", "m1", "m2"), e.sev("src_github", "g1", "g2", "g3", "g4")
+}
+
+// sweep227 跑线上那次归类：一次模型调用，mid 与 gp 并进 keep。
+func (e *env) sweep227() {
+	e.t.Helper()
+	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[
+		{"new":"N1","action":"merge","target":"N3","reason":"同一个 PR #227 的评审通知","confident":true},
+		{"new":"N2","action":"merge","target":"N3","reason":"同一个 PR #227","confident":true}]}`})
+	e.now = e.now.Add(31 * time.Minute)
+	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
+		e.t.Fatalf("one model call: %v %d", err, e.batchCalls())
+	}
+}
+
+// 线上 PR #227：平台上的三条更新挂到 gp，记进它的消息清单。归类把 mid、gp 并进 keep：被折那条名下的消息全部搬到 keep，
+// 按到达先后排，每条带合并留痕（记着从哪条来）；撤销后原样回到原处。
+func TestMergeFoldMovesEveryHeldMessage(t *testing.T) {
+	e := followEnv(t)
+	keep, mid, gp, i, m, g := pr227(e)
+	if len(e.allItems()) != 3 || !slices.Equal(keep.Proposal.Sources, i[:1]) || !slices.Equal(mid.Proposal.Sources, []string{i[1], m[0], m[1]}) || !slices.Equal(gp.Proposal.Sources, g) {
+		t.Fatalf("before the sweep: %+v / %+v / %+v", keep.Proposal, mid.Proposal, gp.Proposal)
+	}
+	for _, x := range e.events("src_github")[1:] {
+		if x.Item != gp.ID || x.Disposition != domain.DispositionAttached || x.AttachState != "processed" {
+			t.Fatalf("platform updates are attached to the platform-built proposal: %+v", x)
+		}
+	}
+
+	e.sweep227()
+	got := e.item(keep.ID).Proposal
+	want := append(append(append([]string{}, i...), m...), g...)
+	if !slices.Equal(got.Sources, want) || len(got.Merges) != 7 {
+		t.Fatalf("every held message moves, in arrival order: %+v", got)
+	}
+	for k, x := range got.Merges {
+		from := mid.ID
+		if k >= 3 {
+			from = gp.ID
+		}
+		if x.Event != want[k+1] || x.Item != from || x.By != "generate" || x.Batch == "" {
+			t.Fatalf("merge trace %d: %+v", k, x)
+		}
+	}
+	for _, src := range []string{"src_mail_icloud", "src_mail", "src_github"} {
+		for _, x := range e.events(src) {
+			if x.Item != keep.ID {
+				t.Fatalf("event left behind: %+v", x)
+			}
+		}
+	}
+	for _, id := range []string{mid.ID, gp.ID} {
+		if it := e.item(id); it.Phase != domain.PhaseDropped || it.Proposal.Sweep.Target != keep.ID {
+			t.Fatalf("folded %s: %+v", id, it.Proposal.Sweep)
+		}
+	}
+	e.verify()
+
+	if err := e.svc.Unmerge(bg, owner, gp.ID); err != nil {
+		t.Fatal(err)
+	}
+	got = e.item(keep.ID).Proposal
+	if !slices.Equal(got.Sources, want[:4]) || len(got.Merges) != 3 || !slices.Equal(e.item(gp.ID).Proposal.Sources, g) {
+		t.Fatalf("unmerge takes back exactly what was moved: %+v", got)
+	}
+	for k, x := range e.events("src_github") {
+		if x.Item != gp.ID || (k == 0) != (x.Disposition == domain.DispositionProposed) {
+			t.Fatalf("back where it was: %+v", x)
+		}
+	}
+	e.verify()
+}
+
+// 并入已有事项也搬消息：被折那条名下的消息（建出它的、挂上的回信）迁到该事项，记进它的消息清单、按先后、每条记从哪条来；
+// 挂上的回信在事项上照样是挂靠消息。事项本身只多一条补充进展，标题、阶段不变。撤销时搬回，事项追加撤回说明。
+func TestAttachFoldMovesMessagesToTheItem(t *testing.T) {
+	e := followEnv(t)
+	open := e.openItem("评审 AgentSafe 资产 B18630823")
+	const thread = "<asset/B18630823@example.invalid>"
+	e.emit("src_mail", "mail", ev("a1", "mail.received", "AgentSafe 资产确认（B18630823）", map[string]any{"sender": "ops@example.invalid", "correlation_keys": []string{thread}}))
+	e.now = e.now.Add(time.Minute)
+	e.emit("src_mail", "mail", ev("a2", "mail.received", "Re: AgentSafe 资产确认（B18630823）", map[string]any{"sender": "ops@example.invalid", "correlation_keys": []string{thread}}))
+	ps := e.proposed()
+	a := e.sev("src_mail", "a1", "a2")
+	if len(ps) != 1 || !slices.Equal(ps[0].Proposal.Sources, a) || len(e.allItems()) != 2 {
+		t.Fatalf("one proposal with its follow-up: %+v", ps)
+	}
+	n := ps[0]
+
+	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[{"new":"N1","action":"attach","target":"E1","reason":"同一个资产编号 B18630823","confident":true}]}`})
+	e.now = e.now.Add(31 * time.Minute)
+	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
+		t.Fatalf("one model call: %v %d", err, e.batchCalls())
+	}
+	it := e.item(open)
+	if it.Title != "评审 AgentSafe 资产 B18630823" || it.Phase != domain.PhaseOpen || it.Proposal == nil || !slices.Equal(it.Proposal.Sources, a) || len(it.Proposal.Merges) != 2 {
+		t.Fatalf("messages move to the item, in order: %+v %+v", it, it.Proposal)
+	}
+	for k, x := range it.Proposal.Merges {
+		if x.Event != a[k] || x.Item != n.ID || x.Source != "src_mail" || x.By != "generate" || x.Why != "同一个资产编号 B18630823" {
+			t.Fatalf("merge trace %d: %+v", k, x)
+		}
+	}
+	evs := e.events("src_mail")
+	if evs[0].Item != open || evs[0].Disposition != domain.DispositionProposed || evs[1].Item != open || evs[1].Disposition != domain.DispositionAttached {
+		t.Fatalf("events point at the item, state unchanged: %+v", evs)
+	}
+	var att []runner.Attachment
+	e.view(func(tx *store.Tx) { att, _ = runner.Attachments(tx, open) })
+	if len(att) != 1 || att[0].ID != a[1] {
+		t.Fatalf("the reply is an attached message of the item: %+v", att)
+	}
+	if ps := e.progressOf(open); len(ps) != 1 || !strings.Contains(ps[0].Text, "AgentSafe 资产确认") {
+		t.Fatalf("still one supplement note: %+v", ps)
+	}
+	e.verify()
+
+	if err := e.svc.Unmerge(bg, owner, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	if it := e.item(open); len(it.Proposal.Sources) != 0 || len(it.Proposal.Merges) != 0 {
+		t.Fatalf("unmerge takes the messages back: %+v", it.Proposal)
+	}
+	for _, x := range e.events("src_mail") {
+		if x.Item != n.ID {
+			t.Fatalf("back where it was: %+v", x)
+		}
+	}
+	if back := e.item(n.ID); back.Phase != domain.PhaseProposed || !slices.Equal(back.Proposal.Sources, a) {
+		t.Fatalf("the proposal is back as it was: %+v", back)
+	}
+	if ps := e.progressOf(open); len(ps) != 2 || !strings.Contains(ps[1].Text, "撤回上一条补充") {
+		t.Fatalf("retraction note: %+v", ps)
+	}
+	e.verify()
 }

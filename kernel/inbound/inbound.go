@@ -317,6 +317,9 @@ func (s *Service) Register(x *command.Executor) error {
 	if err := registerSweep(x); err != nil {
 		return err
 	}
+	if err := registerRepair(x); err != nil {
+		return err
+	}
 	if err := registerUnmerge(x); err != nil {
 		return err
 	}
