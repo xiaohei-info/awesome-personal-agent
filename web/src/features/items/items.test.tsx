@@ -12,7 +12,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "re-read the item and retry" });
 
 interface Ev { seq: number; type: string; object: string; actor: { type: string; principal: string; via: string }; at: string; reason?: string; chain_depth: number; to?: string; fields?: string[] }
-interface It { id: string; phase: string; version: number; kind: string; title: string; status_label?: string; tags?: string[]; deadline?: string | null; planned_for?: string | null; planned_slot?: string | null; waiting_on?: { kind: string; ref: string } }
+interface It { id: string; phase: string; version: number; kind: string; title: string; status_label?: string; tags?: string[]; deadline?: string | null; planned_for?: string | null; planned_slot?: string | null; daily_at?: string | null; waiting_on?: { kind: string; ref: string } }
 
 const AGENT = { type: "agent", principal: "del-1", via: "cli" };
 const HUMAN = { type: "human", principal: "owner", via: "web" };
@@ -223,6 +223,25 @@ describe("排期区块的并发（W26）", () => {
     await userEvent.click(block.getByRole("button", { name: "保存排期" }));
     await waitFor(() => expect(l.items[0].planned_for).toBeNull());
     expect(l.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ planned_for: null, reason: "在事项页改排期" }); // 时段由内核随日期一起清
+  });
+});
+
+describe("每天提醒（daily_at，主动提醒的只有时间点）", () => {
+  it("没有计划日期时可设每天提醒的钟点并清除；有计划日期时这一项不可填、不发", async () => {
+    const l = ledger();
+    mount(l.impl, "/items/item_a");
+    const block = within(await screen.findByRole("region", { name: "排期" }));
+    fireEvent.change(block.getByLabelText("每天提醒"), { target: { value: "07:30" } });
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
+    await waitFor(() => expect(l.items[0].daily_at).toBe("07:30"));
+    expect(l.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ daily_at: "07:30", reason: "在事项页改排期" });
+    fireEvent.change(block.getByLabelText("每天提醒"), { target: { value: "" } });
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
+    await waitFor(() => expect(l.items[0].daily_at).toBeNull());
+    fireEvent.change(block.getByLabelText("计划日期"), { target: { value: "2030-03-02" } });
+    expect(block.getByLabelText("每天提醒")).toBeDisabled();
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
+    await waitFor(() => expect(l.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ planned_for: "2030-03-02", reason: "在事项页改排期" }));
   });
 });
 

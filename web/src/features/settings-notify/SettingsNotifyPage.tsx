@@ -6,6 +6,7 @@ import { EntityPick, useItemTitle } from "../../app/names";
 import { Pick, useLabel } from "../../app/values";
 import { CHANNEL_PREFIX } from "../../app/vocab";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
+import { ProactiveCard, TaskPushCard } from "./Proactive";
 import { strings } from "./strings";
 
 // 设置 › 提醒与打扰：策略的 disturb 段（§7.4）。按使用者的一件事拆成几节、各自保存（界面设计 §6.1）：怎么送、每天上限、暂停、安静时段、更多。
@@ -89,6 +90,8 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
     <>
       <Routes doc={doc} names={names} routeIds={routeIds} put={put} />
       <Push doc={doc} channels={channels} names={names} put={put} />
+      <ProactiveCard doc={doc} put={put} />
+      <TaskPushCard doc={doc} put={put} />
       <Cap doc={doc} put={put} />
       <Mutes doc={doc} put={put} />
       <Quiet doc={doc} put={put} />

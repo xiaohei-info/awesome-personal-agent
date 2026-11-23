@@ -19,6 +19,7 @@ interface Form {
   dueDate: string;
   dueTimed: boolean;
   dueTime: string;
+  daily: string; // 每天提醒的钟点，空为不提醒；有计划日期时不用
 }
 
 function formOf(it: Item, offset: string): Form {
@@ -30,6 +31,7 @@ function formOf(it: Item, offset: string): Form {
     dueDate: due?.date ?? "",
     dueTimed,
     dueTime: dueTimed ? due!.time.slice(0, 5) : "18:00",
+    daily: it.daily_at ?? "",
   };
 }
 
@@ -104,6 +106,8 @@ export function ScheduleBlock({ item, path, onSaved }: { item: Item; path: strin
   if (v.planned_for !== (item.planned_for || null)) body.planned_for = v.planned_for;
   if (v.planned_slot !== (item.planned_slot || null)) body.planned_slot = v.planned_slot;
   if (!sameInstant(v.deadline, item.deadline)) body.deadline = v.deadline;
+  // 每天提醒与计划日期互斥：有日期时内核会一起清掉它，这里只在没有日期时发。
+  if (!f.date && (f.daily || null) !== (item.daily_at || null)) body.daily_at = f.daily || null;
   const changed = Object.keys(body).length > 0;
   const latest = formOf(item, offset);
   const differs = conflict ? {
@@ -144,6 +148,11 @@ export function ScheduleBlock({ item, path, onSaved }: { item: Item; path: strin
         <SlotFields className={differs.slot ? "differs" : undefined} date={f.date} timed={f.timed} start={f.start} end={f.end} bad={v.badSlot} onChange={set}>
           {differs.slot && <span className="sub">{t.latest(latestSlot)}</span>}
         </SlotFields>
+        <fieldset disabled={!!f.date}>
+          <legend>{t.dailyAt}</legend>
+          <label>{t.dailyAt} <input type="time" step={60} value={f.date ? "" : f.daily} onChange={(e) => set({ daily: e.target.value })} /></label>
+          <p className="sub">{t.dailyAtHint}</p>
+        </fieldset>
         <fieldset className={differs.due ? "differs" : undefined}>
           <legend>{t.deadlineField}</legend>
           <label>{t.deadlineField} <input type="date" value={f.dueDate} onChange={(e) => set({ dueDate: e.target.value })} /></label>

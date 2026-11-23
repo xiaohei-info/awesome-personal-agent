@@ -25,12 +25,13 @@ export function initialDoc(): Record<string, any> {
   };
 }
 
-export function policyServer(opts: { webOnlyDenied?: boolean; agents?: Record<string, unknown>[]; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[] } = {}) {
+export function policyServer(opts: { preview?: Record<string, unknown>; instances?: Record<string, unknown>[]; webOnlyDenied?: boolean; agents?: Record<string, unknown>[]; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[] } = {}) {
   let version = 1;
   const doc = initialDoc();
   if (opts.routes) doc.disturb.routes = opts.routes;
   const puts: { path: string; body: any; csrf?: string }[] = [];
   const tiers: { url: string; body: any }[] = [];
+  const previews: any[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [{ id: "acc-home", name: "Home" }] });
@@ -38,6 +39,11 @@ export function policyServer(opts: { webOnlyDenied?: boolean; agents?: Record<st
     if (url === "/v1/settings/ext-keys") return json(200, { credentials: opts.extKeys ?? [{ id: "k1", kind: "ext", scope: "channel.slack" }, { id: "k2", kind: "ext", scope: "channel.old", revoked_at: "x" }] });
     if (url === "/v1/connections?direction=channel") return json(200, { connections: opts.connections ?? [] });
     if (url === "/v1/settings/commands") return json(200, { declarations: [{ harness: "hermes", rev: 1, state: "confirmed", declaration: { harness: "hermes", headless: { command: ["hermes"], access: { read: [], edit: [] } } } }] });
+    if (url === "/v1/settings/proactive/preview" && method === "POST") {
+      previews.push(JSON.parse(init.body as string));
+      return json(200, opts.preview ?? { total: 0, batches: 0, next_count: 0, route: "web", blocked: "main_not_set", entries: [] });
+    }
+    if (url === "/v1/instances") return json(200, { instances: opts.instances ?? [] });
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
     if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: (doc.persona_lang || (url.endsWith("locale=zh") ? "zh" : "en")) === "zh" ? "Default tone (zh)" : "Default tone (en)" });
@@ -59,5 +65,5 @@ export function policyServer(opts: { webOnlyDenied?: boolean; agents?: Record<st
     if (JSON.stringify(doc) !== before) version++;
     return json(200, render());
   }) as unknown as typeof fetch;
-  return { impl, puts, doc, tiers };
+  return { impl, puts, doc, tiers, previews };
 }
