@@ -456,7 +456,7 @@ HTTP 200 返回登记过的现场事件，按 `seq > cursor` 升序排列，允�
 
 对外事件类型只增不改。初始集合：
 
-`item.created`、`inbound.capture_failed`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`grant.issued`、`grant.revoked`、`agent.configured`、`agent.queued`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
+`item.created`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`grant.issued`、`grant.revoked`、`agent.configured`、`agent.queued`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
 
 v0.2.0 新增四个登录审计类型（主文档 §14.13），对象是 `owner`，载荷不含口令：登录成功、同一来源地址失败锁定、改口令（Web 或主机上 `apa init --reset-password`）、吊销会话（逐个或全部）。
 
@@ -497,7 +497,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 合并结果按"N 条消息 → 这一条"展示（2026-11-23）只做加法：`GET /merge/activity` 每条结论增 `sources`（这条建议带着的消息条数）；邮件来源的事件在代码托管平台的通知邮件上增 `link`（所说 PR 或 issue 的规范链接，附录 D.2），其他邮件仍没有 `link`。不改账本结构、不迁移、不回填：已入账的旧通知邮件没有 `link`，与平台事件仍由批量归类判断。
 
-对话捕获默认开启（2026-11-23）只做加法：新建项目的 `capture` 恒为 `true`，`POST /projects` 与 `apa project create` 不再接收 `capture`（带了是 400 与退出码 2）；已有项目升级后由启动迁移一次性补开（经 `project.update`，操作者 `kernel:defaults`，幂等，不改账本结构）；`PATCH /projects/{id}` 与 `apa project update --capture` 仍在（3a，默认已开，一般用不到），Web 项目页不再有这个开关。`POST /capture` 增可选 `failures`，`GET /health` 增第十四项 `capture_failures`，新增事件 `inbound.capture_failed`。
+对话捕获默认开启（2026-11-23）只做加法：新建项目的 `capture` 恒为 `true`，`POST /projects` 与 `apa project create` 不再接收 `capture`（带了是 400 与退出码 2）；已有项目升级后由启动迁移一次性补开（经 `project.update`，操作者 `kernel:defaults`，幂等，不改账本结构）；`PATCH /projects/{id}` 与 `apa project update --capture` 仍在（3a，默认已开，一般用不到），Web 项目页不再有这个开关。`POST /capture` 增可选 `failures`，`GET /health` 增第十四项 `capture_failures`，新增内部事件 `inbound.capture_failed`（不在 B.4 对外稳定集合里）。
 
 按进展日读事项（2026-11-23）只做加法：`GET /items` 增 `progress_from`、`progress_to`，带上时响应另有 `progress`。不改账本结构、不迁移；不带这两个参数时响应不变。
 
