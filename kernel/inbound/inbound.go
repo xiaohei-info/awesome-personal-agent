@@ -308,6 +308,9 @@ func (s *Service) Register(x *command.Executor) error {
 	if err := registerPropose(x); err != nil {
 		return err
 	}
+	if err := registerSplit(x); err != nil {
+		return err
+	}
 	if err := RegisterAttach(x); err != nil {
 		return err
 	}
@@ -1340,10 +1343,6 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		if err != nil {
 			return err
 		}
-		if into != "" {
-			ids, places = append(ids, into), append(places, placed{into, mergeFields{MergeKey: key, Merge: true}})
-			continue
-		}
 		p := proposal{reason: "extracted from " + ev.ID, judgment: a.judgment, body: refBody(ev, c.Refs),
 			rec: &domain.Proposal{LowConfidence: a.low, Sources: []string{ev.ID}}}
 		s.fill(sn, &p, c.fieldsOut, l)
@@ -1351,11 +1350,26 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		if project != "" { // 规则或来源给了项目就用它；候选的项目只在没有时补上
 			cp = project
 		}
+		trace := &domain.ProposalMerge{Title: p.title, Summary: p.summary, Kind: p.kind, Project: cp, By: "merge_key"}
+		var hints []domain.ProposalSimilar
+		if into == "" && attachTo == "" {
+			var st *domain.ProposalMerge
+			if into, st, hints, err = s.findSimilar(ctx, src, ev, p.title, p.summary); err != nil {
+				return err
+			}
+			if into != "" {
+				st.Kind, st.Project, trace = p.kind, cp, st
+			}
+		}
+		if into != "" {
+			ids, places = append(ids, into), append(places, placed{into, mergeFields{MergeKey: key, Merge: true, Trace: trace}})
+			continue
+		}
 		id, err := s.createItemKeyed(ctx, system, m.key(), fmt.Sprintf("inbound:item:%s:%d", ev.ID, i), src, ev, p, cp)
 		if err != nil {
 			return err
 		}
-		ids, places = append(ids, id), append(places, placed{id, mergeFields{MergeKey: key, New: true, AttachTo: attachTo}})
+		ids, places = append(ids, id), append(places, placed{id, mergeFields{MergeKey: key, New: true, AttachTo: attachTo, Similar: hints}})
 	}
 	d := disposeIn{Event: ev.ID, Rule: m.key(), Judgment: a.judgment, Material: &mat.Trace}
 	if len(ids) == 0 {

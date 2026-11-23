@@ -48,6 +48,20 @@ const zh = {
   followupDefer: "让模型判断提醒能不能晚点提",
   advanced: "高级",
   wake: "唤醒 Agent",
+  pushCard: "推送哪些事",
+  pushHint: "要你动手的默认推，纯信息的默认不推；同一件事只推一次。",
+  pushKinds: { decision: "需要你决定或确认", source_failing: "来源连续失败", template_failed: "简报或定时任务没出来", run_failed: "Agent 运行失败", new_proposals: "新建议攒多了" } as Record<string, string>,
+  pushWhen: {
+    source_failing: "连续失败 3 次、要重新登录或改配置、被停用时；一串失败只推一次",
+    template_failed: "简报、周报、例行任务失败或超时；成功的不推，看简报页",
+    run_failed: "交给 Agent 的事失败或超时；同一件事 1 小时内只推一次",
+    new_proposals: "新增建议攒够条数时推一条汇总；两次至少隔 2 小时",
+  } as Record<string, string>,
+  pushDecision: (where: string) => `${where}（在上面「各类提醒怎么送」里改）`,
+  pushFollow: (where: string) => `跟「需要你决定」一样：${where}`,
+  pushRoute: (what: string) => `${what} 送到哪`,
+  pushMin: "攒够几条",
+  pushMinInvalid: "「攒够几条」要是不小于 1 的整数",
 };
 
 const en: typeof zh = {
@@ -96,6 +110,20 @@ const en: typeof zh = {
   followupDefer: "Let a model decide whether a reminder can wait",
   advanced: "Advanced",
   wake: "Agent wake-up",
+  pushCard: "What to push",
+  pushHint: "Things that need you are pushed by default, information is not; each is pushed once.",
+  pushKinds: { decision: "Needs your decision or confirmation", source_failing: "A source keeps failing", template_failed: "A brief or scheduled task did not come out", run_failed: "An Agent run failed", new_proposals: "Proposals are piling up" },
+  pushWhen: {
+    source_failing: "after 3 failures in a row, when it needs a new login or config, or when it is disabled; once per streak",
+    template_failed: "a brief, review or routine failed or timed out; successes are not pushed, see Briefs",
+    run_failed: "work handed to an Agent failed or timed out; at most once an hour per item",
+    new_proposals: "one summary when enough new proposals arrive; at least 2 hours apart",
+  },
+  pushDecision: (where) => `${where} (change it under "How to reach me" above)`,
+  pushFollow: (where) => `Same as decisions: ${where}`,
+  pushRoute: (what) => `Where to send: ${what}`,
+  pushMin: "How many",
+  pushMinInvalid: "\"How many\" must be a whole number of at least 1",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

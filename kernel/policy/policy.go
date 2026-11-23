@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -127,10 +128,56 @@ type Disturb struct {
 	// Mutes 按来源、项目或事项静音；到期（Until）后自动恢复。只在 Web 改。
 	Mutes         []Mute `json:"mutes"`
 	FollowupDefer bool   `json:"followup_defer"`
+	// Push 是"推送哪些事"的逐类开关（§7.4）：键为 PushCategories 之一；缺的类别取 PushDefaults。
+	// 旧版本策略文档没有此键，读作全部取默认。
+	Push map[string]PushRule `json:"push,omitempty"`
+}
+
+// PushRule 是一类推送：On 为假时不产出投递；Route 为空时用决策类的路由；Min 只用于 new_proposals（攒够几条才推）。
+type PushRule struct {
+	On    bool   `json:"on"`
+	Route string `json:"route,omitempty"`
+	Min   int    `json:"min,omitempty"`
+}
+
+// 推送类别（§7.4）。需要你决定或确认的沿用决策类的路由，不在这里。
+const (
+	PushSourceFailing = "source_failing"  // 来源连续失败、认证或配置失败、永久失败
+	PushTemplateRun   = "template_failed" // 简报、周报、例行任务没出来
+	PushRunFailed     = "run_failed"      // 其他 Agent 运行失败或超时
+	PushNewProposals  = "new_proposals"   // 新建议攒够 Min 条
+)
+
+// PushCategories 是推送类别的固定顺序。
+var PushCategories = []string{PushSourceFailing, PushTemplateRun, PushRunFailed, PushNewProposals}
+
+// PushDefaults：要本人动手的默认开，纯信息的默认关（新建议默认关，阈值 10 条）。
+var PushDefaults = map[string]PushRule{
+	PushSourceFailing: {On: true}, PushTemplateRun: {On: true}, PushRunFailed: {On: true}, PushNewProposals: {On: false, Min: 10},
+}
+
+// PushRuleFor 返回一类推送的生效设置：策略里有就用它（Min 缺省时补默认），没有取默认。
+func (d Disturb) PushRuleFor(cat string) PushRule {
+	r, ok := d.Push[cat]
+	if !ok {
+		return PushDefaults[cat]
+	}
+	if r.Min <= 0 {
+		r.Min = PushDefaults[cat].Min
+	}
+	return r
 }
 
 // DefaultDailyCap 是日上限缺省值（§7.4）。
 const DefaultDailyCap = 20
+
+// 跨来源合并的判断方（MergeJudge 的取值）。
+const (
+	MergeSame         = "same"
+	MergeJudgeOnly    = "judge"
+	MergeGenerateOnly = "generate"
+	MergeOff          = "off"
+)
 
 // Mute 的 Scope 取值。
 const (
@@ -311,6 +358,9 @@ type Policy struct {
 	// ModelsPaused 为真时两个端点的配置与密钥原样保留，但内核按两者都未配置运行（Current 给出的就是这个视图，§8.7）。
 	// 没有任何端点时规整为假。只在 Web 改。
 	ModelsPaused bool `json:"models_paused"`
+	// MergeJudge 是跨来源相似合并由谁判断（§9.3）：same（缺省，与生成事项和建议相同：打分模型先答、拿不准交写作模型）、
+	// judge（只用打分模型）、generate（只用写作模型）、off（关闭，只按来源幂等键与合并键去重）。旧文档没有此键读作 same。
+	MergeJudge string `json:"merge_judge,omitempty"`
 	// NoteVaults 是笔记库登记（§6.13、§12.8）：名字在实例内唯一，OpenURL 是"在笔记应用打开"的 URL 模板。
 	// 已存的策略版本没有这个键，读作没有登记，不改写。只在 Web 改。
 	NoteVaults []NoteVault `json:"note_vaults"`
@@ -483,6 +533,17 @@ func oneOf(v string, set ...string) bool {
 
 // normalize 校验并规整 p；失败返回 ErrInvalid。
 func normalize(p Policy) (Policy, error) {
+	if !oneOf(p.MergeJudge, "", MergeSame, MergeJudgeOnly, MergeGenerateOnly, MergeOff) {
+		return p, invalid("merge_judge %q: use same, judge, generate or off", p.MergeJudge)
+	}
+	for k, r := range p.Disturb.Push {
+		if !slices.Contains(PushCategories, k) {
+			return p, invalid("disturb push %q: unknown category", k)
+		}
+		if r.Min < 0 {
+			return p, invalid("disturb push %q: min must not be negative", k)
+		}
+	}
 	if len(p.Disturb.Routes) == 0 {
 		return p, invalid("disturb routes is empty")
 	}

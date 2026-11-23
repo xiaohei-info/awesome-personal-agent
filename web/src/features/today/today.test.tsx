@@ -217,6 +217,35 @@ describe("今天 › 提醒", () => {
   });
 });
 
+describe("今天页降噪：每一行都是本人要知道或要动手的", () => {
+  it("简报成功不占「Agent 交回的」，失败的列出并写明下一步；已关掉的失败不再列；简报类投递不进「提醒」", async () => {
+    const at = new Date(Date.now() + 60_000).toISOString();
+    const run = (id: string, target: string, state: string) => ({ id, target, category: "task", state, finished_at: at });
+    const s = server({ planned: [], due: [], pending: [], stale: [] }, () => false, {
+      "/v1/runs?category=background,task&state=succeeded,failed,timeout&limit=100": { runs: [
+        run("r1", "B-OK", "succeeded"), run("r2", "B-FAIL", "failed"), run("r3", "T-OK", "succeeded"), run("r4", "B-GONE", "failed")] },
+      "/v1/items/B-OK": { item: mk("B-OK", { kind: "brief", phase: "done", title: "brief 11-23" }) },
+      "/v1/items/B-FAIL": { item: mk("B-FAIL", { kind: "brief", title: "brief 11-24" }) },
+      "/v1/items/T-OK": { item: mk("T-OK", { title: "委派的活" }) },
+      "/v1/items/B-GONE": { item: mk("B-GONE", { kind: "brief", phase: "dropped", title: "brief 11-22" }) },
+      "/v1/deliveries/unread": { deliveries: [
+        { id: "brief:B-OK", item: "B-OK", class: "brief", content: { title: "brief 11-23" } },
+        { id: "remind:1", item: "T-OK", class: "reminder", content: { title: "截止已过：交材料" } }] },
+    });
+    mount(s.impl);
+    const back = await screen.findByRole("region", { name: "Agent 交回的" });
+    await waitFor(() => expect(within(back).getAllByRole("listitem")).toHaveLength(2));
+    expect(within(back).queryByText("brief 11-23")).not.toBeInTheDocument();
+    expect(within(back).queryByText("brief 11-22")).not.toBeInTheDocument();
+    const rows = within(back).getAllByRole("listitem").map((li) => li.textContent ?? "");
+    expect(rows.filter((x) => x.includes("没做完") && x.includes("打开看原因，决定重跑、改派还是放弃"))).toHaveLength(1);
+    expect(rows.filter((x) => x.includes("做完了"))).toHaveLength(1); // 非模板运行（委派的活）照旧列出
+    const reminders = await screen.findByRole("region", { name: "提醒" });
+    expect(within(reminders).getByText("截止已过：交材料")).toBeInTheDocument();
+    expect(within(reminders).queryByText("brief 11-23")).not.toBeInTheDocument();
+  });
+});
+
 describe("发布门槛（flow-release-gates）", () => {
   it("ACT-GATE-09：§4.1 写明 360 像素走查结论，§21.3 的 SPIKE-WEB-MOBILE 行已关闭", async () => {
     const mods = import.meta.glob<string>("../../../../docs/solution-design.md", { query: "?raw", import: "default", eager: true });

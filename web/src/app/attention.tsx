@@ -19,7 +19,7 @@ export interface Confirm {
   name: string;
   to: string;
 }
-/** 提醒：退回网页、还没确认的投递，扣除决策类与系统类（它们随问题卡与状态页出现，不在这里再算）。 */
+/** 提醒：退回网页、还没确认的投递，扣除决策类、系统类与简报类（它们各在问题卡、状态页、简报页出现，不在这里再算）。 */
 export interface Reminder {
   id: string;
   item: string;
@@ -39,7 +39,8 @@ export interface Attention {
   status: Status | null;
 }
 
-const OWN_CLASSES = new Set(["decision", "health"]);
+// 决策类随问题卡、系统类随状态页、简报类就是简报本身（在简报页），都不在「提醒」里再列一遍。
+const OWN_CLASSES = new Set(["decision", "health", "brief"]);
 const unanswered = (i: Question) => !!i.ask && !i.ask.resolution;
 
 type Label = { zh: string; en: string };

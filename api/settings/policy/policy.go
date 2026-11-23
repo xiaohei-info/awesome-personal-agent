@@ -115,6 +115,8 @@ var (
 		{key: "generate_endpoint", tier: power, page: "/settings/models", get: getGenerate, set: setGenerate},
 		// 暂停模型：两个端点原样保留，内核按未配置运行（§8.7）；没有端点时内核规整为 false。
 		sect("models_paused", rules, "/settings/models", func(p *kpolicy.Policy) *bool { return &p.ModelsPaused }),
+		// 跨来源合并由谁判断（§9.3）：same、judge、generate、off；空即 same，内核校验取值。
+		sect("merge_judge", rules, "/settings/models", func(p *kpolicy.Policy) *string { return &p.MergeJudge }),
 		// v0.1 的请求形状：只在 PUT 里被接受（等同只设生成端点，位置 external），响应一律是新形状（附录 B.2）。
 		{key: legacyKey, tier: power, page: "/settings/models", set: setLegacy},
 	}

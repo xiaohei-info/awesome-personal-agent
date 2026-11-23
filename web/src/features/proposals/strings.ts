@@ -35,6 +35,19 @@ const zh = {
   planPart: (what: string, n: number) => `${what} ${n} 条`,
   confirmBatch: "确认按推荐处理",
   batch: (n: number) => `按推荐处理 ${n} 条`,
+  sourcesHead: "这条建议的来源",
+  first: "最先到的",
+  mergedBy: { merge_key: "同一链接或同一标题与发件人，自动合并", classifier: "打分模型判断为同一件事，自动合并", chat: "写作模型判断为同一件事，自动合并", default: "自动合并" } as Record<string, string>,
+  score: (n: number) => `标题相似度 ${n.toFixed(2)}`,
+  seeJudgment: "看判断记录",
+  original: "原文",
+  splitOut: "拆出来",
+  splitWhy: "不是同一件事？拆成一条单独的建议，来源跟着走",
+  splitDone: "已拆成单独的一条建议",
+  similar: (title: string) => `可能和「${title}」是同一件事`,
+  similarWhy: (n: number) => `标题相似度 ${n.toFixed(2)}；判断方拿不准，没有自动合并`,
+  splitFrom: (title: string) => `从「${title}」里拆出来的`,
+  loadingSources: "读取来源…",
 };
 
 const en: typeof zh = {
@@ -71,6 +84,19 @@ const en: typeof zh = {
   planPart: (what, n) => `${what} ${n}`,
   confirmBatch: "Confirm apply recommendations",
   batch: (n) => `Apply ${n} recommendation${n === 1 ? "" : "s"}`,
+  sourcesHead: "Where this proposal came from",
+  first: "arrived first",
+  mergedBy: { merge_key: "Same link, or same title and sender: merged automatically", classifier: "The scoring model judged it the same thing: merged automatically", chat: "The writing model judged it the same thing: merged automatically", default: "Merged automatically" },
+  score: (n) => `title similarity ${n.toFixed(2)}`,
+  seeJudgment: "See the judgment",
+  original: "Original",
+  splitOut: "Split out",
+  splitWhy: "Not the same thing? Make it a separate proposal; its source goes with it",
+  splitDone: "Split into a separate proposal",
+  similar: (title) => `May be the same thing as "${title}"`,
+  similarWhy: (n) => `title similarity ${n.toFixed(2)}; the judge was unsure, so nothing was merged`,
+  splitFrom: (title) => `Split out of "${title}"`,
+  loadingSources: "Loading sources…",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

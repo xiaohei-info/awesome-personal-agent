@@ -205,6 +205,35 @@ type Proposal struct {
 	Sources       []string `json:"sources,omitempty"`   // 来源事件 id
 	MergeKey      string   `json:"merge_key,omitempty"` // 合并键（§9.3）：同一件事的后续事件凭它找到这条建议
 	Urgent        *bool    `json:"urgent,omitempty"`    // 起草或抽取对"今天不处理是否有后果"的判断；缺失表示模型没给，只供紧急提醒使用（§9.3）
+	// Merges 是并入这条建议的来源事件各自的合并留痕（§9.3 跨来源合并）：并入时的候选内容与依据，拆分时据此另建一条。
+	Merges []ProposalMerge `json:"merges,omitempty"`
+	// Similar 是只提示、没有自动合并的相似建议（判断方拿不准或不可用）。
+	Similar []ProposalSimilar `json:"similar,omitempty"`
+	// NotSame 是本人拆开过的建议：与它们不再自动合并、也不再提示。
+	NotSame []string `json:"not_same,omitempty"`
+	// SplitFrom 是这条建议从哪条建议里拆出来的。
+	SplitFrom string `json:"split_from,omitempty"`
+}
+
+// ProposalMerge 是一次合并的留痕。By 取 merge_key（合并键相同）、classifier（打分模型判断）、chat（写作模型判断）。
+type ProposalMerge struct {
+	Event    string    `json:"event"`
+	Source   string    `json:"source"`
+	Title    string    `json:"title"`
+	Summary  string    `json:"summary,omitempty"`
+	Kind     Kind      `json:"kind,omitempty"`
+	Project  string    `json:"project,omitempty"`
+	By       string    `json:"by"`
+	Score    float64   `json:"score,omitempty"`    // 相似度（0 到 1）；合并键相同时为 0
+	Judgment string    `json:"judgment,omitempty"` // 判断记录 id
+	At       time.Time `json:"at"`
+}
+
+// ProposalSimilar 是一条只提示的相似建议。
+type ProposalSimilar struct {
+	Item     string  `json:"item"`
+	Score    float64 `json:"score"`
+	Judgment string  `json:"judgment,omitempty"`
 }
 
 // ItemKernelState 只由内核维护；子事项的 Unattended 继承自后台运行。

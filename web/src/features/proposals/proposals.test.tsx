@@ -334,3 +334,31 @@ describe("接受并交给 Agent", () => {
     expect(w.order).toEqual(["POST /v1/items/a/accept {}"]);
   });
 });
+
+describe("跨来源合并：展开看来源与依据，一键拆分（§9.3）", () => {
+  it("展开列出每个来源的名字、时间、原话与合并依据；点「拆出来」发 POST /source-events/{id}/split，回执指向新建议", async () => {
+    const merged = prop("m", { origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sources: ["e1", "e2"],
+      merges: [{ event: "e2", source: "src_wx", title: "AgentSafe 资产确认", by: "classifier", score: 0.72, judgment: "jdg_1", at: "2030-01-01T00:00:00Z" }] } as any });
+    const s = server([merged]);
+    const base = s.impl;
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      if (url === "/v1/sources") return json(200, { sources: [{ id: "src_mail_qq", name: "QQ 邮箱" }, { id: "src_wx", name: "微信" }] });
+      if (url === "/v1/source-events/e1") return json(200, { event: { id: "e1", source_id: "src_mail_qq", subject: "确认 AgentSafe AI 资产", occurred_at: "2030-01-01T00:00:00Z" } });
+      if (url === "/v1/source-events/e2") return json(200, { event: { id: "e2", source_id: "src_wx", subject: "AgentSafe", occurred_at: "2030-01-01T01:00:00Z" } });
+      if (url === "/v1/source-events/e2/split") { (base as any)(url, init); return json(200, { item: "n1" }); }
+      return base(url, init);
+    }) as unknown as typeof fetch;
+    mount(impl);
+    const card = await screen.findByRole("article", { name: "建议 m" });
+    await userEvent.click(within(card).getByText("这条建议的来源"));
+    const wx = await within(card).findByRole("listitem", { name: "微信" });
+    expect(wx).toHaveTextContent("打分模型判断为同一件事，自动合并");
+    expect(wx).toHaveTextContent("标题相似度 0.72");
+    expect(within(card).getByRole("listitem", { name: "QQ 邮箱" })).toHaveTextContent("最先到的");
+    expect(within(within(card).getByRole("listitem", { name: "QQ 邮箱" })).queryByRole("button", { name: "拆出来" })).toBeNull();
+    await userEvent.click(within(wx).getByRole("button", { name: "拆出来" }));
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/source-events/e2/split")).toMatchObject({ method: "POST", body: { from: "m" }, csrf: "tok-1" }));
+    expect(await screen.findByText(/已拆成单独的一条建议/)).toBeInTheDocument();
+    expect(document.querySelector("main")!.textContent, "界面不出现来源 id").not.toMatch(/src_/);
+  });
+});

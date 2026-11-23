@@ -45,10 +45,14 @@ export function TodayPage() {
   useEffect(() => {
     localStorage.setItem(SEEN, new Date().toISOString());
     // Agent 交回的：上次打开今天页之后结束的 Agent 运行，按事项各取最近一次。取不到就不显示这一块。
-    api.get<{ runs: Run[] }>("/runs?category=background,task&state=succeeded,failed,timeout&limit=100").then((r) => {
+    // 只留本人要看或要动手的：模板型（简报、例行任务）成功了结果就在简报页，不占一行；失败了、事项已关掉的也不再列（本人已处理）。
+    api.get<{ runs: Run[] }>("/runs?category=background,task&state=succeeded,failed,timeout&limit=100").then(async (r) => {
       const latest = new Map<string, Run>();
       for (const x of r.runs) if (x.finished_at && (!since || x.finished_at > since)) latest.set(x.target, x);
-      setBack([...latest.values()].reverse());
+      const runs = [...latest.values()].reverse();
+      const keep = await Promise.all(runs.map((x) => api.get<{ item: Item }>("/items/" + encodeURIComponent(x.target)).then(
+        (r) => worthShowing(x, r.item), () => x.state !== "succeeded")));
+      setBack(runs.filter((_, i) => keep[i]));
     }, () => setBack([]));
   }, [api, since]);
 
@@ -120,6 +124,15 @@ export function TodayPage() {
   );
 }
 
+/** 模板型运行的事项：成功就是结果本身（在简报页），只有没出来时才要本人知道。 */
+const TEMPLATE_KINDS = new Set(["brief", "routine"]);
+
+/** 「Agent 交回的」只列本人需要知道或要动手的运行。 */
+export function worthShowing(run: Run, item: Pick<Item, "kind" | "phase">): boolean {
+  if (run.state === "succeeded") return !TEMPLATE_KINDS.has(item.kind);
+  return item.phase !== "done" && item.phase !== "dropped";
+}
+
 /** Agent 交回的一件事：谁做的不重复写（事项页里有），只说做完没有、多久前，下一步是看结果或去回答。 */
 function BackRow({ run }: { run: Run }) {
   const t = useT(strings);
@@ -132,6 +145,7 @@ function BackRow({ run }: { run: Run }) {
       <div>
         <span>{title}</span>
         <span className="sub">{[ok ? t.backDone : fault ? t.backFault(fault.say) : t.backNotDone, when].filter(Boolean).join(" · ")}</span>
+        {!ok && <span className="sub">{t.backNext}</span>}
       </div>
       <Go className="btn" to={"/items/" + encodeURIComponent(run.target) + "#agent"}>{ok ? t.seeResult : fault ? t.seeWhy : t.answer}</Go>
     </li>

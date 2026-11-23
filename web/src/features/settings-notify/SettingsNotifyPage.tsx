@@ -88,11 +88,56 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
   return (
     <>
       <Routes doc={doc} names={names} routeIds={routeIds} put={put} />
+      <Push doc={doc} channels={channels} names={names} put={put} />
       <Cap doc={doc} put={put} />
       <Mutes doc={doc} put={put} />
       <Quiet doc={doc} put={put} />
       <More doc={doc} names={names} routeIds={routeIds} put={put} />
     </>
+  );
+}
+
+// 推送哪些事（§7.4）：逐类开关、选渠道；没选渠道的跟「需要你决定」走。缺的类别取内核默认：要本人动手的开，纯信息的关。
+// 同一串来源失败、同一次运行只推一次，新建议攒够才推且两次至少隔 2 小时（内核去重），这里只管开关与去向。
+const PUSH = ["source_failing", "template_failed", "run_failed", "new_proposals"] as const;
+const PUSH_DEFAULT: Record<string, Rule> = { source_failing: { on: true }, template_failed: { on: true }, run_failed: { on: true }, new_proposals: { on: false, min: 10 } };
+interface Rule { on: boolean; route?: string; min?: number }
+function Push({ doc, channels, names, put }: { doc: Doc; channels: Channels; names: Record<string, string>; put: Put }) {
+  const t = useT(strings);
+  const label = useLabel();
+  const saved = (doc.disturb.push ?? {}) as Record<string, Rule>;
+  const decision = (doc.disturb.routes as Record<string, string>).decision ?? "web";
+  const [rules, setRules, dirty] = useDraft(doc.disturb.push, () => Object.fromEntries(PUSH.map((c) => [c, { ...PUSH_DEFAULT[c], ...saved[c] }])));
+  const set = (c: string, r: Partial<Rule>) => setRules({ ...rules, [c]: { ...rules[c], ...r } });
+  const opts = { ...names, "": t.pushFollow(names[decision] ?? label("route", decision)) };
+  const submit = () => {
+    const out: Record<string, Rule> = {};
+    for (const c of PUSH) {
+      const r = rules[c];
+      if (c === "new_proposals" && !(Number.isInteger(Number(r.min)) && Number(r.min) >= 1)) return reject(t.pushMinInvalid);
+      out[c] = { on: r.on, ...(r.route ? { route: r.route } : {}), ...(c === "new_proposals" ? { min: Number(r.min) } : {}) };
+    }
+    return put({ push: out });
+  };
+  return (
+    <Card title={t.pushCard} hint={t.pushHint} onSave={submit} dirty={dirty}>
+      <div className="line">
+        <span>{t.pushKinds.decision}</span>
+        <span className="sub">{t.pushDecision(names[decision] ?? label("route", decision))}</span>
+      </div>
+      {PUSH.map((c) => (
+        <div key={c} className="line" role="group" aria-label={t.pushKinds[c]}>
+          <label>
+            <input type="checkbox" role="switch" checked={rules[c].on} aria-label={t.pushKinds[c]} onChange={(e) => set(c, { on: e.target.checked })} /> {t.pushKinds[c]}
+            <small className="sub"> {t.pushWhen[c]}</small>
+          </label>
+          {c === "new_proposals" && (
+            <label>{t.pushMin} <input type="number" min={1} value={rules[c].min ?? 10} aria-label={t.pushMin} onChange={(e) => set(c, { min: Number(e.target.value) })} /></label>
+          )}
+          <Pick k="route" names={opts} label={t.pushRoute(t.pushKinds[c])} value={rules[c].route ?? ""} ids={["", ...channels.ids]} disabled={!rules[c].on} onChange={(v) => set(c, { route: v })} />
+        </div>
+      ))}
+    </Card>
   );
 }
 

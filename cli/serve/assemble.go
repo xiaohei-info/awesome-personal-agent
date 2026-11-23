@@ -170,6 +170,7 @@ type kernel struct {
 	fu     *followup.Service
 	stale  *stale.Service
 	att    *attention.Attention
+	push   *khealth.Pusher
 	hn     *khealth.Notifier
 	rs     *resume.Service
 	sum    *summaries.Service
@@ -243,7 +244,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if base == "" {
 		base = apiURL
 	}
-	k := &kernel{st: st, x: x, layout: l, att: att, sum: sum, hn: khealth.NewNotifier(q), packs: ld,
+	k := &kernel{st: st, x: x, layout: l, att: att, sum: sum, hn: khealth.NewNotifier(q), push: khealth.NewPusher(q), packs: ld,
 		send:  &kchannel.Sender{Store: st, Queue: q, Conns: conns, Call: caller, Base: base},
 		drain: make(chan struct{}, 1), draft: make(chan struct{}, 1), summarize: make(chan struct{}, 1)}
 
@@ -406,6 +407,11 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	att.Attach(x, st, logErr("attention"))
 	x.OnCommit(func(command.Commit) { k.sumDue.Store(true) })
 	k.hn.Attach(x, st, logErr("health delivery"))
+	x.OnCommit(func(command.Commit) { // 推送哪些事（§7.4）：命令提交后立即追赶；不经命令写下的事件由维护循环追赶
+		if err := k.push.Sync(context.Background(), st); err != nil {
+			slog.Error("push", "err", err)
+		}
+	})
 	k.fu.Attach(logErr("follow-up"))
 
 	agm, ok := ld.Get("agents-md")
@@ -755,6 +761,7 @@ func (k *kernel) worker(ctx context.Context, wg *sync.WaitGroup, wakeUp <-chan s
 // syncHealth 追赶不经命令提交写下的健康告警（规则动作失败、跟进失败等），命令提交的由 Attach 立即追赶。
 func (k *kernel) syncHealth(ctx context.Context, report func(string, error)) {
 	report("health delivery", k.st.Update(ctx, k.hn.Sync))
+	report("push", k.push.Sync(ctx, k.st))
 }
 
 // localURL 是本机进程访问内核的地址；监听通配地址时走回环。

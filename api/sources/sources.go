@@ -83,6 +83,8 @@ type Replayer interface {
 // Proposer 把未判定事件转为建议（*inbound.Service 满足它）。
 type Proposer interface {
 	ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error)
+	// Split 把误并入建议 from 的来源事件拆成一条新建议，返回新建议的 id（§9.3）。
+	Split(ctx context.Context, id command.Identity, event, from string) (string, error)
 	// BacklogRules 是积压放开第 1 步：只跑规则，不调模型（§9.3）。req 带调用者身份与本人原话。
 	BacklogRules(ctx context.Context, req command.Request, source string) (inbound.RulesResult, error)
 	// BacklogScore 是积压放开第 2 步：影子打分，只写判断记录，不改处置（§9.3）。没有判断端点时是 409。
@@ -191,6 +193,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/split", MaxBody: 1 << 10, Handler: a.split})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rejudge", MaxBody: 1 << 10, Handler: a.backlogRejudge})
@@ -835,6 +838,21 @@ func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal)
 		return err
 	}
 	return a.writeEvent(w, r, ev)
+}
+
+// split 把并入某条建议的来源事件拆出来另成一条建议：请求体 {"from": 建议 id}，返回 {"item": 新建议 id}。
+func (a *api) split(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		From string `json:"from"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.From == "" {
+		return domain.NewError(domain.CodeInvalidRequest, "body must be {\"from\": \"<proposal id>\"}", "name the proposal the source was merged into")
+	}
+	item, err := a.pr.Split(r.Context(), p.Identity, r.PathValue("id"), in.From)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]string{"item": item})
 }
 
 // ignoreOne 忽略一条积压事件，返回更新后的来源事件；不在积压里是 409。

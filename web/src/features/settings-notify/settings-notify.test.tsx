@@ -166,4 +166,26 @@ describe("设置 › 提醒与打扰", () => {
     const wake = (await section("更多")).getByLabelText("唤醒 Agent");
     expect(within(wake).getByRole("option", { name: "唤醒 Agent" })).toBeInTheDocument();
   });
+
+  it("推送哪些事：默认要动手的开、纯信息的关；逐类开关与选渠道，保存发 disturb.push，其余字段原样带回", async () => {
+    const s = policyServer();
+    mount(s.impl);
+    const push = await section("推送哪些事");
+    expect(push.getByRole("switch", { name: "来源连续失败" })).toBeChecked();
+    expect(push.getByRole("switch", { name: "简报或定时任务没出来" })).toBeChecked();
+    expect(push.getByRole("switch", { name: "Agent 运行失败" })).toBeChecked();
+    expect(push.getByRole("switch", { name: "新建议攒多了" })).not.toBeChecked();
+    await userEvent.click(push.getByRole("switch", { name: "新建议攒多了" }));
+    await userEvent.clear(push.getByLabelText("攒够几条"));
+    await userEvent.type(push.getByLabelText("攒够几条"), "5");
+    await userEvent.click(push.getByRole("switch", { name: "Agent 运行失败" }));
+    await waitFor(() => expect(options(push.getByLabelText("来源连续失败 送到哪"))).toEqual(["", "channel:slack"]));
+    await userEvent.selectOptions(push.getByLabelText("来源连续失败 送到哪"), "channel:slack");
+    await saveIn("推送哪些事");
+    await push.findByRole("status");
+    const d = s.puts.at(-1)!.body.disturb;
+    expect(d.push).toEqual({ source_failing: { on: true, route: "channel:slack" }, template_failed: { on: true }, run_failed: { on: false }, new_proposals: { on: true, min: 5 } });
+    expect(d.routes).toBeDefined(); // 其余字段原样带回
+    expect(screen.getByRole("main")).not.toHaveTextContent(/channel:|source_failing/);
+  });
 });

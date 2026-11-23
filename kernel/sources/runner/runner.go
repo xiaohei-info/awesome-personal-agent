@@ -626,6 +626,11 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 		case clsTransient:
 			st.LastFailureKind = "transient"
 			st.NextAttemptAt = nextAttempt(in.FinishedAt, src.Schedule, st.ConsecutiveFailures)
+			if st.ConsecutiveFailures == StreakFailures { // 连续临时失败到第 3 次记一条，推送"来源连续失败"按它产出（§7.4）
+				if err := r.failed(c, src, in, "streak"); err != nil {
+					return nil, err
+				}
+			}
 		case clsNeedsHuman:
 			// 认证或配置失败是故障不是问题：记 source.failed，健康视图的来源失败信号带"去来源页修"，不建 needs_input 事项（§6.14 第 20 条、§9.2）。
 			st.LastFailureKind = "auth_or_config"
@@ -654,6 +659,9 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 	}
 	return map[string]any{"id": src.ID, "class": in.Class, "cursor": cursor}, nil
 }
+
+// StreakFailures 是记 source.failed（kind: streak）的连续临时失败次数。
+const StreakFailures = 3
 
 // IdentityTimeout 是 identity 模式一次运行的超时（秒）。
 const IdentityTimeout = 10
@@ -921,6 +929,12 @@ func requeue(tx *store.Tx, id, where string) (int, error) {
 // SetMergeKey 记下内核算出的合并键（§9.3）；来源自带键时写入的是同一个值。不记事件，调用方自己负责留痕。
 func SetMergeKey(tx *store.Tx, id, key string) error {
 	_, err := tx.Exec(`UPDATE sources_runner_event SET merge_key = ? WHERE id = ?`, key, id)
+	return err
+}
+
+// Repoint 把来源事件指向的事项从 from 改成 to（拆分建议时，§9.3）；事件没指向 from 时不动。
+func Repoint(tx *store.Tx, id, from, to string) error {
+	_, err := tx.Exec(`UPDATE sources_runner_event SET item = ? WHERE id = ? AND item = ?`, to, id, from)
 	return err
 }
 

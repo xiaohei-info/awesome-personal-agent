@@ -7,7 +7,7 @@ import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
-import { useNames } from "../../app/names";
+import { useItemTitle, useNames } from "../../app/names";
 import { Val } from "../../app/values";
 import { HANDOFF_TAG } from "../../app/ids";
 import { Prereqs } from "../../app/Prereqs";
@@ -25,10 +25,14 @@ export interface Proposal {
   project?: string;
   origin?: { source: string; actor?: string };
   // 入站流水线写入的建议信息（主文档 §6.3）；agent 直接提出的建议没有 recommend。
-  proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[] };
+  proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[];
+    merges?: Merge[]; similar?: { item: string; score: number }[]; split_from?: string };
 }
+/** 一次合并的留痕（§9.3 跨来源合并）：并入的来源事件、当时的候选内容与依据。 */
+interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; at: string }
+interface SourceRead { event: { id: string; source_id: string; subject: string; summary?: string; occurred_at: string; link?: string } }
 
-type Action = "accept" | "dismiss" | "attach" | "handoff";
+type Action = "accept" | "dismiss" | "attach" | "handoff" | "split";
 /** 处理完的一行回执：说清结果，并给去处（界面设计 §5.2、§7 路径一）。 */
 interface Receipt { id: string; title: string; text: string; to?: string; missing?: boolean }
 interface BatchResult { id: string; do: string; ok: boolean; why?: string }
@@ -94,6 +98,8 @@ function Card({ item, rejection, candidates, onAct, ready }: { item: Proposal; r
           {p.low_confidence && <> · <strong title={t.lowConfidenceWhy}>{t.lowConfidence}</strong> <span className="sub">{t.lowConfidenceWhy}</span></>}
         </p>
       )}
+      {p && <Similar p={p} />}
+      {p?.sources && p.sources.length > 1 && <Sources item={item} onSplit={(event) => onAct(item.id, "split", { event })} />}
       <RejectionNote rejection={rejection} what="handle" />
       <div className="actions">
         <button disabled={busy} className={ready ? "primary" : undefined} onClick={() => act("handoff", {})}>{t.acceptHandoff}</button>
@@ -125,6 +131,71 @@ function Card({ item, rejection, candidates, onAct, ready }: { item: Proposal; r
         </div>
       )}
     </article>
+  );
+}
+
+/** 只提示、没自动合并的相似建议，以及拆分出来的出处：点名字去看那一条，由本人决定忽略哪条。 */
+function Similar({ p }: { p: NonNullable<Proposal["proposal"]> }) {
+  const t = useT(strings);
+  return (
+    <>
+      {p.split_from && <p className="sub"><ItemName id={p.split_from} say={t.splitFrom} /></p>}
+      {p.similar?.map((x) => (
+        <p key={x.item} className="sub">
+          <Link to={"/items/" + encodeURIComponent(x.item)}><ItemName id={x.item} say={t.similar} /></Link> · {t.similarWhy(x.score)}
+        </p>
+      ))}
+    </>
+  );
+}
+
+function ItemName({ id, say }: { id: string; say: (title: string) => string }) {
+  const title = useItemTitle(id);
+  return <>{say(title || "…")}</>;
+}
+
+/** 来自几个来源时展开看每个来源：名字、时间、原话或摘要、原文，并入的那几个写明依据并可一键拆出。 */
+function Sources({ item, onSplit }: { item: Proposal; onSplit: (event: string) => Promise<void> }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const sourceName = useNames("source");
+  const [rows, setRows] = useState<SourceRead["event"][] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const p = item.proposal!;
+  const load = () => {
+    if (rows) return;
+    Promise.all(p.sources!.map((id) => api.get<SourceRead>("/source-events/" + encodeURIComponent(id)).then((r) => r.event, () => ({ id, source_id: "", subject: "", occurred_at: "" }))))
+      .then(setRows);
+  };
+  const merges = new Map((p.merges ?? []).map((m) => [m.event, m]));
+  return (
+    <details onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && load()}>
+      <summary>{t.sourcesHead}</summary>
+      {!rows ? <p role="status">{t.loadingSources}</p> : (
+        <ul className="rows">
+          {rows.map((ev, i) => {
+            const m = merges.get(ev.id);
+            const when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleString() : "";
+            return (
+              <li key={ev.id} className="act-row" aria-label={sourceName(m?.source || ev.source_id) || ev.id}>
+                <div>
+                  <span>{sourceName(m?.source || ev.source_id)} · {when}</span>
+                  <span className="sub">{m?.title || ev.subject}{(m?.summary || ev.summary) ? " — " + (m?.summary || ev.summary) : ""}</span>
+                  <span className="sub">
+                    {i === 0 && !m ? t.first : m ? [t.mergedBy[m.by] ?? t.mergedBy.default, m.score ? t.score(m.score) : ""].filter(Boolean).join(" · ") : ""}
+                    {m?.judgment && <> · <Link to={"/judgment?id=" + encodeURIComponent(m.judgment)}>{t.seeJudgment}</Link></>}
+                    {" · "}<Link to={"/sources/events/" + encodeURIComponent(ev.id)}>{t.original}</Link>
+                  </span>
+                </div>
+                {i > 0 && (
+                  <button type="button" title={t.splitWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onSplit(ev.id); } finally { setBusy(false); } }}>{t.splitOut}</button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </details>
   );
 }
 
@@ -190,6 +261,9 @@ export function ProposalsPage() {
         await api.post(path + "/accept", {});
         const who = handoff.preview?.selected?.agent_name;
         setReceipts((r) => [...r, { id, title, to: "/items/" + encodeURIComponent(id) + "#agent", text: ready ? t.handedTo(who || t.agent) : t.acceptedNotHanded, missing: !ready }]);
+      } else if (action === "split") {
+        const r = await api.post<{ item: string }>("/source-events/" + encodeURIComponent((body as { event: string }).event) + "/split", { from: id });
+        setReceipts((x) => [...x, { id, title, text: t.splitDone, to: "/items/" + encodeURIComponent(r.item) }]);
       } else {
         await api.post(path + "/" + action, body);
         const target = action === "attach" ? (body as { to: string }).to : id;
