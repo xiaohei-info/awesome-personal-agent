@@ -44,20 +44,27 @@ func TestCatalogDescribesEachMaterial(t *testing.T) {
 	}
 }
 
-// output.txt 只留末段时第一行写明截断量；没截断时原样。
-func TestOutputFileMarksDroppedHead(t *testing.T) {
+// output.txt 是末段时首行与末行都写明共多少字节、这里是末尾多少、全文在哪；没截断时原样。
+func TestOutputFileMarksTailAndPointsToFullText(t *testing.T) {
 	if got := string(outputFile(proc.Result{Stdout: []byte("a\n")})); got != "a\n" {
 		t.Fatalf("untruncated: %q", got)
 	}
-	got := outputFile(proc.Result{Stdout: []byte("tail\n"), StdoutTotal: 105, StdoutDropped: 100})
-	first, rest, _ := strings.Cut(string(got), "\n")
-	var h struct {
-		Type    string `json:"type"`
-		Total   int64  `json:"total_bytes"`
-		Kept    int    `json:"kept_bytes"`
-		Dropped int64  `json:"dropped_head_bytes"`
+	files := []string{"output.001.txt", "output.002.txt", "output.003.txt", "output.004.txt"}
+	got := strings.Split(strings.TrimSuffix(string(outputFile(proc.Result{Stdout: []byte("tail\n"), StdoutTotal: 200005, StdoutDropped: 200000, StdoutFiles: files})), "\n"), "\n")
+	type note struct {
+		Type    string   `json:"type"`
+		Total   int64    `json:"total_bytes"`
+		Kept    int      `json:"kept_bytes"`
+		Dropped int64    `json:"dropped_head_bytes"`
+		Files   []string `json:"full_text_files"`
+		Note    string   `json:"note"`
 	}
-	if err := json.Unmarshal([]byte(first), &h); err != nil || h.Type != "apa_output_truncated" || h.Total != 105 || h.Kept != 5 || h.Dropped != 100 || rest != "tail\n" {
-		t.Fatalf("%v %+v %q", err, h, got)
+	var head, foot note
+	if len(got) != 3 || got[1] != "tail" || json.Unmarshal([]byte(got[0]), &head) != nil || json.Unmarshal([]byte(got[2]), &foot) != nil {
+		t.Fatalf("%q", got)
+	}
+	if head.Type != "apa_output_truncated" || head.Total != 200005 || head.Kept != 5 || head.Dropped != 200000 || len(head.Files) != 4 ||
+		!strings.Contains(head.Note, "共 200005 字节，此处为末尾 5 字节；全文见 output.001.txt 至 output.004.txt") || foot.Note != head.Note {
+		t.Fatalf("%+v %+v", head, foot)
 	}
 }

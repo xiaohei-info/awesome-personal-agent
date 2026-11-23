@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -530,12 +531,48 @@ func TestCloseKillsRunningAndLeavesQueued(t *testing.T) {
 
 func TestOutputKeepsOnlyTail(t *testing.T) {
 	h := newHarness(t, 1, 1, Options{})
-	h.enqueue(domain.RunReader, "r", false, `head -c 1100000 /dev/zero | tr '\0' a; echo END`)
+	h.enqueue(domain.RunReader, "r", false, `head -c 200000 /dev/zero | tr '\0' a; echo END`)
 	h.dispatch()
 	res := h.next()
-	if len(res.Stdout) != stdoutTailLimit || !strings.HasSuffix(string(res.Stdout), "END\n") ||
-		res.StdoutTotal != 1100004 || res.StdoutDropped != 1100004-stdoutTailLimit {
-		t.Fatalf("len=%d total=%d dropped=%d", len(res.Stdout), res.StdoutTotal, res.StdoutDropped)
+	if len(res.Stdout) != tailLimit || !strings.HasSuffix(string(res.Stdout), "END\n") || res.StdoutTotal != 200004 ||
+		res.StdoutDropped != 200004-tailLimit || res.StdoutFiles != nil {
+		t.Fatalf("len=%d total=%d dropped=%d files=%v", len(res.Stdout), res.StdoutTotal, res.StdoutDropped, res.StdoutFiles)
+	}
+}
+
+// 有运行目录的运行输出 200KB：交回的是末尾 64KB 并带总量与丢掉的量，运行目录里分段文件按序拼接即全文；没超出时不留分段文件。
+func TestOutputOverTailIsSpooledWhole(t *testing.T) {
+	h := newHarness(t, 1, 1, Options{})
+	dir := t.TempDir()
+	h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", `i=0; while [ $i -lt 2000 ]; do printf '%05d:%093d\n' $i 0; i=$((i+1)); done`}, RunDir: dir})
+	h.dispatch()
+	res := h.next()
+	var full []byte
+	for _, n := range res.StdoutFiles {
+		b, err := os.ReadFile(filepath.Join(dir, n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		full = append(full, b...)
+	}
+	if res.StdoutTotal != 200000 || len(full) != 200000 || !strings.HasPrefix(string(full), "00000:") || !strings.HasSuffix(string(full), "\n") ||
+		len(res.StdoutFiles) != 4 || res.StdoutFiles[0] != "output.001.txt" || len(res.Stdout) != tailLimit ||
+		res.StdoutDropped != 200000-tailLimit || !strings.HasSuffix(string(full), string(res.Stdout)) || res.StdoutSpoolErr != "" {
+		t.Fatalf("total=%d spooled=%d files=%v kept=%d dropped=%d err=%q", res.StdoutTotal, len(full), res.StdoutFiles, len(res.Stdout), res.StdoutDropped, res.StdoutSpoolErr)
+	}
+	for i := 0; i < 2000; i++ { // 每一行都在，顺序不乱
+		if want := fmt.Sprintf("%05d:%093d\n", i, 0); string(full[i*100:(i+1)*100]) != want {
+			t.Fatalf("line %d: %q", i, full[i*100:(i+1)*100])
+		}
+	}
+	small := t.TempDir()
+	h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", "echo hi"}, RunDir: small})
+	h.dispatch()
+	if res := h.next(); string(res.Stdout) != "hi\n" || res.StdoutFiles != nil {
+		t.Fatalf("%+v", res)
+	}
+	if ents, _ := os.ReadDir(small); len(ents) != 0 {
+		t.Fatalf("a short output leaves no segment files: %v", ents)
 	}
 }
 
@@ -828,7 +865,7 @@ func TestTailCountsDroppedHead(t *testing.T) {
 	tl := tail{limit: 4}
 	tl.Write([]byte("abc"))
 	tl.Write([]byte("defg"))
-	if total, dropped := tl.counts(); string(tl.bytes()) != "defg" || total != 7 || dropped != 3 {
-		t.Fatalf("%q %d %d", tl.bytes(), total, dropped)
+	if total, dropped, files, _ := tl.finish(); string(tl.bytes()) != "defg" || total != 7 || dropped != 3 || files != nil {
+		t.Fatalf("%q %d %d %v", tl.bytes(), total, dropped, files)
 	}
 }

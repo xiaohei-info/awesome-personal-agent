@@ -123,6 +123,8 @@ while [ ! -f "$2/go" ]; do sleep 0.05; done
 echo '{"session_id":"sess-cli","outcome":"done"}'
 `,
 	"summary":  `printf '%s' "$1" > "$2/prompt.seen"; echo '{"session_id":"sess-sum","outcome":"done"}'` + "\n",
+	// 先写一段 200KB 的正文（开头带标记），最后一行才是摘要：长正文任务的正文不在末段。
+	"bigout": `echo BRIEF-HEAD; i=0; while [ $i -lt 2000 ]; do printf '%099d\n' $i; i=$((i+1)); done; echo '{"session_id":"sess-big","outcome":"done"}'` + "\n",
 	"pwd":      `pwd -P > "$2/pwd"; echo '{"session_id":"s","outcome":"done"}'` + "\n",
 	"silent":   "true\n",
 	"exit1":    "exit 1\n",
@@ -421,6 +423,39 @@ func TestStdoutSummaryFallback(t *testing.T) {
 	}
 	if got := e.session(out.Item); got != "sess-sum" {
 		t.Fatalf("session %q", got)
+	}
+}
+
+// 执行者输出 200KB：运行目录里分段文件按序拼接是全文（正文开头在），output.txt 是末段、首尾写明截断与全文位置，
+// 末段里的摘要照常兜底判定。
+func TestLongOutputIsKeptWholeAndTheTailSaysSo(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "bigout")
+	out, err := e.svc.Launch(bg, e.task("hx", "brief"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := e.waitResult()
+	dir := filepath.Join(e.runs, out.Run)
+	var full strings.Builder
+	for _, n := range res.StdoutFiles {
+		full.WriteString(read(t, filepath.Join(dir, n)))
+	}
+	if !strings.HasPrefix(full.String(), "BRIEF-HEAD\n") || int64(full.Len()) != res.StdoutTotal || res.StdoutTotal < 200_000 || len(res.StdoutFiles) < 4 {
+		t.Fatalf("full text: %d bytes of %d in %v", full.Len(), res.StdoutTotal, res.StdoutFiles)
+	}
+	lines := strings.Split(strings.TrimSuffix(read(t, filepath.Join(dir, "output.txt")), "\n"), "\n")
+	head, foot := lines[0], lines[len(lines)-1]
+	for _, l := range []string{head, foot} {
+		if !strings.Contains(l, `"type":"apa_output_truncated"`) || !strings.Contains(l, "此处为末尾 65536 字节") || !strings.Contains(l, "全文见 output.001.txt") {
+			t.Fatalf("output.txt must say it is the tail and where the full text is: %s", l)
+		}
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "BRIEF-HEAD") {
+		t.Fatal("output.txt is the tail; the head lives in the segment files")
+	}
+	if it := e.item(out.Item); it.Phase != domain.PhaseDone || e.session(out.Item) != "sess-big" {
+		t.Fatalf("summary in the tail still settles the run: %s %q", it.Phase, e.session(out.Item))
 	}
 }
 

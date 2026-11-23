@@ -402,16 +402,30 @@ type itemView struct {
 	Project string `json:"project,omitempty"`
 }
 
-// outputFile 是写进运行目录 output.txt 的内容：stdout 只留了末段时，第一行写明总字节、保留字节与丢掉的开头字节，
-// 截断不静默；这一行与事件流同为一行 JSON，按行读的工具照样能读。
+// outputFile 是写进运行目录 output.txt 的内容：stdout 没丢开头时就是全文；丢了开头时它是末段，
+// 首行与末行各一行 JSON（type apa_output_truncated）写明共多少字节、这里是末尾多少字节、全文在哪几个分段文件，截断不静默。
 func outputFile(res proc.Result) []byte {
 	if res.StdoutDropped == 0 {
 		return res.Stdout
 	}
-	head, _ := json.Marshal(map[string]any{"type": "apa_output_truncated", "total_bytes": res.StdoutTotal,
-		"kept_bytes": len(res.Stdout), "dropped_head_bytes": res.StdoutDropped,
-		"note": fmt.Sprintf("输出已截断：共 %d 字节，只保留末尾 %d 字节，开头 %d 字节未保存", res.StdoutTotal, len(res.Stdout), res.StdoutDropped)})
-	return append(append(head, '\n'), res.Stdout...)
+	where := "全文没有落盘"
+	if n := len(res.StdoutFiles); n > 0 {
+		where = "全文见 " + res.StdoutFiles[0]
+		if n > 1 {
+			where += " 至 " + res.StdoutFiles[n-1] + fmt.Sprintf("（%d 段，按序拼接）", n)
+		}
+	}
+	if res.StdoutSpoolErr != "" {
+		where += "；落盘出错，全文可能不全：" + res.StdoutSpoolErr
+	}
+	note, _ := json.Marshal(map[string]any{"type": "apa_output_truncated", "total_bytes": res.StdoutTotal, "kept_bytes": len(res.Stdout),
+		"dropped_head_bytes": res.StdoutDropped, "full_text_files": res.StdoutFiles, "spool_error": res.StdoutSpoolErr,
+		"note": fmt.Sprintf("输出共 %d 字节，此处为末尾 %d 字节；%s", res.StdoutTotal, len(res.Stdout), where)})
+	out := append(append(note, '\n'), res.Stdout...)
+	if len(res.Stdout) > 0 && res.Stdout[len(res.Stdout)-1] != '\n' {
+		out = append(out, '\n')
+	}
+	return append(append(out, note...), '\n')
 }
 
 // instructionFile 是运行目录里放任务说明的文件名（附录 C.7 的 instruction_path）。

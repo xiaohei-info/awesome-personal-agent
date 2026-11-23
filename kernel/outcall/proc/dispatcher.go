@@ -21,11 +21,17 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 事件流以外的 stdout 与所有 stderr 只保留末段（任务型的结构化摘要在 stdout 末段，§8.4）；丢掉的开头字节数随结果交回。
+// tailLimit：事件流以外的 stdout 与所有 stderr 交回调用模块的只是末段——任务型的结构化摘要与回执兜底在 stdout 末段（§8.4），
+// 判定只需要末段。但末段不是全文：简报这类长正文任务的正文可能在前面，只留末段等于把正文丢掉，而且以前丢得不留痕。
+// 所以有运行目录的运行，stdout 另按 segmentLimit 整份分段落盘（output.001.txt、output.002.txt……，按字节切，依次拼接即全文），
+// 交回的末段带总字节与丢掉的字节数，由调用模块在给人看的那份里写明截断与全文位置。
 const (
-	stdoutTailLimit = 1 << 20
-	tailLimit       = 64 << 10
+	tailLimit    = 64 << 10
+	segmentLimit = 64 << 10
 )
+
+// SegmentName 是运行目录里 stdout 全文第 n 段（从 1 起）的文件名。
+func SegmentName(n int) string { return fmt.Sprintf("output.%03d.txt", n) }
 
 // envWhitelist 是子进程能从内核环境继承的全部变量（§7.7）：PATH、HOME 和 XDG 目录变量及基本区域设置。
 var envWhitelist = map[string]bool{
@@ -53,6 +59,9 @@ type Result struct {
 	Overflow bool
 	// StdoutDropped 是只留末段的 stdout 丢掉的开头字节数；StdoutTotal 是子进程写出的 stdout 总字节数（只留末段的类别才有）。
 	StdoutDropped, StdoutTotal int64
+	// StdoutFiles 是 stdout 全文在运行目录里的分段文件名（有丢掉的开头且有运行目录时才有）；StdoutSpoolErr 是落盘失败的原因。
+	StdoutFiles    []string
+	StdoutSpoolErr string
 }
 
 // Options 是调度器的依赖与扩展点；零值字段取默认。
@@ -318,7 +327,7 @@ func (d *Dispatcher) removeContext(rec Record) {
 func (d *Dispatcher) run(rec Record) {
 	defer d.wg.Done()
 	errb := tail{limit: tailLimit}
-	var out stdoutSink = &tail{limit: stdoutTailLimit}
+	var out stdoutSink = &tail{limit: tailLimit, dir: rec.Spec.RunDir}
 	if rec.Spec.StdoutLimit > 0 {
 		out = &rawBytes{limit: rec.Spec.StdoutLimit}
 	} else if eventStream(rec.Run.Category) {
@@ -329,7 +338,7 @@ func (d *Dispatcher) run(rec Record) {
 	stdout, overflow := out.result()
 	res := Result{Stdout: stdout, Stderr: errb.bytes(), Reason: reason, Overflow: overflow}
 	if t, ok := out.(*tail); ok {
-		res.StdoutTotal, res.StdoutDropped = t.counts()
+		res.StdoutTotal, res.StdoutDropped, res.StdoutFiles, res.StdoutSpoolErr = t.finish()
 	}
 	// 落账不能被关停取消，否则 Run 会卡在 running。
 	err := d.st.Update(context.Background(), func(tx *store.Tx) error {
@@ -497,17 +506,24 @@ func (w *rawBytes) result() ([]byte, bool) {
 	return append([]byte(nil), w.buf...), w.over
 }
 
-// tail 只保留最后 limit 字节，并记下总共写了多少、丢了多少。
+// tail 只保留最后 limit 字节，并记下总共写了多少、丢了多少；dir 非空时另把全文按 segmentLimit 分段写进 dir。
+// 落盘失败不阻塞子进程（管道照常读完），只记下原因、停止落盘。
 type tail struct {
 	mu             sync.Mutex
 	buf            []byte
 	limit          int
 	total, dropped int64
+	dir            string
+	seg            *os.File
+	segs           []string
+	segBytes       int
+	spoolErr       error
 }
 
 func (t *tail) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.spool(p)
 	t.buf = append(t.buf, p...)
 	t.total += int64(len(p))
 	if n := len(t.buf) - t.limit; n > 0 {
@@ -517,10 +533,48 @@ func (t *tail) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (t *tail) counts() (total, dropped int64) {
+func (t *tail) spool(p []byte) {
+	for len(p) > 0 && t.dir != "" && t.spoolErr == nil {
+		if t.seg == nil || t.segBytes == segmentLimit {
+			if t.seg != nil {
+				t.spoolErr = t.seg.Close()
+			}
+			name := SegmentName(len(t.segs) + 1)
+			if t.seg, t.spoolErr = os.OpenFile(filepath.Join(t.dir, name), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600); t.spoolErr != nil {
+				t.seg = nil
+				return
+			}
+			t.segs, t.segBytes = append(t.segs, name), 0
+		}
+		n := min(len(p), segmentLimit-t.segBytes)
+		if _, t.spoolErr = t.seg.Write(p[:n]); t.spoolErr != nil {
+			return
+		}
+		t.segBytes += n
+		p = p[n:]
+	}
+}
+
+// finish 关掉分段文件；没有丢掉开头时末段就是全文，分段文件删掉，运行目录里不留两份。
+func (t *tail) finish() (total, dropped int64, files []string, spoolErr string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.total, t.dropped
+	if t.seg != nil {
+		if err := t.seg.Close(); err != nil && t.spoolErr == nil {
+			t.spoolErr = err
+		}
+		t.seg = nil
+	}
+	if t.dropped == 0 {
+		for _, n := range t.segs {
+			os.Remove(filepath.Join(t.dir, n))
+		}
+		return t.total, 0, nil, ""
+	}
+	if t.spoolErr != nil {
+		spoolErr = t.spoolErr.Error()
+	}
+	return t.total, t.dropped, append([]string(nil), t.segs...), spoolErr
 }
 
 func (t *tail) bytes() []byte {
