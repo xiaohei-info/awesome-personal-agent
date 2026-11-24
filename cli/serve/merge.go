@@ -35,7 +35,8 @@ var hostCLI = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Princ
 //   - mark-pending：给还没有归类标记的建议补记待归类（标 backfill，维护循环不自动归类它们，等 run --apply）。
 //
 // 缺省与 --dry-run 一样只演练：在账本的在线副本上算规则层，不调模型、不写账本，服务开着也能跑；
-// --apply 才调写作模型（run）、经内核命令落账；离线跑，apa serve 占着监听端口时拒绝。
+// --apply 才调写作模型（run）、经内核命令落账：apa serve 在跑时经主机本地入口（hostsock.go）交给服务进程执行，不用停服务；
+// 没有服务在应答时离线跑（占住 serve 的监听端口，执行期间服务起不来）。
 func mergeCmd(c *client.Ctx, args []string) error {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "mark-pending") {
 		return usage("apa merge needs run or mark-pending", mergeUsage)
@@ -67,6 +68,21 @@ func mergeCmd(c *client.Ctx, args []string) error {
 		}
 	}
 	ctx := context.Background()
+	if *apply { // 服务在跑：交给服务进程执行，同维护循环一个内核；没有服务在应答才离线跑
+		home, err := config.ResolveHome(c.Env.Getenv, c.Env.UserHome)
+		if err != nil {
+			return usage("cannot locate the APA home directory", "set APA_HOME to an absolute path")
+		}
+		rep, served, err := viaServe(ctx, config.LayoutOf(home), hostReq{Sub: sub, By: *by, Filter: f})
+		if served {
+			if rep != nil {
+				if perr := c.Print(rep); err == nil {
+					err = perr
+				}
+			}
+			return err
+		}
+	}
 	st, l, done, err := openOffline(ctx, c, !*apply)
 	if err != nil {
 		return err
@@ -159,7 +175,8 @@ func openOffline(ctx context.Context, c *client.Ctx, dry bool) (*store.Store, co
 		}
 		ln, err := core.Listen(cfg.Listen) // 占住 serve 的端口：服务开着时拒绝，执行期间服务也起不来
 		if err != nil {
-			return nil, l, nil, domain.NewError(domain.CodeConflict, "apa serve is running (listen address "+cfg.Listen+" is taken)", "stop the service first, or run without --apply")
+			return nil, l, nil, domain.NewError(domain.CodeConflict, "apa serve is running (listen address "+cfg.Listen+" is taken) but its host entry "+hostSocket(l)+" does not answer",
+				"check the apa serve log for the host entry, or run without --apply")
 		}
 		closers = append(closers, func() { ln.Close() })
 	}

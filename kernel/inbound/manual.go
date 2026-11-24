@@ -209,23 +209,27 @@ func (s *Service) PlanManual(ctx context.Context, f ManualFilter) (ManualReport,
 
 // RunManual 是手动合并的真跑：同一份规则层结果，调一次写作模型（有要问的时），以 id 的身份经 inbound.sweep 逐条落账，
 // 结论从账本读回。重复执行时已归类的不再命中，第二遍零写入。
+// 在服务进程里跑时与维护循环共用 sweeping：规则层与模型调用在锁外，只有落账在锁内，一批的落账不和维护循环的一批交错；
+// 两边算到同一条时，后落账的那次在 inbound.sweep 里见它已归类，什么都不改。
 func (s *Service) RunManual(ctx context.Context, id command.Identity, f ManualFilter) (ManualReport, error) {
-	s.sweeping.Lock() // 与维护循环互斥（同一进程里时）
-	defer s.sweeping.Unlock()
 	pol, rep, keep, p, err := s.planManual(ctx, f)
 	if err != nil {
 		return rep, err
 	}
 	rep.DryRun = false
-	for _, v := range keep {
-		err = errors.Join(err, s.settle(ctx, id, v))
+	settle := keep
+	if p != nil {
+		out, err := s.decide(ctx, pol, p)
+		if err != nil {
+			return rep, err // 模型没答上：什么都没落，下次再跑
+		}
+		settle = append(slices.Clone(keep), out...)
 	}
-	var done []sweepIn
-	if p != nil && err == nil {
-		done, err = s.runPlan(ctx, id, pol, p)
-	}
-	ids := make([]string, 0, len(keep)+len(done))
-	for _, v := range append(keep, done...) {
+	s.sweeping.Lock()
+	err = s.land(ctx, id, settle)
+	s.sweeping.Unlock()
+	ids := make([]string, 0, len(settle))
+	for _, v := range settle {
 		ids = append(ids, v.Item)
 	}
 	rerr := s.o.Store.View(ctx, func(tx *store.Tx) error {

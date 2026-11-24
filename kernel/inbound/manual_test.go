@@ -244,6 +244,46 @@ func TestMarkPendingThenManualMerge(t *testing.T) {
 	e.verify()
 }
 
+// 手动合并在服务进程里与维护循环共用归类锁，但模型调用在锁外：手动那批在等模型时，维护循环照常跑完自己的一批；
+// 两边算到同一条时只落一次（后落账的见它已归类，不改），去处只有一条溯源。
+func TestManualRunHoldsTheSweepLockOnlyToLand(t *testing.T) {
+	e := newEnv(t, true)
+	e.svc.o.Now = e.Now
+	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 5 })
+	tgt := e.proposal("src_mail", "m1", "整理报销单据 R2201", "")
+	e.sweepNow()
+	n := e.proposal("src_web", "w1", "整理报销单据 R2201（补发票）", "")
+	e.now = e.now.Add(31 * time.Minute) // 先拨好钟：下面两路并发只读它
+	r := mergeReply(domain.SweepMerge)
+	r.Delay = 400 * time.Millisecond
+	e.stub.When(batchMark, r)
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.svc.RunManual(bg, cliOwner, ManualFilter{})
+		done <- err
+	}()
+	for e.batchCalls() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !e.svc.sweeping.TryLock() {
+		t.Fatal("the sweep lock must be free while the manual run waits for the model")
+	}
+	e.svc.sweeping.Unlock()
+	if err := e.svc.Sweep(bg); err != nil { // 维护循环同一时刻跑同一条
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := e.item(n.ID); got.Phase != domain.PhaseDropped || got.Proposal.Sweep.Target != tgt.ID || e.batchCalls() != 2 {
+		t.Fatalf("folded once: %s %+v, calls %d", got.Phase, got.Proposal.Sweep, e.batchCalls())
+	}
+	if ab := e.item(tgt.ID).Proposal.Absorbed; len(ab) != 1 {
+		t.Fatalf("one trail on the target: %+v", ab)
+	}
+	e.verify()
+}
+
 // 筛选：来源（精确、前缀）、项目（含"不属于任何项目"）、时间窗、条数上限。
 func TestManualFilter(t *testing.T) {
 	t0 := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)

@@ -140,11 +140,14 @@ func (s *Service) Sweep(ctx context.Context) error {
 	if len(batch) > pol.Merge.Batch() {
 		batch = batch[:pol.Merge.Batch()]
 	}
-	if _, err := s.runPlan(ctx, system, pol, s.planBatch(pol, all, srcs, batch)); err != nil {
-		s.sweepAfter = now.Add(sweepRetry)
-		return err
+	settle, err := s.decide(ctx, pol, s.planBatch(pol, all, srcs, batch))
+	if err == nil {
+		err = s.land(ctx, system, settle)
 	}
-	return nil
+	if err != nil {
+		s.sweepAfter = now.Add(sweepRetry)
+	}
+	return err
 }
 
 // sweepView 读一批要用的策略、全部事项与来源。
@@ -289,8 +292,8 @@ func (s *Service) planBatch(pol policy.Policy, all []domain.Item, srcs map[strin
 	return p
 }
 
-// runPlan 按 plan 调一次写作模型（有要问的时），以 id 的身份逐条落账，返回落账的结论。
-func (s *Service) runPlan(ctx context.Context, id command.Identity, pol policy.Policy, p *batchPlan) ([]sweepIn, error) {
+// decide 按 plan 调一次写作模型（有要问的时），返回这一批全部结论；不写账本。
+func (s *Service) decide(ctx context.Context, pol policy.Policy, p *batchPlan) ([]sweepIn, error) {
 	settle := slices.Clone(p.settle)
 	if len(p.ask) > 0 {
 		out, err := s.askBatch(ctx, pol, p)
@@ -299,6 +302,12 @@ func (s *Service) runPlan(ctx context.Context, id command.Identity, pol policy.P
 		}
 		settle = append(settle, out...)
 	}
+	return settle, nil
+}
+
+// land 以 id 的身份逐条经 inbound.sweep 落账。每条在落账时按账本现状重验（仍待归类、去处仍相配、护栏），
+// 所以结论可以在锁外、按稍早的读视图算出。
+func (s *Service) land(ctx context.Context, id command.Identity, settle []sweepIn) error {
 	// 留着的先落，再落折叠：并到同批建议的那条落账时，去处已经是归类过的建议。
 	slices.SortStableFunc(settle, func(a, b sweepIn) int {
 		return cmp.Compare(b2i(a.Action != domain.SweepKeep), b2i(b.Action != domain.SweepKeep))
@@ -307,7 +316,7 @@ func (s *Service) runPlan(ctx context.Context, id command.Identity, pol policy.P
 	for _, v := range settle {
 		errs = errors.Join(errs, s.settle(ctx, id, v))
 	}
-	return settle, errs
+	return errs
 }
 
 func b2i(b bool) int {

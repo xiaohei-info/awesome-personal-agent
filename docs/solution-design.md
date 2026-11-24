@@ -1901,7 +1901,7 @@ HTTP 层错误的响应体为 `{"error": {"code": "<标识>", "message": "…"}}
 | 环节 | 规则 |
 |---|---|
 | 谁进批 | 合并开启时，参与合并的来源（设置 › 跨来源合并，默认全部来源）新建的建议记 `proposal.sweep.state = pending`。升级前已有的建议不自动回填，只作为比对对象；本人可用 `apa merge mark-pending --apply` 给还没有标记的建议补记待归类（记 `proposal.sweep.backfill` 与操作者），补打的不由维护循环自动归类，只由本人再跑 `apa merge run --apply` 处理——补标记与执行合并是两个显式动作 |
-| 手动跑一批 | `apa merge run`：取待归类的建议（可按来源、项目、时间窗、条数筛），按本表同一套规则跑一批，不等"何时跑"的条件；缺省只演练（规则层候选、合并护栏、资料打包与分组，不调模型、不写账本），`--apply` 才调模型并经 `inbound.sweep` 落账，同一账本状态下两者的规则层结果相同（附录 B.1） |
+| 手动跑一批 | `apa merge run`：取待归类的建议（可按来源、项目、时间窗、条数筛），按本表同一套规则跑一批，不等"何时跑"的条件；缺省只演练（规则层候选、合并护栏、资料打包与分组，不调模型、不写账本），`--apply` 才调模型并经 `inbound.sweep` 落账，同一账本状态下两者的规则层结果相同（附录 B.1）。`--apply` 不用停服务：服务在跑时经主机本地入口（§14.12）在服务进程里执行，与维护循环共用归类锁，规则层与模型调用在锁外，只有落账在锁内；两边算到同一条时，后落账的见它已归类，不改 |
 | 何时跑 | 维护循环每分钟看一次：待归类的攒够 `batch_size` 条（默认 20），或最早一条已等 `wait_minutes` 分钟（默认 30），就取最早的至多 `batch_size` 条跑一批；没到就不跑 |
 | 比对对象 | 账本里已有的全部记录：所有建议（含同批的其他新建议），以及开启"纳入已有事项与被忽略记录"（默认开）时的未关闭事项（open、waiting、needs_input）、已完成事项、本人忽略过的建议（dropped）。简报与例行任务不参与；被本归类折叠掉的建议由它的去处代表；本人拆开过的（`not_same`）不再配对；不参与合并的来源的记录不参与 |
 | 规则初筛 | 对每条新建议，用规则在全部比对对象里算相似度：标题的字符二元组 Dice 系数（先去掉两边共有的模板前缀）、两边共享强标识（链接，或含数字、不短于 4 个字符的编号）加 0.3、两边都有摘要时加摘要 Dice 的 0.2 倍，上限 1；合并键相同记 1。取不低于相似度下限的至多 5 条作候选。下限由设置 › 跨来源合并的"相似度档位"（`merge.similarity`）给出三档：宽 `loose` 0.25、默认（空串）0.30、严 `strict` 0.40，其他值 400；没有这个键读作默认档，与此前写死的 0.30 相同。档位与其余合并设置一样每批现读策略，改了下一批就生效，每次保存是一个策略版本（`policy.changed`）。候选条数上限 5 不开放：资料上限的下限（2000 token）按"一条新建议带满 5 条候选"推定，放开条数要一起改下限。全批都没有候选时不调模型，每条记"留着"，依据写"全量比对后没有相似的记录" |
@@ -2906,6 +2906,8 @@ Event 带内核维护的链路深度，调用方不能写。规则动作（含�
 
 主机配置文件有两处，都在数据目录里，`apa serve` 每次启动时读取，按本人身份登记并记 Event。`sources.json` 是 `{"sources": [...]}`，逐条登记或覆盖来源；`declarations/*.json` 每个文件一份无头运行声明（字段见附录 A.2），立即生效，内容不变时不产生新版本。文件不存在就跳过；内容有误或登记被拒绝时拒绝启动，不带着半份配置运行。
 
+同一信任依据下还有一个**主机本地入口**：`apa serve` 在数据目录的 `host/`（权限 0700）下开 Unix 套接字 `serve.sock`，只接受 `apa merge run --apply` 与 `apa merge mark-pending --apply`（§9.3），在服务进程里按本人身份执行。它不在网络监听上，能连上它的就是能写上述主机配置文件的人；Agent 凭据与外部钥匙经 HTTP API 仍然做不了这两条系统内部命令。开不了套接字（例如路径超过系统上限）不影响服务启动，只是这两条命令要先停服务、离线执行。
+
 ### 14.13 Web 入口
 
 Web 是最高权限入口。默认只监听本机；暴露到本机之外时必须经 HTTPS（反向代理、隧道或私有网络），并在运行配置里写明 https 的 `public_url`，否则监听非本机地址时 `apa serve` 拒绝启动。登录态使用安全 Cookie 并防跨站请求。webhook 接收路径可单独暴露，其余路径不必公开（§16.3）。
@@ -3071,6 +3073,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
   config.yaml       运行配置（监听地址、max_subprocesses、max_short_subprocesses、max_source_output_mb、delivery_unclaimed_after、delivery_backoff、chain_depth_threshold、guideline_draft_executor、unjudged_rejudge_days、backlog_release_per_day、judgment_retention_days、delegation_stall_after、public_url 等）
   sources.json      本人在主机上写的来源登记，可选（§14.12）
   declarations/     本人在主机上写的无头运行声明，可选（§14.12）
+  host/serve.sock   apa serve 运行期间的主机本地入口，目录 0700，服务停止时删除（§14.12）
   ledger.db         账本（事项、Event、投递、运行记录、来源事件及其原文……；存储选型见 §18）
   blobs/            内容寻址附件（材料附件，以及本人取回的来源事件附件）
   packs/<name>/     用户能力包，同名覆盖内置
@@ -3150,7 +3153,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 | 来源登记 | `default_project` 为空；`outbound.local` 为 `full`，`outbound.external` 为未选择。使用外部端点前，本人要在"设置 › 模型"为每个来源选一次范围，健康视图与 `apa doctor` 会提示。显示名为空的来源在 `apa serve` 启动时补名：先用接入层声明的名字（§9.1），取不到声明的为了兼容才按 `source_type` 或来源类型起名（如"邮件""自定义脚本"），名字被占用时按 id 顺序加序号；逐个记 `source.renamed`（操作者 system）。有按类型起名的，另记一条健康说明（对象 `sources:names`），建议本人起名，它按"系统健康"的去向出一条健康类投递；除此之外不触发判断、投递或重判。这是唯一保留按类型起名的地方 |
 | 钥匙（2026-11-23） | `auth` 迁移 v4 加 `audience`（缺省 `external`）与 `source_scopes`。升级后第一次启动时一次性换算，记 `credential.scopes_migrated`：observer、worker、delegate token 换算成它们当时经 token 读来源原文实际拿到的档位（来源 `outbound.external` 为 `full`、`excerpt` 的照给，其余为 `meta`），ext 与 webhook 为空表；没有钥匙被自动标成内部。事项与材料从此对外部钥匙按档位裁，是收紧；本人在 Web 把 APA 内部用的钥匙改成"APA 内部"后恢复全文。新账本对旧二进制是 `ledger_too_new`，回退只有旧二进制加升级前快照一条路 |
 | 打扰策略的投递去处（2026-11-23） | 加 `disturb.delivery`（投递矩阵，§7.4），只是策略文档里的一个键，不改账本结构。没有它时按 `routes`、`push.*.route`、`proactive.task_push` 与 `instance_push` 换算，去处与换算前逐值相同；写入后（启动时采用建议值，或本人第一次在矩阵里改动）这四个旧键原样冻结、内核不再读。回退到旧二进制时：旧版本解码策略不严格，忽略 `delivery`，读到冻结的旧键，即写入那一刻的设置；之后在矩阵里的改动在旧版本不生效；旧版本再保存一次策略会丢掉 `delivery`，再升级时又从旧键换算。两层都推时 Agent 层的投递 id 带 `@agent`，旧版本不认识这个后缀，回退前要先让在途投递清零（`apa health` 积压为 0），否则在途的事项可能各重复一次 |
-| 跨来源合并的旧建议（2026-11-24） | 升级不回填待归类标记，也不补写已折叠记录的 `proposal.absorbed`；本人要让旧建议参与合并时，先 `apa merge mark-pending --apply`，再 `apa merge run --apply`（§9.3）。新增的 `proposal.absorbed`、`proposal.sweep.backfill` 在事项数据里，不改账本结构。回退到不认识 `backfill` 的版本时，补打而未归类的会被维护循环当作普通待归类自动归类，回退前用 `apa merge run --dry-run` 确认 `matched` 为 0 |
+| 跨来源合并的旧建议（2026-11-24） | 升级不回填待归类标记，也不补写已折叠记录的 `proposal.absorbed`；本人要让旧建议参与合并时，先 `apa merge mark-pending --apply`，再 `apa merge run --apply`（§9.3）。新增的 `proposal.absorbed`、`proposal.sweep.backfill` 在事项数据里，不改账本结构。回退到不认识 `backfill` 的版本前，先确认没有补打了但还没归类的条目，否则旧版会把它们当普通待归类自动合并，且旧版没有护栏；用 `apa merge run --dry-run` 确认 `matched` 为 0 |
 | 规则模式 | 内置包的提醒类规则（§14.8）若仍是 v0.1 的初始值 `observe`、本人从未切换过，升级时切到 `auto`，逐条记 `rule.mode_changed` 并合并成一条健康类说明；本人切换过的保持原样；用户覆盖包里显式写了 `observe` 或 `off` 的按包里的写法。动作类规则不变 |
 | 数据目录里覆盖内置包的用户包 | 用到已移除字段（`confidence_threshold`、`escalate_to`）的包被拒绝加载，内置包生效，健康视图给出要改的字段（附录 C.11）。只为改邮件、日历的项目归属而覆盖 `inbound-triage` 的，改用来源的默认项目即可，不再需要覆盖包 |
 | 运行配置 | 旧键全部有效，新键取默认值。监听非本机地址的部署要在升级前补上 https 的 `public_url`，否则新版本拒绝启动（§14.13）；预检会报告 |
