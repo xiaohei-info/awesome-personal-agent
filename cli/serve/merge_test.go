@@ -43,10 +43,14 @@ func TestMergeDryRunNeedsNoStopAndApplyRefusesWithoutHostEntry(t *testing.T) {
 	}
 	for _, bad := range [][]string{{"merge"}, {"merge", "nope"}, {"merge", "run", "--dry-run", "--apply"}, {"merge", "run", "--by", "x"},
 		{"merge", "run", "--since", "yesterday"}, {"merge", "run", "--limit", "-1"}, {"merge", "run", "extra"},
-		{"merge", "run", "--with-model", "--apply"}, {"merge", "mark-pending", "--with-model"}} {
+		{"merge", "run", "--with-model", "--apply"}, {"merge", "mark-pending", "--with-model"}, {"merge", "mark-pending", "--retry-rejected"}} {
 		if r := apa(t, home, "", bad...); r.code != 2 {
 			t.Fatalf("%v must be a usage error: %+v", bad, r)
 		}
+	}
+	// --retry-rejected 的演练：没有被退回的建议时说明原因，账本不动。
+	if r := apa(t, home, "", "merge", "run", "--retry-rejected"); r.code != 0 || !strings.Contains(r.out, `"retry":{"dry_run":true`) || !strings.Contains(r.out, "没有可重新纳入") {
+		t.Fatalf("run --retry-rejected dry run: %+v", r)
 	}
 	// --with-model 也只在副本上跑（这里没有待归类，不调模型）：服务开着也行，真账本不动。
 	if r := apa(t, home, "", "merge", "run", "--dry-run", "--with-model"); r.code != 0 || !strings.Contains(r.out, `"with_model":true`) || !strings.Contains(r.out, `"dry_run":true`) {
@@ -62,6 +66,9 @@ func TestMergeDryRunNeedsNoStopAndApplyRefusesWithoutHostEntry(t *testing.T) {
 		}
 		if r := apa(t, home, "", "merge", "run", "--apply"); r.code != 0 || !strings.Contains(r.out, `"dry_run":false`) || !strings.Contains(r.out, `"matched":0`) {
 			t.Fatalf("run --apply: %+v", r)
+		}
+		if r := apa(t, home, "", "merge", "run", "--apply", "--retry-rejected"); r.code != 0 || !strings.Contains(r.out, `"retry":{"dry_run":false`) || !strings.Contains(r.out, "没有可重新纳入") {
+			t.Fatalf("run --apply --retry-rejected offline: %+v", r)
 		}
 	}
 }
@@ -91,6 +98,9 @@ func TestMergeApplyRunsInsideServe(t *testing.T) {
 		}
 		if r := apa(t, home, "", "merge", "run", "--apply"); r.code != 0 || !strings.Contains(r.out, `"dry_run":false`) || !strings.Contains(r.out, `"matched":0`) {
 			t.Fatalf("run --apply while serving: %+v", r)
+		}
+		if r := apa(t, home, "", "merge", "run", "--apply", "--retry-rejected"); r.code != 0 || !strings.Contains(r.out, `"retry":{"dry_run":false`) || !strings.Contains(r.out, "没有可重新纳入") {
+			t.Fatalf("run --apply --retry-rejected while serving: %+v", r)
 		}
 	}
 	stop()

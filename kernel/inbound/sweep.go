@@ -315,6 +315,9 @@ func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain
 	h := sha256.New()
 	for _, it := range batch {
 		h.Write([]byte(it.ID + "|"))
+		if it.Proposal != nil && it.Proposal.Sweep != nil && it.Proposal.Sweep.Retry != nil {
+			h.Write([]byte("retry:" + it.Proposal.Sweep.Retry.Of + "|")) // 重新纳入的是另一次判定，批号不能与上次相同
+		}
 	}
 	p := &batchPlan{id: "mb_" + hex.EncodeToString(h.Sum(nil))[:12], size: len(batch), srcs: srcs, topics: recentTopics(all)}
 
@@ -993,8 +996,9 @@ func fits(action string, t domain.Item) bool {
 	return false
 }
 
+// 幂等键带批号：同一条建议被重新纳入后会再落一次账（apa merge run --retry-rejected），不同批的输入不同。
 func (s *Service) settle(ctx context.Context, id command.Identity, v sweepIn) error {
-	_, err := s.do(ctx, id, "", "inbound:sweep:"+v.Item, CmdSweep, v, command.Chain{})
+	_, err := s.do(ctx, id, "", "inbound:sweep:"+v.Item+":"+v.Batch, CmdSweep, v, command.Chain{})
 	return err
 }
 
@@ -1049,7 +1053,7 @@ func registerSweep(x *command.Executor) error {
 			}
 			at := c.Now()
 			sw := domain.ProposalSweep{State: "done", Batch: v.Batch, Action: v.Action, Target: v.Target, Why: v.Why, By: v.By, Run: v.Run, Size: v.Size, Chars: v.Chars, Deferred: v.Deferred, At: &at,
-				Group: v.Group, Topic: v.Topic, Backfill: it.Proposal.Sweep.Backfill, Rejected: v.Rejected}
+				Group: v.Group, Topic: v.Topic, Backfill: it.Proposal.Sweep.Backfill, Retry: it.Proposal.Sweep.Retry, Rejected: v.Rejected}
 			p := *it.Proposal
 			p.Sweep = &sw
 			if v.Action == domain.SweepKeep {

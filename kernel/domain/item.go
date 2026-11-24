@@ -296,6 +296,16 @@ type ProposalSweep struct {
 	Topic string `json:"topic,omitempty"`
 	// Backfill 是本人补打的待归类标记（apa merge mark-pending）：维护循环不自动归类它，只由 apa merge run --apply 处理；归类后保留。
 	Backfill *SweepBackfill `json:"backfill,omitempty"`
+	// Retry 记这条建议被 apa merge run --retry-rejected 重新纳入过：上一次判定的批号、拒绝码与原因。有它说明重判过一次，不再重复纳入。
+	Retry *SweepRetry `json:"retry,omitempty"`
+}
+
+// SweepRetry 是一条被退回的建议重新纳入待归类时留下的来源：Of 是上一次判定的批号，Rejected 与 Why 是那次的拒绝码与原因，At 是纳入时刻。
+type SweepRetry struct {
+	Of       string    `json:"of"`
+	Rejected string    `json:"rejected"`
+	Why      string    `json:"why,omitempty"`
+	At       time.Time `json:"at"`
 }
 
 // SweepBackfill 记谁、何时补打的待归类标记。
