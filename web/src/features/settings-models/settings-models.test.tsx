@@ -170,7 +170,7 @@ describe("设置 › 模型", () => {
     expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://gw.example.invalid/v1", api_key: "ts-key", model: "gw/jev-latest", locality: "external", protocol: "system-one", timeout_ms: 30000, max_batch: 32, max_material_chars: 8000 } });
   });
 
-  it("生成端点的协议在第一项下拉：旧配置没写协议显示 OpenAI 兼容；换协议换地址示例，获取模型、测试与保存都带协议，结果写明原生结构化输出", async () => {
+  it("生成端点的协议在第一项下拉：旧配置没写协议显示 OpenAI Chat Completions；换协议换地址示例与提示，获取模型、测试与保存都带协议，结果写明原生结构化输出", async () => {
     const s = server({ generate: null });
     mount(s.impl);
     const g = await card("写作模型");
@@ -178,7 +178,13 @@ describe("设置 › 模型", () => {
     const proto = g.getByLabelText("协议");
     expect(g.getAllByRole("combobox")[0]).toBe(proto); // 第一项
     expect(proto).toHaveValue("chat-completions");
-    expect(within(proto).getAllByRole("option").map((o) => o.textContent)).toEqual(["OpenAI 兼容", "Anthropic 兼容", "OpenAI Responses"]);
+    expect(within(proto).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "OpenAI Chat Completions",
+      "OpenAI Responses",
+      "Anthropic Messages",
+      "Google Gemini 原生",
+    ]);
+    expect(g.getByText(/最通用/)).toBeInTheDocument();
     expect(g.getByLabelText("地址")).toHaveAttribute("placeholder", "https://llm.example.com/v1");
     await userEvent.selectOptions(proto, "messages");
     expect(g.getByLabelText("地址")).toHaveAttribute("placeholder", "https://api.anthropic.com/v1");
@@ -189,11 +195,17 @@ describe("设置 › 模型", () => {
     await userEvent.selectOptions(g.getByLabelText("模型"), "model-a");
     s.setProbe({ subject: "generate_endpoint", status: "ok", code: "ok", why: "answered", data: { elapsed_ms: 900, protocol: "messages", structured_output: "tool_use" } });
     await userEvent.click(g.getByRole("button", { name: "测试连接" }));
-    expect(await g.findByRole("status", { name: "测试结果" })).toHaveTextContent("Anthropic 兼容 · 原生结构化输出（工具调用）");
+    expect(await g.findByRole("status", { name: "测试结果" })).toHaveTextContent("Anthropic Messages · 原生结构化输出（工具调用）");
     expect(s.posts.at(-1)!.body.config.protocol).toBe("messages");
+    await userEvent.selectOptions(proto, "generate-content");
+    expect(g.getByText(/Google Gemini 原生接口/)).toBeInTheDocument();
+    s.setProbe({ subject: "generate_endpoint", status: "ok", code: "ok", why: "answered", data: { elapsed_ms: 650, protocol: "generate-content", structured_output: "responseJsonSchema" } });
+    await userEvent.click(g.getByRole("button", { name: "测试连接" }));
+    expect(await g.findByRole("status", { name: "测试结果" })).toHaveTextContent("Google Gemini 原生 · 原生结构化输出（JSON 结构约束）");
+    expect(s.posts.at(-1)!.body.config.protocol).toBe("generate-content");
     await userEvent.click(g.getByRole("radio", { name: /外部服务/ }));
     await save("写作模型");
-    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://gw.example.invalid/v1", api_key: "", model: "model-a", locality: "external", protocol: "messages", max_material_tokens: 16000 } });
+    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://gw.example.invalid/v1", api_key: "", model: "model-a", locality: "external", protocol: "generate-content", max_material_tokens: 16000 } });
   });
 
   it("获取模型后从列表选择，再测试连接；请求用占位沿用已存密钥", async () => {

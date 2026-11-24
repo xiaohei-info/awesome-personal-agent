@@ -32,11 +32,12 @@ const PRESETS: Record<string, { url: string; model: string; timeout_ms: string }
 const MANUAL = "\u0000manual";
 // 生成端点的协议（§8.1）：按接口形态区分，各用原生的结构化输出；旧配置没写协议按 chat-completions。换协议只换地址示例占位，不预填。
 const CHAT = "chat-completions";
-const GEN_PROTOCOLS = [CHAT, "messages", "responses"];
+const GEN_PROTOCOLS = [CHAT, "responses", "messages", "generate-content"];
 const GEN_URL_EXAMPLE: Record<string, string> = {
   [CHAT]: "https://llm.example.com/v1",
-  messages: "https://api.anthropic.com/v1",
   responses: "https://api.openai.com/v1",
+  messages: "https://api.anthropic.com/v1",
+  "generate-content": "https://generativelanguage.googleapis.com/v1beta",
 };
 
 type Kind = "generate" | "judge";
@@ -381,12 +382,15 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
       {on && (
         <>
           {kind === "generate" && (
-            <label>
-              {t.protocol}
-              <select value={d.protocol} onChange={(e) => set("protocol", e.target.value)}>
-                {GEN_PROTOCOLS.map((p) => <option key={p} value={p}>{label("protocol", p)}</option>)}
-              </select>
-            </label>
+            <>
+              <label>
+                {t.protocol}
+                <select value={d.protocol} onChange={(e) => set("protocol", e.target.value)}>
+                  {GEN_PROTOCOLS.map((p) => <option key={p} value={p}>{label("protocol", p)}</option>)}
+                </select>
+              </label>
+              {t.protocolHints[d.protocol] && <small className="sub">{t.protocolHints[d.protocol]}</small>}
+            </>
           )}
           <fieldset className="choice">
             <legend>{t.where}</legend>

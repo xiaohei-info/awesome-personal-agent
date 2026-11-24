@@ -476,9 +476,21 @@ func TestEndpointDefaultsAndValidation(t *testing.T) {
 		"judge batch":      func(p *Policy) { p.JudgeEndpoint.MaxBatch = -1 },
 		"gen url":          func(p *Policy) { p.GenerateEndpoint.URL = "ftp://x" },
 		"gen locality":     func(p *Policy) { p.GenerateEndpoint.Locality = "nearby" },
+		"gen protocol":     func(p *Policy) { p.GenerateEndpoint.Protocol = "unknown-proto" },
 	} {
 		if _, err := update(t, s, owner, func(p *Policy) error { bad(p); return nil }); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	for _, proto := range []string{"", ProtocolChatCompletions, ProtocolResponses, ProtocolMessages, ProtocolGenerateContent} {
+		must(t, s, func(p *Policy) error { p.GenerateEndpoint.Protocol = proto; return nil })
+		_, got := current(t, s)
+		want := proto
+		if want == "" {
+			want = ProtocolChatCompletions
+		}
+		if GenerateProtocol(got.GenerateEndpoint.Protocol) != want {
+			t.Errorf("protocol %q → effective %q, want %q", proto, GenerateProtocol(got.GenerateEndpoint.Protocol), want)
 		}
 	}
 }
