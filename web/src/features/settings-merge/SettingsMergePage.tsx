@@ -15,14 +15,9 @@ const ACTIONS = ["attach", "merge", "duplicate", "keep"];
 const DEFAULT_BATCH = 100;
 const DEFAULT_WAIT = 30;
 
-interface Merge { exclude_sources?: string[] | null; skip_existing?: boolean; batch_size?: number; wait_minutes?: number; budget_tokens?: number; prompt?: string; prompt_at?: string; similarity?: string }
+interface Merge { exclude_sources?: string[] | null; skip_existing?: boolean; batch_size?: number; wait_minutes?: number; budget_tokens?: number; prompt?: string; prompt_at?: string; similarity?: string; candidates?: number }
 
-// 相似度档位（§9.3）：与内核 policy.SimilarityMin 同值，由 kernel/policy 的 TestWebSimilarityTiersMatchKernel 锁住。空串是默认档。
-export const SIMILARITY_TIERS = [
-  { id: "loose", min: 0.25 },
-  { id: "", min: 0.3 },
-  { id: "strict", min: 0.4 },
-] as const;
+const DEFAULT_CANDIDATES = 20;
 
 export function SettingsMergePage() {
   const t = useT(strings);
@@ -35,7 +30,7 @@ export function SettingsMergePage() {
           <AgentCard doc={d} save={save} />
           <SourcesCard doc={d} save={save} />
           <ExistingCard doc={d} save={save} />
-          <SimilarityCard doc={d} save={save} />
+          <CandidatesCard doc={d} save={save} />
           <BatchCard doc={d} save={save} />
           <PromptCard doc={d} save={save} />
           <Cost />
@@ -104,22 +99,19 @@ function ExistingCard({ doc, save }: { doc: Doc; save: Save }) {
   );
 }
 
-function SimilarityCard({ doc, save }: { doc: Doc; save: Save }) {
+// 规则检索给每条带几条已有事项（§9.3）：只排序取前几条，与内核 policy.DefaultMergeCandidates、MaxMergeCandidates 同值。等于默认值时不带这个键。
+function CandidatesCard({ doc, save }: { doc: Doc; save: Save }) {
   const t = useT(strings);
   const m = doc.merge as Merge;
-  const value = m.similarity ?? "";
-  const [pick, setPick, dirty] = useDraft(value, () => value);
+  const [v, setV, dirty] = useDraft(m.candidates, () => String(m.candidates || DEFAULT_CANDIDATES));
+  const onSave = () => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 50) return reject(t.candBad);
+    return putMerge(doc, save, { candidates: n === DEFAULT_CANDIDATES ? undefined : n });
+  };
   return (
-    <Card title={t.simTitle} hint={t.simHint} dirty={dirty} onSave={() => putMerge(doc, save, { similarity: pick || undefined })}>
-      <fieldset>
-        {SIMILARITY_TIERS.map((x) => (
-          <label key={x.id} className="row">
-            <input type="radio" name="similarity" value={x.id} checked={pick === x.id} onChange={() => setPick(x.id)} />
-            <span>{t.simChoice(t.simName[x.id], x.min.toFixed(2))}</span>
-            <small className="sub">{t.simWhy[x.id]}</small>
-          </label>
-        ))}
-      </fieldset>
+    <Card title={t.candTitle} hint={t.candHint} dirty={dirty} onSave={onSave}>
+      <label>{t.candLabel} <input type="number" min={1} max={50} value={v} onChange={(e) => setV(e.target.value)} /></label>
     </Card>
   );
 }

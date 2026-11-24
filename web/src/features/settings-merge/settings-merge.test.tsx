@@ -128,22 +128,21 @@ describe("设置 › 跨来源合并", () => {
     expect(s.puts.at(-1).merge).not.toHaveProperty("budget_tokens");
   });
 
-  it("相似度档位：三档写明数值与一句说明，默认档选中且等于 0.30；改严随整段 merge 保存，改回默认不带这个键", async () => {
-    const s = server({ exclude_sources: ["src_mail"], skip_existing: false, batch_size: 10, wait_minutes: 0, prompt: "" });
+  it("每条带几条候选：默认 20；改成 30 随整段 merge 保存（旧的 similarity 原样带回），改回 20 不带这个键", async () => {
+    const s = server({ exclude_sources: ["src_mail"], skip_existing: false, batch_size: 10, wait_minutes: 0, prompt: "", similarity: "strict" });
     mount(s.impl);
-    const c = await card("相似度档位");
-    expect(c.getByLabelText(/^默认（相似度 ≥ 0\.30）/)).toBeChecked();
-    expect(c.getByLabelText(/^默认/).closest("label")).toHaveTextContent("和改成档位之前一样");
-    expect(c.getByLabelText(/^宽（相似度 ≥ 0\.25）/).closest("label")).toHaveTextContent("漏合更少，模型调用和送出的字更多");
-    expect(c.getByLabelText(/^严（相似度 ≥ 0\.40）/).closest("label")).toHaveTextContent("说法不同的同一件事可能漏合");
-    await userEvent.click(c.getByLabelText(/^严/));
-    await saveIn("相似度档位");
-    await waitFor(() => expect(s.puts.at(-1)).toEqual({ merge: { exclude_sources: ["src_mail"], skip_existing: false, batch_size: 10, wait_minutes: 0, prompt: "", similarity: "strict" } }));
-    await waitFor(() => expect(c.getByLabelText(/^严/)).toBeChecked()); // 以保存后的策略为准，不用重载
-    await userEvent.click(c.getByLabelText(/^默认/));
-    await saveIn("相似度档位");
+    const c = await card("每条带几条候选");
+    const box = c.getByLabelText(/已有事项至多几条/);
+    expect(box).toHaveValue(20);
+    await userEvent.clear(box);
+    await userEvent.type(box, "30");
+    await saveIn("每条带几条候选");
+    await waitFor(() => expect(s.puts.at(-1)).toEqual({ merge: { exclude_sources: ["src_mail"], skip_existing: false, batch_size: 10, wait_minutes: 0, prompt: "", similarity: "strict", candidates: 30 } }));
+    await userEvent.clear(box);
+    await userEvent.type(box, "20");
+    await saveIn("每条带几条候选");
     await waitFor(() => expect(s.puts).toHaveLength(2));
-    expect(s.puts.at(-1).merge).not.toHaveProperty("similarity");
+    expect(s.puts.at(-1).merge).not.toHaveProperty("candidates");
   });
 
   it("关闭合并：只发 merge_judge", async () => {

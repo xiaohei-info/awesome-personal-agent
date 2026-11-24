@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -26,8 +28,10 @@ import (
 )
 
 // ---- 跨来源合并的批量归类（§9.3） ----
-// 新建议只标记 pending；维护循环里攒够条数或等够时间成一批：成员互相全量可见，规则检索已有事项（进行中、已完成）作候选，
-// 整批一次写作模型调用：先分组，再按优先级（并入事项 → 批内整合 → 保留）给出 attach / duplicate / merge / keep，逐条经 inbound.sweep 落账，本人可经 inbound.unmerge 撤销。
+// 新建议只标记 pending；维护循环里攒够 batch_size 条或最早一条等够时间成一批（同一个数也是一批的上限）：成员互相全量可见，
+// 规则检索（第 4 层）只按分数给每条成员排出前 N 条已有事项作候选，不设下限、不做任何禁止性拦截；
+// 整批一次写作模型调用：先分组（沿用最近几批的主题名），再按优先级（并入事项 → 批内整合 → 保留）给出 attach / duplicate / merge / keep；
+// 全部禁止性规则在第 6 层校验（veto，模型答完后与落账时共用），被拒的留着并记类别码；逐条经 inbound.sweep 落账，本人可经 inbound.unmerge 撤销。
 
 const (
 	// MergeUse 是合并调用的用途，计入既有的模型调用统计。
@@ -37,16 +41,15 @@ const (
 	CmdSweep      = "inbound.sweep"
 	CmdUnmerge    = "inbound.unmerge"
 
-	sweepCands   = 5                // 每条成员至多带几条检索出的已有事项
 	sweepRetry   = 15 * time.Minute // 模型调用失败后多久再试（只在内存）
 	sweepTitle   = 120              // 送给模型的标题、摘要各自至多几个字
 	sweepSummary = 200
 	sweepActor   = "kernel:merge"
-	// sweepFallback 是回答不完整时降到的批量：同样大小问两次（第二次不复用第一次的回答）都缺结论或被截断，就只问前这么多条。
-	sweepFallback = 50
+	// sweepTopicBatches 是给模型作已有主题的最近几批。
+	sweepTopicBatches = 20
 )
 
-// batchSize 是这一轮一批的条数上限：策略的批量，降过就取降后的。
+// batchSize 是这一轮一批的条数：攒够它就跑，也是一批的上限（策略里只有 batch_size 这一个数）；回答不完整降过批就取降后的。
 func (s *Service) batchSize(pol policy.Policy) int {
 	n := pol.Merge.Batch()
 	if c := int(s.sweepCap.Load()); c > 0 && c < n {
@@ -99,9 +102,18 @@ func notSame(a, b domain.Item) bool {
 	return (a.Proposal != nil && slices.Contains(a.Proposal.NotSame, b.ID)) || (b.Proposal != nil && slices.Contains(b.Proposal.NotSame, a.ID))
 }
 
-// apart 为真的两条无论谁判都不折叠在一起：本人拆开过、项目护栏、同一仓库的不同 PR。
-func apart(a, b domain.Item) bool {
-	return notSame(a, b) || !sameOwner(a, b) || otherChange(changeRef(a), changeRef(b))
+// veto 是第 6 层校验的禁止性规则：it 折叠到 t（或与 t 整合成一条）被禁止时返回拒绝码与原因，空为放行。
+// 模型答完后（askBatch）与落账时（inbound.sweep）共用这一处；检索阶段不拦。结论与去处阶段相配另由调用方判（答完时看 stepOne，落账时看 fits）。
+func veto(it, t domain.Item) (code, why string) {
+	switch {
+	case !sameOwner(it, t):
+		return domain.RejectCrossProject, "去处属于另一个项目，跨项目不合并"
+	case otherChange(changeRef(it), changeRef(t)):
+		return domain.RejectOtherChange, "去处是同一仓库的另一个 PR，不合并"
+	case notSame(it, t):
+		return domain.RejectNotSame, "本人拆开过这两条"
+	}
+	return "", ""
 }
 
 // markPending 在新建议的建议信息里记"待归类"：合并开启且来源参与时。
@@ -120,6 +132,7 @@ func markPending(tx *store.Tx, p *domain.Proposal, source string) error {
 type sweepText struct {
 	Title   string   `json:"title"`
 	Summary string   `json:"summary"`
+	Body    string   `json:"body"`
 	Members []string `json:"members"`
 }
 
@@ -142,6 +155,7 @@ type sweepIn struct {
 	Integrate *sweepText `json:"integrate,omitempty"` // 只在载体（keep）上：整合文本
 	Into      bool       `json:"into,omitempty"`      // merge 到整合载体：落账时要求载体的整合已含这一条
 	From      string     `json:"from,omitempty"`      // attach 进展里这条的出处（来源、建立时间、名下消息）
+	Rejected  string     `json:"rejected,omitempty"`  // 第 6 层校验拒绝模型结论的类别码
 }
 
 // Sweep 是维护循环的一步：结清不该归类的待归类建议，攒够一批就跑一批。一次至多跑一批。
@@ -232,6 +246,7 @@ func sameOwner(a, b domain.Item) bool {
 // batchGroup 是模型给的一个组：主题与成员。
 type batchGroup struct {
 	key, topic string
+	reused     bool // 主题名与最近几批的某个主题逐字相同
 	members    []*sweepRec
 }
 
@@ -241,8 +256,9 @@ type batchCombined struct {
 	members        []*sweepRec // 校验后真正整合的（不足两条时为空）
 	carrier        *sweepRec
 	title, summary string
-	missing        []string // 关键事实校验没找到的片段；非空即整组留着
-	why            string   // 没整合时的原因
+	body           string   // 整合后的正文：模型的要点清单 + 内核附上的各成员原文（integratedBody）
+	missing        []string // 关键事实校验没找到的片段（要点清单里缺的带「正文：」、成员原文里的带「原文：」前缀）；非空即整组留着
+	code, why      string   // 没整合时的拒绝码与原因
 }
 
 // batchPlan 是一批的规则层结果，不调模型、不写账本：手动合并的演练输出它，真跑在同一份结果上调模型、落账。
@@ -251,10 +267,10 @@ type batchPlan struct {
 	id       string
 	size     int
 	members  []*sweepRec
-	settle   []sweepIn                 // 规则直接留着的（外发范围不许送）
-	ask      []*sweepRec               // 送模型的（已按资料上限砍过）
-	later    []*sweepRec               // 超出资料上限留到下一轮的，仍待归类
-	blocked  map[*sweepRec][]sweepCand // 够得上检索条件、但被护栏或"不同 PR"拦下的已有事项
+	settle   []sweepIn   // 规则直接留着的（外发范围不许送）
+	ask      []*sweepRec // 送模型的（已按资料上限砍过）
+	later    []*sweepRec // 超出资料上限留到下一轮的，仍待归类
+	topics   []string    // 最近 sweepTopicBatches 批的主题名，给模型沿用
 	text     string
 	input    map[string]any
 	srcs     map[string]domain.Source
@@ -263,7 +279,8 @@ type batchPlan struct {
 	calls    []ManualCall // 这一批的每次模型调用（含不完整而重问的）
 }
 
-// planBatch 跑一批的规则层：成员互相全量可见；每个成员按合并键、仓库 + PR 号、origin.ref、相似度与同项目检索已有事项；护栏；资料打包与超预算砍半。
+// planBatch 跑一批的规则层：成员互相全量可见；每个成员对全部已有事项打分（合并键、仓库 + PR 号、origin.ref 相同记 1，其余按相似度），
+// 按分数取前 merge.candidates 条作候选——只排序，不设下限、不拦（禁止性规则全在第 6 层 veto）；资料打包与超预算砍半。
 func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain.Item, srcs map[string]domain.Source, batch []domain.Item) (*batchPlan, error) {
 	locality := policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
 	canSend := func(it domain.Item) bool {
@@ -278,7 +295,7 @@ func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain
 	for _, it := range batch {
 		h.Write([]byte(it.ID + "|"))
 	}
-	p := &batchPlan{id: "mb_" + hex.EncodeToString(h.Sum(nil))[:12], size: len(batch), blocked: map[*sweepRec][]sweepCand{}, srcs: srcs}
+	p := &batchPlan{id: "mb_" + hex.EncodeToString(h.Sum(nil))[:12], size: len(batch), srcs: srcs, topics: recentTopics(all)}
 
 	// 已有事项：进行中与已完成的（§9.3 判定优先级第 1 步）。建议（含已归类的）、被忽略的不作去处；批内合并只在成员之间。
 	inBatch := map[string]bool{}
@@ -317,27 +334,20 @@ func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain
 		}
 		ask = append(ask, m)
 		for _, o := range pool {
-			if notSame(m.it, o.it) {
-				continue
-			}
 			sc := similarScore(m.it.Title, m.it.Summary, o.it.Title, o.it.Summary)
 			k := mergeKeyOfItem(m.it)
 			if (k != "" && k == mergeKeyOfItem(o.it)) || (m.change != "" && m.change == o.change) || (m.it.Origin != nil && o.it.Origin != nil && m.it.Origin.Ref != "" && m.it.Origin.Ref == o.it.Origin.Ref) {
 				sc = 1
 			}
-			project := m.it.Project != "" && m.it.Project == o.it.Project && o.it.Phase != domain.PhaseDone
-			if sc < pol.Merge.MinScore() && !project { // 档位每批现读策略，改了下一批就生效
-				continue
-			}
-			if !sameOwner(m.it, o.it) || otherChange(m.change, o.change) {
-				p.blocked[m] = append(p.blocked[m], sweepCand{o, round2(sc)})
-				continue
-			}
 			m.cands = append(m.cands, sweepCand{o, round2(sc)})
 		}
-		slices.SortStableFunc(m.cands, func(a, b sweepCand) int { return cmp.Compare(b.score, a.score) })
-		if len(m.cands) > sweepCands {
-			m.cands = m.cands[:sweepCands]
+		// 同分时同一非空项目的在前，再按建立新的在前；每批现读策略的条数，改了下一批就生效。
+		slices.SortStableFunc(m.cands, func(a, b sweepCand) int {
+			same := func(c sweepCand) bool { return m.it.Project != "" && c.rec.it.Project == m.it.Project }
+			return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(b2i(same(b)), b2i(same(a))), b.rec.it.CreatedAt.Compare(a.rec.it.CreatedAt))
+		})
+		if n := pol.Merge.Cands(); len(m.cands) > n {
+			m.cands = m.cands[:n]
 		}
 	}
 	if len(ask) == 1 && len(ask[0].cands) == 0 { // 只有它一条、也没有可选事项：分组与判定都无从谈起，不调模型
@@ -348,10 +358,53 @@ func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain
 		p.settle[i].Batch, p.settle[i].Size = p.id, p.size
 	}
 	if len(ask) > 0 {
-		p.ask, p.text, p.input = s.compose(pol, srcs, ask)
+		p.ask, p.text, p.input = s.compose(pol, srcs, p.topics, ask)
 		p.later = ask[len(p.ask):]
 	}
 	return p, nil
+}
+
+// recentTopics 是最近 sweepTopicBatches 批落账的主题名（新的批在前、批内按名字排、去重）。
+// 主题本就记在每条成员的 proposal.sweep（批次、主题、时刻），也在 inbound.sweep 发出的事项事件快照里；这里只读，不另存。
+func recentTopics(all []domain.Item) []string {
+	type batch struct {
+		at     time.Time
+		topics []string
+	}
+	bs := map[string]*batch{}
+	for _, it := range all {
+		if it.Proposal == nil || it.Proposal.Sweep == nil {
+			continue
+		}
+		sw := it.Proposal.Sweep
+		if sw.State != "done" || sw.Batch == "" || sw.Topic == "" || sw.At == nil {
+			continue
+		}
+		b := bs[sw.Batch]
+		if b == nil {
+			b = &batch{}
+			bs[sw.Batch] = b
+		}
+		if sw.At.After(b.at) {
+			b.at = *sw.At
+		}
+		b.topics = append(b.topics, sw.Topic)
+	}
+	list := make([]*batch, 0, len(bs))
+	for _, b := range bs {
+		list = append(list, b)
+	}
+	slices.SortFunc(list, func(x, y *batch) int { return y.at.Compare(x.at) })
+	var out []string
+	for _, b := range list[:min(len(list), sweepTopicBatches)] {
+		slices.Sort(b.topics)
+		for _, t := range slices.Compact(b.topics) {
+			if !slices.Contains(out, t) {
+				out = append(out, t)
+			}
+		}
+	}
+	return out
 }
 
 // decide 按 plan 调一次写作模型（有要问的时），返回这一批全部结论；不写账本。
@@ -416,6 +469,7 @@ type sweepOut struct {
 		Members []string `json:"members"`
 		Title   string   `json:"title"`
 		Summary string   `json:"summary"`
+		Body    string   `json:"body"`
 	} `json:"combined"`
 }
 
@@ -456,7 +510,7 @@ func sourceName(srcs map[string]domain.Source, src string) string {
 
 // compose 组送给写作模型的资料：成员编 N 号（全文标题与摘要，整合要照抄其中的数字与编号），检索出的已有事项编 E 号；
 // 超出资料上限时砍半，返回这一轮实际要问的那些（ask 的前缀）。
-func (s *Service) compose(pol policy.Policy, srcs map[string]domain.Source, ask []*sweepRec) ([]*sweepRec, string, map[string]any) {
+func (s *Service) compose(pol policy.Policy, srcs map[string]domain.Source, topics []string, ask []*sweepRec) ([]*sweepRec, string, map[string]any) {
 	clip := func(s string, n int) string {
 		r := []rune(strings.Join(strings.Fields(s), " "))
 		if n > 0 && len(r) > n {
@@ -480,7 +534,14 @@ func (s *Service) compose(pol policy.Policy, srcs map[string]domain.Source, ask 
 			}
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "# 这一批待归类的建议（共 %d 条）\n\n", len(ask))
+		fmt.Fprintf(&b, "# 已有主题（最近 %d 批用过的）\n\n", sweepTopicBatches)
+		if len(topics) == 0 {
+			b.WriteString("（还没有）\n")
+		}
+		for _, t := range topics {
+			fmt.Fprintf(&b, "- %s\n", t)
+		}
+		fmt.Fprintf(&b, "\n# 这一批待归类的建议（共 %d 条）\n\n", len(ask))
 		news := make([]string, 0, len(ask))
 		cands := map[string][]string{}
 		for _, m := range ask {
@@ -499,7 +560,7 @@ func (s *Service) compose(pol policy.Policy, srcs map[string]domain.Source, ask 
 			if len(cands[refs[m]]) == 0 {
 				b.WriteString("可选事项：无\n\n")
 			} else {
-				fmt.Fprintf(&b, "可选事项：%s\n\n", strings.Join(cands[refs[m]], "、"))
+				fmt.Fprintf(&b, "可选事项（按检索分数从高到低）：%s\n\n", strings.Join(cands[refs[m]], "、"))
 			}
 		}
 		b.WriteString("# 已有事项\n\n")
@@ -521,7 +582,7 @@ func (s *Service) compose(pol policy.Policy, srcs map[string]domain.Source, ask 
 			for r, ref := range refs {
 				r.ref = ref
 			}
-			return ask, text, map[string]any{"new": news, "candidates": cands, "today": s.o.Now().In(time.Local).Format("2006-01-02")}
+			return ask, text, map[string]any{"new": news, "candidates": cands, "topics": topics, "today": s.o.Now().In(time.Local).Format("2006-01-02")}
 		}
 		ask = ask[:len(ask)/2] // 超出资料预算：这批先归一半，其余下一轮
 	}
@@ -574,17 +635,18 @@ func (s *Service) askOnce(ctx context.Context, pol policy.Policy, p *batchPlan, 
 	return x, f.RunID, true, nil
 }
 
-// askBatch 按 plan 问写作模型，按组、按优先级把回答对回到每条成员；不合规则的结论一律按"留着"。
-// 回答必须对每个成员编号都给出结论：不完整就整批不落账、同样大小重问一次（不复用刚才的回答），仍不完整且多于 sweepFallback 条就只问前 sweepFallback 条
+// askBatch 按 plan 问写作模型，按组、按优先级把回答对回到每条成员，再过第 6 层校验：被拒的一律按"留着"并记拒绝码。
+// 回答必须对每个成员编号都给出结论：不完整就整批不落账、同样大小重问一次（不复用刚才的回答），仍不完整且多于 batch_size 的一半就只问前一半
 // （余下的留在待归类，本进程之后的批也不超过它），再同样重问一次；都不完整就报错，什么都不落。
 // 模型的分组与整合（连同校验结果）记在 p.groups、p.combined 上，给手动合并的报告用。
 //
-// 内核管不到、只靠提示词的两处（§9.3）：
-//   - 先判事项、再判建议：内核只校验去处在本组可选事项里、结论与去处阶段相配；本可以并入事项却被判成批内整合（或保留）的，内核看不出来，step 字段不读。
-//   - 拿不准就保留：内核把 confident=false 的 attach、duplicate、merge 一律留着，但模型自己填了 true 的是否真有把握、
-//     以及"合并后还有没有哪一条要本人单独处理"，只有不同 PR 号这一种由内核硬拦（apart），其余只靠模型判断。
+// 第 6 层校验（内核强制）：去处必须在这一条自己当时的候选里（not_candidate）；结论与去处阶段相配，attach 要进行中、duplicate 要已完成（action_mismatch）；
+// 跨项目、同一仓库不同 PR、本人拆开过的不折叠也不整合（veto）；整合要至少两条、同组、标题摘要正文都不空（combine_invalid），
+// 标题与摘要、正文各自都要含每个成员的关键数字与编号（facts_missing）。
+// 内核管不到、只靠提示词的两处（§9.3）：先判事项再判建议（step 字段不读）；拿不准就保留（confident=false 的一律留着，但填 true 是否真有把握核对不了）。
 func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan) ([]sweepIn, error) {
 	id, size := p.id, p.size
+	half := max(pol.Merge.Batch()/2, 1)
 	var x sweepOut
 	var run string
 	for try := 0; ; try++ {
@@ -598,10 +660,10 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 		}
 		switch {
 		case try%2 == 0: // 同样大小重问一次
-		case len(p.ask) > sweepFallback:
-			s.sweepCap.Store(sweepFallback)
-			head, rest := p.ask[:sweepFallback], append(slices.Clone(p.ask[sweepFallback:]), p.later...)
-			p.ask, p.text, p.input = s.compose(pol, p.srcs, head)
+		case len(p.ask) > half:
+			s.sweepCap.Store(int32(half))
+			head, rest := p.ask[:half], append(slices.Clone(p.ask[half:]), p.later...)
+			p.ask, p.text, p.input = s.compose(pol, p.srcs, p.topics, head)
 			p.later = append(slices.Clone(head[len(p.ask):]), rest...)
 		default:
 			return nil, fmt.Errorf("merge batch %s: the model's answer was incomplete (truncated or missing decisions) %d times, nothing landed", id, try+1)
@@ -616,10 +678,11 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 		}
 	}
 
-	// 第一段：分组。成员只认第一次出现的组；模型漏掉的单独成组（没有主题）。
+	// 第一段：分组。成员只认第一次出现的组；模型漏掉的单独成组（没有主题）。主题名与最近几批的逐字相同即记为沿用。
 	groupOf := map[*sweepRec]int{}
 	for _, g := range x.Groups {
 		bg := batchGroup{key: fmt.Sprintf("%s/G%d", id, len(p.groups)+1), topic: strings.TrimSpace(g.Topic)}
+		bg.reused = bg.topic != "" && slices.Contains(p.topics, bg.topic)
 		for _, ref := range g.Members {
 			if m, ok := byRef[ref]; ok && m.member {
 				if _, seen := groupOf[m]; !seen {
@@ -638,14 +701,6 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 			p.groups = append(p.groups, batchGroup{key: fmt.Sprintf("%s/G%d", id, len(p.groups)+1), members: []*sweepRec{m}})
 		}
 	}
-	inGroup := func(g int, t *sweepRec) bool { // t 是不是本组某个成员的可选事项
-		for _, m := range p.groups[g].members {
-			if slices.ContainsFunc(m.cands, func(c sweepCand) bool { return c.rec == t }) {
-				return true
-			}
-		}
-		return false
-	}
 
 	// 第二段：逐条按优先级。merge 先收集，整组校验后再定。
 	res := map[*sweepRec]*sweepIn{}
@@ -661,6 +716,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 		v := &sweepIn{Item: m.it.ID, Batch: id, Action: domain.SweepKeep, By: "generate", Run: run, Size: size, Chars: chars, Deferred: total - len(ask),
 			Group: g.key, Topic: g.topic, Why: "模型没有给这条结论，留着"}
 		res[m] = v
+		reject := func(code, why string) { v.Rejected, v.Why = code, why+"，按留着处理："+v.Why }
 		for _, d := range x.Decisions {
 			if d.New != m.ref {
 				continue
@@ -671,22 +727,23 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 			case domain.SweepKeep:
 			case domain.SweepAttach, domain.SweepDuplicate:
 				t, ok := byRef[ref]
-				switch {
-				case !ok || t.member || !inGroup(groupOf[m], t):
-					v.Why = "模型给的去处不在本组的可选事项里，按留着处理：" + v.Why
-				case apart(m.it, t.it):
-					v.Why = "去处与这条属于不同项目或不同 PR，按留着处理：" + v.Why
-				case !d.Confident:
+				if !ok || t.member || !slices.ContainsFunc(m.cands, func(c sweepCand) bool { return c.rec == t }) {
+					reject(domain.RejectNotCandidate, "模型给的去处不在这一条的候选里")
+				} else if code, why := veto(m.it, t.it); code != "" {
+					reject(code, why)
+				} else if d.Action != stepOne(t.it) {
+					reject(domain.RejectActionMismatch, "结论与去处的状态不相配（"+d.Action+" 落到"+sweepStatus(t.it)+"的事项）")
+				} else if !d.Confident {
 					v.Hint, v.Score = t.it.ID, scoreOf(m, t)
 					v.Why = "模型拿不准，只提示：" + v.Why
-				default:
-					v.Action, v.Target, v.Score = stepOne(t.it), t.it.ID, scoreOf(m, t)
+				} else {
+					v.Action, v.Target, v.Score = d.Action, t.it.ID, scoreOf(m, t)
 				}
 			case domain.SweepMerge:
 				i, ok := combined[ref]
 				switch {
 				case !ok || !slices.Contains(x.Combined[i].Members, m.ref):
-					v.Why = "模型给的合并项不存在或没有列这一条，按留着处理：" + v.Why
+					reject(domain.RejectNotCandidate, "模型给的合并项不存在或没有列这一条")
 				case !d.Confident:
 					v.Why = "模型拿不准，留着：" + v.Why
 				default:
@@ -704,32 +761,43 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 			continue
 		}
 		delete(merging, c.Merge) // 同号只认第一项
-		bc := &batchCombined{ref: c.Merge, title: strings.TrimSpace(c.Title), summary: strings.TrimSpace(c.Summary), topic: p.groups[groupOf[set[0]]].topic}
+		bc := &batchCombined{ref: c.Merge, title: strings.TrimSpace(c.Title), summary: strings.TrimSpace(c.Summary), body: strings.TrimSpace(c.Body), topic: p.groups[groupOf[set[0]]].topic}
 		p.combined = append(p.combined, bc)
-		bc.why = combineProblem(set, groupOf, bc)
-		if bc.why == "" {
+		bc.code, bc.why = combineProblem(set, groupOf, bc)
+		if bc.code == "" {
+			// 落到载体上的正文 = 模型的要点清单 + 内核逐字附上的各成员原文（超长按额度截断并标注）。
+			// 标题摘要里的关键事实要在整合后的标题摘要与要点清单里都有；原文里的关键事实要在整合后的整段正文里有（被截掉的只能靠要点清单带上）。
+			list := bc.body
+			bc.body = integratedBody(list, set, carrierOf(set), p.srcs, pol.Merge.BodyMax())
 			for _, m := range set {
-				bc.missing = append(bc.missing, missingFacts(bc.title+"\n"+bc.summary, keyFacts(m.it.Title, m.it.Summary))...)
+				facts := keyFacts(m.it.Title, m.it.Summary)
+				bc.missing = append(bc.missing, missingFacts(bc.title+"\n"+bc.summary, facts)...)
+				for _, f := range missingFacts(list, facts) {
+					bc.missing = append(bc.missing, "正文："+f)
+				}
+				for _, f := range missingFacts(bc.body, slices.DeleteFunc(keyFacts(m.it.Body, ""), func(f string) bool { return slices.Contains(facts, f) })) {
+					bc.missing = append(bc.missing, "原文："+f)
+				}
 			}
 			if len(bc.missing) > 0 {
-				bc.why = "整合后的文本缺少成员的关键数字或编号（" + strings.Join(bc.missing, "、") + "），不合并"
+				bc.code, bc.why = domain.RejectFactsMissing, "整合后的文本或正文缺少成员的关键数字或编号（"+strings.Join(bc.missing, "、")+"），不合并"
 			}
 		}
-		if bc.why != "" {
+		bc.members = set
+		if bc.code != "" {
 			for _, m := range set {
-				res[m].Why = bc.why + "，留着：" + res[m].Why
+				res[m].Rejected, res[m].Why = bc.code, bc.why+"，留着："+res[m].Why
 			}
-			bc.members = set
 			continue
 		}
-		bc.members, bc.carrier = set, carrierOf(set)
+		bc.carrier = carrierOf(set)
 		ids := make([]string, len(set))
 		for i, m := range set {
 			ids[i] = m.it.ID
 		}
 		for _, m := range set {
 			if m == bc.carrier {
-				res[m].Integrate = &sweepText{Title: bc.title, Summary: bc.summary, Members: ids}
+				res[m].Integrate = &sweepText{Title: bc.title, Summary: bc.summary, Body: bc.body, Members: ids}
 				continue
 			}
 			res[m].Action, res[m].Target, res[m].Into = domain.SweepMerge, bc.carrier.it.ID, true
@@ -746,27 +814,27 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 	return out2, nil
 }
 
-// combineProblem 是一项整合不能落成的原因（空为可以）：不足两条、跨组、文本为空、成员两两之间有护栏或不同 PR。
-func combineProblem(set []*sweepRec, groupOf map[*sweepRec]int, bc *batchCombined) string {
+// combineProblem 是一项整合不能落成的拒绝码与原因（空为可以）：不足两条、跨组、文本或正文为空（combine_invalid），成员两两之间被 veto 拦下。
+func combineProblem(set []*sweepRec, groupOf map[*sweepRec]int, bc *batchCombined) (string, string) {
 	switch {
 	case len(set) < 2:
-		return "合并只剩一条"
-	case bc.title == "" || bc.summary == "":
-		return "整合后的标题或摘要为空"
+		return domain.RejectCombine, "合并只剩一条"
+	case bc.title == "" || bc.summary == "" || bc.body == "":
+		return domain.RejectCombine, "整合后的标题、摘要或正文为空"
 	}
 	for _, m := range set[1:] {
 		if groupOf[m] != groupOf[set[0]] {
-			return "合并的几条不在同一组"
+			return domain.RejectCombine, "合并的几条不在同一组"
 		}
 	}
 	for i, a := range set {
 		for _, b := range set[i+1:] {
-			if apart(a.it, b.it) {
-				return "合并的几条属于不同项目、不同 PR，或本人拆开过"
+			if code, why := veto(a.it, b.it); code != "" {
+				return code, "合并的几条之间：" + why
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // carrierOf 是整合的载体：名下来源事件最多的一条，同数取建立最早的。
@@ -778,6 +846,100 @@ func carrierOf(set []*sweepRec) *sweepRec {
 		}
 	}
 	return best
+}
+
+// cutNoteRoom 是每条原文给截断说明预留的字节数（说明本身约 250 字节）。
+const cutNoteRoom = 320
+
+// integratedBody 是落到载体上的整合正文：模型写的要点清单在前，后面按成员顺序逐字附上各自的原始正文，每条注明来源、时间、原题与原摘要。
+// 原文先按内容去重：轻量归一化（见 dedupKey）后非空且完全相同的正文只附第一份（成员顺序在前的那条，附的是它的原始字节），其抬头里写「另有 N 条正文与此完全相同」并列出各条的编号、来源、时间与原题；
+// 归一化后仍不同的（前缀、只差一个词、大小写不同）一律各附各的，不做模糊去重。额度在去重之后才分配，省下的归还给留下的原文。
+// 总长不超过 limit 字节：要点清单与每条的抬头整段保留，原文均分余下的额度（从最短的起，用不完的额度留给其余成员），
+// 超出额度的按字节截断（不切开 UTF-8 字符）并写明全文多少、保留多少、截掉多少，以及全文存在哪里。只有要点清单与抬头本身就超限时才会超出。
+func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[string]domain.Source, limit int) string {
+	n := len(set)
+	head := fmt.Sprintf("\n\n---\n来源原文（共 %d 条，按成员顺序逐字附上）", n)
+	label := func(i int) string {
+		m := set[i]
+		return fmt.Sprintf("来源：%s · %s · 原题：「%s」", sourceName(srcs, originSource(m.it)), m.it.CreatedAt.In(time.Local).Format("2006-01-02 15:04"), m.it.Title)
+	}
+	var kept []int          // 要附的成员下标（成员顺序）
+	same := map[int][]int{} // 留下的成员下标 -> 与它正文完全相同、不另附的成员下标
+	first := map[string]int{}
+	for i, m := range set {
+		key := dedupKey(m.it.Body)
+		if k, ok := first[key]; ok && key != "" {
+			same[k] = append(same[k], i)
+			continue
+		}
+		first[key] = i
+		kept = append(kept, i)
+	}
+	heads := make([]string, n)
+	room := limit - len(list) - len(head)
+	for _, i := range kept {
+		heads[i] = fmt.Sprintf("\n\n【%d/%d】%s\n", i+1, n, label(i))
+		if s := set[i].it.Summary; s != "" {
+			heads[i] += "原摘要：" + s + "\n"
+		}
+		if d := same[i]; len(d) > 0 {
+			parts := make([]string, len(d))
+			for j, k := range d {
+				parts[j] = fmt.Sprintf("【%d/%d】%s", k+1, n, label(k))
+			}
+			heads[i] += fmt.Sprintf("（另有 %d 条正文与此完全相同，不重复附上：%s）\n", len(d), strings.Join(parts, "；"))
+		}
+		room -= len(heads[i]) + cutNoteRoom
+	}
+	quota := make([]int, n)
+	order := slices.Clone(kept)
+	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(len(set[a].it.Body), len(set[b].it.Body)) })
+	left := max(room, 0)
+	for k, i := range order {
+		quota[i] = min(len(set[i].it.Body), left/(len(order)-k))
+		left -= quota[i]
+	}
+	var b strings.Builder
+	b.WriteString(list)
+	b.WriteString(head)
+	for _, i := range kept {
+		m := set[i]
+		b.WriteString(heads[i])
+		body := m.it.Body
+		switch {
+		case body == "":
+			b.WriteString("（原文为空）")
+		case len(body) <= quota[i]:
+			b.WriteString(body)
+		default:
+			cut := quota[i]
+			for cut > 0 && !utf8.RuneStart(body[cut]) {
+				cut--
+			}
+			where := "本条 proposal.absorbed 里建议 " + m.it.ID + " 的 body"
+			if m == carrier || slices.ContainsFunc(same[i], func(k int) bool { return set[k] == carrier }) {
+				where = "本条 proposal.integrated.body"
+			}
+			fmt.Fprintf(&b, "%s\n……（原文截断：全文 %d 字节，这里保留前 %d 字节，截掉 %d 字节；全文存于%s）", body[:cut], len(body), cut, len(body)-cut, where)
+		}
+	}
+	return b.String()
+}
+
+// dedupKey 是去重比较用的轻量归一化，只用于比较、不写进正文：CRLF 与 CR 视为 LF，去掉每行行尾空白，连续两个以上空行压成一个，去掉整段首尾空白。
+func dedupKey(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	var out []string
+	blank := false
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRightFunc(line, unicode.IsSpace)
+		if line == "" && blank {
+			continue
+		}
+		blank = line == ""
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 // batchRef 是资料里给记录编的号（N1、E3、M2）；理由里出现时换成那条的标题，页面上不出现编号。
@@ -858,19 +1020,24 @@ func registerSweep(x *command.Executor) error {
 			}
 			var t domain.Item
 			if v.Action != domain.SweepKeep {
-				if t, err = items.Get(c.Tx, v.Target); err != nil || !fits(v.Action, t) || (t.Proposal != nil && t.Proposal.Sweep.Folded()) {
-					v.Action, v.Target, v.Why = domain.SweepKeep, "", "去处已经变了，留着："+v.Why
-				} else if !sameOwner(it, t) { // 护栏在落账处硬拦：不论谁给的结论，项目归属不同不折叠
-					v.Action, v.Target, v.Why = domain.SweepKeep, "", "去处属于另一个项目，跨项目不合并，留着："+v.Why
-				} else if otherChange(changeRef(it), changeRef(t)) {
-					v.Action, v.Target, v.Why = domain.SweepKeep, "", "去处是同一仓库的另一个 PR，不合并，留着："+v.Why
-				} else if v.Into && (t.Proposal == nil || t.Proposal.Integrated == nil || t.Proposal.Integrated.Batch != v.Batch || !slices.Contains(t.Proposal.Integrated.Members, it.ID)) {
-					v.Action, v.Target, v.Why = domain.SweepKeep, "", "整合没有落成，留着："+v.Why
+				// 第 6 层在落账处按账本现状再校验一遍：不论结论来自模型还是别处，被拒的留着并记拒绝码。
+				t, err = items.Get(c.Tx, v.Target)
+				code, why := "", ""
+				switch {
+				case err != nil || !fits(v.Action, t) || (t.Proposal != nil && t.Proposal.Sweep.Folded()):
+					code, why = domain.RejectTargetChanged, "去处已经变了"
+				case v.Into && (t.Proposal == nil || t.Proposal.Integrated == nil || t.Proposal.Integrated.Batch != v.Batch || !slices.Contains(t.Proposal.Integrated.Members, it.ID)):
+					code, why = domain.RejectNotLanded, "整合没有落成"
+				default:
+					code, why = veto(it, t)
+				}
+				if code != "" {
+					v.Action, v.Target, v.Rejected, v.Why = domain.SweepKeep, "", code, why+"，留着："+v.Why
 				}
 			}
 			at := c.Now()
 			sw := domain.ProposalSweep{State: "done", Batch: v.Batch, Action: v.Action, Target: v.Target, Why: v.Why, By: v.By, Run: v.Run, Size: v.Size, Chars: v.Chars, Deferred: v.Deferred, At: &at,
-				Group: v.Group, Topic: v.Topic, Backfill: it.Proposal.Sweep.Backfill}
+				Group: v.Group, Topic: v.Topic, Backfill: it.Proposal.Sweep.Backfill, Rejected: v.Rejected}
 			p := *it.Proposal
 			p.Sweep = &sw
 			if v.Action == domain.SweepKeep {
@@ -878,13 +1045,16 @@ func registerSweep(x *command.Executor) error {
 					p.Similar = append(slices.Clone(p.Similar), domain.ProposalSimilar{Item: v.Hint, Score: v.Score})
 				}
 				if v.Integrate != nil {
-					if why := integrable(c.Tx, it, v.Integrate.Members); why != "" {
-						sw.Why = "整合没落成（" + why + "），留着：" + v.Why
+					if code, why := integrable(c.Tx, it, v.Integrate.Members); code != "" {
+						sw.Rejected, sw.Why = code, "整合没落成（"+why+"），留着："+v.Why
 					} else {
-						p.Integrated = &domain.ProposalIntegrated{Title: it.Title, Summary: it.Summary, ToTitle: v.Integrate.Title, ToSummary: v.Integrate.Summary,
-							Members: v.Integrate.Members, Batch: v.Batch, Run: v.Run, At: at}
+						p.Integrated = &domain.ProposalIntegrated{Title: it.Title, Summary: it.Summary, Body: it.Body, ToTitle: v.Integrate.Title, ToSummary: v.Integrate.Summary,
+							ToBody: v.Integrate.Body, Members: v.Integrate.Members, Batch: v.Batch, Run: v.Run, At: at}
 						_, _, snap, err := items.Revise(c.Tx, it.ID, "merge.integrate", at, func(x *domain.Item) error {
 							x.Title, x.Summary, x.Proposal = v.Integrate.Title, v.Integrate.Summary, &p
+							if v.Integrate.Body != "" { // 模型校验保证非空；旧的落账输入没有正文时不动正文
+								x.Body = v.Integrate.Body
+							}
 							return nil
 						})
 						if err != nil {
@@ -946,28 +1116,28 @@ func attachText(it domain.Item, v sweepIn) string {
 	return text
 }
 
-// integrable 是载体落整合前的重验（空为可以）：其余成员仍待归类、与载体之间没有护栏、不同 PR 或本人拆开过。
-func integrable(tx *store.Tx, carrier domain.Item, members []string) string {
+// integrable 是载体落整合前的重验（空为可以）：其余成员仍待归类（not_landed），与载体之间不被 veto 拦下。
+func integrable(tx *store.Tx, carrier domain.Item, members []string) (string, string) {
 	if !slices.Contains(members, carrier.ID) || len(members) < 2 {
-		return "成员不全"
+		return domain.RejectNotLanded, "成员不全"
 	}
 	for _, id := range members {
 		if id == carrier.ID {
 			continue
 		}
 		m, err := items.Get(tx, id)
-		switch {
-		case err != nil || !pending(m):
-			return "有成员已不在待归类"
-		case apart(carrier, m):
-			return "有成员与它属于不同项目或不同 PR"
+		if err != nil || !pending(m) {
+			return domain.RejectNotLanded, "有成员已不在待归类"
+		}
+		if code, why := veto(carrier, m); code != "" {
+			return code, "有成员与它：" + why
 		}
 	}
-	return ""
+	return "", ""
 }
 
-// absorb 在去处 to 上记下被折叠的 it 本身：原始标题与摘要、origin.source、origin.ref、项目、搬过去的消息与折叠结论，使溯源不靠它名下有没有消息；
-// 原始正文仍在 it 自己身上（折叠只改阶段）。
+// absorb 在去处 to 上记下被折叠的 it 本身：原始标题、摘要与正文（全文）、origin.source、origin.ref、项目、搬过去的消息与折叠结论，
+// 使溯源不靠它名下有没有消息；它自己身上也还留着原文（折叠只改阶段），撤销时它原样回到建议页。
 func absorb(c *command.Ctx, it domain.Item, to string, sw domain.ProposalSweep, moved []string, at time.Time) error {
 	t, err := items.Get(c.Tx, to)
 	if err != nil {
@@ -977,7 +1147,7 @@ func absorb(c *command.Ctx, it domain.Item, to string, sw domain.ProposalSweep, 
 	if t.Proposal != nil {
 		tp = *t.Proposal
 	}
-	a := domain.ProposalAbsorbed{Item: it.ID, Title: it.Title, Summary: it.Summary, Events: moved, Project: it.Project, Created: it.CreatedAt, Action: sw.Action, Batch: sw.Batch, At: at}
+	a := domain.ProposalAbsorbed{Item: it.ID, Title: it.Title, Summary: it.Summary, Body: it.Body, Events: moved, Project: it.Project, Created: it.CreatedAt, Action: sw.Action, Batch: sw.Batch, At: at}
 	if it.Origin != nil {
 		a.Source, a.Ref = it.Origin.Source, it.Origin.Ref
 	}
@@ -1156,7 +1326,7 @@ func unfold(c *command.Ctx, it domain.Item, notSame bool, at time.Time) error {
 }
 
 // undoIntegration 撤销一次批内整合（§9.3）：同一次整合的其他成员一并退回建议（不记 not_same），
-// 本人点撤销的 it 的消息与溯源移回（记 not_same），载体的标题与摘要恢复成整合前的原文——本人事后改过的不覆盖。it 本身由调用方改回建议。
+// 本人点撤销的 it 的消息与溯源移回（记 not_same），载体的标题、摘要与正文恢复成整合前的原文——本人事后改过的不覆盖。it 本身由调用方改回建议。
 func undoIntegration(c *command.Ctx, it, t domain.Item, at time.Time) error {
 	in := *t.Proposal.Integrated
 	for _, id := range in.Members {
@@ -1195,6 +1365,9 @@ func undoIntegration(c *command.Ctx, it, t domain.Item, at time.Time) error {
 	_, _, snap, err := items.Revise(c.Tx, t.ID, "merge.unintegrate", at, func(x *domain.Item) error {
 		if x.Title == in.ToTitle && x.Summary == in.ToSummary {
 			x.Title, x.Summary = in.Title, in.Summary
+		}
+		if in.ToBody != "" && x.Body == in.ToBody { // 整合改过正文的才还原；本人事后改过的不覆盖
+			x.Body = in.Body
 		}
 		x.Proposal = &p
 		return nil

@@ -692,23 +692,26 @@ func TestWebBudgetConstantsMatchKernel(t *testing.T) {
 	}
 }
 
-// 相似度档位：网页的三档与内核同值；默认档（空串）等于改成档位前写死的 0.30；旧策略文档没有这个键读作默认档。
-func TestWebSimilarityTiersMatchKernel(t *testing.T) {
-	b, err := os.ReadFile("../../web/src/features/settings-merge/SettingsMergePage.tsx")
-	if err != nil {
-		t.Fatal(err)
+// 相似度档位已不参与判定：旧策略文档里的 similarity 照常读入、原样往返；候选条数缺省 20，范围外拒绝。
+func TestMergeCandidatesAndLegacySimilarity(t *testing.T) {
+	var m MergeSettings
+	if err := json.Unmarshal([]byte(`{"exclude_sources":null,"batch_size":0,"prompt":"","similarity":"strict"}`), &m); err != nil || m.Similarity != "strict" || m.Cands() != DefaultMergeCandidates {
+		t.Fatalf("an old document still reads: %+v %v", m, err)
 	}
-	for id, min := range SimilarityMin {
-		if want := fmt.Sprintf("{ id: %q, min: %v }", id, min); !strings.Contains(string(b), want) {
-			t.Errorf("SettingsMergePage.tsx lacks %s", want)
+	if out, _ := json.Marshal(MergeSettings{}); strings.Contains(string(out), "candidates") || strings.Contains(string(out), "similarity") {
+		t.Fatalf("defaults are not written: %s", out)
+	}
+	for _, c := range []int{-1, MaxMergeCandidates + 1} {
+		p := Default()
+		p.Merge.Candidates = c
+		if _, err := normalize(p); err == nil {
+			t.Errorf("candidates %d must be refused", c)
 		}
 	}
-	var m MergeSettings
-	if err := json.Unmarshal([]byte(`{"exclude_sources":null,"skip_existing":false,"batch_size":0,"wait_minutes":0,"prompt":""}`), &m); err != nil || m.MinScore() != 0.30 {
-		t.Fatalf("an old document reads as the default tier 0.30: %v %v", m.MinScore(), err)
-	}
-	if out, _ := json.Marshal(m); strings.Contains(string(out), "similarity") {
-		t.Fatalf("the default tier is not written: %s", out)
+	p := Default()
+	p.Merge.Candidates, p.Merge.Similarity = 30, "anything-old"
+	if _, err := normalize(p); err != nil {
+		t.Fatalf("30 candidates with a legacy tier: %v", err)
 	}
 }
 
@@ -739,5 +742,27 @@ func TestCancelledDisturbSwitchesReadAndDropped(t *testing.T) {
 	docs := storedDocs(t, s)
 	if docs[0] != string(old) || strings.Contains(docs[1], "threshold_judge") || strings.Contains(docs[1], "followup_defer") || !strings.Contains(docs[1], `"daily_cap":5`) {
 		t.Fatalf("stored docs: %v", docs)
+	}
+}
+
+// 整合正文上限：缺省 32 KiB、不写出；范围外拒绝。
+func TestMergeBodyMaxBytes(t *testing.T) {
+	if (MergeSettings{}).BodyMax() != DefaultMergeBodyBytes || DefaultMergeBodyBytes != 32768 {
+		t.Fatal("default")
+	}
+	if out, _ := json.Marshal(MergeSettings{}); strings.Contains(string(out), "body_max_bytes") {
+		t.Fatalf("defaults are not written: %s", out)
+	}
+	for _, b := range []int{-1, MinMergeBodyBytes - 1, MaxMergeBodyBytes + 1} {
+		p := Default()
+		p.Merge.BodyMaxBytes = b
+		if _, err := normalize(p); err == nil {
+			t.Errorf("body_max_bytes %d must be refused", b)
+		}
+	}
+	p := Default()
+	p.Merge.BodyMaxBytes = MinMergeBodyBytes
+	if _, err := normalize(p); err != nil || p.Merge.BodyMax() != MinMergeBodyBytes {
+		t.Fatalf("%v", err)
 	}
 }

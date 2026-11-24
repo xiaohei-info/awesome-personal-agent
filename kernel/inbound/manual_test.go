@@ -59,7 +59,7 @@ func stepOneReply(action string) modelstub.Reply {
 		`{"new":"N1","group":"G1","step":1,"action":"`+action+`","target":"E1","reason":"N1 与 E1 是同一件事","confident":true}`, ``)
 }
 
-// 合并护栏：相似但属于别的项目的事项不当候选、不送模型；模型把它判给同组另一条的去处时，落账前也拦下。
+// 合并护栏：检索不拦，另一项目的事项照样是候选、送给模型；模型把它判为去处时第 6 层拒绝（cross_project）、留着。
 // 同一项目的照常并入，去处记下被并那条的原始标题、原始摘要与 origin.ref。
 func TestMergeGuardBlocksCrossProjectCandidates(t *testing.T) {
 	e := newEnv(t, true)
@@ -73,15 +73,15 @@ func TestMergeGuardBlocksCrossProjectCandidates(t *testing.T) {
 	e.now = e.now.Add(time.Minute)
 	c := e.proposal("src_c", "c1", "季度预算评审会议改期", e.web)
 	dry, err := e.svc.PlanManual(bg, ManualFilter{})
-	if err != nil || len(dry.Ask) != 2 || len(dry.Ask[0].Candidates) != 0 || len(dry.Ask[0].Blocked) != 1 || dry.Ask[0].Blocked[0].Item != open || len(dry.Ask[1].Candidates) != 1 {
-		t.Fatalf("the cross-project item is blocked, the same-project one is a candidate: %v %+v", err, dry.Ask)
+	if err != nil || len(dry.Ask) != 2 || len(dry.Ask[0].Candidates) != 1 || dry.Ask[0].Candidates[0].Item != open || len(dry.Ask[1].Candidates) != 1 {
+		t.Fatalf("retrieval does not block: the item is a candidate of both: %v %+v", err, dry.Ask)
 	}
 	e.sweepNow()
 	if e.batchCalls() != 1 {
 		t.Fatalf("one call, got %d", e.batchCalls())
 	}
 	got := e.item(b.ID)
-	if got.Phase != domain.PhaseProposed || got.Proposal.Sweep.Action != domain.SweepKeep || !strings.Contains(got.Proposal.Sweep.Why, "不同项目") {
+	if got.Phase != domain.PhaseProposed || got.Proposal.Sweep.Action != domain.SweepKeep || got.Proposal.Sweep.Rejected != domain.RejectCrossProject || !strings.Contains(got.Proposal.Sweep.Why, "另一个项目") {
 		t.Fatalf("a look-alike in another project must not fold: %s %+v", got.Phase, got.Proposal.Sweep)
 	}
 	if got := e.item(c.ID); got.Phase != domain.PhaseDropped || got.Proposal.Sweep.Action != domain.SweepAttach || got.Proposal.Sweep.Target != open {
@@ -193,13 +193,13 @@ func TestMarkPendingThenManualMerge(t *testing.T) {
 	}
 
 	// 真跑：同一份规则层结果，一次模型调用，判定重复；去处留下溯源。
-	e.stub.When(batchMark, stepOneReply(domain.SweepAttach)) // 去处已完成：内核按阶段定为判定重复
+	e.stub.When(batchMark, stepOneReply(domain.SweepDuplicate)) // 去处已完成：判定重复（判成 attach 是 action_mismatch，见 TestMergeVetoCodes）
 	run, err := e.svc.RunManual(bg, cliOwner, ManualFilter{})
 	if err != nil || e.batchCalls() != 1 {
 		t.Fatalf("apply: %v, calls %d", err, e.batchCalls())
 	}
 	strip := func(r ManualReport) string {
-		r.DryRun, r.Decisions, r.Groups, r.Combined, r.CheckFailed, r.Calls = false, nil, nil, nil, 0, nil
+		r.DryRun, r.Decisions, r.Groups, r.Combined, r.CheckFailed, r.Calls, r.Rejected = false, nil, nil, nil, 0, nil, nil
 		b, _ := json.Marshal(r)
 		return string(b)
 	}

@@ -228,20 +228,23 @@ type ProposalIntegrated struct {
 	Summary   string    `json:"summary,omitempty"`
 	ToTitle   string    `json:"to_title"`
 	ToSummary string    `json:"to_summary,omitempty"`
+	Body      string    `json:"body,omitempty"`    // 整合前载体的正文（撤销时还原）
+	ToBody    string    `json:"to_body,omitempty"` // 整合后的正文：要点清单 + 按成员附的来源原文
 	Members   []string  `json:"members"`
 	Batch     string    `json:"batch,omitempty"`
 	Run       string    `json:"run,omitempty"`
 	At        time.Time `json:"at"`
 }
 
-// ProposalAbsorbed 是一条被归类折叠进来的建议：它的 id、原始标题、origin 与项目，折叠的结论、批次与时刻。
+// ProposalAbsorbed 是一条被归类折叠进来的建议：它的 id、原始标题、摘要与正文、origin 与项目，折叠的结论、批次与时刻。
 type ProposalAbsorbed struct {
 	Item    string    `json:"item"`
 	Title   string    `json:"title"`
 	Source  string    `json:"source,omitempty"` // 它的 origin.source
 	Ref     string    `json:"ref,omitempty"`    // 它的 origin.ref
 	Project string    `json:"project,omitempty"`
-	Summary string    `json:"summary,omitempty"` // 它的原始摘要；原始正文仍在它自己身上（折叠只改阶段）
+	Summary string    `json:"summary,omitempty"` // 它的原始摘要
+	Body    string    `json:"body,omitempty"`    // 它折叠时的原始正文（全文，不截断；它自己身上也还留着，折叠只改阶段）
 	Events  []string  `json:"events,omitempty"`  // 随折叠搬到去处的、它名下的来源事件
 	Created time.Time `json:"created_at"`        // 它自己建立的时刻
 	Action  string    `json:"action"`
@@ -256,6 +259,19 @@ const (
 	SweepAttach    = "attach"    // 并入已有事项：去处追加补充进展，这条折叠
 	SweepDuplicate = "duplicate" // 判定重复：这条折叠
 	SweepUndone    = "undone"    // 本人撤销了折叠
+)
+
+// 第 6 层校验（落账前）拒绝一条折叠结论的类别码（ProposalSweep.Rejected）：被拒的一律留着。
+const (
+	RejectCrossProject   = "cross_project"   // 去处（或整合的另一条）属于另一个项目
+	RejectOtherChange    = "other_change"    // 同一仓库的不同 PR 号
+	RejectNotSame        = "not_same"        // 本人拆开过
+	RejectNotCandidate   = "not_candidate"   // 去处不在这一条当时的候选里，或合并项不存在、没列这一条
+	RejectFactsMissing   = "facts_missing"   // 整合后的文本或正文缺成员的关键数字或编号
+	RejectActionMismatch = "action_mismatch" // 结论与去处的状态不相配（attach 要进行中，duplicate 要已完成）
+	RejectCombine        = "combine_invalid" // 整合不成立：只剩一条、跨组、标题摘要或正文为空
+	RejectTargetChanged  = "target_changed"  // 落账时去处已经变了
+	RejectNotLanded      = "not_landed"      // 落账时整合没有落成
 )
 
 // ProposalSweep 是一条建议在跨来源合并里的归类记录。State 为 pending（待归类）或 done。
@@ -273,6 +289,8 @@ type ProposalSweep struct {
 	Chars    int        `json:"chars,omitempty"`
 	Deferred int        `json:"deferred,omitempty"`
 	At       *time.Time `json:"at,omitempty"`
+	// Rejected 是第 6 层校验拒绝模型结论的类别码（domain.Reject*），被拒后这条留着；空为没有被拒。
+	Rejected string `json:"rejected,omitempty"`
 	// Group 与 Topic 是归类时模型给的分组（批号/G<k>）与主题：建议页按它把同组的建议放在一起，可整组处理。
 	Group string `json:"group,omitempty"`
 	Topic string `json:"topic,omitempty"`

@@ -67,12 +67,11 @@ func refOf(r *sweepRec, score float64) ManualRef {
 	return m
 }
 
-// ManualAsk 是会送给写作模型的一条：它自己、它的仓库 + PR 号、规则检索出的已有事项、被护栏或"不同 PR"拦下的。
+// ManualAsk 是会送给写作模型的一条：它自己、它的仓库 + PR 号、规则检索出的已有事项（按分数从高到低，检索不拦）。
 type ManualAsk struct {
 	ManualRef
 	Change     string      `json:"change,omitempty"`
 	Candidates []ManualRef `json:"candidates"`
-	Blocked    []ManualRef `json:"blocked,omitempty"`
 }
 
 // ManualKept 是规则直接留着、不进模型的一条。
@@ -85,18 +84,22 @@ type ManualKept struct {
 type ManualGroup struct {
 	Group   string      `json:"group"`
 	Topic   string      `json:"topic"`
+	Reused  bool        `json:"reused,omitempty"` // 主题名沿用了最近几批的某个主题（逐字相同）
 	Members []ManualRef `json:"members"`
 }
 
-// ManualCombined 是模型给的一项批内整合与内核校验的结果：Missing 非空是关键事实校验没过，Why 非空即没有整合、成员都留着。
+// ManualCombined 是模型给的一项批内整合与内核校验的结果：Missing 非空是关键事实校验没过（要点清单里缺的带「正文：」、成员原文里缺的带「原文：」），Body 是要落到载体上的整段正文（要点清单 + 来源原文），
+// Rejected、Why 非空即没有整合、成员都留着。
 type ManualCombined struct {
-	Topic   string      `json:"topic"`
-	Carrier string      `json:"carrier,omitempty"`
-	Members []ManualRef `json:"members"`
-	Title   string      `json:"title"`
-	Summary string      `json:"summary"`
-	Missing []string    `json:"missing,omitempty"`
-	Why     string      `json:"why,omitempty"`
+	Topic    string      `json:"topic"`
+	Carrier  string      `json:"carrier,omitempty"`
+	Members  []ManualRef `json:"members"`
+	Title    string      `json:"title"`
+	Summary  string      `json:"summary"`
+	Body     string      `json:"body"`
+	Missing  []string    `json:"missing,omitempty"`
+	Rejected string      `json:"rejected,omitempty"`
+	Why      string      `json:"why,omitempty"`
 }
 
 // ManualCall 是一批里的一次模型调用：问了几条、是不是重问（不复用旧回答）、耗时与输出字数（端点不回报用量，靠它看余量）、
@@ -122,7 +125,8 @@ type ManualDecision struct {
 	Why        string `json:"why"`
 	By         string `json:"by"`
 	Topic      string `json:"topic,omitempty"`
-	Integrated bool   `json:"integrated,omitempty"` // 它是整合的载体：标题与摘要已改写
+	Rejected   string `json:"rejected,omitempty"`   // 第 6 层校验拒绝模型结论的类别码
+	Integrated bool   `json:"integrated,omitempty"` // 它是整合的载体：标题、摘要与正文已改写
 }
 
 // ManualReport 是一轮手动合并的结果。演练与真跑的规则层部分（batch 到 chars）同一算法、同一输入下逐字段相同；
@@ -138,11 +142,13 @@ type ManualReport struct {
 	Ask         []ManualAsk      `json:"ask"`
 	Deferred    []ManualRef      `json:"deferred"` // 超出资料上限、留在待归类的
 	Chars       int              `json:"chars"`    // 送给写作模型的资料字数
+	Topics      []string         `json:"topics"`   // 给模型作已有主题的最近几批主题名
 	Groups      []ManualGroup    `json:"groups,omitempty"`
 	Combined    []ManualCombined `json:"combined,omitempty"`
 	CheckFailed int              `json:"check_failed,omitempty"` // 关键事实校验没过、退回留着的整合项数
 	Calls       []ManualCall     `json:"calls,omitempty"`
 	Decisions   []ManualDecision `json:"decisions,omitempty"`
+	Rejected    map[string]int   `json:"rejected,omitempty"` // 落账后读回的拒绝码计数
 }
 
 // planManual 选出这一轮的待归类（含本人补打的），算规则层结果。
@@ -196,7 +202,7 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 
 // askPart 写报告里送模型的与留到下一轮的：回答不完整降批后重写一遍。
 func (rep *ManualReport) askPart(p *batchPlan) {
-	rep.Batch, rep.Chars = p.id, len([]rune(p.text))
+	rep.Batch, rep.Chars, rep.Topics = p.id, len([]rune(p.text)), p.topics
 	rep.Ask, rep.Deferred = []ManualAsk{}, []ManualRef{}
 	for _, m := range p.later {
 		rep.Deferred = append(rep.Deferred, refOf(&sweepRec{it: m.it}, 0))
@@ -205,9 +211,6 @@ func (rep *ManualReport) askPart(p *batchPlan) {
 		a := ManualAsk{ManualRef: refOf(m, 0), Change: m.change, Candidates: []ManualRef{}}
 		for _, c := range m.cands {
 			a.Candidates = append(a.Candidates, refOf(c.rec, c.score))
-		}
-		for _, c := range p.blocked[m] {
-			a.Blocked = append(a.Blocked, refOf(&sweepRec{it: c.rec.it}, c.score))
 		}
 		rep.Ask = append(rep.Ask, a)
 	}
@@ -223,10 +226,10 @@ func (rep *ManualReport) modelPart(p *batchPlan) {
 		return out
 	}
 	for _, g := range p.groups {
-		rep.Groups = append(rep.Groups, ManualGroup{Group: g.key, Topic: g.topic, Members: refs(g.members)})
+		rep.Groups = append(rep.Groups, ManualGroup{Group: g.key, Topic: g.topic, Reused: g.reused, Members: refs(g.members)})
 	}
 	for _, c := range p.combined {
-		mc := ManualCombined{Topic: c.topic, Members: refs(c.members), Title: c.title, Summary: c.summary, Missing: c.missing, Why: c.why}
+		mc := ManualCombined{Topic: c.topic, Members: refs(c.members), Title: c.title, Summary: c.summary, Body: c.body, Missing: c.missing, Rejected: c.code, Why: c.why}
 		if c.carrier != nil {
 			mc.Carrier = c.carrier.it.ID
 		}
@@ -277,7 +280,13 @@ func (s *Service) RunManual(ctx context.Context, id command.Identity, f ManualFi
 			}
 			if sw := it.Proposal.Sweep; sw != nil && sw.State == "done" && sw.Batch == v.Batch {
 				rep.Decisions = append(rep.Decisions, ManualDecision{Item: it.ID, Title: it.Title, Action: sw.Action, Target: sw.Target, Why: sw.Why, By: sw.By,
-					Topic: sw.Topic, Integrated: it.Proposal.Integrated != nil && it.Proposal.Integrated.Batch == v.Batch})
+					Topic: sw.Topic, Rejected: sw.Rejected, Integrated: it.Proposal.Integrated != nil && it.Proposal.Integrated.Batch == v.Batch})
+				if sw.Rejected != "" {
+					if rep.Rejected == nil {
+						rep.Rejected = map[string]int{}
+					}
+					rep.Rejected[sw.Rejected]++
+				}
 			}
 		}
 		return nil
