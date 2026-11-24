@@ -851,24 +851,46 @@ func carrierOf(set []*sweepRec) *sweepRec {
 const cutNoteRoom = 320
 
 // integratedBody 是落到载体上的整合正文：模型写的要点清单在前，后面按成员顺序逐字附上各自的原始正文，每条注明来源、时间、原题与原摘要。
+// 原文先按内容去重：非空且字节逐位相同的正文只附第一份（成员顺序在前的那条），其抬头里写「另有 N 条正文与此完全相同」并列出各条的编号、来源、时间与原题；
+// 只相似、不完全相同的一律各附各的，不做模糊去重。额度在去重之后才分配，省下的归还给留下的原文。
 // 总长不超过 limit 字节：要点清单与每条的抬头整段保留，原文均分余下的额度（从最短的起，用不完的额度留给其余成员），
 // 超出额度的按字节截断（不切开 UTF-8 字符）并写明全文多少、保留多少、截掉多少，以及全文存在哪里。只有要点清单与抬头本身就超限时才会超出。
 func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[string]domain.Source, limit int) string {
-	head := fmt.Sprintf("\n\n---\n来源原文（共 %d 条，按成员顺序逐字附上）", len(set))
-	heads := make([]string, len(set))
-	room := limit - len(list) - len(head)
+	n := len(set)
+	head := fmt.Sprintf("\n\n---\n来源原文（共 %d 条，按成员顺序逐字附上）", n)
+	label := func(i int) string {
+		m := set[i]
+		return fmt.Sprintf("来源：%s · %s · 原题：「%s」", sourceName(srcs, originSource(m.it)), m.it.CreatedAt.In(time.Local).Format("2006-01-02 15:04"), m.it.Title)
+	}
+	var kept []int          // 要附的成员下标（成员顺序）
+	same := map[int][]int{} // 留下的成员下标 -> 与它正文完全相同、不另附的成员下标
+	first := map[string]int{}
 	for i, m := range set {
-		heads[i] = fmt.Sprintf("\n\n【%d/%d】来源：%s · %s · 原题：「%s」\n", i+1, len(set), sourceName(srcs, originSource(m.it)), m.it.CreatedAt.In(time.Local).Format("2006-01-02 15:04"), m.it.Title)
-		if m.it.Summary != "" {
-			heads[i] += "原摘要：" + m.it.Summary + "\n"
+		if k, ok := first[m.it.Body]; ok && m.it.Body != "" {
+			same[k] = append(same[k], i)
+			continue
+		}
+		first[m.it.Body] = i
+		kept = append(kept, i)
+	}
+	heads := make([]string, n)
+	room := limit - len(list) - len(head)
+	for _, i := range kept {
+		heads[i] = fmt.Sprintf("\n\n【%d/%d】%s\n", i+1, n, label(i))
+		if s := set[i].it.Summary; s != "" {
+			heads[i] += "原摘要：" + s + "\n"
+		}
+		if d := same[i]; len(d) > 0 {
+			parts := make([]string, len(d))
+			for j, k := range d {
+				parts[j] = fmt.Sprintf("【%d/%d】%s", k+1, n, label(k))
+			}
+			heads[i] += fmt.Sprintf("（另有 %d 条正文与此完全相同，不重复附上：%s）\n", len(d), strings.Join(parts, "；"))
 		}
 		room -= len(heads[i]) + cutNoteRoom
 	}
-	quota := make([]int, len(set))
-	order := make([]int, len(set))
-	for i := range order {
-		order[i] = i
-	}
+	quota := make([]int, n)
+	order := slices.Clone(kept)
 	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(len(set[a].it.Body), len(set[b].it.Body)) })
 	left := max(room, 0)
 	for k, i := range order {
@@ -878,7 +900,8 @@ func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[st
 	var b strings.Builder
 	b.WriteString(list)
 	b.WriteString(head)
-	for i, m := range set {
+	for _, i := range kept {
+		m := set[i]
 		b.WriteString(heads[i])
 		body := m.it.Body
 		switch {
@@ -892,7 +915,7 @@ func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[st
 				cut--
 			}
 			where := "本条 proposal.absorbed 里建议 " + m.it.ID + " 的 body"
-			if m == carrier {
+			if m == carrier || slices.ContainsFunc(same[i], func(k int) bool { return set[k] == carrier }) {
 				where = "本条 proposal.integrated.body"
 			}
 			fmt.Fprintf(&b, "%s\n……（原文截断：全文 %d 字节，这里保留前 %d 字节，截掉 %d 字节；全文存于%s）", body[:cut], len(body), cut, len(body)-cut, where)
