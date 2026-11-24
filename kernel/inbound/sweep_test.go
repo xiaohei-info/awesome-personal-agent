@@ -16,7 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
-const batchMark = "这一批新到的建议"
+const batchMark = "这一批待归类的建议"
 
 func (e *env) setPolicy(f func(p *policy.Policy)) {
 	e.t.Helper()
@@ -52,99 +52,118 @@ func (e *env) progressOf(id string) (out []domain.Progress) {
 	return
 }
 
-// 新数据和账本里全部已有记录一起比：三条来自三个来源的新建议攒成一批，一次模型调用分别归为
-// 并入进行中的事项、与本人忽略过的记录重复、与已有建议合成一条；留痕写明去处、理由、判断方与成本；每条都能撤销。
-func TestMergeBatchAgainstExistingAndUndo(t *testing.T) {
+// reply 拼一份模型回答：groups、decisions、combined 三段（各是 JSON 数组的内容）。
+func reply(groups, decisions, combined string) modelstub.Reply {
+	return modelstub.Reply{Content: `{"groups":[` + groups + `],"decisions":[` + decisions + `],"combined":[` + combined + `]}`}
+}
+
+func (e *env) lastBatchBody() (body string) {
+	for _, r := range e.stub.Requests() {
+		if strings.Contains(r.BodyText, batchMark) {
+			body = r.BodyText
+		}
+	}
+	return
+}
+
+// 一批四条按优先级：能确定到进行中事项的并入（attach，进展逐字写出原文）、落到已完成事项的判定重复（事项不改，记溯源）、
+// 同组两条同一件事的整合成一条新建议（载体改写标题与摘要、原文进 integrated，另一条折叠、消息与原摘要进溯源）；
+// 已归类过的老建议不作去处。同一批再跑一遍零变化；撤销整合成员时整组还原。
+func TestMergeBatchPriorityAndIntegration(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeOff })
-	e.emit("src_a", "ticket", ev("old", "ticket.opened", "季度预算评审会议", nil)) // 合并关闭时到的：不进批，只作已有建议
+	e.emit("src_a", "ticket", ev("old", "ticket.opened", "季度预算评审会议改到 11-28 14:00", nil)) // 合并关闭时到的老建议：不进批，也不作去处
 	open := e.openItem("评审 AgentSafe 资产 B18630823")
-	ignored := e.openItem("周报模板改版 W4701")
-	e.transition(ignored, domain.PhaseDropped)
-	old := e.byTitle("季度预算评审会议")
-	if old.Proposal.Sweep != nil {
-		t.Fatalf("merge off must not mark pending: %+v", old.Proposal.Sweep)
-	}
+	done := e.openItem("周报模板改版 W4701")
+	e.transition(done, domain.PhaseDone)
+	old := e.byTitle("季度预算评审会议改到 11-28 14:00")
 
-	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 3 })
-	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[
-		{"new":"N1","action":"attach","target":"E1","reason":"N1 与 E1 是同一个资产编号 B18630823","confident":true},
-		{"new":"N2","action":"duplicate","target":"E2","reason":"同一次周报改版，本人忽略过","confident":true},
-		{"new":"N3","action":"merge","target":"E3","reason":"同一场预算评审会议","confident":true}]}`})
+	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 4 })
+	e.stub.When(batchMark, reply(
+		`{"group":"G1","topic":"AgentSafe 资产","members":["N1"]},{"group":"G2","topic":"周报模板","members":["N2"]},{"group":"G3","topic":"预算评审会议","members":["N3","N4"]}`,
+		`{"new":"N1","group":"G1","step":1,"action":"attach","target":"E1","reason":"N1 与 E1 是同一个资产编号 B18630823","confident":true},
+		 {"new":"N2","group":"G2","step":1,"action":"duplicate","target":"E2","reason":"同一次周报改版，已完成","confident":true},
+		 {"new":"N3","group":"G3","step":2,"action":"merge","target":"M1","reason":"同一场预算评审会议","confident":true},
+		 {"new":"N4","group":"G3","step":2,"action":"merge","target":"M1","reason":"同一场预算评审会议","confident":true}`,
+		`{"merge":"M1","group":"G3","members":["N3","N4"],"title":"季度预算评审会议 11-28 14:00（301 会议室）","summary":"季度预算评审会议定在 11-28 14:00：\n- src_c：会议改到 11-28 14:00\n- src_d：地点 3 楼 301 会议室"}`))
 	e.emit("src_b", "ticket", ev("n1", "ticket.opened", "AgentSafe 资产确认（B18630823）", nil))
-	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 0 {
-		t.Fatalf("one pending is below the batch size: err %v, calls %d", err, e.batchCalls())
-	}
 	e.now = e.now.Add(time.Minute) // 同批按建立先后编号
 	e.emit("src_c", "ticket", ev("n2", "ticket.opened", "周报模板改版（W4701 第二次提醒）", nil))
 	e.now = e.now.Add(time.Minute)
-	e.emit("src_d", "ticket", ev("n3", "ticket.opened", "季度预算评审会议改期", nil))
-	if err := e.svc.Sweep(bg); err != nil {
-		t.Fatal(err)
+	e.emit("src_c", "ticket", ev("n3", "ticket.opened", "季度预算评审会议改到 11-28 14:00 了", nil))
+	e.now = e.now.Add(time.Minute)
+	e.emit("src_d", "ticket", ev("n4", "ticket.opened", "季度预算评审会议地点：3 楼 301 会议室", nil))
+	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
+		t.Fatalf("one model call for the whole batch: %v %d", err, e.batchCalls())
 	}
-	if n := e.batchCalls(); n != 1 {
-		t.Fatalf("one model call for the whole batch, got %d", n)
-	}
-	req := ""
-	for _, r := range e.stub.Requests() {
-		if strings.Contains(r.BodyText, batchMark) {
-			req = r.BodyText
-		}
-	}
-	for _, s := range []string{"进行中", "本人忽略过", "评审 AgentSafe 资产 B18630823", "周报模板改版 W4701"} {
+	req := e.lastBatchBody()
+	for _, s := range []string{"［进行中］", "［已完成］", "评审 AgentSafe 资产 B18630823", "周报模板改版 W4701", "N4［待归类的建议］"} {
 		if !strings.Contains(req, s) {
-			t.Fatalf("existing records must be in the batch input, missing %q", s)
+			t.Fatalf("members and existing items must be in the batch input, missing %q", s)
 		}
+	}
+	if strings.Contains(req, "季度预算评审会议改到 11-28 14:00\\n") {
+		t.Fatal("an already sorted proposal is not a target any more")
 	}
 
-	n1, n2, n3 := e.byTitle("AgentSafe 资产确认（B18630823）"), e.byTitle("周报模板改版（W4701 第二次提醒）"), e.byTitle("季度预算评审会议改期")
+	n1, n2 := e.byTitle("AgentSafe 资产确认（B18630823）"), e.byTitle("周报模板改版（W4701 第二次提醒）")
+	n4 := e.byTitle("季度预算评审会议地点：3 楼 301 会议室")
+	carrier := e.byTitle("季度预算评审会议 11-28 14:00（301 会议室）")
 	for _, c := range []struct {
 		it             domain.Item
 		action, target string
-	}{{n1, domain.SweepAttach, open}, {n2, domain.SweepDuplicate, ignored}, {n3, domain.SweepMerge, old.ID}} {
+	}{{n1, domain.SweepAttach, open}, {n2, domain.SweepDuplicate, done}, {n4, domain.SweepMerge, carrier.ID}} {
 		sw := c.it.Proposal.Sweep
 		if c.it.Phase != domain.PhaseDropped || sw.State != "done" || sw.Action != c.action || sw.Target != c.target ||
-			sw.By != "generate" || sw.Run == "" || sw.Size != 3 || sw.Chars == 0 || sw.Why == "" || sw.Batch == "" {
+			sw.By != "generate" || sw.Run == "" || sw.Size != 4 || sw.Chars == 0 || sw.Why == "" || sw.Group == "" || sw.Topic == "" {
 			t.Fatalf("%s: %s %+v", c.it.Title, c.it.Phase, sw)
 		}
 	}
-	if why := n1.Proposal.Sweep.Why; strings.Contains(why, "N1") || strings.Contains(why, "E1") || !strings.Contains(why, "「AgentSafe 资产确认") || !strings.Contains(why, "「评审 AgentSafe") {
+	if why := n1.Proposal.Sweep.Why; strings.Contains(why, "E1") || !strings.Contains(why, "「AgentSafe 资产确认") || !strings.Contains(why, "「评审 AgentSafe") {
 		t.Fatalf("batch numbers in the reason become titles: %q", why)
 	}
-	if ps := e.progressOf(open); len(ps) != 1 || !strings.Contains(ps[0].Text, "AgentSafe 资产确认") || !strings.Contains(ps[0].Text, "B18630823") {
-		t.Fatalf("attach appends a supplement to the open item: %+v", ps)
+	if ps := e.progressOf(open); len(ps) != 1 || !strings.Contains(ps[0].Text, "原建议「AgentSafe 资产确认（B18630823）」") || !strings.Contains(ps[0].Text, "消息 1 条：ticket.opened×1") {
+		t.Fatalf("attach writes the folded proposal out in full: %+v", ps)
 	}
-	if it := e.item(open); it.Title != "评审 AgentSafe 资产 B18630823" || it.Phase != domain.PhaseOpen {
-		t.Fatalf("attach must not change the open item itself: %+v", it)
+	if it := e.item(done); it.Title != "周报模板改版 W4701" || it.Phase != domain.PhaseDone || len(it.Proposal.Absorbed) != 1 || it.Proposal.Absorbed[0].Action != domain.SweepDuplicate {
+		t.Fatalf("duplicate leaves the done item as it was, with a trail: %+v", it)
 	}
-	ev3 := e.sev("src_d", "n3")[0]
-	got := e.item(old.ID).Proposal
-	if !slices.Contains(got.Sources, ev3) || len(got.Merges) != 1 || got.Merges[0].Item != n3.ID || got.Merges[0].By != "generate" ||
-		got.Merges[0].Why != "同一场预算评审会议" || got.Merges[0].Source != "src_d" {
-		t.Fatalf("merge trace on the target: %+v", got)
+	in := carrier.Proposal.Integrated
+	if carrier.Phase != domain.PhaseProposed || carrier.Proposal.Sweep.Action != domain.SweepKeep || in == nil || in.Title != "季度预算评审会议改到 11-28 14:00 了" ||
+		!strings.Contains(carrier.Summary, "301 会议室") || len(in.Members) != 2 || in.ToTitle != carrier.Title {
+		t.Fatalf("the carrier is rewritten and keeps its own original: %+v %+v", carrier, in)
 	}
-	if e.events("src_d")[0].Item != old.ID {
-		t.Fatal("merged event must point at the target")
+	ab := carrier.Proposal.Absorbed
+	if len(ab) != 1 || ab[0].Item != n4.ID || ab[0].Title != n4.Title || len(ab[0].Events) != 1 || !slices.Contains(carrier.Proposal.Sources, ab[0].Events[0]) {
+		t.Fatalf("the folded member's original and messages are on the carrier: %+v", ab)
+	}
+	if e.item(old.ID).Proposal.Sweep != nil {
+		t.Fatal("the old proposal is untouched")
 	}
 	e.verify()
 
-	// 再跑一轮：没有待归类的，不调模型。
-	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
-		t.Fatalf("nothing pending must not call the model: %v %d", err, e.batchCalls())
+	// 同一批再跑：成员都已归类，零变化、不调模型。
+	h := e.head()
+	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 || e.head() != h {
+		t.Fatalf("second pass changes nothing: %v %d", err, e.batchCalls())
 	}
 
-	for _, id := range []string{n3.ID, n1.ID, n2.ID} {
+	// 撤销整合成员：整组还原。
+	if err := e.svc.Unmerge(bg, owner, n4.ID); err != nil {
+		t.Fatal(err)
+	}
+	back := e.item(carrier.ID)
+	if back.Title != "季度预算评审会议改到 11-28 14:00 了" || back.Proposal.Integrated != nil || len(back.Proposal.Absorbed) != 0 || !slices.Contains(back.Proposal.NotSame, n4.ID) {
+		t.Fatalf("the carrier is back to its original: %+v", back)
+	}
+	if it := e.item(n4.ID); it.Phase != domain.PhaseProposed || it.Proposal.Sweep.Action != domain.SweepUndone || e.events("src_d")[0].Item != n4.ID {
+		t.Fatalf("the member is back with its message: %+v", it)
+	}
+	for _, id := range []string{n1.ID, n2.ID} {
 		if err := e.svc.Unmerge(bg, owner, id); err != nil {
 			t.Fatalf("unmerge %s: %v", id, err)
 		}
-		if it := e.item(id); it.Phase != domain.PhaseProposed || it.Proposal.Sweep.Action != domain.SweepUndone {
-			t.Fatalf("undone %s: %s %+v", id, it.Phase, it.Proposal.Sweep)
-		}
-	}
-	got = e.item(old.ID).Proposal
-	if slices.Contains(got.Sources, ev3) || len(got.Merges) != 0 || !slices.Contains(got.NotSame, n3.ID) || e.events("src_d")[0].Item != n3.ID {
-		t.Fatalf("unmerge moves the source back: %+v", got)
 	}
 	if ps := e.progressOf(open); len(ps) != 2 || !strings.Contains(ps[1].Text, "撤回上一条补充") {
 		t.Fatalf("unmerge of attach appends a retraction: %+v", ps)
@@ -155,14 +174,74 @@ func TestMergeBatchAgainstExistingAndUndo(t *testing.T) {
 	e.verify()
 }
 
-// 拿不准只提示、给的去处不在候选里按留着；不够条数时等够时间再跑；关闭合并时待归类的按规则结清、不调模型。
+// 关键事实校验：整合文本漏掉成员的一个数字（301）就不整合，两条都留着、载体文本不变，手动合并的报告计 check_failed。
+// 同一仓库不同 PR 号的两条即使模型放进同一项整合也不合并；PR 号相同的已有事项按强标识检索成满分候选，另一个 PR 的被拦下。
+func TestMergeIntegrationChecks(t *testing.T) {
+	e := newEnv(t, true)
+	e.svc.o.Now = e.Now
+	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 4 })
+	pr := e.openItem("[org/app] fix A (PR #220) 审阅 T-6661")
+	e.stub.When(batchMark, reply(
+		`{"group":"G1","topic":"预算会","members":["N1","N2"]},{"group":"G2","topic":"org/app PR","members":["N3","N4"]}`,
+		`{"new":"N1","group":"G1","step":2,"action":"merge","target":"M1","reason":"同一场会","confident":true},
+		 {"new":"N2","group":"G1","step":2,"action":"merge","target":"M1","reason":"同一场会","confident":true},
+		 {"new":"N3","group":"G2","step":2,"action":"merge","target":"M2","reason":"同一仓库","confident":true},
+		 {"new":"N4","group":"G2","step":2,"action":"merge","target":"M2","reason":"同一仓库","confident":true}`,
+		`{"merge":"M1","group":"G1","members":["N1","N2"],"title":"季度预算评审会议","summary":"会议 11-28 14:00 开，地点 3 楼会议室"},
+		 {"merge":"M2","group":"G2","members":["N3","N4"],"title":"org/app PR #220 与 PR #221","summary":"[org/app] fix A (PR #220)；[org/app] fix A (PR #221)"}`))
+	a := e.proposal("src_a", "a1", "季度预算评审会议改到 11-28 14:00", "")
+	e.now = e.now.Add(time.Minute)
+	b := e.proposal("src_b", "b1", "季度预算评审会议地点 301", "")
+	e.now = e.now.Add(time.Minute)
+	c := e.proposal("src_c", "c1", "[org/app] fix A (PR #220)", "")
+	e.now = e.now.Add(time.Minute)
+	d := e.proposal("src_d", "d1", "[org/app] fix A (PR #221) T-6661", "")
+	e.now = e.now.Add(31 * time.Minute)
+
+	dry, err := e.svc.PlanManual(bg, ManualFilter{})
+	if err != nil || len(dry.Ask) != 4 {
+		t.Fatalf("dry: %v %+v", err, dry)
+	}
+	for _, x := range dry.Ask {
+		switch x.Item {
+		case c.ID:
+			if x.Change != "org/app#220" || len(x.Candidates) != 1 || x.Candidates[0].Item != pr || x.Candidates[0].Score != 1 {
+				t.Fatalf("the same PR is a full-score candidate: %+v", x)
+			}
+		case d.ID:
+			if len(x.Candidates) != 0 || len(x.Blocked) != 1 || x.Blocked[0].Item != pr {
+				t.Fatalf("another PR of the same repository is blocked: %+v", x)
+			}
+		}
+	}
+	rep, err := e.svc.RunManual(bg, cliOwner, ManualFilter{})
+	if err != nil || rep.CheckFailed != 1 || len(rep.Combined) != 2 || !slices.Equal(rep.Combined[0].Missing, []string{"301"}) || len(rep.Groups) != 2 {
+		t.Fatalf("one integration fails the fact check: %v %+v", err, rep)
+	}
+	for _, it := range []domain.Item{a, b, c, d} {
+		got := e.item(it.ID)
+		if got.Phase != domain.PhaseProposed || got.Title != it.Title || got.Proposal.Sweep.Action != domain.SweepKeep || got.Proposal.Integrated != nil {
+			t.Fatalf("%s stays as it was: %+v", it.Title, got)
+		}
+	}
+	if why := e.item(a.ID).Proposal.Sweep.Why; !strings.Contains(why, "缺少") || !strings.Contains(why, "301") {
+		t.Fatalf("why names the missing fact: %q", why)
+	}
+	if why := e.item(c.ID).Proposal.Sweep.Why; !strings.Contains(why, "不同 PR") {
+		t.Fatalf("two PRs never merge: %q", why)
+	}
+	e.verify()
+}
+
+// 拿不准只提示、给的合并项不存在按留着；不够条数时等够时间再跑；关闭合并时待归类的按规则结清、不调模型。
 func TestMergeBatchUndecidedWaitAndOff(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	open := e.openItem("季度预算评审会议")
-	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[
-		{"new":"N1","action":"attach","target":"E1","reason":"像是同一场会","confident":false},
-		{"new":"N2","action":"merge","target":"E9","reason":"编造的去处","confident":true}]}`})
+	e.setPolicy(func(p *policy.Policy) { p.Merge.BatchSize = 20 })
+	e.stub.When(batchMark, reply(`{"group":"G1","topic":"预算会","members":["N1","N2"]}`,
+		`{"new":"N1","group":"G1","step":1,"action":"attach","target":"E1","reason":"像是同一场会","confident":false},
+		 {"new":"N2","group":"G1","step":2,"action":"merge","target":"M9","reason":"编造的合并项","confident":true}`, ``))
 	e.emit("src_a", "ticket", ev("u1", "ticket.opened", "季度预算评审会议改期", nil))
 	e.now = e.now.Add(time.Minute)
 	e.emit("src_b", "ticket", ev("u2", "ticket.opened", "季度预算评审会议纪要", nil))
@@ -177,8 +256,8 @@ func TestMergeBatchUndecidedWaitAndOff(t *testing.T) {
 	if u1.Phase != domain.PhaseProposed || u1.Proposal.Sweep.Action != domain.SweepKeep || len(u1.Proposal.Similar) != 1 || u1.Proposal.Similar[0].Item != open {
 		t.Fatalf("undecided keeps and hints: %+v", u1.Proposal)
 	}
-	if u2.Phase != domain.PhaseProposed || u2.Proposal.Sweep.Action != domain.SweepKeep || !strings.Contains(u2.Proposal.Sweep.Why, "不在候选里") {
-		t.Fatalf("made-up target keeps: %+v", u2.Proposal.Sweep)
+	if u2.Phase != domain.PhaseProposed || u2.Proposal.Sweep.Action != domain.SweepKeep || !strings.Contains(u2.Proposal.Sweep.Why, "合并项不存在") {
+		t.Fatalf("made-up merge keeps: %+v", u2.Proposal.Sweep)
 	}
 
 	e.emit("src_c", "ticket", ev("u3", "ticket.opened", "季度预算评审会议改到周五", nil))
@@ -193,7 +272,7 @@ func TestMergeBatchUndecidedWaitAndOff(t *testing.T) {
 	e.verify()
 }
 
-// 不参与合并的来源不进批；不纳入已有记录时只和建议比；本人改过的提示词随调用送出。
+// 不参与合并的来源不进批；不纳入已有事项时资料里没有已有事项；本人改过的提示词随调用送出。
 func TestMergeBatchSettings(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
@@ -202,42 +281,30 @@ func TestMergeBatchSettings(t *testing.T) {
 	e.setPolicy(func(p *policy.Policy) {
 		p.Merge = policy.MergeSettings{ExcludeSources: []string{"src_x"}, SkipExisting: true, BatchSize: 2, Prompt: body}
 	})
-	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[{"new":"N1","action":"keep","target":null,"reason":"不是一回事","confident":true}]}`})
+	e.stub.When(batchMark, reply(``, ``, ``))
 	e.emit("src_x", "ticket", ev("x1", "ticket.opened", "季度预算评审会议改期", nil))
 	e.emit("src_a", "ticket", ev("a1", "ticket.opened", "季度预算评审会议改期了", nil))
 	e.emit("src_b", "ticket", ev("b1", "ticket.opened", "导出报表加一列", nil))
-	if x := e.sev("src_x", "x1")[0]; x == "" {
-		t.Fatal("no event")
-	}
 	for _, it := range e.proposed() {
 		if it.Origin.Source == "src_x" && it.Proposal.Sweep != nil {
 			t.Fatalf("excluded source must not be marked: %+v", it.Proposal.Sweep)
 		}
 	}
-	if err := e.svc.Sweep(bg); err != nil {
-		t.Fatal(err)
+	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
+		t.Fatalf("two members make a batch: %v %d", err, e.batchCalls())
 	}
-	// 只和建议比：src_a 那条唯一的相似记录是被排除来源的建议与进行中的事项，都不算候选，所以不调模型。
-	if n := e.batchCalls(); n != 0 {
-		t.Fatalf("no candidates under these settings, got %d calls", n)
+	if req := e.lastBatchBody(); strings.Contains(req, "［进行中］") || !strings.Contains(req, "自定义标记XYZ") || strings.Contains(req, "改期\\n") {
+		t.Fatalf("no existing items, the owner's prompt is sent, the excluded source is not: %s", req)
 	}
-	if sw := e.byTitle("导出报表加一列").Proposal.Sweep; sw.By != "rule" || sw.Action != domain.SweepKeep {
-		t.Fatalf("%+v", sw)
+	if sw := e.byTitle("导出报表加一列").Proposal.Sweep; sw.By != "generate" || sw.Action != domain.SweepKeep || !strings.Contains(sw.Why, "没有给这条结论") {
+		t.Fatalf("no answer keeps: %+v", sw)
 	}
 
 	e.setPolicy(func(p *policy.Policy) { p.Merge.SkipExisting = false })
 	e.emit("src_c", "ticket", ev("c1", "ticket.opened", "季度预算评审会议改期一事", nil))
 	e.emit("src_d", "ticket", ev("d1", "ticket.opened", "另一件不相干的事", nil))
-	if err := e.svc.Sweep(bg); err != nil {
-		t.Fatal(err)
-	}
-	if e.batchCalls() != 1 {
-		t.Fatalf("with existing records included there is a candidate: %d", e.batchCalls())
-	}
-	for _, r := range e.stub.Requests() {
-		if strings.Contains(r.BodyText, batchMark) && !strings.Contains(r.BodyText, "自定义标记XYZ") {
-			t.Fatal("the owner's prompt must be sent")
-		}
+	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 2 || !strings.Contains(e.lastBatchBody(), "［进行中］") {
+		t.Fatalf("with existing items the open one is a candidate: %v %d", err, e.batchCalls())
 	}
 	e.verify()
 }
@@ -249,9 +316,13 @@ func TestMergeBatchBudgetHalves(t *testing.T) {
 		e := newEnv(t, true)
 		e.svc.o.Now = e.Now
 		e.openItem("资产确认 B18630823")
-		e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 20; p.Merge.BudgetTokens = budget })
-		e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[]}`})
-		long := strings.Repeat("需要本人确认的资产信息与负责人说明", 6) // 标题按上限 120 字送出
+		e.setPolicy(func(p *policy.Policy) {
+			p.MergeJudge = policy.MergeSame
+			p.Merge.BatchSize = 20
+			p.Merge.BudgetTokens = budget
+		})
+		e.stub.When(batchMark, reply(``, ``, ``))
+		long := strings.Repeat("需要本人确认的资产信息与负责人说明", 6)
 		for i := range 20 {
 			e.now = e.now.Add(time.Second)
 			e.emit(fmt.Sprintf("src_%02d", i), "ticket", ev(fmt.Sprintf("b%02d", i), "ticket.opened", fmt.Sprintf("%02d %s B18630823", i, long), nil))
@@ -369,20 +440,24 @@ func pr227(e *env) (keep, mid, gp domain.Item, i, m, g []string) {
 	return keep, mid, gp, e.sev("src_mail_icloud", "i1", "i2"), e.sev("src_mail", "m1", "m2"), e.sev("src_github", "g1", "g2", "g3", "g4")
 }
 
-// sweep227 跑线上那次归类：一次模型调用，mid 与 gp 并进 keep。
+const pr227Title = "org/app PR #227「能力页「帮我安装」卡片移到最上方并改标题」：评审请求，已合并"
+
+// sweep227 跑一次归类：同一 PR #227 的三条整合成一条新建议。
 func (e *env) sweep227() {
 	e.t.Helper()
-	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[
-		{"new":"N1","action":"merge","target":"N3","reason":"同一个 PR #227 的评审通知","confident":true},
-		{"new":"N2","action":"merge","target":"N3","reason":"同一个 PR #227","confident":true}]}`})
+	e.stub.When(batchMark, reply(`{"group":"G1","topic":"org/app PR #227","members":["N1","N2","N3"]}`,
+		`{"new":"N1","group":"G1","step":2,"action":"merge","target":"M1","reason":"同一个 PR #227 的评审通知","confident":true},
+		 {"new":"N2","group":"G1","step":2,"action":"merge","target":"M1","reason":"同一个 PR #227","confident":true},
+		 {"new":"N3","group":"G1","step":2,"action":"merge","target":"M1","reason":"同一个 PR #227","confident":true}`,
+		`{"merge":"M1","group":"G1","members":["N1","N2","N3"],"title":"`+pr227Title+`","summary":"org/app 的 PR #227 共三条通知：\n- 邮件：Re: 评审回复\n- 邮件：请求评审\n- 平台：已合并、有更新、请求评审"}`))
 	e.now = e.now.Add(31 * time.Minute)
 	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
 		e.t.Fatalf("one model call: %v %d", err, e.batchCalls())
 	}
 }
 
-// 线上 PR #227：平台上的三条更新挂到 gp，记进它的消息清单。归类把 mid、gp 并进 keep：被折那条名下的消息全部搬到 keep，
-// 按到达先后排，每条带合并留痕（记着从哪条来）；撤销后原样回到原处。
+// 线上 PR #227：三条建议在同一批里整合成一条。载体是名下消息最多的平台那条（4 条），另两条名下的消息全部搬到它，
+// 按搬入先后排，每条带合并留痕（记着从哪条来）；撤销其中一条时整组还原，消息原样回到原处，载体恢复原标题。
 func TestMergeFoldMovesEveryHeldMessage(t *testing.T) {
 	e := followEnv(t)
 	keep, mid, gp, i, m, g := pr227(e)
@@ -396,40 +471,46 @@ func TestMergeFoldMovesEveryHeldMessage(t *testing.T) {
 	}
 
 	e.sweep227()
-	got := e.item(keep.ID).Proposal
-	want := append(append(append([]string{}, i...), m...), g...)
-	if !slices.Equal(got.Sources, want) || len(got.Merges) != 7 {
-		t.Fatalf("every held message moves, in arrival order: %+v", got)
+	if req := e.lastBatchBody(); !strings.Contains(req, "消息：4 条：pr.opened×1、pr.merged×1、pr.updated×1、notification.review_requested×1") {
+		t.Fatalf("the model sees what each member's messages were: %s", req)
 	}
-	for k, x := range got.Merges {
-		from := mid.ID
-		if k >= 3 {
-			from = gp.ID
+	got := e.item(gp.ID)
+	want := append(append(append([]string{}, g...), i[0]), i[1], m[0], m[1])
+	if got.Title != pr227Title || got.Proposal.Integrated == nil || !slices.Equal(got.Proposal.Sources, want) || len(got.Proposal.Merges) != 4 || len(got.Proposal.Absorbed) != 2 {
+		t.Fatalf("every held message moves to the carrier: %+v %+v", got, got.Proposal)
+	}
+	for k, x := range got.Proposal.Merges {
+		from := keep.ID
+		if k >= 1 {
+			from = mid.ID
 		}
-		if x.Event != want[k+1] || x.Item != from || x.By != "generate" || x.Batch == "" {
+		if x.Event != want[k+4] || x.Item != from || x.By != "generate" || x.Batch == "" {
 			t.Fatalf("merge trace %d: %+v", k, x)
 		}
 	}
 	for _, src := range []string{"src_mail_icloud", "src_mail", "src_github"} {
 		for _, x := range e.events(src) {
-			if x.Item != keep.ID {
+			if x.Item != gp.ID {
 				t.Fatalf("event left behind: %+v", x)
 			}
 		}
 	}
-	for _, id := range []string{mid.ID, gp.ID} {
-		if it := e.item(id); it.Phase != domain.PhaseDropped || it.Proposal.Sweep.Target != keep.ID {
+	for _, id := range []string{keep.ID, mid.ID} {
+		if it := e.item(id); it.Phase != domain.PhaseDropped || it.Proposal.Sweep.Target != gp.ID {
 			t.Fatalf("folded %s: %+v", id, it.Proposal.Sweep)
 		}
 	}
 	e.verify()
 
-	if err := e.svc.Unmerge(bg, owner, gp.ID); err != nil {
+	if err := e.svc.Unmerge(bg, owner, mid.ID); err != nil {
 		t.Fatal(err)
 	}
-	got = e.item(keep.ID).Proposal
-	if !slices.Equal(got.Sources, want[:4]) || len(got.Merges) != 3 || !slices.Equal(e.item(gp.ID).Proposal.Sources, g) {
-		t.Fatalf("unmerge takes back exactly what was moved: %+v", got)
+	got = e.item(gp.ID)
+	if got.Title != gp.Title || got.Proposal.Integrated != nil || !slices.Equal(got.Proposal.Sources, g) || len(got.Proposal.Merges) != 0 || len(got.Proposal.Absorbed) != 0 {
+		t.Fatalf("undo puts the whole integration back: %+v", got.Proposal)
+	}
+	if !slices.Equal(e.item(keep.ID).Proposal.Sources, i[:1]) || e.item(keep.ID).Phase != domain.PhaseProposed || e.item(mid.ID).Phase != domain.PhaseProposed {
+		t.Fatal("both members are back")
 	}
 	for k, x := range e.events("src_github") {
 		if x.Item != gp.ID || (k == 0) != (x.Disposition == domain.DispositionProposed) {
@@ -455,7 +536,8 @@ func TestAttachFoldMovesMessagesToTheItem(t *testing.T) {
 	}
 	n := ps[0]
 
-	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[{"new":"N1","action":"attach","target":"E1","reason":"同一个资产编号 B18630823","confident":true}]}`})
+	e.stub.When(batchMark, reply(`{"group":"G1","topic":"AgentSafe 资产","members":["N1"]}`,
+		`{"new":"N1","group":"G1","step":1,"action":"attach","target":"E1","reason":"同一个资产编号 B18630823","confident":true}`, ``))
 	e.now = e.now.Add(31 * time.Minute)
 	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
 		t.Fatalf("one model call: %v %d", err, e.batchCalls())
@@ -478,8 +560,8 @@ func TestAttachFoldMovesMessagesToTheItem(t *testing.T) {
 	if len(att) != 1 || att[0].ID != a[1] {
 		t.Fatalf("the reply is an attached message of the item: %+v", att)
 	}
-	if ps := e.progressOf(open); len(ps) != 1 || !strings.Contains(ps[0].Text, "AgentSafe 资产确认") {
-		t.Fatalf("still one supplement note: %+v", ps)
+	if ps := e.progressOf(open); len(ps) != 1 || !strings.Contains(ps[0].Text, "AgentSafe 资产确认") || !strings.Contains(ps[0].Text, "消息 2 条") {
+		t.Fatalf("still one supplement note, written out in full: %+v", ps)
 	}
 	e.verify()
 
@@ -503,8 +585,9 @@ func TestAttachFoldMovesMessagesToTheItem(t *testing.T) {
 	e.verify()
 }
 
-// 相似度档位（merge.similarity）：默认档就是改成档位前写死的 0.30；改档写进策略，同一个运行中的服务下一批即按新档初筛，不重启。
-// 「季度预算评审会议」对「预算会议改期 / 延期 / 推迟」都是 0.33、对「季度总结 / 复盘 / 规划会议」都是 0.25：严档两条都不送模型，默认档只送前者，宽档两条都送。
+// 相似度档位（merge.similarity）只管检索已有事项：默认档就是改成档位前写死的 0.30；改档写进策略，下一批即按新档检索，不重启。
+// 「季度预算评审会议」对「预算会议改期 / 延期 / 推迟」都是 0.33、对「季度总结 / 复盘 / 规划会议」都是 0.25：
+// 严档两条都不带它作可选事项，默认档只带前者，宽档两条都带。成员本身总是全量送给模型分组。
 func TestMergeBatchSimilarityTiers(t *testing.T) {
 	if got := (policy.MergeSettings{}).MinScore(); got != 0.30 {
 		t.Fatalf("the default tier must equal the former constant 0.30, got %v", got)
@@ -515,11 +598,10 @@ func TestMergeBatchSimilarityTiers(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	e.openItem("季度预算评审会议")
-	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[]}`})
+	e.stub.When(batchMark, reply(``, ``, ``))
 	n, done := 0, []string{}
-	round := func(tier string, titles ...string) (asked []string) {
+	round := func(tier string, titles ...string) (withItem []string) {
 		t.Helper()
-		// 前几轮的建议换个来源并排除在比对之外，每轮只和那条进行中的事项比。
 		e.setPolicy(func(p *policy.Policy) { p.Merge.Similarity, p.Merge.ExcludeSources = tier, slices.Clone(done) })
 		src := fmt.Sprintf("src_r%d", len(done))
 		done = append(done, src)
@@ -532,30 +614,26 @@ func TestMergeBatchSimilarityTiers(t *testing.T) {
 		if err := e.svc.Sweep(bg); err != nil {
 			t.Fatal(err)
 		}
-		if e.batchCalls() > calls {
-			req := e.stub.Requests()
-			body := req[len(req)-1].BodyText
-			for _, title := range titles {
-				if strings.Contains(body, "标题："+title) {
-					asked = append(asked, title)
-				}
+		if e.batchCalls() != calls+1 {
+			t.Fatalf("every batch goes to the model for grouping: %d", e.batchCalls())
+		}
+		body := e.lastBatchBody()
+		for _, title := range titles {
+			at := strings.Index(body, "标题："+title)
+			if rest := body[at:]; strings.Contains(rest[:strings.Index(rest, "可选事项：")+len("可选事项：E")], "可选事项：E") {
+				withItem = append(withItem, title)
 			}
 		}
 		return
 	}
 	if got := round(policy.SimilarityStrict, "预算会议改期", "季度总结会议"); len(got) != 0 {
-		t.Fatalf("strict sent %v to the model", got)
-	}
-	for _, it := range e.proposed() {
-		if sw := it.Proposal.Sweep; sw == nil || sw.By != "rule" || sw.Action != domain.SweepKeep {
-			t.Fatalf("strict: %s must be kept by rule, got %+v", it.Title, sw)
-		}
+		t.Fatalf("strict listed the item for %v", got)
 	}
 	if got := round("", "预算会议延期", "季度复盘会议"); !slices.Equal(got, []string{"预算会议延期"}) {
-		t.Fatalf("default tier sent %v, want only the 0.33 one", got)
+		t.Fatalf("default tier listed the item for %v, want only the 0.33 one", got)
 	}
 	if got := round(policy.SimilarityLoose, "预算会议推迟", "季度规划会议"); len(got) != 2 {
-		t.Fatalf("loose tier sent %v, want both", got)
+		t.Fatalf("loose tier listed the item for %v, want both", got)
 	}
 	// 档位不在三档里：策略写入拒绝。
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
@@ -565,4 +643,43 @@ func TestMergeBatchSimilarityTiers(t *testing.T) {
 		t.Fatal("an unknown tier must be refused")
 	}
 	e.verify()
+}
+
+// 仓库 + PR 号与关键事实的抽取。
+func TestChangeRefAndKeyFacts(t *testing.T) {
+	item := func(title, summary, ref, key string) domain.Item {
+		it := domain.Item{Title: title, Summary: summary, Origin: &domain.Origin{Ref: ref}}
+		if key != "" {
+			it.Proposal = &domain.Proposal{MergeKey: key}
+		}
+		return it
+	}
+	for _, c := range []struct {
+		it   domain.Item
+		want string
+	}{
+		{item("fix: #207/#200 验收反馈", "", "https://git.example/Org/App/pull/208", ""), "org/app#208"},
+		{item("Re: [org/app] fix: #207/#200 验收反馈 (PR #208)", "", "sev_1", ""), "org/app#208"},
+		{item("审查 PR #214：行业方案", "", "sev_2", "title:[org/app] feat: 行业方案 (pr #214\x1fx"), "org/app#214"},
+		{item("评审 PR #221：命名空间", "代码托管上 org/app PR #221 请你评审；它叠在 #220 上", "sev_3", ""), "org/app#221"},
+		{item("评审 PR #221", "", "", ""), ""},
+	} {
+		if got := changeRef(c.it); got != c.want {
+			t.Errorf("%q: got %q, want %q", c.it.Title, got, c.want)
+		}
+	}
+	if !otherChange("org/app#220", "org/app#221") || otherChange("org/app#220", "org/app#220") || otherChange("org/app#220", "org/web#221") || otherChange("", "org/app#1") {
+		t.Fatal("otherChange")
+	}
+	got := keyFacts("核实 Bitget 840 USDT 提现记录", "提现已于 2026-11-16 22:55（UTC+8）完成，地址 0x82df…5057，手续费 0.01 USDT")
+	want := []string{"0.01", "0x82df", "2026-11-16", "22:55", "5057", "840"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("facts: %q", got)
+	}
+	if miss := missingFacts("Bitget 提现 840 USDT，2026-11-16 22:55，0x82df…5057，手续费 0.01", want); len(miss) != 0 {
+		t.Fatalf("all there: %q", miss)
+	}
+	if miss := missingFacts("Bitget 提现 840 USDT，11 月 16 日晚，0x82df…5057，手续费 0.01", want); !slices.Equal(miss, []string{"2026-11-16", "22:55"}) {
+		t.Fatalf("rewritten dates are missing: %q", miss)
+	}
 }

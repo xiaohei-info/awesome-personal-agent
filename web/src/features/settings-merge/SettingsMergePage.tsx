@@ -12,7 +12,7 @@ import { strings } from "./strings";
 const ROUTES = ["merge"] as const;
 const PACK_PROMPT = "/packs/inbound-triage/prompts/merge-batch";
 const ACTIONS = ["attach", "merge", "duplicate", "keep"];
-const DEFAULT_BATCH = 20;
+const DEFAULT_BATCH = 100;
 const DEFAULT_WAIT = 30;
 
 interface Merge { exclude_sources?: string[] | null; skip_existing?: boolean; batch_size?: number; wait_minutes?: number; budget_tokens?: number; prompt?: string; prompt_at?: string; similarity?: string }
@@ -133,7 +133,7 @@ function BatchCard({ doc, save }: { doc: Doc; save: Save }) {
   const [v, setV, dirty] = useDraft([m.batch_size, m.wait_minutes, m.budget_tokens], init);
   const onSave = () => {
     const size = Number(v.size), wait = Number(v.wait), budget = Number(v.budget);
-    if (!Number.isInteger(size) || size < 2 || size > 50 || !Number.isInteger(wait) || wait < 5 || wait > 1440) return reject(t.batchBad);
+    if (!Number.isInteger(size) || size < 2 || size > 100 || !Number.isInteger(wait) || wait < 5 || wait > 1440) return reject(t.batchBad);
     if (!budgetOk(v.budget)) return reject(budgetBad);
     // 等于默认值时条数与分钟存 0、预算不带这个键：以后默认值调整时跟着走。
     return putMerge(doc, save, { batch_size: size === DEFAULT_BATCH ? 0 : size, wait_minutes: wait === DEFAULT_WAIT ? 0 : wait, budget_tokens: budget === DEFAULT_BUDGET ? undefined : budget });
@@ -141,7 +141,7 @@ function BatchCard({ doc, save }: { doc: Doc; save: Save }) {
   return (
     <Card title={t.batchTitle} hint={t.batchHint(Number(v.size) || DEFAULT_BATCH, Number(v.wait) || DEFAULT_WAIT)} dirty={dirty} onSave={onSave}>
       <div className="row">
-        <label>{t.batchSize} <input type="number" min={2} max={50} value={v.size} onChange={(e) => setV({ ...v, size: e.target.value })} /></label>
+        <label>{t.batchSize} <input type="number" min={2} max={100} value={v.size} onChange={(e) => setV({ ...v, size: e.target.value })} /></label>
         <label>{t.batchWait} <input type="number" min={5} max={1440} value={v.wait} onChange={(e) => setV({ ...v, wait: e.target.value })} /></label>
         <label>{t.budget} <input type="number" min={MIN_BUDGET} max={MAX_BUDGET} step={1000} value={v.budget} onChange={(e) => setV({ ...v, budget: e.target.value })} /></label>
       </div>

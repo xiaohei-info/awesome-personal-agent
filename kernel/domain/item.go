@@ -218,6 +218,20 @@ type Proposal struct {
 	Sweep *ProposalSweep `json:"sweep,omitempty"`
 	// Absorbed 是归类折叠进这一条的建议本身的溯源（§9.3）：折叠时不论那条名下有没有消息（迁移来的建议常没有）都记一条，撤销时删掉。
 	Absorbed []ProposalAbsorbed `json:"absorbed,omitempty"`
+	// Integrated 只在批内合并的载体上：几条同一件事的建议整合成这一条时，整合前它自己的标题与摘要、整合后的文本与一起整合的成员（§9.3），撤销时据此还原。
+	Integrated *ProposalIntegrated `json:"integrated,omitempty"`
+}
+
+// ProposalIntegrated 是一次批内整合：Title、Summary 是载体整合前的原文，ToTitle、ToSummary 是写入的整合文本，Members 含载体自己。
+type ProposalIntegrated struct {
+	Title     string    `json:"title"`
+	Summary   string    `json:"summary,omitempty"`
+	ToTitle   string    `json:"to_title"`
+	ToSummary string    `json:"to_summary,omitempty"`
+	Members   []string  `json:"members"`
+	Batch     string    `json:"batch,omitempty"`
+	Run       string    `json:"run,omitempty"`
+	At        time.Time `json:"at"`
 }
 
 // ProposalAbsorbed 是一条被归类折叠进来的建议：它的 id、原始标题、origin 与项目，折叠的结论、批次与时刻。
@@ -227,7 +241,9 @@ type ProposalAbsorbed struct {
 	Source  string    `json:"source,omitempty"` // 它的 origin.source
 	Ref     string    `json:"ref,omitempty"`    // 它的 origin.ref
 	Project string    `json:"project,omitempty"`
-	Created time.Time `json:"created_at"` // 它自己建立的时刻
+	Summary string    `json:"summary,omitempty"` // 它的原始摘要；原始正文仍在它自己身上（折叠只改阶段）
+	Events  []string  `json:"events,omitempty"`  // 随折叠搬到去处的、它名下的来源事件
+	Created time.Time `json:"created_at"`        // 它自己建立的时刻
 	Action  string    `json:"action"`
 	Batch   string    `json:"batch,omitempty"`
 	At      time.Time `json:"at"` // 折叠的时刻
@@ -257,6 +273,9 @@ type ProposalSweep struct {
 	Chars    int        `json:"chars,omitempty"`
 	Deferred int        `json:"deferred,omitempty"`
 	At       *time.Time `json:"at,omitempty"`
+	// Group 与 Topic 是归类时模型给的分组（批号/G<k>）与主题：建议页按它把同组的建议放在一起，可整组处理。
+	Group string `json:"group,omitempty"`
+	Topic string `json:"topic,omitempty"`
 	// Backfill 是本人补打的待归类标记（apa merge mark-pending）：维护循环不自动归类它，只由 apa merge run --apply 处理；归类后保留。
 	Backfill *SweepBackfill `json:"backfill,omitempty"`
 }

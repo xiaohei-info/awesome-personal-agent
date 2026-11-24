@@ -46,9 +46,10 @@ func (f ManualFilter) match(it domain.Item) bool {
 	return true
 }
 
-// ManualRef 是输出里的一条记录：id、标题、来源、origin.ref、项目、阶段；候选另带相似度。
+// ManualRef 是输出里的一条记录：id、标题、来源、origin.ref、项目、阶段；候选另带相似度，送模型的带资料里的编号（N、E）。
 type ManualRef struct {
 	Item    string       `json:"item"`
+	Num     string       `json:"num,omitempty"`
 	Title   string       `json:"title"`
 	Source  string       `json:"source,omitempty"`
 	Ref     string       `json:"ref,omitempty"`
@@ -57,51 +58,76 @@ type ManualRef struct {
 	Score   float64      `json:"score,omitempty"`
 }
 
-func refOf(it domain.Item, score float64) ManualRef {
-	r := ManualRef{Item: it.ID, Title: it.Title, Project: it.Project, Phase: it.Phase, Score: score}
+func refOf(r *sweepRec, score float64) ManualRef {
+	it := r.it
+	m := ManualRef{Item: it.ID, Num: r.ref, Title: it.Title, Project: it.Project, Phase: it.Phase, Score: score}
 	if it.Origin != nil {
-		r.Source, r.Ref = it.Origin.Source, it.Origin.Ref
+		m.Source, m.Ref = it.Origin.Source, it.Origin.Ref
 	}
-	return r
+	return m
 }
 
-// ManualAsk 是会送给写作模型的一条：它自己、规则初筛出的候选、被合并护栏拦下的跨项目候选。
+// ManualAsk 是会送给写作模型的一条：它自己、它的仓库 + PR 号、规则检索出的已有事项、被护栏或"不同 PR"拦下的。
 type ManualAsk struct {
 	ManualRef
+	Change     string      `json:"change,omitempty"`
 	Candidates []ManualRef `json:"candidates"`
-	Blocked    []ManualRef `json:"blocked_cross_project,omitempty"`
+	Blocked    []ManualRef `json:"blocked,omitempty"`
 }
 
 // ManualKept 是规则直接留着、不进模型的一条。
 type ManualKept struct {
 	ManualRef
-	Why     string      `json:"why"`
-	Blocked []ManualRef `json:"blocked_cross_project,omitempty"`
+	Why string `json:"why"`
 }
 
-// ManualDecision 是 --apply 落账后从账本读回的归类结论。
+// ManualGroup 是模型给的一组：主题与成员（只在调过模型时有）。
+type ManualGroup struct {
+	Group   string      `json:"group"`
+	Topic   string      `json:"topic"`
+	Members []ManualRef `json:"members"`
+}
+
+// ManualCombined 是模型给的一项批内整合与内核校验的结果：Missing 非空是关键事实校验没过，Why 非空即没有整合、成员都留着。
+type ManualCombined struct {
+	Topic   string      `json:"topic"`
+	Carrier string      `json:"carrier,omitempty"`
+	Members []ManualRef `json:"members"`
+	Title   string      `json:"title"`
+	Summary string      `json:"summary"`
+	Missing []string    `json:"missing,omitempty"`
+	Why     string      `json:"why,omitempty"`
+}
+
+// ManualDecision 是落账后从账本读回的归类结论。
 type ManualDecision struct {
-	Item   string `json:"item"`
-	Title  string `json:"title"`
-	Action string `json:"action"`
-	Target string `json:"target,omitempty"`
-	Why    string `json:"why"`
-	By     string `json:"by"`
+	Item       string `json:"item"`
+	Title      string `json:"title"`
+	Action     string `json:"action"`
+	Target     string `json:"target,omitempty"`
+	Why        string `json:"why"`
+	By         string `json:"by"`
+	Topic      string `json:"topic,omitempty"`
+	Integrated bool   `json:"integrated,omitempty"` // 它是整合的载体：标题与摘要已改写
 }
 
-// ManualReport 是一轮手动合并的结果。演练与真跑的规则层部分（batch 到 groups）同一算法、同一输入下逐字段相同，真跑另带 decisions。
+// ManualReport 是一轮手动合并的结果。演练与真跑的规则层部分（batch 到 chars）同一算法、同一输入下逐字段相同；
+// 调过模型的（真跑、--with-model 演练）另带分组、整合、校验没过的条数与结论。
 type ManualReport struct {
-	DryRun    bool             `json:"dry_run"`
-	Matched   int              `json:"matched"`   // 筛选命中的待归类
-	Taken     int              `json:"taken"`     // 这一轮取的（不超过 --limit；进模型的一批不超过 batch_size）
-	Remaining int              `json:"remaining"` // 命中但留到下一轮的
-	Batch     string           `json:"batch,omitempty"`
-	RuleKept  []ManualKept     `json:"rule_kept"`
-	Ask       []ManualAsk      `json:"ask"`
-	Deferred  []ManualRef      `json:"deferred"` // 超出资料上限、留在待归类的
-	Groups    [][]ManualRef    `json:"groups"`   // ask 与候选按候选关系连成的组
-	Chars     int              `json:"chars"`    // 送给写作模型的资料字数
-	Decisions []ManualDecision `json:"decisions,omitempty"`
+	DryRun      bool             `json:"dry_run"`
+	WithModel   bool             `json:"with_model,omitempty"`
+	Matched     int              `json:"matched"`   // 筛选命中的待归类
+	Taken       int              `json:"taken"`     // 这一轮取的（不超过 --limit；进模型的一批不超过 batch_size）
+	Remaining   int              `json:"remaining"` // 命中但留到下一轮的
+	Batch       string           `json:"batch,omitempty"`
+	RuleKept    []ManualKept     `json:"rule_kept"`
+	Ask         []ManualAsk      `json:"ask"`
+	Deferred    []ManualRef      `json:"deferred"` // 超出资料上限、留在待归类的
+	Chars       int              `json:"chars"`    // 送给写作模型的资料字数
+	Groups      []ManualGroup    `json:"groups,omitempty"`
+	Combined    []ManualCombined `json:"combined,omitempty"`
+	CheckFailed int              `json:"check_failed,omitempty"` // 关键事实校验没过、退回留着的整合项数
+	Decisions   []ManualDecision `json:"decisions,omitempty"`
 }
 
 // planManual 选出这一轮的待归类（含本人补打的），算规则层结果。
@@ -117,7 +143,7 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 		}
 	}
 	slices.SortStableFunc(sel, func(a, b domain.Item) int { return a.CreatedAt.Compare(b.CreatedAt) })
-	rep := ManualReport{DryRun: true, Matched: len(sel), RuleKept: []ManualKept{}, Ask: []ManualAsk{}, Deferred: []ManualRef{}, Groups: [][]ManualRef{}}
+	rep := ManualReport{DryRun: true, Matched: len(sel), RuleKept: []ManualKept{}, Ask: []ManualAsk{}, Deferred: []ManualRef{}}
 	if f.Limit > 0 && len(sel) > f.Limit {
 		sel = sel[:f.Limit]
 	}
@@ -126,7 +152,7 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 	for _, it := range sel {
 		if v, ok := ruleKeep(pol, it); ok {
 			keep = append(keep, v)
-			rep.RuleKept = append(rep.RuleKept, ManualKept{ManualRef: refOf(it, 0), Why: v.Why})
+			rep.RuleKept = append(rep.RuleKept, ManualKept{ManualRef: refOf(&sweepRec{it: it}, 0), Why: v.Why})
 			continue
 		}
 		if len(batch) < pol.Merge.Batch() { // 一批不超过 batch_size，同维护循环
@@ -138,67 +164,56 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 	if len(batch) == 0 {
 		return pol, rep, keep, nil, nil
 	}
-	p := s.planBatch(pol, all, srcs, batch)
-	rep.Batch, rep.Chars = p.id, len([]rune(p.text))
-	blocked := func(m *sweepRec) (out []ManualRef) {
-		for _, c := range p.blocked[m] {
-			out = append(out, refOf(c.rec.it, c.score))
-		}
-		return
+	p, err := s.planBatch(ctx, pol, all, srcs, batch)
+	if err != nil {
+		return pol, rep, nil, nil, err
 	}
+	rep.Batch, rep.Chars = p.id, len([]rune(p.text))
 	byID := map[string]*sweepRec{}
 	for _, m := range p.members {
 		byID[m.it.ID] = m
 	}
 	for _, v := range p.settle {
-		m := byID[v.Item]
-		rep.RuleKept = append(rep.RuleKept, ManualKept{ManualRef: refOf(m.it, 0), Why: v.Why, Blocked: blocked(m)})
+		rep.RuleKept = append(rep.RuleKept, ManualKept{ManualRef: refOf(byID[v.Item], 0), Why: v.Why})
 	}
 	for _, m := range p.later {
-		rep.Deferred = append(rep.Deferred, refOf(m.it, 0))
-	}
-	// 按候选关系连组（并查集）；组按第一次出现的先后，组内同样。
-	parent := map[string]string{}
-	var find func(string) string
-	find = func(x string) string {
-		if parent[x] != x {
-			parent[x] = find(parent[x])
-		}
-		return parent[x]
-	}
-	var order []string
-	refs := map[string]ManualRef{}
-	add := func(r ManualRef) {
-		if _, ok := parent[r.Item]; !ok {
-			parent[r.Item] = r.Item
-			order = append(order, r.Item)
-			r.Score = 0
-			refs[r.Item] = r
-		}
+		rep.Deferred = append(rep.Deferred, refOf(&sweepRec{it: m.it}, 0))
 	}
 	for _, m := range p.ask {
-		a := ManualAsk{ManualRef: refOf(m.it, 0), Candidates: []ManualRef{}, Blocked: blocked(m)}
-		add(a.ManualRef)
+		a := ManualAsk{ManualRef: refOf(m, 0), Change: m.change, Candidates: []ManualRef{}}
 		for _, c := range m.cands {
-			r := refOf(c.rec.it, c.score)
-			a.Candidates = append(a.Candidates, r)
-			add(r)
-			parent[find(c.rec.it.ID)] = find(m.it.ID)
+			a.Candidates = append(a.Candidates, refOf(c.rec, c.score))
+		}
+		for _, c := range p.blocked[m] {
+			a.Blocked = append(a.Blocked, refOf(&sweepRec{it: c.rec.it}, c.score))
 		}
 		rep.Ask = append(rep.Ask, a)
 	}
-	groups := map[string]int{}
-	for _, id := range order {
-		root := find(id)
-		i, ok := groups[root]
-		if !ok {
-			i = len(rep.Groups)
-			groups[root] = i
-			rep.Groups = append(rep.Groups, nil)
-		}
-		rep.Groups[i] = append(rep.Groups[i], refs[id])
-	}
 	return pol, rep, keep, p, nil
+}
+
+// modelPart 把模型的分组与整合（连同校验结果）写进报告。
+func (rep *ManualReport) modelPart(p *batchPlan) {
+	refs := func(rs []*sweepRec) []ManualRef {
+		out := make([]ManualRef, len(rs))
+		for i, r := range rs {
+			out[i] = refOf(r, 0)
+		}
+		return out
+	}
+	for _, g := range p.groups {
+		rep.Groups = append(rep.Groups, ManualGroup{Group: g.key, Topic: g.topic, Members: refs(g.members)})
+	}
+	for _, c := range p.combined {
+		mc := ManualCombined{Topic: c.topic, Members: refs(c.members), Title: c.title, Summary: c.summary, Missing: c.missing, Why: c.why}
+		if c.carrier != nil {
+			mc.Carrier = c.carrier.it.ID
+		}
+		if len(c.missing) > 0 {
+			rep.CheckFailed++
+		}
+		rep.Combined = append(rep.Combined, mc)
+	}
 }
 
 // PlanManual 是手动合并的演练：只算规则层，不调模型、不写账本。
@@ -208,7 +223,7 @@ func (s *Service) PlanManual(ctx context.Context, f ManualFilter) (ManualReport,
 }
 
 // RunManual 是手动合并的真跑：同一份规则层结果，调一次写作模型（有要问的时），以 id 的身份经 inbound.sweep 逐条落账，
-// 结论从账本读回。重复执行时已归类的不再命中，第二遍零写入。
+// 结论从账本读回。重复执行时已归类的不再命中，第二遍零写入。`--dry-run --with-model` 在账本副本上调它，真账本不动。
 // 在服务进程里跑时与维护循环共用 sweeping：规则层与模型调用在锁外，只有落账在锁内，一批的落账不和维护循环的一批交错；
 // 两边算到同一条时，后落账的那次在 inbound.sweep 里见它已归类，什么都不改。
 func (s *Service) RunManual(ctx context.Context, id command.Identity, f ManualFilter) (ManualReport, error) {
@@ -224,22 +239,20 @@ func (s *Service) RunManual(ctx context.Context, id command.Identity, f ManualFi
 			return rep, err // 模型没答上：什么都没落，下次再跑
 		}
 		settle = append(slices.Clone(keep), out...)
+		rep.modelPart(p)
 	}
 	s.sweeping.Lock()
 	err = s.land(ctx, id, settle)
 	s.sweeping.Unlock()
-	ids := make([]string, 0, len(settle))
-	for _, v := range settle {
-		ids = append(ids, v.Item)
-	}
 	rerr := s.o.Store.View(ctx, func(tx *store.Tx) error {
-		for _, x := range ids {
-			it, err := items.Get(tx, x)
+		for _, v := range settle {
+			it, err := items.Get(tx, v.Item)
 			if err != nil {
 				return err
 			}
-			if sw := it.Proposal.Sweep; sw != nil && sw.State == "done" {
-				rep.Decisions = append(rep.Decisions, ManualDecision{Item: it.ID, Title: it.Title, Action: sw.Action, Target: sw.Target, Why: sw.Why, By: sw.By})
+			if sw := it.Proposal.Sweep; sw != nil && sw.State == "done" && sw.Batch == v.Batch {
+				rep.Decisions = append(rep.Decisions, ManualDecision{Item: it.ID, Title: it.Title, Action: sw.Action, Target: sw.Target, Why: sw.Why, By: sw.By,
+					Topic: sw.Topic, Integrated: it.Proposal.Integrated != nil && it.Proposal.Integrated.Batch == v.Batch})
 			}
 		}
 		return nil
@@ -311,7 +324,7 @@ func (s *Service) MarkPending(ctx context.Context, id command.Identity, by strin
 				continue
 			}
 		}
-		rep.Marked = append(rep.Marked, refOf(it, 0))
+		rep.Marked = append(rep.Marked, refOf(&sweepRec{it: it}, 0))
 	}
 	return rep, nil
 }

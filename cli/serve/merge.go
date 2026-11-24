@@ -24,7 +24,7 @@ import (
 
 func init() { client.Register("merge", mergeCmd) }
 
-const mergeUsage = "usage: apa merge run [--dry-run|--apply] [--source <id|prefix*>] [--project <id|->] [--since <time>] [--until <time>] [--limit <n>]" +
+const mergeUsage = "usage: apa merge run [--dry-run [--with-model]|--apply] [--source <id|prefix*>] [--project <id|->] [--since <time>] [--until <time>] [--limit <n>]" +
 	" | mark-pending [--dry-run|--apply] [--by <name>] [--source <id|prefix*>] [--project <id|->] [--since <time>] [--until <time>] [--limit <n>]"
 
 // hostCLI 是主机终端上的本人：同 apa serve 读主机配置文件的 hostOwner，与 Web 上的本人同级（§14.12）。
@@ -35,6 +35,7 @@ var hostCLI = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Princ
 //   - mark-pending：给还没有归类标记的建议补记待归类（标 backfill，维护循环不自动归类它们，等 run --apply）。
 //
 // 缺省与 --dry-run 一样只演练：在账本的在线副本上算规则层，不调模型、不写账本，服务开着也能跑；
+// --dry-run --with-model 也在副本上跑，但调一次写作模型并在副本上落账，读回分组、整合与结论后删掉副本，真账本不动；
 // --apply 才调写作模型（run）、经内核命令落账：apa serve 在跑时经主机本地入口（hostsock.go）交给服务进程执行，不用停服务；
 // 没有服务在应答时离线跑（占住 serve 的监听端口，执行期间服务起不来）。
 func mergeCmd(c *client.Ctx, args []string) error {
@@ -46,13 +47,15 @@ func mergeCmd(c *client.Ctx, args []string) error {
 	fs.SetOutput(io.Discard)
 	dry := fs.Bool("dry-run", false, "")
 	apply := fs.Bool("apply", false, "")
+	withModel := fs.Bool("with-model", false, "")
 	by := fs.String("by", "", "")
 	var f inbound.ManualFilter
 	fs.StringVar(&f.Source, "source", "", "")
 	fs.StringVar(&f.Project, "project", "", "")
 	since, until := fs.String("since", "", ""), fs.String("until", "", "")
 	fs.IntVar(&f.Limit, "limit", 0, "")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*dry && *apply) || f.Limit < 0 || (*by != "" && sub != "mark-pending") {
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*dry && *apply) || f.Limit < 0 || (*by != "" && sub != "mark-pending") ||
+		(*withModel && (sub != "run" || *apply)) {
 		return usage("invalid arguments for apa merge "+sub, mergeUsage)
 	}
 	var err error
@@ -112,8 +115,9 @@ func mergeCmd(c *client.Ctx, args []string) error {
 		return c.Print(rep)
 	}
 	var rep inbound.ManualReport
-	if *apply {
-		rep, err = in.RunManual(ctx, hostCLI, f)
+	if *apply || *withModel {
+		rep, err = in.RunManual(ctx, hostCLI, f) // --with-model 时 st 是副本：落账只落在副本上
+		rep.DryRun, rep.WithModel = !*apply, *withModel
 	} else {
 		rep, err = in.PlanManual(ctx, f)
 	}

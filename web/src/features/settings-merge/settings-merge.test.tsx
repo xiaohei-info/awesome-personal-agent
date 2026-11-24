@@ -46,7 +46,7 @@ const saveIn = async (name: string) => userEvent.click((await card(name)).getByR
 beforeEach(() => sessionStorage.clear());
 
 describe("设置 › 跨来源合并", () => {
-  it("默认：与生成事项和建议相同、全部来源（含微信与大象）、纳入已有记录、20 条或 30 分钟、内置提示词；成本可见；界面不出现来源 id", async () => {
+  it("默认：与生成事项和建议相同、全部来源（含微信与大象）、纳入已有记录、100 条或 30 分钟、内置提示词；成本可见；界面不出现来源 id", async () => {
     mount(server().impl);
     expect((await card("由谁来合并")).getByLabelText(/与生成事项和建议相同（默认）/)).toBeChecked();
     const src = await card("哪些来源参与合并");
@@ -54,7 +54,7 @@ describe("设置 › 跨来源合并", () => {
     expect(src.getByLabelText("大象")).toBeChecked();
     expect((await card("和哪些已有记录比")).getByRole("checkbox")).toBeChecked();
     const batch = await card("批量参数");
-    expect(batch.getByLabelText("攒够几条")).toHaveValue(20);
+    expect(batch.getByLabelText("攒够几条")).toHaveValue(100);
     expect(batch.getByLabelText("一批资料上限（token）")).toHaveValue(16000);
     expect(batch.getByRole("note")).toHaveTextContent("一批打包给模型的资料上限：超了就把这批砍半，余下的留到下一轮");
     expect(batch.getByRole("note")).toHaveTextContent("按约 1.5 个字符 ≈ 1 token 估算（不调用 tokenizer）");
