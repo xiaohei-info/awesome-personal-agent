@@ -198,10 +198,15 @@ type MergeSettings struct {
 	Similarity string `json:"similarity,omitempty"`
 	// Candidates 是规则检索给每条待归类建议至多带几条已有事项（按分数从高到低）；0 取默认。
 	Candidates int `json:"candidates,omitempty"`
+	// BodyMaxBytes 是批内整合后正文（要点清单 + 来源原文）的总长上限（字节）；0 取默认。超限时要点清单整段保留，来源原文按成员均分余下的额度。
+	BodyMaxBytes int `json:"body_max_bytes,omitempty"`
 }
 
 // Cands 是生效的每条候选条数。
 func (m MergeSettings) Cands() int { return cmp.Or(m.Candidates, DefaultMergeCandidates) }
+
+// BodyMax 是生效的整合正文总长上限（字节）。
+func (m MergeSettings) BodyMax() int { return cmp.Or(m.BodyMaxBytes, DefaultMergeBodyBytes) }
 
 // 合并批量参数的默认值与范围。
 const (
@@ -212,6 +217,11 @@ const (
 	// 每条待归类建议带的候选条数：缺省 20，可设 1–50。
 	DefaultMergeCandidates = 20
 	MaxMergeCandidates     = 50
+	// 整合正文总长上限（字节）：缺省 32 KiB。单条建议正文至多 budget.ProposalBodyChars（4000）个字符，中文约 12 KB；
+	// 线上建议正文 p95 约 4.9 KB、p99 约 7.4 KB，32 KiB 能让 3–4 个成员的原文在常见长度下原样附全。可设 4 KiB–256 KiB。
+	DefaultMergeBodyBytes = 32 << 10
+	MinMergeBodyBytes     = 4 << 10
+	MaxMergeBodyBytes     = 256 << 10
 
 	// CharsPerToken 是资料预算的 token 估算系数：每这么多个字符记 1 个 token（向上取整）。合并与写作两处预算共用它。
 	// 模型由本人配置、分词各家不同，内核不带 tokenizer，按这个明写的系数估算（§9.3）。
@@ -678,6 +688,9 @@ func normalize(p Policy) (Policy, error) {
 	}
 	if c := p.Merge.Candidates; c < 0 || c > MaxMergeCandidates {
 		return p, invalid("merge candidates %d: use 1 to %d, or 0 for the default", c, MaxMergeCandidates)
+	}
+	if b := p.Merge.BodyMaxBytes; b != 0 && (b < MinMergeBodyBytes || b > MaxMergeBodyBytes) {
+		return p, invalid("merge body_max_bytes %d: use %d to %d, or 0 for the default", b, MinMergeBodyBytes, MaxMergeBodyBytes)
 	}
 	for k, r := range p.Disturb.Push {
 		if !slices.Contains(PushCategories, k) {

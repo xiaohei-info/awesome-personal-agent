@@ -229,21 +229,22 @@ type ProposalIntegrated struct {
 	ToTitle   string    `json:"to_title"`
 	ToSummary string    `json:"to_summary,omitempty"`
 	Body      string    `json:"body,omitempty"`    // 整合前载体的正文（撤销时还原）
-	ToBody    string    `json:"to_body,omitempty"` // 整合后的正文：逐条列出每个成员
+	ToBody    string    `json:"to_body,omitempty"` // 整合后的正文：要点清单 + 按成员附的来源原文
 	Members   []string  `json:"members"`
 	Batch     string    `json:"batch,omitempty"`
 	Run       string    `json:"run,omitempty"`
 	At        time.Time `json:"at"`
 }
 
-// ProposalAbsorbed 是一条被归类折叠进来的建议：它的 id、原始标题、origin 与项目，折叠的结论、批次与时刻。
+// ProposalAbsorbed 是一条被归类折叠进来的建议：它的 id、原始标题、摘要与正文、origin 与项目，折叠的结论、批次与时刻。
 type ProposalAbsorbed struct {
 	Item    string    `json:"item"`
 	Title   string    `json:"title"`
 	Source  string    `json:"source,omitempty"` // 它的 origin.source
 	Ref     string    `json:"ref,omitempty"`    // 它的 origin.ref
 	Project string    `json:"project,omitempty"`
-	Summary string    `json:"summary,omitempty"` // 它的原始摘要；原始正文仍在它自己身上（折叠只改阶段）
+	Summary string    `json:"summary,omitempty"` // 它的原始摘要
+	Body    string    `json:"body,omitempty"`    // 它折叠时的原始正文（全文，不截断；它自己身上也还留着，折叠只改阶段）
 	Events  []string  `json:"events,omitempty"`  // 随折叠搬到去处的、它名下的来源事件
 	Created time.Time `json:"created_at"`        // 它自己建立的时刻
 	Action  string    `json:"action"`

@@ -88,7 +88,7 @@ type ManualGroup struct {
 	Members []ManualRef `json:"members"`
 }
 
-// ManualCombined 是模型给的一项批内整合与内核校验的结果：Missing 非空是关键事实校验没过（正文里缺的带「正文：」），
+// ManualCombined 是模型给的一项批内整合与内核校验的结果：Missing 非空是关键事实校验没过（要点清单里缺的带「正文：」、成员原文里缺的带「原文：」），Body 是要落到载体上的整段正文（要点清单 + 来源原文），
 // Rejected、Why 非空即没有整合、成员都留着。
 type ManualCombined struct {
 	Topic    string      `json:"topic"`

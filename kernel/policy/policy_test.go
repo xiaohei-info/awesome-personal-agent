@@ -744,3 +744,25 @@ func TestCancelledDisturbSwitchesReadAndDropped(t *testing.T) {
 		t.Fatalf("stored docs: %v", docs)
 	}
 }
+
+// 整合正文上限：缺省 32 KiB、不写出；范围外拒绝。
+func TestMergeBodyMaxBytes(t *testing.T) {
+	if (MergeSettings{}).BodyMax() != DefaultMergeBodyBytes || DefaultMergeBodyBytes != 32768 {
+		t.Fatal("default")
+	}
+	if out, _ := json.Marshal(MergeSettings{}); strings.Contains(string(out), "body_max_bytes") {
+		t.Fatalf("defaults are not written: %s", out)
+	}
+	for _, b := range []int{-1, MinMergeBodyBytes - 1, MaxMergeBodyBytes + 1} {
+		p := Default()
+		p.Merge.BodyMaxBytes = b
+		if _, err := normalize(p); err == nil {
+			t.Errorf("body_max_bytes %d must be refused", b)
+		}
+	}
+	p := Default()
+	p.Merge.BodyMaxBytes = MinMergeBodyBytes
+	if _, err := normalize(p); err != nil || p.Merge.BodyMax() != MinMergeBodyBytes {
+		t.Fatalf("%v", err)
+	}
+}

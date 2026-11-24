@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -254,8 +255,8 @@ type batchCombined struct {
 	members        []*sweepRec // 校验后真正整合的（不足两条时为空）
 	carrier        *sweepRec
 	title, summary string
-	body           string   // 整合后的正文：逐条列出每个成员
-	missing        []string // 关键事实校验没找到的片段（正文里缺的带「正文：」前缀）；非空即整组留着
+	body           string   // 整合后的正文：模型的要点清单 + 内核附上的各成员原文（integratedBody）
+	missing        []string // 关键事实校验没找到的片段（要点清单里缺的带「正文：」、成员原文里的带「原文：」前缀）；非空即整组留着
 	code, why      string   // 没整合时的拒绝码与原因
 }
 
@@ -763,11 +764,18 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 		p.combined = append(p.combined, bc)
 		bc.code, bc.why = combineProblem(set, groupOf, bc)
 		if bc.code == "" {
+			// 落到载体上的正文 = 模型的要点清单 + 内核逐字附上的各成员原文（超长按额度截断并标注）。
+			// 标题摘要里的关键事实要在整合后的标题摘要与要点清单里都有；原文里的关键事实要在整合后的整段正文里有（被截掉的只能靠要点清单带上）。
+			list := bc.body
+			bc.body = integratedBody(list, set, carrierOf(set), p.srcs, pol.Merge.BodyMax())
 			for _, m := range set {
 				facts := keyFacts(m.it.Title, m.it.Summary)
 				bc.missing = append(bc.missing, missingFacts(bc.title+"\n"+bc.summary, facts)...)
-				for _, f := range missingFacts(bc.body, facts) {
+				for _, f := range missingFacts(list, facts) {
 					bc.missing = append(bc.missing, "正文："+f)
+				}
+				for _, f := range missingFacts(bc.body, slices.DeleteFunc(keyFacts(m.it.Body, ""), func(f string) bool { return slices.Contains(facts, f) })) {
+					bc.missing = append(bc.missing, "原文："+f)
 				}
 			}
 			if len(bc.missing) > 0 {
@@ -837,6 +845,60 @@ func carrierOf(set []*sweepRec) *sweepRec {
 		}
 	}
 	return best
+}
+
+// cutNoteRoom 是每条原文给截断说明预留的字节数（说明本身约 250 字节）。
+const cutNoteRoom = 320
+
+// integratedBody 是落到载体上的整合正文：模型写的要点清单在前，后面按成员顺序逐字附上各自的原始正文，每条注明来源、时间、原题与原摘要。
+// 总长不超过 limit 字节：要点清单与每条的抬头整段保留，原文均分余下的额度（从最短的起，用不完的额度留给其余成员），
+// 超出额度的按字节截断（不切开 UTF-8 字符）并写明全文多少、保留多少、截掉多少，以及全文存在哪里。只有要点清单与抬头本身就超限时才会超出。
+func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[string]domain.Source, limit int) string {
+	head := fmt.Sprintf("\n\n---\n来源原文（共 %d 条，按成员顺序逐字附上）", len(set))
+	heads := make([]string, len(set))
+	room := limit - len(list) - len(head)
+	for i, m := range set {
+		heads[i] = fmt.Sprintf("\n\n【%d/%d】来源：%s · %s · 原题：「%s」\n", i+1, len(set), sourceName(srcs, originSource(m.it)), m.it.CreatedAt.In(time.Local).Format("2006-01-02 15:04"), m.it.Title)
+		if m.it.Summary != "" {
+			heads[i] += "原摘要：" + m.it.Summary + "\n"
+		}
+		room -= len(heads[i]) + cutNoteRoom
+	}
+	quota := make([]int, len(set))
+	order := make([]int, len(set))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(len(set[a].it.Body), len(set[b].it.Body)) })
+	left := max(room, 0)
+	for k, i := range order {
+		quota[i] = min(len(set[i].it.Body), left/(len(order)-k))
+		left -= quota[i]
+	}
+	var b strings.Builder
+	b.WriteString(list)
+	b.WriteString(head)
+	for i, m := range set {
+		b.WriteString(heads[i])
+		body := m.it.Body
+		switch {
+		case body == "":
+			b.WriteString("（原文为空）")
+		case len(body) <= quota[i]:
+			b.WriteString(body)
+		default:
+			cut := quota[i]
+			for cut > 0 && !utf8.RuneStart(body[cut]) {
+				cut--
+			}
+			where := "本条 proposal.absorbed 里建议 " + m.it.ID + " 的 body"
+			if m == carrier {
+				where = "本条 proposal.integrated.body"
+			}
+			fmt.Fprintf(&b, "%s\n……（原文截断：全文 %d 字节，这里保留前 %d 字节，截掉 %d 字节；全文存于%s）", body[:cut], len(body), cut, len(body)-cut, where)
+		}
+	}
+	return b.String()
 }
 
 // batchRef 是资料里给记录编的号（N1、E3、M2）；理由里出现时换成那条的标题，页面上不出现编号。
@@ -1033,8 +1095,8 @@ func integrable(tx *store.Tx, carrier domain.Item, members []string) (string, st
 	return "", ""
 }
 
-// absorb 在去处 to 上记下被折叠的 it 本身：原始标题与摘要、origin.source、origin.ref、项目、搬过去的消息与折叠结论，使溯源不靠它名下有没有消息；
-// 原始正文仍在 it 自己身上（折叠只改阶段）。
+// absorb 在去处 to 上记下被折叠的 it 本身：原始标题、摘要与正文（全文）、origin.source、origin.ref、项目、搬过去的消息与折叠结论，
+// 使溯源不靠它名下有没有消息；它自己身上也还留着原文（折叠只改阶段），撤销时它原样回到建议页。
 func absorb(c *command.Ctx, it domain.Item, to string, sw domain.ProposalSweep, moved []string, at time.Time) error {
 	t, err := items.Get(c.Tx, to)
 	if err != nil {
@@ -1044,7 +1106,7 @@ func absorb(c *command.Ctx, it domain.Item, to string, sw domain.ProposalSweep, 
 	if t.Proposal != nil {
 		tp = *t.Proposal
 	}
-	a := domain.ProposalAbsorbed{Item: it.ID, Title: it.Title, Summary: it.Summary, Events: moved, Project: it.Project, Created: it.CreatedAt, Action: sw.Action, Batch: sw.Batch, At: at}
+	a := domain.ProposalAbsorbed{Item: it.ID, Title: it.Title, Summary: it.Summary, Body: it.Body, Events: moved, Project: it.Project, Created: it.CreatedAt, Action: sw.Action, Batch: sw.Batch, At: at}
 	if it.Origin != nil {
 		a.Source, a.Ref = it.Origin.Source, it.Origin.Ref
 	}
