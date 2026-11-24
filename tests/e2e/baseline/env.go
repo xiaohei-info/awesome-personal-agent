@@ -60,6 +60,7 @@ type Env struct {
 	Cls       *modelstub.ClsStub // CLS_STUB（判断端点）
 
 	srv      *exec.Cmd
+	proc     *Proc
 	srvDone  chan struct{}
 	logs     *syncBuf
 	session  string // Web 会话 cookie 值
@@ -111,6 +112,9 @@ func buildBinaries() (map[string]string, error) {
 		if buildErr != nil {
 			return
 		}
+		if buildErr = removeOnAbort(buildDir); buildErr != nil {
+			return
+		}
 		// apa 一律是测试构建（apa_testclock）：发布物不带该标签，由 flow-release 单独验证。
 		for name, pkg := range map[string]string{"apa": "./cli/apa", "stub-harness": "./tests/doubles/stubharness/cmd/stub-harness",
 			"tool-stub": "./tests/doubles/tools/cmd/tool-stub", "telegram-ext": "./ext/telegram/cmd/telegram-ext"} {
@@ -134,7 +138,12 @@ func buildBinaries() (map[string]string, error) {
 
 // Run 跑完 m.Run 后删除本进程构建的二进制目录，用 defer 保证测试 panic 时也清。
 // 每个用到 New/Setup 的测试包在 TestMain 里 os.Exit(baseline.Run(m))；二进制仍是每个进程只构建一次。
+// 以看管进程身份被拉起时（reap.go）只做看管，不跑测试。
 func Run(m *testing.M) int {
+	if os.Getenv(reaperEnv) == "1" {
+		reap()
+		return 0
+	}
 	defer func() {
 		if buildDir != "" {
 			os.RemoveAll(buildDir)
@@ -152,6 +161,9 @@ func New(t testing.TB) *Env {
 		t.Fatal(err)
 	}
 	root, err := os.MkdirTemp("", "apa-e2e-")
+	if err == nil {
+		err = removeOnAbort(root)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +190,9 @@ func New(t testing.TB) *Env {
 func (e *Env) newLocalRepo() string {
 	// 放在 APA_HOME 所在的 Root 之外：bootstrap 流程要核对 Root 内只有 APA_HOME 一份数据。
 	dir, err := os.MkdirTemp("", "apa-e2e-repo-")
+	if err == nil {
+		err = removeOnAbort(dir)
+	}
 	if err != nil {
 		e.fatal("%v", err)
 	}
@@ -386,11 +401,12 @@ func (e *Env) startServe(port string) {
 		e.srv.Env = append(e.srv.Env, "PATH="+e.ToolBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	e.srv.Stdout, e.srv.Stderr = e.logs, e.logs
-	if err := e.srv.Start(); err != nil {
+	p, err := startProc(e.srv) // 由 New 注册的 StopKernel 收掉，见 startProc
+	if err != nil {
+		e.srv = nil
 		e.fatal("apa serve: %v", err)
 	}
-	e.srvDone = make(chan struct{})
-	go func(c *exec.Cmd, done chan struct{}) { _ = c.Wait(); close(done) }(e.srv, e.srvDone)
+	e.proc, e.srvDone = p, p.Done
 	e.URL = "http://" + loopback + ":" + port
 	deadline := time.Now().Add(30 * time.Second)
 	for {
@@ -423,13 +439,7 @@ func (e *Env) StopKernel() {
 	if e.srv == nil || e.srv.Process == nil {
 		return
 	}
-	_ = e.srv.Process.Signal(os.Interrupt)
-	select {
-	case <-e.srvDone:
-	case <-time.After(10 * time.Second):
-		_ = e.srv.Process.Kill()
-		<-e.srvDone
-	}
+	e.proc.Stop()
 	e.srv = nil
 }
 

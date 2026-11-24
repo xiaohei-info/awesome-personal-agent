@@ -88,10 +88,11 @@ func startV01(t *testing.T, bin string) *v01Instance {
 	srv.Env = append(os.Environ(), "APA_HOME="+home)
 	out, _ := srv.StdoutPipe()
 	srv.Stderr = io.Discard
-	if err := srv.Start(); err != nil {
+	p, err := baseline.StartServe(t, srv, home)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = srv.Process.Kill(); _, _ = srv.Process.Wait() })
+	t.Cleanup(p.Kill)
 	ready := make(chan string, 1)
 	go func() { line, _ := bufio.NewReader(out).ReadString('\n'); ready <- line }()
 	select {

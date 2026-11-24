@@ -29,7 +29,7 @@ type fixtureKernel struct {
 	home    string
 	csrf    string
 	client  *http.Client
-	cmd     *exec.Cmd
+	p       *baseline.Proc
 	cleanup func()
 }
 
@@ -54,11 +54,11 @@ func startOnFixture(t *testing.T, e *baseline.Env, fx *baseline.Fixture) *fixtur
 	cmd.Env = append(os.Environ(), "APA_HOME="+fx.Home)
 	out, _ := cmd.StdoutPipe()
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	p, err := baseline.StartServe(t, cmd)
+	if err != nil {
 		t.Fatal(err)
 	}
-	k := &fixtureKernel{t: t, base: "http://" + listen, home: fx.Home, cmd: cmd}
-	t.Cleanup(k.stop)
+	k := &fixtureKernel{t: t, base: "http://" + listen, home: fx.Home, p: p}
 	ready := make(chan string, 1)
 	go func() { l, _ := bufio.NewReader(out).ReadString('\n'); ready <- l }()
 	select {
@@ -80,20 +80,6 @@ func startOnFixture(t *testing.T, e *baseline.Env, fx *baseline.Fixture) *fixtur
 	}
 	k.csrf = login.CSRF
 	return k
-}
-
-func (k *fixtureKernel) stop() {
-	if k.cmd != nil && k.cmd.Process != nil {
-		_ = k.cmd.Process.Signal(os.Interrupt)
-		done := make(chan struct{})
-		go func() { _ = k.cmd.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			_ = k.cmd.Process.Kill()
-		}
-		k.cmd = nil
-	}
 }
 
 func (k *fixtureKernel) do(method, path, body string) (int, string) {

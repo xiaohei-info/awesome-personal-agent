@@ -372,10 +372,11 @@ func (f *Fixture) ServeV01(bin string) *V01Server {
 	cmd.Env = append(os.Environ(), "APA_HOME="+f.Home)
 	out, _ := cmd.StdoutPipe()
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	p, err := StartServe(e.T, cmd)
+	if err != nil {
 		e.fatal("旧版本 apa serve: %v", err)
 	}
-	e.T.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+	e.T.Cleanup(p.Kill)
 	ready := make(chan string, 1)
 	go func() { line, _ := bufio.NewReader(out).ReadString('\n'); ready <- line }()
 	select {

@@ -598,8 +598,9 @@ func (k *kit) serveFixture(home string) string {
 	out, _ := cmd.StdoutPipe()
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
-	k.must(cmd.Start())
-	k.t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+	p, err := baseline.StartServe(k.t, cmd)
+	k.must(err)
+	k.t.Cleanup(p.Kill)
 	ready := make(chan string, 1)
 	go func() { line, _ := bufio.NewReader(out).ReadString('\n'); ready <- line }()
 	select {
