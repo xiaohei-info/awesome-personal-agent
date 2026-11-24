@@ -20,8 +20,6 @@ import { DoctorDetails, type DoctorReport } from "./Doctor";
 export type { HealthReport, Signal } from "../../app/status";
 export type { DoctorCheck, DoctorDetail, DoctorReport } from "./Doctor";
 
-interface Run { id: string; target: string }
-
 /** 一行的问题、影响、主按钮与落点。 */
 interface Said { problem: string; impact?: string; button?: string; to?: string; second?: { button: string; to: string } }
 
@@ -30,7 +28,7 @@ interface Said { problem: string; impact?: string; button?: string; to?: string;
 const TIER_CODES = new Set(["tier_closed", "session_not_direct", "grant_required"]);
 const isReason = (r?: string) => !!r && (REJECT_REASON as readonly string[]).includes(r);
 
-function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: Status) => Said {
+function useSay(): (r: Row, st: Status) => Said {
   const t = useT(strings);
   const lang = useLang();
   const source = useNames("source");
@@ -45,10 +43,8 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
       case "sourceFail": return { problem: t.sourceFail(source(r.obj ?? ""), r.n), impact: t.sourceImpact, button: t.fix, to: r.to };
       case "sourceAuth": return { problem: t.sourceAuth(source(r.obj ?? "")), impact: t.sourceImpact, button: t.fix, to: r.to };
       case "sourceOff": return { problem: t.sourceOff(source(r.obj ?? "")), button: t.enable, to: r.to };
-      case "outcall": {
-        const item = runTarget(r.obj);
-        return item ? { problem: t.outcallItem, impact: t.notDone, button: t.seeItem, to: "/items/" + encodeURIComponent(item) } : { problem: t.outcall(r.n), impact: t.notDone, button: t.seeRuns, to: r.to };
-      }
+      case "outcall":
+        return { problem: t.outcall(r.n), impact: t.outcallImpact, button: t.seeTimeoutRuns, to: r.to };
       case "queue": return { problem: t.queue(r.n) };
       case "delivery": return { problem: t.delivery(r.n), impact: t.deliveryImpact, button: t.seeChannels, to: r.to };
       case "chain": return { problem: t.chain, impact: t.halfway, button: r.obj ? t.seeItem : t.seeItems, to: r.to };
@@ -64,7 +60,10 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
       case "fallback": return { problem: r.obj ? t.fallbackOne(ruleName(lang, r.obj)) : t.fallbacks(r.n), impact: t.fallbackImpact, button: t.reopen, to: r.to };
       case "runFail": {
         const f = fault(r.code ? { code: r.code, params: r.params } : undefined);
-        return { problem: f?.say ?? t.outcallItem, impact: t.runFailImpact(f?.next ?? ""), button: t.seeItem, to: r.to };
+        if (r.code === "timeout") {
+          return { problem: f?.say ?? t.outcall(1), impact: t.outcallImpact, button: t.seeTimeoutRuns, to: "/runs?state=timeout" };
+        }
+        return { problem: f?.say ?? t.runFailFallback, impact: t.runFailImpact(f?.next ?? ""), button: t.seeItem, to: r.to };
       }
       case "receipt": {
         const reason = r.params?.reason;
@@ -135,8 +134,7 @@ export function HealthPage() {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [doctor, setDoctor] = useState<DoctorReport | null>(null);
-  const [runs, setRuns] = useState<Run[]>([]);
-  const say = useSay((id) => runs.find((x) => x.id === id)?.target);
+  const say = useSay();
 
   const load = useCallback(() => {
     setError(null);
@@ -148,8 +146,6 @@ export function HealthPage() {
       },
       () => setDoctor(null),
     );
-    // 超时的运行：信号只给运行 id，落点要的是它为哪件事跑。取不到时按钮退回运行记录。
-    api.get<{ runs: Run[] }>("/runs?state=timeout&limit=100").then((r) => setRuns(r.runs), () => setRuns([]));
     return api.get<HealthReport>("/health").then(setReport, (e) => setError(e));
   }, [api]);
   useEffect(() => {

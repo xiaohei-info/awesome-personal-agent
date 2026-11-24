@@ -9,6 +9,7 @@ import { AddAgent } from "./AgentEditor";
 import { AgentPage, KeyList, KindChoice, Secret } from "./AgentPage";
 import { AudienceChoice, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 import { Persona } from "./Persona";
+import { RunTimeoutCard } from "./RunTimeout";
 import { PolicyPage, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { entries, hasKey, LEGACY, ready, useData, type Data, type Entry, type Rec } from "./data";
 import { strings } from "./strings";
@@ -61,6 +62,7 @@ function AgentList() {
             </>
           )}
           <h2>{t.common}</h2>
+          <RunTimeoutCard doc={pol} save={save} />
           <Persona doc={pol} save={save} />
           {data && <Other data={data} list={list} reload={load} onError={setError} secret={secret} onSecret={setSecret} />}
           <PageReminder row="run_failed" />

@@ -76,6 +76,16 @@ type FaultSay = Record<I.RunFault, { say: (p: NoticeParams) => string; next: str
 /** go：下一步去哪修（按钮文字与地址）；没有时下一步就是看这件事。 */
 type NoticeSay = Record<I.NoticeCode, { say: (p: NoticeParams) => string; go?: { label: string; to: string } }>;
 const mins = (p: NoticeParams) => Math.max(1, Math.round(Number(p?.timeout ?? 0) / 60));
+const limitZh = (p: NoticeParams) => {
+  const s = Number(p?.timeout ?? 0);
+  if (s >= 3600 && s % 900 === 0) return `${Math.round((s / 3600) * 100) / 100} 小时`;
+  return `${mins(p)} 分钟`;
+};
+const limitEn = (p: NoticeParams) => {
+  const s = Number(p?.timeout ?? 0);
+  if (s >= 3600 && s % 900 === 0) return `${Math.round((s / 3600) * 100) / 100} h`;
+  return `${mins(p)} min`;
+};
 
 /** 自检结论的可变参数（kernel/doctor 的 data，附录 B.2）。 */
 export type DoctorData = Record<string, unknown> | undefined;
@@ -400,7 +410,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     exec_not_found: { say: () => "找不到执行程序", next: "确认程序已安装、启动命令的路径正确" },
     exit_nonzero: { say: (p) => `执行程序出错退出（退出码 ${p?.exit ?? "?"}）`, next: "看运行记录里的原因，修好后再开始" },
     killed: { say: () => "执行程序被中途终止", next: "确认没有别的程序结束它，再重新开始" },
-    timeout: { say: (p) => `超过时限（${mins(p)} 分钟）没做完，已停下`, next: "可以调大时限，或把事情拆小再开始" },
+    timeout: { say: (p) => `一条 Agent 后台运行因超时停止（超过 ${limitZh(p)}）`, next: "可在设置里调大时限，或直接继续处理" },
     lost: { say: () => "APA 重启时它正在运行，已中断", next: "需要的话重新开始" },
   },
   doctorCode: {
@@ -793,7 +803,7 @@ const en: typeof zh = {
     exec_not_found: { say: () => "The program was not found", next: "Make sure it is installed and the launch path is right" },
     exit_nonzero: { say: (p) => `The program exited with an error (code ${p?.exit ?? "?"})`, next: "See the reason in the run record, fix it, then start again" },
     killed: { say: () => "The program was stopped midway", next: "Make sure nothing else ended it, then start again" },
-    timeout: { say: (p) => `It ran past its limit (${mins(p)} min) and was stopped`, next: "Raise the limit or split the work, then start again" },
+    timeout: { say: (p) => `A background run stopped after timing out (over ${limitEn(p)})`, next: "Adjust the limit in Settings, or continue working on it" },
     lost: { say: () => "It was running when APA restarted and got cut off", next: "Start it again if you still need it" },
   },
   doctorCode: {

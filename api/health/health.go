@@ -8,6 +8,7 @@ package health
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -224,11 +225,11 @@ func build(v khealth.View, rejudgeDays int) Report {
 		}
 		return s
 	}
+	outcallWhy, outcallNext := outcallCopy(len(v.Outcall.Timeouts), len(v.Outcall.Failures))
 	rep := Report{Healthy: v.Healthy(), Signals: []Signal{
 		sig("source_failures", len(v.SourceFailures), "a source's latest pulls are failing (kind says whether it is an auth or config failure), or it is disabled; a successful pull clears it",
 			"source page: open the source and fix its credentials or config", srcs),
-		sig("outcall", len(v.Outcall.Timeouts)+len(v.Outcall.Failures), "an outcall run timed out, or an Agent run failed (did not start, exited non-zero), and it is still the latest run of its target (within 24 hours); its result was not recorded and the item was not changed; queue depth, longest wait and each failure's fault code are in detail",
-			"run detail or the item; fix what the fault code names on the host, then start it again from the item or the schedule; if queues stay backed up, raise the matching quota in run settings", outcall),
+		sig("outcall", len(v.Outcall.Timeouts)+len(v.Outcall.Failures), outcallWhy, outcallNext, outcall),
 		sig("delivery_backlog", len(v.DeliveryBacklog), "deliveries are queued or retrying without being sent",
 			"channel ext and interruption policy", ids(v.DeliveryBacklog, func(d domain.Delivery) string { return d.ID })),
 		sig("chain_trips", len(v.ChainTrips), "the chain-depth breaker stopped a command or background run, and the owner has not handled that item since (objectless trips clear after 24 hours)",
@@ -280,6 +281,24 @@ func build(v khealth.View, rejudgeDays int) Report {
 		}
 	}
 	return rep
+}
+
+// outcallCopy 区分后台运行超时与运行失败的说明：超时只是后台运行因达到时限停止，事项状态未变且已写进展保留，
+// 入口指向运行记录页；失败才是未启动或非 0 退出。
+func outcallCopy(timeouts, failures int) (why, next string) {
+	switch {
+	case timeouts > 0 && failures == 0:
+		return fmt.Sprintf("%d background run(s) timed out and stopped (the item status is unchanged and any written progress is kept), while still the latest run of their target (within 24 hours); timed-out run IDs and queue depth are in detail", timeouts),
+			"runs page (/runs?state=timeout) to inspect the timed-out runs; adjust the background run time limit in Settings › Agents if needed"
+	case timeouts > 0 && failures > 0:
+		return fmt.Sprintf("%d background run(s) timed out and stopped (item status unchanged, written progress kept), and %d Agent run(s) failed (did not start, exited non-zero), while still the latest run of their target (within 24 hours); timed-out run IDs, failure fault codes and queue depth are in detail", timeouts, failures),
+			"runs page (/runs?state=timeout) to inspect timed-out runs and Settings › Agents to adjust the time limit; for failed runs, fix what the fault code names on the host and start again"
+	case failures > 0:
+		return "an Agent run failed (did not start, exited non-zero), and it is still the latest run of its target (within 24 hours); its result was not recorded and the item was not changed; queue depth, longest wait and each failure's fault code are in detail",
+			"run detail or the item; fix what the fault code names on the host, then start it again from the item or the schedule; if queues stay backed up, raise the matching quota in run settings"
+	default:
+		return "", "runs page (/runs) to inspect runs, or Settings › Agents to adjust the background run time limit"
+	}
 }
 
 // withRejections 给 pack_rejections 补上逐字段的原因（C.11）；本人据此就能修。

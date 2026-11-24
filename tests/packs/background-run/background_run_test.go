@@ -480,3 +480,35 @@ func TestPackCannotDeclareAuto(t *testing.T) {
 		t.Fatalf("rejections = %+v", rej)
 	}
 }
+
+// 内置 background-run 包的模板不得声明 timeout，所有后台运行统一用全局默认值（4 小时）。
+func TestBuiltinBackgroundRunPromptsHaveNoTimeoutAndUse4HourDefault(t *testing.T) {
+	ld := packs.New(packs.Options{Builtin: rootpacks.FS, Kinds: items.NewKinds()})
+	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
+		t.Fatalf("load builtin packs: %v %+v", err, rej)
+	}
+	pk, ok := ld.Get("background-run")
+	if !ok {
+		t.Fatal("background-run pack not loaded")
+	}
+	for _, name := range []string{"handle-item", "run-task"} {
+		pr, ok := pk.Prompts[name]
+		if !ok {
+			t.Fatalf("prompt %s missing", name)
+		}
+		if pr.Meta.Timeout != "" {
+			t.Errorf("background-run/prompts/%s.md must not declare timeout, got %q", name, pr.Meta.Timeout)
+		}
+	}
+	e := newEnv(t, "work-host.cli")
+	e.auto(mainRule)
+	id := e.newOpen("检查默认时限", []string{"agent-ok"}, nil)
+	rs := e.runs_()
+	if len(rs) != 1 || rs[0].Run.Target != id || rs[0].Run.TimeoutSec != policy.DefaultBackgroundRunTimeoutSec {
+		t.Fatalf("launched run = %+v, want timeout %d", rs, policy.DefaultBackgroundRunTimeoutSec)
+	}
+	if err := os.WriteFile(filepath.Join(e.runs, rs[0].Run.ID, "go"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	<-e.done
+}

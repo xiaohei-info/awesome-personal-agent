@@ -386,6 +386,11 @@ const (
 	DefaultGenerateMaxMaterialChars = 24000
 	// DefaultGenerateBudgetTokens 是写作资料预算的缺省值，与旧缺省逐字等价（24000 ÷ 1.5）。
 	DefaultGenerateBudgetTokens = 16000
+	// 后台运行时限（§13.6、§6.13）：所有后台运行（推送主会话的 wake/headless、派给执行者的 task 与续接）共用同一个值，
+	// 唯一语义是防卡死、防无限运行，不影响事项本身。默认 4 小时，设置页按小时编辑（0.25–24 小时）。
+	DefaultBackgroundRunTimeoutSec = 4 * 60 * 60
+	MinBackgroundRunTimeoutSec     = 15 * 60
+	MaxBackgroundRunTimeoutSec     = 24 * 60 * 60
 )
 
 // EffectiveLocality 是端点位置的实际取值：未声明按 external（§14.14）。
@@ -500,6 +505,13 @@ type Policy struct {
 	// NoteVaults 是笔记库登记（§6.13、§12.8）：名字在实例内唯一，OpenURL 是"在笔记应用打开"的 URL 模板。
 	// 已存的策略版本没有这个键，读作没有登记，不改写。只在 Web 改。
 	NoteVaults []NoteVault `json:"note_vaults"`
+	// BackgroundRunTimeoutSec 是所有后台运行的统一时限（秒）；旧策略版本没有此键，读作 DefaultBackgroundRunTimeoutSec（4 小时）。
+	BackgroundRunTimeoutSec int `json:"background_run_timeout_sec,omitempty"`
+}
+
+// BackgroundRunTimeout 返回生效的后台运行时限；未设置时取 DefaultBackgroundRunTimeoutSec（4 小时）。
+func (p Policy) BackgroundRunTimeout() time.Duration {
+	return time.Duration(cmp.Or(p.BackgroundRunTimeoutSec, DefaultBackgroundRunTimeoutSec)) * time.Second
 }
 
 // NoteVault 是一个已登记的笔记库。OpenURL 的占位符 {vault}（库名）与 {path}（库内相对路径）渲染时各自做 URL 编码；
@@ -581,8 +593,9 @@ func Default() Policy {
 		ForwardAllowlist:  map[string][]string{},
 		ChannelAnswerers:  map[string][]string{},
 		Channels:          map[string]Channel{},
-		NoteVaults:        []NoteVault{},
-		Judgment:          Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
+		NoteVaults:              []NoteVault{},
+		Judgment:                Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
+		BackgroundRunTimeoutSec: DefaultBackgroundRunTimeoutSec,
 	}
 }
 
@@ -691,6 +704,12 @@ func normalize(p Policy) (Policy, error) {
 	}
 	if b := p.Merge.BodyMaxBytes; b != 0 && (b < MinMergeBodyBytes || b > MaxMergeBodyBytes) {
 		return p, invalid("merge body_max_bytes %d: use %d to %d, or 0 for the default", b, MinMergeBodyBytes, MaxMergeBodyBytes)
+	}
+	if p.BackgroundRunTimeoutSec == 0 {
+		p.BackgroundRunTimeoutSec = DefaultBackgroundRunTimeoutSec
+	}
+	if p.BackgroundRunTimeoutSec < MinBackgroundRunTimeoutSec || p.BackgroundRunTimeoutSec > MaxBackgroundRunTimeoutSec {
+		return p, invalid("background_run_timeout_sec %d: use %d to %d (0.25h to 24h)", p.BackgroundRunTimeoutSec, MinBackgroundRunTimeoutSec, MaxBackgroundRunTimeoutSec)
 	}
 	for k, r := range p.Disturb.Push {
 		if !slices.Contains(PushCategories, k) {
@@ -955,7 +974,7 @@ func decode(doc string) (p Policy, legacy bool, err error) {
 	w := struct {
 		Policy
 		Legacy *legacyModelEndpoint `json:"model_endpoint"`
-	}{Policy: Policy{Disturb: Disturb{DailyCap: DefaultDailyCap}, Judgment: Judgment{SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}}}} // 旧文档没有 daily_cap：升级后日上限即生效
+	}{Policy: Policy{Disturb: Disturb{DailyCap: DefaultDailyCap}, Judgment: Judgment{SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}}, BackgroundRunTimeoutSec: DefaultBackgroundRunTimeoutSec}} // 旧文档没有这些键：升级后默认值即生效
 	if err := json.Unmarshal([]byte(doc), &w); err != nil {
 		return Policy{}, false, fmt.Errorf("policy: stored document: %w", err)
 	}
@@ -1058,7 +1077,7 @@ func StoredRaw(tx *store.Tx, keys ...string) (map[string]json.RawMessage, error)
 
 // RulesSections 是策略里属于 3a 改日常的顶层段（§14.3）：Agent 档位放开到 3a 可改，规矩改动清单列出并可撤回。
 // 其余段都是 3b。设置路由的段表与它一致（api/settings/policy）。
-var RulesSections = []string{"channels", "disturb", "forward_allowlist", "judgment", "models_paused", "persona", "persona_lang"}
+var RulesSections = []string{"background_run_timeout_sec", "channels", "disturb", "forward_allowlist", "judgment", "models_paused", "persona", "persona_lang"}
 
 // At 读第 v 版策略（存储原文，不按模型暂停改写）；没有这一版返回 not_found。
 func At(tx *store.Tx, v int) (Policy, error) {

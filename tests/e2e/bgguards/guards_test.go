@@ -121,6 +121,11 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 
 		f.mode("hang", "")
 		id2 := f.task("bgg-04-timeout", "acc-work", "acc-short")
+		f.waitFor("超时用例的运行进入 running", 20*time.Second, func() bool {
+			rs := f.runsOf(id2)
+			return len(rs) == 1 && rs[0].State == "running"
+		})
+		f.TCAdvance(14460) // 推进测试时钟越过默认 4 小时时限
 		rs2 := f.settledFinal(id2, 1)
 		if rs2[0].State == "succeeded" {
 			t.Errorf("超时的 Run 不应成功: %+v", rs2[0])

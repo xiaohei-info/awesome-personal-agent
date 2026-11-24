@@ -168,6 +168,7 @@ var (
 		disturbSection,
 		sect("persona", rules, "/settings/general", func(p *kpolicy.Policy) *string { return &p.Persona }),
 		sect("persona_lang", rules, "/settings/general", func(p *kpolicy.Policy) *string { return &p.PersonaLang }),
+		sect("background_run_timeout_sec", rules, "/settings/agents", func(p *kpolicy.Policy) *int { return &p.BackgroundRunTimeoutSec }),
 		sect("channels", rules, "/settings/channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
 		sect("default_agent_id", power, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.DefaultAgentID }),
 		sect("main_agent_id", power, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.MainAgentID }),

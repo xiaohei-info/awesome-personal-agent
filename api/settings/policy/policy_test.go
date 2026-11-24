@@ -654,3 +654,35 @@ func TestGenerateMaterialBudget(t *testing.T) {
 		t.Fatalf("旧的字数字段不再接受：%d", rec.Code)
 	}
 }
+
+func TestBackgroundRunTimeoutSettingRoute(t *testing.T) {
+	e := setup(t)
+	rec := e.do("GET", routes[0], "", e.web)
+	if rec.Code != 200 {
+		t.Fatalf("GET /settings/policy: %d %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Timeout int `json:"background_run_timeout_sec"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Timeout != kpolicy.DefaultBackgroundRunTimeoutSec {
+		t.Fatalf("default timeout = %d (err=%v)", got.Timeout, err)
+	}
+	// 保存 0.5 小时（1800 秒）后立即读回
+	if rec := e.do("PUT", routes[0], `{"background_run_timeout_sec":1800}`, e.web); rec.Code != 200 {
+		t.Fatalf("PUT 1800: %d %s", rec.Code, rec.Body)
+	}
+	rec = e.do("GET", routes[0], "", e.web)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Timeout != 1800 {
+		t.Fatalf("updated timeout = %d (err=%v)", got.Timeout, err)
+	}
+	// 超出上下限返回 400，且不覆盖已存值
+	for _, bad := range []string{"-1", "60", "899", "86401"} {
+		if rec := e.do("PUT", routes[0], `{"background_run_timeout_sec":`+bad+`}`, e.web); rec.Code != 400 {
+			t.Fatalf("bad timeout %s: got %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+	rec = e.do("GET", routes[0], "", e.web)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Timeout != 1800 {
+		t.Fatalf("timeout after rejected PUT = %d", got.Timeout)
+	}
+}

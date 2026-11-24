@@ -88,7 +88,11 @@ export function rowsOf(s: Signal): Row[] {
       const failures = list<{ run: string; target: string; fault?: { code: string; params?: Record<string, string> } }>(q.failures).map((f) => ({
         ...row("runFail", true, 1, "/items/" + enc(f.target) + "#agent", f.target), code: f.fault?.code, params: f.fault?.params,
       }));
-      const timeouts = runs.length ? runs.map((r) => row("outcall", true, 1, "/runs", r)) : failures.length ? [] : [row("outcall", true, s.count, "/runs")];
+      const timeouts = runs.length
+        ? [row("outcall", true, runs.length, "/runs?state=timeout&ids=" + enc(runs.join(",")), runs.join(","))]
+        : failures.length
+          ? []
+          : [row("outcall", true, s.count, "/runs?state=timeout")];
       return [...timeouts, ...failures, ...(queued ? [row("queue", false, queued)] : [])];
     }
     case "delivery_backlog":

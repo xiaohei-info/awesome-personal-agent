@@ -22,6 +22,13 @@ export function LastRunNote({ item }: { item: string }) {
   }, [api, item]);
   const f = say(fault);
   if (!f) return null;
+  if (fault?.code === "timeout") {
+    return (
+      <p role="note" className="panel">
+        <strong>{t.runTimeout(f.say)}</strong> {t.timeoutKept} {f.next} <Link to="/runs?state=timeout">{t.seeRuns}</Link>
+      </p>
+    );
+  }
   return (
     <p role="note" className="panel">
       <strong>{t.runFault(f.say)}</strong> {t.notRecorded} {f.next} <Link to="/runs">{t.seeRuns}</Link>

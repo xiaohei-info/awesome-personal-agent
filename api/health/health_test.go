@@ -405,3 +405,42 @@ func TestCaptureFailuresIsWarningWithClassRows(t *testing.T) {
 		t.Fatalf("%+v", s.Captures)
 	}
 }
+
+// 后台运行超时的健康信号文案：明确说明是后台运行超时停止、事项状态未变且已写进展保留，入口指向运行记录页，
+// 不把超时说成「result was not recorded」。
+func TestOutcallTimeoutSignalCopyDistinguishesFromItemError(t *testing.T) {
+	e := setup(t, nil)
+	now := time.Now().UTC()
+	var runID string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		r, err := proc.Enqueue(tx, proc.Request{
+			Run:      domain.Run{Category: domain.RunBackground, Launch: "wake", Target: "itm_1", TimeoutSec: 14400},
+			External: true,
+		}, now)
+		if err != nil {
+			return err
+		}
+		runID = r.ID
+		return proc.Settle(tx, r.ID, domain.RunTimeout, nil, "timeout after 14400s", now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := e.report(auth.Observer).byID("outcall")
+	if s.OK || s.Count != 1 || s.Severity != SeverityError {
+		t.Fatalf("outcall signal = %+v", s)
+	}
+	if strings.Contains(s.Why, "result was not recorded") {
+		t.Fatalf("timeout why must not say result was not recorded: %q", s.Why)
+	}
+	if !strings.Contains(s.Why, "1 background run(s) timed out") || !strings.Contains(s.Why, "item status is unchanged") {
+		t.Fatalf("unexpected timeout why: %q", s.Why)
+	}
+	if !strings.Contains(s.Next, "/runs?state=timeout") {
+		t.Fatalf("timeout next must point to runs page: %q", s.Next)
+	}
+	d, _ := s.Detail.(map[string]any)
+	ts, _ := d["timeouts"].([]any)
+	if len(ts) != 1 || ts[0] != runID {
+		t.Fatalf("timeouts detail = %+v, want [%s]", ts, runID)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -764,5 +765,37 @@ func TestMergeBodyMaxBytes(t *testing.T) {
 	p.Merge.BodyMaxBytes = MinMergeBodyBytes
 	if _, err := normalize(p); err != nil || p.Merge.BodyMax() != MinMergeBodyBytes {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestBackgroundRunTimeoutDefaultAndBounds(t *testing.T) {
+	if DefaultBackgroundRunTimeoutSec != 4*3600 {
+		t.Fatalf("DefaultBackgroundRunTimeoutSec = %d, want 14400 (4h)", DefaultBackgroundRunTimeoutSec)
+	}
+	if d := Default(); d.BackgroundRunTimeoutSec != DefaultBackgroundRunTimeoutSec || d.BackgroundRunTimeout() != 4*time.Hour {
+		t.Fatalf("Default = %d / %v", d.BackgroundRunTimeoutSec, d.BackgroundRunTimeout())
+	}
+	// 旧策略文档没有 background_run_timeout_sec 字段，解码后读作 4 小时默认值
+	p, _, err := decode(`{"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0},"permission_cap":{"default":"read","by_harness":{}}}`)
+	if err != nil || p.BackgroundRunTimeoutSec != DefaultBackgroundRunTimeoutSec || p.BackgroundRunTimeout() != 4*time.Hour {
+		t.Fatalf("legacy decode: %d %v (err=%v)", p.BackgroundRunTimeoutSec, p.BackgroundRunTimeout(), err)
+	}
+	for _, okSec := range []int{0, MinBackgroundRunTimeoutSec, 1800, 4 * 3600, MaxBackgroundRunTimeoutSec} {
+		q := Default()
+		q.BackgroundRunTimeoutSec = okSec
+		got, err := normalize(q)
+		if err != nil {
+			t.Errorf("sec %d rejected: %v", okSec, err)
+		}
+		if okSec == 0 && got.BackgroundRunTimeoutSec != DefaultBackgroundRunTimeoutSec {
+			t.Errorf("sec 0 normalized to %d, want %d", got.BackgroundRunTimeoutSec, DefaultBackgroundRunTimeoutSec)
+		}
+	}
+	for _, badSec := range []int{-1, 1, MinBackgroundRunTimeoutSec - 1, MaxBackgroundRunTimeoutSec + 1} {
+		q := Default()
+		q.BackgroundRunTimeoutSec = badSec
+		if _, err := normalize(q); err == nil {
+			t.Errorf("sec %d must be rejected", badSec)
+		}
 	}
 }
