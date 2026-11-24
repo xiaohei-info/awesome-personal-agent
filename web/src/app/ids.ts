@@ -161,7 +161,7 @@ export const EVENT = [
 ] as const;
 /** 内部审计事件类型（各模块写入，不在对外清单里；查不到的显示原值） */
 export const EVENT_INTERNAL = [
-  "rule.observed", "rule.timer_created", "inbound.disposed", "inbound.requeued", "inbound.captured", "instance.created",
+  "rule.observed", "rule.fired", "rule.timer_created", "inbound.disposed", "inbound.requeued", "inbound.captured", "instance.created",
   "instance.updated", "instance.toggled", "instance.fired", "item.start_requested", "material.revision_rejected", "material.revision_summarized",
   "followmsg.attached", "followmsg.processed", "followmsg.handed_back", "followmsg.released", "executor.declared",
   "executor.confirmed", "executor.rejected", "executor.changed", "executor.removed", "source.registered", "source.updated",
