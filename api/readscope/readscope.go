@@ -114,6 +114,9 @@ func (r *Reader) ItemSources(it domain.Item) ([]string, error) {
 		for _, m := range it.Proposal.Merges {
 			cands = append(cands, m.Source)
 		}
+		for _, a := range it.Proposal.Absorbed { // 折叠进来的建议的标题与 ref 也是内容
+			cands = append(cands, a.Source)
+		}
 	}
 	seen := map[string]bool{}
 	var out []string

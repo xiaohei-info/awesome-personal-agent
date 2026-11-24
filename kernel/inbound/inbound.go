@@ -320,6 +320,9 @@ func (s *Service) Register(x *command.Executor) error {
 	if err := registerRepair(x); err != nil {
 		return err
 	}
+	if err := registerMarkPending(x); err != nil {
+		return err
+	}
 	if err := registerUnmerge(x); err != nil {
 		return err
 	}
