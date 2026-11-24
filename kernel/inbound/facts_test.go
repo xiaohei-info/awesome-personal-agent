@@ -154,3 +154,30 @@ func TestMergeFactsRelaxedPipeline(t *testing.T) {
 		})
 	}
 }
+
+// 千分位与小数点的边界：1,200 与 1200 是同一个数；200 不会在 1,200 或 5.200 里算找到；中文日期换成 2026.11.16 的写法仍算在。
+func TestMissingFactsNumberBoundaries(t *testing.T) {
+	cases := []struct {
+		source, text string
+		missing      bool
+	}{
+		{"报销 1200 元", "报销 1,200 元", false},
+		{"转账 1,200 USDT", "转账 1200 USDT", false},
+		{"转账 1,234,567 USDT", "转账 1234567 USDT", false},
+		{"共 200 件", "共 1,200 件", true},
+		{"付 200 元", "付 5.200 元", true},
+		{"付 5.2 元", "付 15.2 元", true},
+		{"付 5.2 元。", "付 5.2 元。", false},
+		{"共 50 件", "共 50.5 件", true},
+		{"11月16日", "2026.11.16", false},
+	}
+	for _, c := range cases {
+		facts := keyFacts(c.source, "")
+		if len(facts) != 1 {
+			t.Fatalf("%q: expected one fact, got %v", c.source, facts)
+		}
+		if got := len(missingFacts(c.text, facts)) == 1; got != c.missing {
+			t.Errorf("%q in %q: missing=%v, want %v", c.source, c.text, got, c.missing)
+		}
+	}
+}

@@ -176,11 +176,19 @@ func keyFacts(title, summary string) []fact {
 	return slices.CompactFunc(out, func(a, b fact) bool { return a.Kind == b.Kind && a.Text == b.Text })
 }
 
-// missingFacts 是 facts 里在 text 中找不到的（小写、空白合一后比）：纯数字类的片段按数字边界比，「840」不会在「1840」里算找到。
+// missingFacts 是 facts 里在 text 中找不到的（小写、空白合一后比）：纯数字类的片段按数字边界比，「840」不会在「1840」里算找到；
+// 金额与数量再把千分位逗号当作数字的一部分：「1,200」与「1200」是同一个数，「200」不会在「1,200」或「5.200」里算找到。
 func missingFacts(text string, facts []fact) (out []fact) {
 	text = normalizeText(text)
+	plain := thousands(text)
 	for _, f := range facts {
-		if !slices.ContainsFunc(f.need, func(n string) bool { return !hasFact(text, n) }) {
+		strict := f.Kind == factAmount || f.Kind == factQuantity
+		if !slices.ContainsFunc(f.need, func(n string) bool {
+			if strict {
+				return !hasFact(plain, thousands(normalizeText(n)), true)
+			}
+			return !hasFact(text, n, false)
+		}) {
 			continue
 		}
 		out = append(out, f)
@@ -188,12 +196,27 @@ func missingFacts(text string, facts []fact) (out []fact) {
 	return
 }
 
-var numericNeed = regexp.MustCompile(`^[\d,.:/-]+$`)
+var (
+	numericNeed = regexp.MustCompile(`^[\d,.:/-]+$`)
+	thousandSep = regexp.MustCompile(`(\d),(\d{3})`)
+)
 
-func hasFact(text, need string) bool {
+// thousands 去掉千分位逗号（1,234,567 → 1234567）。
+func thousands(s string) string {
+	for old := ""; old != s; {
+		old, s = s, thousandSep.ReplaceAllString(s, "$1$2")
+	}
+	return s
+}
+
+// hasFact 在 text 里找 need。numeric 的按数字边界找；inner 为真时数字之间的 . 也算数字的一部分（小数点）。
+func hasFact(text, need string, inner bool) bool {
 	need = normalizeText(need)
 	if !numericNeed.MatchString(need) {
 		return strings.Contains(text, need)
+	}
+	joined := func(i int) bool { // text[i] 是 . 且两侧都是数字
+		return inner && i > 0 && i+1 < len(text) && text[i] == '.' && isDigit(text[i-1]) && isDigit(text[i+1])
 	}
 	for i := 0; ; {
 		j := strings.Index(text[i:], need)
@@ -201,7 +224,7 @@ func hasFact(text, need string) bool {
 			return false
 		}
 		a, b := i+j, i+j+len(need)
-		if (a == 0 || !isDigit(text[a-1])) && (b == len(text) || !isDigit(text[b])) {
+		if (a == 0 || !isDigit(text[a-1]) && !(a > 1 && text[a-1] == '.' && inner && isDigit(text[a-2]))) && (b == len(text) || !isDigit(text[b]) && !joined(b)) {
 			return true
 		}
 		i = a + 1
