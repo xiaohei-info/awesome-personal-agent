@@ -227,9 +227,10 @@ type ProposalAbsorbed struct {
 	Source  string    `json:"source,omitempty"` // 它的 origin.source
 	Ref     string    `json:"ref,omitempty"`    // 它的 origin.ref
 	Project string    `json:"project,omitempty"`
+	Created time.Time `json:"created_at"` // 它自己建立的时刻
 	Action  string    `json:"action"`
 	Batch   string    `json:"batch,omitempty"`
-	At      time.Time `json:"at"`
+	At      time.Time `json:"at"` // 折叠的时刻
 }
 
 // 跨来源合并的归类结论（ProposalSweep.Action）。

@@ -622,7 +622,7 @@ func absorb(c *command.Ctx, it domain.Item, to string, sw domain.ProposalSweep, 
 	if t.Proposal != nil {
 		tp = *t.Proposal
 	}
-	a := domain.ProposalAbsorbed{Item: it.ID, Title: it.Title, Project: it.Project, Action: sw.Action, Batch: sw.Batch, At: at}
+	a := domain.ProposalAbsorbed{Item: it.ID, Title: it.Title, Project: it.Project, Created: it.CreatedAt, Action: sw.Action, Batch: sw.Batch, At: at}
 	if it.Origin != nil {
 		a.Source, a.Ref = it.Origin.Source, it.Origin.Ref
 	}

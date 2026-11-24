@@ -95,7 +95,7 @@ func TestMergeGuardBlocksCrossProjectCandidates(t *testing.T) {
 	}
 	ab := e.item(a.ID).Proposal.Absorbed
 	if len(ab) != 1 || ab[0].Item != c.ID || ab[0].Title != c.Title || ab[0].Source != "src_c" || ab[0].Ref == "" || ab[0].Ref != c.Origin.Ref ||
-		ab[0].Action != domain.SweepMerge || ab[0].Project != e.web {
+		ab[0].Action != domain.SweepMerge || ab[0].Project != e.web || !ab[0].Created.Equal(c.CreatedAt) {
 		t.Fatalf("the target keeps the folded title and origin.ref: %+v (origin %+v)", ab, c.Origin)
 	}
 	e.verify()

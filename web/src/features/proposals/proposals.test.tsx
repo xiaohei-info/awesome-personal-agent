@@ -404,6 +404,33 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
     expect(await screen.findByText(/已撤销合并，它回到了建议里/)).toBeInTheDocument();
   });
 
+  it("从哪几条合来：展开列出 proposal.absorbed 的原始标题、来源、建立时间与怎么合的；没有消息的迁移建议也列；撤销合并后随之消失", async () => {
+    let absorbed = [
+      { item: "itm_v", title: "整理报销单据（清单）", source: "agent:vault-migrate", ref: "todo-migrate:abc", created_at: "2030-01-01T00:00:00Z", action: "duplicate", at: "2030-01-02T00:00:00Z" },
+      { item: "itm_g", title: "fix: 报销导出", source: "src_mail_qq", ref: "https://git.example/org/web/pull/7", created_at: "2030-01-01T02:00:00Z", action: "merge", at: "2030-01-02T00:00:00Z" },
+    ];
+    const s = server([]);
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      if (url === "/v1/items?phase=proposed") return json(200, { items: [prop("t", { proposal: { low_confidence: false, absorbed } as any })], last_rejections: {} });
+      if (url === "/v1/items/itm_v/unmerge") { (s.impl as any)(url, init); absorbed = absorbed.filter((a) => a.item !== "itm_v"); return json(200, { item: "itm_v" }); }
+      return s.impl(url, init);
+    }) as unknown as typeof fetch;
+    mount(impl);
+    const card = await screen.findByRole("article", { name: "建议 t" });
+    await userEvent.click(within(card).getByText("从 2 条建议合来"));
+    const v = within(card).getByRole("listitem", { name: "整理报销单据（清单）" });
+    expect(v).toHaveTextContent("agent:vault-migrate");
+    expect(v).toHaveTextContent("建于 " + new Date("2030-01-01T00:00:00Z").toLocaleString());
+    expect(v).toHaveTextContent("判定重复 · 合并于 " + new Date("2030-01-02T00:00:00Z").toLocaleString());
+    const g = within(card).getByRole("listitem", { name: "fix: 报销导出" });
+    expect(g).toHaveTextContent("QQ 邮箱");
+    expect(within(g).getByRole("link", { name: "链接" })).toHaveAttribute("href", "https://git.example/org/web/pull/7");
+    await userEvent.click(within(v).getByRole("button", { name: "撤销合并" }));
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/itm_v/unmerge")).toMatchObject({ method: "POST", csrf: "tok-1" }));
+    await waitFor(() => expect(within(screen.getByRole("article", { name: "建议 t" })).queryByText("整理报销单据（清单）")).toBeNull());
+    expect(screen.getByRole("article", { name: "建议 t" })).toHaveTextContent("从 1 条建议合来");
+  });
+
   it("最近自动归类：写明每批几条、几次模型调用、送出多少字，每条的去处与理由；折叠掉的可撤销，留着的不给撤销", async () => {
     mount(withMerge().impl);
     const panel = await screen.findByRole("group", { name: "最近自动归类" }).catch(() => null) ?? (await screen.findByText(/最近 7 天自动归类/)).closest("details")!;
