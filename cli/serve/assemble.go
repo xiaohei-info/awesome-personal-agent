@@ -300,6 +300,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	startBackground := func(ctx context.Context, c rules.Call) error { return bg.Handler()(ctx, c) }
 	if k.eng, err = rules.New(rules.Options{Store: st, Exec: x, Packs: ld, Owner: owner,
 		Handlers: map[string]rules.Handler{"call_agent": callAgent, background.Action: startBackground}, Reminder: att, OnError: logErr("rules"),
+		Ready: map[string]rules.Ready{background.Action: func(ctx context.Context, c rules.Call) (string, error) { return bg.Ready(ctx, c) }},
 		Gate: func(ctx context.Context, pack string, do []kpacks.Action, params json.RawMessage) (string, error) {
 			return tk.Gate(ctx, pack, do, params)
 		}}); err != nil {

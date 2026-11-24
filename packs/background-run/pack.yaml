@@ -1,14 +1,16 @@
 name: background-run
 version: 1.0.0
-description: 无人值守运行与续接：带 agent-ok 标签的事项进入 open 时拉起后台运行（规则样例，初始 observe）
+description: 无人值守运行与续接：进行中、带 agent-ok 标签、选中的 Agent 可用的任务，每件自动拉起一次后台运行（状态规则样例，初始 observe）
 event_rules:
   - id: handle-labelled
     mode: observe
+    # 状态规则：不看事件流，按事项的当前状态求值；同一事项自动只做一次（C.6），再跑一次用 Web 上的“现在开工”。
+    trigger: state
     when:
-      event: item.phase_changed
-      to_phase: open
+      phase: open
       kind: [task]
       tag_any: [agent-ok]
+      agent_ready: true
     do:
       - action: start_background_run
         runner: main_session

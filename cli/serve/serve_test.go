@@ -1136,6 +1136,22 @@ func (k *kernel) deepItem(t *testing.T) string {
 	return id
 }
 
+// usableAgent 登记一个能后台运行的默认 harness：handle-labelled 带 agent_ready，没有可用 Agent 时规则不命中（附录 C.6）。
+func (k *kernel) usableAgent(t *testing.T) {
+	t.Helper()
+	k.do(t, command.Chain{}, "executor.register", map[string]any{"harness": "hx", "headless": map[string]any{
+		"command": []string{"true"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string][]string{"read": {}, "edit": {}}}})
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := policy.Update(tx, hostOwner.Actor, "t", func(p *policy.Policy) error {
+			p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx"
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // healthAlertDelivered 断言该事项有一条链路超限的 health.alert（带规则 id），且已产出对应的健康类投递。
 func (k *kernel) healthAlertDelivered(t *testing.T, item string) {
 	t.Helper()
@@ -1171,6 +1187,7 @@ func (k *kernel) healthAlertDelivered(t *testing.T, item string) {
 func TestBackgroundChainDepthAlertIsDelivered(t *testing.T) {
 	k := assembled(t)
 	k.do(t, command.Chain{}, "rule.set_mode", map[string]string{"rule": labelledRule, "mode": "auto"})
+	k.usableAgent(t)
 	id := k.deepItem(t)
 	k.do(t, command.Chain{}, "proposal.accept", map[string]string{"id": id}) // 转 open，规则命中
 	k.healthAlertDelivered(t, id)
@@ -1184,6 +1201,7 @@ func TestChainDepthThresholdFromConfig(t *testing.T) {
 		t.Fatalf("executor threshold = %d", k.x.MaxChainDepth)
 	}
 	k.do(t, command.Chain{}, "rule.set_mode", map[string]string{"rule": labelledRule, "mode": "auto"})
+	k.usableAgent(t)
 	var id string
 	for i := 0; i < 3; i++ { // 深度 0、1、2
 		chain := command.Chain{Mode: command.ChainInherit, From: id}

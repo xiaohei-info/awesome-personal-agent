@@ -294,6 +294,23 @@ func InFlight(tx *store.Tx, item string) (bool, error) {
 // Handler 返回 start_background_run 动作的处理器。
 func (s *Service) Handler() rules.Handler { return s.start }
 
+// Ready 是 start_background_run 的就绪检查（规则条件 agent_ready，C.6）：事项没有在途运行，且与拉起时同一口径选中的 Agent
+// 可用（存在、未停用、有已确认的无头声明、权限上限够这次的 access）。规则本身写不对也按不就绪处理：本人“现在开工”时由 Handler 报错。
+func (s *Service) Ready(ctx context.Context, c rules.Call) (string, error) {
+	sp, err := s.parse(c)
+	if err != nil {
+		return err.Error(), nil
+	}
+	f, err := s.read(ctx, c, sp)
+	if err != nil {
+		return "", err
+	}
+	if f.busy {
+		return "该事项已有在途运行", nil
+	}
+	return f.selected.AccessReason(sp.access), nil
+}
+
 func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if c.Item == nil {
 		return invalid("start_background_run needs a triggering item, but this rule has none")
@@ -500,7 +517,7 @@ func (s *Service) enqueue(ctx context.Context, c rules.Call, f facts, how launch
 			}
 		}
 		p := map[string]any{"agent": run.AgentSnapshot, "run_id": run.ID, "rule": c.Rule, "runner": run.Runner, "launch": run.Launch,
-			"harness": run.Harness, "access": run.Access, "target": run.Target}
+			"harness": run.Harness, "access": run.Access, "target": run.Target, "manual": c.Requested}
 		reason := "rule " + c.Rule + ": background run"
 		if how.from != "" {
 			p["launch_from"] = how.from

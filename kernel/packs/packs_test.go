@@ -348,6 +348,13 @@ func TestLoadRulesRejectWholePack(t *testing.T) {
 		{"instruction param of the wrong type", map[string]string{"pack.yaml": head + "instance_params:\n  type: object\n  properties:\n    instruction: {type: number}\n", "prompts/t.md": "---\nagent: task\n---\n{ instruction_path }\n"}, "instruction_path"},
 		{"prompt without front matter", map[string]string{"pack.yaml": head, "prompts/t.md": "just text"}, "front matter"},
 		{"bad view", map[string]string{"pack.yaml": head, "views/v.yaml": "kind: k\nlayout: grid\n"}, "layout"},
+		// 状态规则（C.6）：必须限定 phase，不能写事件与阶段转移条件；agent_ready 只能是 true 且要有拉起后台运行的动作。
+		{"unknown trigger", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, trigger: always}\n"}, "trigger"},
+		{"state rule without phase", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, trigger: state, when: {kind: task}}\n"}, "needs phase"},
+		{"state rule with event", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, trigger: state, when: {phase: open, event: item.created}}\n"}, "event"},
+		{"state rule with to_phase", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, trigger: state, when: {phase: open, to_phase: open}}\n"}, "to_phase"},
+		{"agent_ready false", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, trigger: state, when: {phase: open, agent_ready: false}}\n"}, "agent_ready"},
+		{"agent_ready without background run", map[string]string{"pack.yaml": head + "event_rules:\n  - id: r\n    trigger: state\n    when: {phase: open, agent_ready: true}\n    do: [{action: add_tag, tag: t}]\n"}, "start_background_run"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
