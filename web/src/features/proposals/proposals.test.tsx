@@ -943,3 +943,40 @@ describe("按推荐处理：确认框打开后收起唯一含推荐的组", () =
     }
   });
 });
+
+describe("按合并主题分组：组标题、条数、整组接受或忽略；整合出来的那条能看到从哪几条合来（§9.3）", () => {
+  const sweep = (group: string, topic: string) => ({ state: "done", action: "keep", group, topic, at: "2030-01-02T00:00:00Z" });
+  const items = [
+    prop("p220", { title: "aiteam PR #220 评审请求", origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sweep: sweep("mb_1/G1", "aiteam 仓库 PR 评审"),
+      integrated: { title: "评审 aiteam PR #220", summary: "原摘要", members: ["p220", "x220"], at: "2030-01-02T00:00:00Z" },
+      absorbed: [{ item: "x220", title: "审阅 PR #220：企业端技能", summary: "BflyT 请你审阅 PR #220", events: ["sev_a", "sev_b"], source: "src_mail_qq", action: "merge", at: "2030-01-02T00:00:00Z" }] } as any }),
+    prop("p221", { title: "aiteam PR #221 评审请求", origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sweep: sweep("mb_1/G1", "aiteam 仓库 PR 评审") } as any }),
+    prop("bg", { title: "Bitget 提现 840 USDT", origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sweep: sweep("mb_1/G2", "Bitget 提现通知") } as any }),
+    prop("old", { title: "没归类过的老建议", origin: { source: "src_mail_qq" } }),
+  ];
+  it("有主题时缺省按主题分组；整组接受先确认，再发 explicit accept；整合的卡片列出原标题、原摘要与原消息，撤销提示整组还原", async () => {
+    const s = server(items, (path, body) => (path === "/v1/proposals/batch" ? json(200, { results: body.actions.map((a: any) => ({ id: a.id, do: a.do, ok: true })) }) : undefined));
+    mount(s.impl);
+    const g1 = await screen.findByRole("group", { name: "aiteam 仓库 PR 评审" });
+    expect(within(g1).getAllByRole("article")).toHaveLength(2);
+    expect(within(g1).getByText("aiteam 仓库 PR 评审 · 2 条")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Bitget 提现通知" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "未分组" })).getAllByRole("article")).toHaveLength(1);
+    await userEvent.click(within(g1).getByRole("button", { name: "整组接受 2 条…" }));
+    expect(within(g1).getByRole("group", { name: "确认批量忽略" })).toHaveTextContent("将接受「aiteam 仓库 PR 评审」这一组的 2 条");
+    await userEvent.click(within(g1).getByRole("button", { name: "确认接受 2 条" }));
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/proposals/batch")?.body).toEqual({ mode: "explicit", actions: [{ id: "p220", do: "accept" }, { id: "p221", do: "accept" }] }));
+
+    const card = screen.getByRole("article", { name: "aiteam PR #220 评审请求" });
+    expect(card).toHaveTextContent("· 整合");
+    await userEvent.click(within(card).getByText("由 2 条建议整合而成"));
+    const row = within(card).getByRole("listitem", { name: "审阅 PR #220：企业端技能" });
+    expect(row).toHaveTextContent("原摘要：BflyT 请你审阅 PR #220");
+    expect(within(row).getByRole("link", { name: "看原消息（2）" })).toHaveAttribute("href", "/sources/events/sev_a");
+    expect(within(row).getByRole("link", { name: "审阅 PR #220：企业端技能" })).toHaveAttribute("href", "/items/x220");
+    expect(within(row).getByRole("button", { name: "撤销合并" })).toHaveAttribute("title", expect.stringContaining("整组还原"));
+
+    await userEvent.selectOptions(screen.getByLabelText("分组"), "source");
+    expect(within(await screen.findByRole("group", { name: "QQ 邮箱" })).getAllByRole("article")).toHaveLength(4);
+  });
+});

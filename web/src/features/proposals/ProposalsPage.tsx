@@ -30,14 +30,16 @@ export interface Proposal {
   origin?: { source: string; actor?: string };
   // 入站流水线写入的建议信息（主文档 §6.3）；agent 直接提出的建议没有 recommend。
   proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[];
-    merges?: Merge[]; absorbed?: Absorbed[]; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep; urgent?: boolean };
+    merges?: Merge[]; absorbed?: Absorbed[]; integrated?: Integrated; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep; urgent?: boolean };
 }
 /** 一次合并的留痕（§9.3 跨来源合并）：并入的来源事件、当时的内容、判断方与理由；item 是被折叠的那条建议（批量归类才有）。 */
 interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; why?: string; batch?: string; item?: string; at: string }
 /** 归类折叠进这一条的建议本身（§9.3 proposal.absorbed）：撤销时服务端删掉，重新加载后随之消失。 */
-interface Absorbed { item: string; title: string; source?: string; ref?: string; created_at?: string; action: string; at: string }
+interface Absorbed { item: string; title: string; summary?: string; events?: string[]; source?: string; ref?: string; created_at?: string; action: string; at: string }
+/** 批内整合（§9.3 proposal.integrated）：只在整合的载体上；title、summary 是整合前它自己的原文，撤销时恢复。 */
+interface Integrated { title: string; summary?: string; members: string[]; at: string }
 /** 批量归类的记录：结论、去处、理由、判断方。 */
-interface Sweep { state: string; action?: string; target?: string; why?: string; by?: string; at?: string }
+interface Sweep { state: string; action?: string; target?: string; why?: string; by?: string; at?: string; group?: string; topic?: string }
 interface SourceRead { event: { id: string; source_id: string; subject: string; summary?: string; occurred_at: string; link?: string; disposition?: string; merge_key?: string } }
 
 type Action = "accept" | "dismiss" | "attach" | "handoff" | "split" | "unmerge";
@@ -82,7 +84,7 @@ function Card({ item, rejection, candidates, onAct, ready }: { item: Proposal; r
 
   return (
     <article aria-label={item.title}>
-      <h3>{item.title}</h3>
+      <h3>{item.title}{p?.integrated && <> <span className="sub" title={t.integratedWhy}>· {t.integrated}</span></>}</h3>
       {(meta || pri) && (
         <p className="meta">
           {meta}
@@ -109,7 +111,7 @@ function Card({ item, rejection, candidates, onAct, ready }: { item: Proposal; r
         </p>
       )}
       {p && <Similar p={p} />}
-      {p?.absorbed?.length ? <AbsorbedFrom list={p.absorbed} onUnmerge={(member) => onAct(member, "unmerge", {})} /> : null}
+      {p?.absorbed?.length ? <AbsorbedFrom list={p.absorbed} integrated={p.integrated} onUnmerge={(member) => onAct(member, "unmerge", {})} /> : null}
       {p?.sources && p.sources.length > 1 && <Sources item={item} onSplit={(event) => onAct(item.id, "split", { event })} onUnmerge={(member) => onAct(member, "unmerge", {})} />}
       <RejectionNote rejection={rejection} what="handle" />
       <div className="actions">
@@ -167,13 +169,16 @@ function ItemName({ id, say }: { id: string; say: (title: string) => string }) {
 }
 
 /** 这一条从哪几条建议合来：逐条列原始标题、来源、建立时间、怎么合的与合并时间，可逐条撤销。名下没有消息的（迁移来的）也在这里。 */
-function AbsorbedFrom({ list, onUnmerge }: { list: Absorbed[]; onUnmerge: (member: string) => Promise<void> }) {
+function AbsorbedFrom({ list, integrated, onUnmerge }: { list: Absorbed[]; integrated?: Integrated; onUnmerge: (member: string) => Promise<void> }) {
   const t = useT(strings);
   const sourceName = useNames("source");
   const [busy, setBusy] = useState(false);
+  const head = integrated ? t.integratedHead(integrated.members.length) : t.absorbedHead(list.length);
+  const whole = (a: Absorbed) => !!integrated?.members.includes(a.item);
   return (
-    <details aria-label={t.absorbedHead(list.length)}>
-      <summary>{t.absorbedHead(list.length)}</summary>
+    <details aria-label={head}>
+      <summary>{head}</summary>
+      {integrated && <p className="sub">{t.integratedWhy}</p>}
       <ul className="rows">
         {list.map((a) => (
           <li key={a.item} className="act-row" aria-label={a.title} title={a.ref || a.item}>
@@ -183,8 +188,10 @@ function AbsorbedFrom({ list, onUnmerge }: { list: Absorbed[]; onUnmerge: (membe
                 {a.ref && /^https?:\/\//.test(a.ref) && <> · <a href={a.ref} target="_blank" rel="noreferrer" title={a.ref}>{t.link}</a></>}
               </span>
               <span className="sub">{[a.source ? sourceName(a.source) : "", a.created_at ? t.createdAt(when(a.created_at)) : "", t.sweepAction[a.action] ?? a.action, t.mergedAt(when(a.at))].filter(Boolean).join(" · ")}</span>
+              {a.summary && <span className="sub">{t.originalSummary(a.summary)}</span>}
+              {a.events?.length ? <span className="sub"><Link to={"/sources/events/" + encodeURIComponent(a.events[0])}>{t.seeMessage(a.events.length)}</Link></span> : null}
             </div>
-            <button type="button" title={t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(a.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
+            <button type="button" title={whole(a) ? t.unmergeIntegratedWhy : t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(a.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
           </li>
         ))}
       </ul>
@@ -446,7 +453,7 @@ export function ProposalsPage() {
   const { api } = useSession();
   const [items, setItems] = useState<Proposal[] | null>(null);
   const [origins, setOrigins] = useState<Record<string, Origin>>({});
-  const [axis, setAxis] = useState<"source" | "type">("source");
+  const [axisPick, setAxis] = useState<"source" | "type" | "topic" | null>(null);
   const [undo, setUndo] = useState<{ batch: string; n: number } | null>(null);
   const [view, setView] = useState<"pending" | "ignored">("pending");
   const [ignoredTick, setIgnoredTick] = useState(0);
@@ -533,6 +540,9 @@ export function ProposalsPage() {
   const opts = (pick: (i: Proposal) => string | undefined) => [...new Set(all.map(pick).filter((v): v is string => !!v))].sort();
   const shown = all.filter((i) => (!source || i.origin?.source === source) && (!project || i.project === project));
   const parts = arrange(shown, origins);
+  // 有合并主题时缺省按主题分组（§9.3 proposal.sweep.group）；本人选过就按选的。
+  const axis = axisPick ?? (parts.rest.some((i) => i.proposal?.sweep?.group) ? "topic" : "source");
+  const topicOf = (k: string) => parts.rest.find((i) => i.proposal?.sweep?.group === k)?.proposal?.sweep;
   // 按推荐处理只管眼前看得见的：折叠着的组（代码托管通知、历史清单）先展开才算，没展开的不进批量，也不进条数与分布。
   const visible = [...parts.pinned, ...parts.rest, ...(hostedOpen ? parts.hosted : []), ...(historyOpen ? parts.history : [])];
   const recommended = visible.filter((i) => i.proposal?.recommend).length;
@@ -609,7 +619,8 @@ export function ProposalsPage() {
   const ended = parts.hosted.filter((i) => origins[i.id]?.ended);
   const card = (i: Proposal) => <Card key={i.id} item={i} rejection={rejections[i.id]} candidates={candidates} onAct={act} ready={ready} />;
   const typeName = (k: string) => t.family[k] ?? (k || t.family[""]);
-  const groupName = (k: string) => (axis === "source" ? (k ? sourceName(k) : t.noSource) : typeName(k));
+  const groupName = (k: string) => (axis === "topic" ? topicOf(k)?.topic || t.noTopic : axis === "source" ? (k ? sourceName(k) : t.noSource) : typeName(k));
+  const groupKey = (i: Proposal) => (axis === "topic" ? i.proposal?.sweep?.group ?? "" : axis === "source" ? i.origin?.source ?? "" : family(origins[i.id]?.type));
   const when = (i: Proposal) => (i.created_at ? new Date(i.created_at).toLocaleString() : "");
 
   return (
@@ -754,14 +765,20 @@ export function ProposalsPage() {
             <>
               <label>
                 {t.groupBy}
-                <select value={axis} onChange={(e) => setAxis(e.target.value as "source" | "type")}>
+                <select value={axis} onChange={(e) => setAxis(e.target.value as "source" | "type" | "topic")}>
+                  <option value="topic">{t.byTopic}</option>
                   <option value="source">{t.bySource}</option>
                   <option value="type">{t.byType}</option>
                 </select>
               </label>
-              {groupBy(parts.rest, (i) => (axis === "source" ? i.origin?.source ?? "" : family(origins[i.id]?.type))).map(([k, its]) => (
+              {groupBy(parts.rest, groupKey).map(([k, its]) => (
                 <details key={axis + k} open className="group" aria-label={groupName(k)}>
                   <summary>{groupName(k)} · {t.count(its.length)}</summary>
+                  {axis === "topic" && k && topicOf(k)?.at && <p className="sub">{t.topicFrom(new Date(topicOf(k)!.at!).toLocaleString())}</p>}
+                  {axis === "topic" && k && (
+                    <BulkIgnore n={its.length} label={t.acceptGroup(its.length)} plan={t.acceptPlan(groupName(k), its.length)} confirm={t.confirmAccept(its.length)}
+                      onConfirm={(key) => ignore({ mode: "explicit", actions: its.map((i) => ({ id: i.id, do: "accept" })) }, key)} />
+                  )}
                   <BulkIgnore n={its.length} label={t.ignoreGroup(its.length)} plan={t.groupPlan(groupName(k), its.length)}
                     onConfirm={(key) => ignore({ mode: "explicit", actions: its.map((i) => ({ id: i.id, do: "dismiss", reason: t.groupReason(groupName(k)) })) }, key)} />
                   {its.map(card)}
