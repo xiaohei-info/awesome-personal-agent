@@ -180,7 +180,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		}
 		out["done_unknown"] = unknown
 	}
-	if origin != nil { // 只读建议时给出各条的来源事件类型、上游对象与对象已结束的依据，建议页据此分组（附录 B.2）
+	if origin != nil { // 只读建议时给出各条的来源事件类型、上游对象与对象已结束的依据，以及现算的分组（附录 B.2、主文档 §7.2）
 		at := map[string]inbound.Origin{}
 		for _, it := range its {
 			if o, ok := origin[it.ID]; ok {
@@ -188,6 +188,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			}
 		}
 		out["origins"] = at
+		out["groups"] = inbound.Groups(its, at)
 	}
 	if dis != nil { // 只读已放弃时给出忽略记录（批次、理由、时刻），建议页的「已忽略」据此按批列出与撤销（附录 B.2）
 		at := map[string]inbound.Dismissal{}

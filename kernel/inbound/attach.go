@@ -42,7 +42,11 @@ func parseAttach(in json.RawMessage) (attachIn, error) {
 // RegisterAttach 登记 proposal.attach：建议的来源事件改挂到目标事项并成为它的挂靠消息，建议的关联键登记到目标
 // （此后同一线程的消息直接回到那里），标题与摘要作为一条进展记在目标上，建议转 dropped 并与目标建立 relates 关系。
 // 全部写入在一个事务里：目标不合法时什么都不改。档位同 proposal.accept、proposal.dismiss（二档，§14.3）。
+// 同时登记批量用到的 proposal.merge 与 proposal.batch_log（registerBulk）。
 func RegisterAttach(x *command.Executor) error {
+	if err := registerBulk(x); err != nil {
+		return err
+	}
 	return x.Register(command.Spec{Name: CmdAttach, Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, Page: "/proposals",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseAttach(in)
@@ -159,8 +163,8 @@ func attachTarget(tx *store.Tx, v attachIn) (domain.Item, error) {
 // MaxBatch 是一次批量至多处理的建议条数。
 const MaxBatch = 200
 
-// 批量的四种方式。ended：忽略 Filter.IDs 里上游对象可核为已结束的建议，依据（来源事件）逐条写进忽略理由；拿不准的不动。
-// undo：把 Batch 那一批忽略的、最近一次阶段变更仍是这次忽略的建议改回 proposed（item.transition），别处改过的不动。
+// 批量的五种方式。ended：忽略 Filter.IDs 里上游对象可核为已结束的建议，依据（来源事件）逐条写进忽略理由；拿不准的不动。
+// selected：对 Filter.IDs 一律接受或忽略（见 bulk.go）。undo：按批撤销（见 undoBatch）。
 const (
 	BatchRecommended = "recommended"
 	BatchExplicit    = "explicit"
@@ -183,22 +187,30 @@ type BatchAction struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// BatchRequest：Mode=recommended 配 Filter；Mode=explicit 配 Actions；Mode=ended 配 Filter.IDs；Mode=undo 配 Batch。
+// BatchRequest：Mode=recommended 配 Filter；Mode=explicit 配 Actions；Mode=ended 配 Filter.IDs；
+// Mode=selected 配 Do、Filter.IDs 与可选的 Reason（只配 dismiss）；Mode=undo 配 Batch。
 type BatchRequest struct {
 	Mode    string        `json:"mode"`
 	Filter  BatchFilter   `json:"filter,omitzero"`
 	Actions []BatchAction `json:"actions,omitempty"`
 	Batch   string        `json:"batch,omitempty"`
+	Do      string        `json:"do,omitempty"`
+	Reason  string        `json:"reason,omitempty"`
 }
 
-// BatchResult 是一条建议的处理结果。失败时 Code 与 Why 说明原因，建议不变。Batch 是这次批量的批次号（忽略与撤销的结果带）。
+// BatchResult 是一条建议的处理结果。失败时 Code 与 Why 说明原因，建议不变；事先或执行中判定不处理的另有 Skip（原因码）。
+// Batch 是这次批量的批次号（忽略、接受、合并与撤销的结果带）；Do 为 merge 的是合进了 Into 那一条；
+// UndoUntil 是接受的撤销窗口截止（只在接受成功的结果上）。
 type BatchResult struct {
-	ID    string      `json:"id"`
-	Do    string      `json:"do"`
-	OK    bool        `json:"ok"`
-	Code  domain.Code `json:"code,omitempty"`
-	Why   string      `json:"why,omitempty"`
-	Batch string      `json:"batch,omitempty"`
+	ID        string      `json:"id"`
+	Do        string      `json:"do"`
+	OK        bool        `json:"ok"`
+	Code      domain.Code `json:"code,omitempty"`
+	Why       string      `json:"why,omitempty"`
+	Skip      string      `json:"skip,omitempty"`
+	Into      string      `json:"into,omitempty"`
+	Batch     string      `json:"batch,omitempty"`
+	UndoUntil *time.Time  `json:"undo_until,omitempty"`
 }
 
 func usage(why string) error {
@@ -208,18 +220,29 @@ func usage(why string) error {
 // Batch 逐条处理建议：批量等于逐条，没有整批的门（§14.3）。形态错误、超过 MaxBatch 时整批不生效；
 // 其余按条各自成败，每条成功的处置各是一条命令、各记一条 Event、可逐条撤销。req 带调用者身份，
 // Command、Input 由本函数按每条填写；req.IdemKey 非空时每条派生自己的幂等键。
+//
+// 每次批量（含按批撤销）另记一条审计事件（proposal.batch_handled / proposal.batch_undone，对象是批次号）。
 func Batch(ctx context.Context, x *command.Executor, st *store.Store, req command.Request, b BatchRequest) ([]BatchResult, error) {
+	switch b.Mode {
+	case BatchSelected:
+		return selected(ctx, x, st, req, b)
+	case BatchUndo:
+		return undoBatch(ctx, x, st, req, b)
+	}
+	if b.Do != "" || b.Reason != "" {
+		return nil, usage("do and reason belong to selected mode")
+	}
 	acts, skipped, err := planBatch(ctx, st, b)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]BatchResult, 0, len(acts)+len(skipped))
-	batch := b.Batch // 撤销沿用被撤的那一批；其余方式这一次另起一批
-	if b.Mode != BatchUndo && len(acts) > 0 {
+	batch := ""
+	if len(acts) > 0 {
 		batch = newBatch(req, acts[0].ID, clock.Now())
 	}
 	tag := func(a BatchAction) string {
-		if a.Do == "dismiss" || a.Do == "undo" {
+		if a.Do == "dismiss" || a.Do == "accept" {
 			return batch
 		}
 		return ""
@@ -233,7 +256,12 @@ func Batch(ctx context.Context, x *command.Executor, st *store.Store, req comman
 		}
 		_, err := x.Do(ctx, r)
 		if err == nil {
-			out = append(out, BatchResult{ID: a.ID, Do: a.Do, OK: true, Batch: tag(a)})
+			res := BatchResult{ID: a.ID, Do: a.Do, OK: true, Batch: tag(a)}
+			if a.Do == "accept" {
+				until := x.Now().Add(UndoWindow)
+				res.UndoUntil = &until
+			}
+			out = append(out, res)
 			continue
 		}
 		var de *domain.Error
@@ -249,7 +277,11 @@ func Batch(ctx context.Context, x *command.Executor, st *store.Store, req comman
 	if denied != nil && !slices.ContainsFunc(out, func(r BatchResult) bool { return r.Code != domain.CodePermissionDenied }) {
 		return nil, denied
 	}
-	return append(out, skipped...), nil
+	out = append(out, skipped...)
+	if batch == "" {
+		return out, nil // 一条都没执行：没有批次，不记审计
+	}
+	return out, logBatch(ctx, x, st, req, batchLog{Batch: batch, Mode: b.Mode, Requested: len(acts) + len(skipped), Results: out, UndoUntil: undoUntil(out)})
 }
 
 var batchRe = regexp.MustCompile(`^pb_[0-9a-f]{12}$`)
@@ -257,12 +289,8 @@ var batchRe = regexp.MustCompile(`^pb_[0-9a-f]{12}$`)
 var batchVerbs = map[string]string{"accept": "proposal.accept", "dismiss": "proposal.dismiss", "attach": CmdAttach}
 
 func batchCommand(a BatchAction, batch string) (string, json.RawMessage) {
-	if a.Do == "undo" {
-		in, _ := json.Marshal(map[string]string{"id": a.ID, "to": string(domain.PhaseProposed), "reason": "undo batch ignore " + batch})
-		return "item.transition", in
-	}
 	m := map[string]string{"id": a.ID}
-	if a.Do == "dismiss" && batch != "" {
+	if batch != "" {
 		m["batch"] = batch
 	}
 	if a.Reason != "" {
@@ -344,27 +372,8 @@ func planBatch(ctx context.Context, st *store.Store, b BatchRequest) ([]BatchAct
 			return err
 		})
 		return acts, skipped, err
-	case BatchUndo:
-		if len(b.Actions) > 0 || b.Filter.Source != "" || b.Filter.Project != "" || len(b.Filter.IDs) > 0 || !batchRe.MatchString(b.Batch) {
-			return nil, nil, usage("undo mode takes batch only (pb_ followed by 12 hex digits)")
-		}
-		var acts []BatchAction
-		err := st.View(ctx, func(tx *store.Tx) error {
-			its, err := items.List(tx, items.Filter{Phase: domain.PhaseDropped})
-			if err != nil {
-				return err
-			}
-			ds, err := Dismissals(tx, its)
-			for _, it := range its { // 已改回的不在 dropped 里，重复撤销自然是 0 条
-				if d, ok := ds[it.ID]; ok && d.Batch == b.Batch {
-					acts = append(acts, BatchAction{ID: it.ID, Do: "undo"})
-				}
-			}
-			return err
-		})
-		return acts, nil, err
 	}
-	return nil, nil, usage("mode must be recommended, explicit, ended or undo")
+	return nil, nil, usage("mode must be recommended, explicit, ended, selected or undo")
 }
 
 // recommended 把范围内带推荐的建议翻成处置：忽略取推荐理由，补到取推荐的目标。没有推荐的不动。

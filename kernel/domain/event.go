@@ -121,6 +121,10 @@ const (
 	// EvAuthzSwitched 记权限模型第二版的一次性切换（§16.5）：撤了哪些授权单、清了哪些问题、写了哪一版策略。
 	// 内部事件，不在 B.4 的对外稳定集合里。
 	EvAuthzSwitched = "authz.switched"
+	// 批量处理建议的审计（§7.2）：每次批量（含按批撤销）一条，对象是批次号，载荷记方式、动作、条数、理由与逐条结果。
+	// 内部事件，不在 B.4 的对外稳定集合里。
+	EvProposalBatchHandled = "proposal.batch_handled"
+	EvProposalBatchUndone  = "proposal.batch_undone"
 
 	// 登录审计（§14.13）：载荷不含口令。
 	EvAuthLogin           = "auth.login"

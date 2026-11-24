@@ -157,11 +157,11 @@ export const EVENT = [
   "decision.requested", "decision.resolved", "delegation.created", "delegation.reported", "command.rejected",
   "material.revised", "material.revision_proposed", "guideline.activated", "project.updated", "project.allowed_executors_changed",
   "rule.mode_changed", "allowlist.changed", "policy.changed", "grant.issued", "grant.revoked", "agent.configured", "agent.queued", "run.started", "run.finished",
-  "source.failed", "health.alert", "inbound.capture_failed", "auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked", "authz.switched",
+  "source.failed", "health.alert", "inbound.capture_failed", "auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked", "authz.switched", "proposal.batch_handled", "proposal.batch_undone",
 ] as const;
 /** 内部审计事件类型（各模块写入，不在对外清单里；查不到的显示原值） */
 export const EVENT_INTERNAL = [
-  "rule.observed", "rule.timer_created", "inbound.disposed", "inbound.requeued", "inbound.captured", "instance.created",
+  "rule.observed", "rule.fired", "rule.timer_created", "inbound.disposed", "inbound.requeued", "inbound.captured", "instance.created",
   "instance.updated", "instance.toggled", "instance.fired", "item.start_requested", "material.revision_rejected", "material.revision_summarized",
   "followmsg.attached", "followmsg.processed", "followmsg.handed_back", "followmsg.released", "executor.declared",
   "executor.confirmed", "executor.rejected", "executor.changed", "executor.removed", "source.registered", "source.updated",

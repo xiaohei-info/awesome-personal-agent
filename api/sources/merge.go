@@ -68,7 +68,7 @@ func (a *api) mergeActivity(w http.ResponseWriter, r *http.Request, _ *core.Prin
 			}
 			continue
 		}
-		if sw.Batch == "" || sw.At == nil || sw.At.Before(since) {
+		if sw.Batch == "" || sw.At == nil || sw.At.Before(since) || sw.By == domain.SweepByBulk { // 批量接受时的合并是本人做的，不是自动归类
 			continue
 		}
 		b := batches[sw.Batch]

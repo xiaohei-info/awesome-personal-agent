@@ -1103,18 +1103,27 @@ func registerSweep(x *command.Executor) error {
 					return nil, err
 				}
 			}
-			if err := absorb(c, it, t.ID, sw, moved, at); err != nil {
-				return nil, err
-			}
-			_, _, snap, err := items.Revise(c.Tx, it.ID, "merge.fold", at, func(x *domain.Item) error {
-				x.Phase, x.Proposal = domain.PhaseDropped, &p
-				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
-			return nil, emitWrite(c, items.Write{Type: domain.EvItemPhaseChanged, Object: it.ID, Payload: snap}, "merge batch "+v.Batch+": "+v.Action+" into "+v.Target)
+			return nil, foldInto(c, it, t.ID, p, moved, at, "", "merge batch "+v.Batch+": "+v.Action+" into "+v.Target)
 		}})
+}
+
+// foldInto 是一次折叠的收尾：在去处 to 上记下被折的 it 本身，再把 it 转 dropped、建议信息换成 p（p.Sweep 是这次折叠的记录）。
+// 批量归类（inbound.sweep）与批量接受时按同一对象合并（proposal.merge）共用；batch 非空时记进阶段变更的载荷。
+func foldInto(c *command.Ctx, it domain.Item, to string, p domain.Proposal, moved []string, at time.Time, batch, reason string) error {
+	if err := absorb(c, it, to, *p.Sweep, moved, at); err != nil {
+		return err
+	}
+	_, _, snap, err := items.Revise(c.Tx, it.ID, "merge.fold", at, func(x *domain.Item) error {
+		x.Phase, x.Proposal = domain.PhaseDropped, &p
+		return nil
+	})
+	if err == nil && batch != "" {
+		snap, err = items.TagBatch(snap, batch)
+	}
+	if err != nil {
+		return err
+	}
+	return emitWrite(c, items.Write{Type: domain.EvItemPhaseChanged, Object: it.ID, Payload: snap}, reason)
 }
 
 // attachText 是并入事项时追加的进展：逐字写出这一条的原标题、出处、原摘要与依据，不由模型改写。
@@ -1246,8 +1255,11 @@ func moveBack(c *command.Ctx, it, t domain.Item, notSame bool, at time.Time) err
 
 // ---- 撤销 ----
 
+// unmergeIn：Batch 只在按批撤销批量接受时带（§7.2），须等于那次折叠的批次：撤的是这一次操作，不是"这两条不是同一件"，
+// 所以不记 not_same，归类记录恢复成折叠前的那一份。
 type unmergeIn struct {
-	Item string `json:"item"`
+	Item  string `json:"item"`
+	Batch string `json:"batch,omitempty"`
 }
 
 func parseUnmerge(in json.RawMessage) (unmergeIn, error) {
@@ -1260,13 +1272,16 @@ func parseUnmerge(in json.RawMessage) (unmergeIn, error) {
 	return v, nil
 }
 
-func unmergeable(tx *store.Tx, id string) (domain.Item, error) {
-	it, err := items.Get(tx, id)
+func unmergeable(tx *store.Tx, v unmergeIn) (domain.Item, error) {
+	it, err := items.Get(tx, v.Item)
 	if err != nil {
 		return it, err
 	}
 	if it.Phase != domain.PhaseDropped || it.Proposal == nil || !it.Proposal.Sweep.Folded() {
-		return it, domain.NewError(domain.CodeConflict, "item "+id+" was not folded by a merge batch, or the fold was already undone", "re-read the item")
+		return it, domain.NewError(domain.CodeConflict, "item "+v.Item+" was not folded by a merge batch, or the fold was already undone", "re-read the item")
+	}
+	if sw := it.Proposal.Sweep; v.Batch != "" && (sw.By != domain.SweepByBulk || sw.Batch != v.Batch) {
+		return it, domain.NewError(domain.CodeConflict, "item "+v.Item+" was not folded by batch "+v.Batch, "re-read the item")
 	}
 	return it, nil
 }
@@ -1277,13 +1292,14 @@ func registerUnmerge(x *command.Executor) error {
 			v, err := parseUnmerge(in)
 			return authz.Object{ID: v.Item}, err
 		},
-		Validate: func(tx *store.Tx, o authz.Object, _ json.RawMessage) error {
-			_, err := unmergeable(tx, o.ID)
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			v, _ := parseUnmerge(in)
+			_, err := unmergeable(tx, v)
 			return err
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parseUnmerge(c.Input)
-			it, err := unmergeable(c.Tx, v.Item)
+			it, err := unmergeable(c.Tx, v)
 			if err != nil {
 				return nil, err
 			}
@@ -1294,6 +1310,10 @@ func registerUnmerge(x *command.Executor) error {
 			case errors.As(err, &de) && de.Code == domain.CodeNotFound: // 去处已清除：只恢复这一条
 			case err != nil:
 				return nil, err
+			case v.Batch != "": // 按批撤销：只搬回消息与留痕，不记 not_same
+				if err := moveBack(c, it, t, false, at); err != nil {
+					return nil, err
+				}
 			case sw.Action == domain.SweepDuplicate: // 只有溯源记录要删
 				if err := moveBack(c, it, t, false, at); err != nil {
 					return nil, err
@@ -1318,8 +1338,25 @@ func registerUnmerge(x *command.Executor) error {
 					return nil, err
 				}
 			}
+			if v.Batch != "" {
+				return map[string]string{"item": it.ID}, restoreFold(c, it, at)
+			}
 			return map[string]string{"item": it.ID}, unfold(c, it, true, at)
 		}})
+}
+
+// restoreFold 把批量接受时折叠的 it 改回建议，归类记录恢复成折叠前的那一份（没有就去掉）。
+func restoreFold(c *command.Ctx, it domain.Item, at time.Time) error {
+	p := *it.Proposal
+	p.Sweep = it.Proposal.Sweep.Prev
+	_, _, snap, err := items.Revise(c.Tx, it.ID, "merge.unfold", at, func(x *domain.Item) error {
+		x.Phase, x.Proposal = domain.PhaseProposed, &p
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return emitWrite(c, items.Write{Type: domain.EvItemPhaseChanged, Object: it.ID, Payload: snap}, "undo batch "+it.Proposal.Sweep.Batch+": back to proposals")
 }
 
 // unfold 把折叠的 it 改回建议（sweep 记 undone）；notSame 时记下与去处不是同一件，以后不再与它合并。

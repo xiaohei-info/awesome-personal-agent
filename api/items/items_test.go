@@ -839,20 +839,29 @@ func TestTodayOverdueAndHighPriority(t *testing.T) {
 	}
 }
 
-// 建议页的分组依据：phase=proposed 时给出 origins（没有来源事件的建议不在其中），其余阶段不给。配对规则的测试在 kernel/inbound。
+// 建议页的分组依据：phase=proposed 时给出 origins（没有来源事件的建议不在其中）与现算的 groups（每条恰好在一组），其余阶段都不给。
+// 分组与配对规则的测试在 kernel/inbound。
 func TestOriginsOnlyForProposed(t *testing.T) {
 	e := setup(t)
 	e.create(e.web, `{"kind":"task","title":"p","phase":"proposed"}`)
+	e.create(e.web, `{"kind":"decision","title":"q","phase":"proposed"}`)
 	rec := e.do("GET", "/v1/items?phase=proposed", "", e.web)
 	var out struct {
-		Items   []json.RawMessage          `json:"items"`
+		Items   []struct{ ID string }      `json:"items"`
 		Origins map[string]json.RawMessage `json:"origins"`
+		Groups  []struct {
+			Kind  string   `json:"kind"`
+			Items []string `json:"items"`
+		} `json:"groups"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 || len(out.Items) != 1 || out.Origins == nil || len(out.Origins) != 0 {
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 || len(out.Items) != 2 || out.Origins == nil || len(out.Origins) != 0 {
 		t.Fatalf("origins = %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("GET", "/v1/items?phase=open", "", e.web); strings.Contains(rec.Body.String(), "origins") {
-		t.Fatalf("origins only with phase=proposed: %s", rec.Body)
+	if len(out.Groups) != 2 || out.Groups[0].Kind != "pinned" || out.Groups[1].Kind != "rest" || len(out.Groups[0].Items)+len(out.Groups[1].Items) != 2 {
+		t.Fatalf("groups = %s", rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items?phase=open", "", e.web); strings.Contains(rec.Body.String(), "origins") || strings.Contains(rec.Body.String(), "groups") {
+		t.Fatalf("origins and groups only with phase=proposed: %s", rec.Body)
 	}
 }
 

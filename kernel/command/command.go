@@ -304,6 +304,9 @@ func New(st *store.Store, now func() time.Time) *Executor {
 	return &Executor{st: st, now: now, MaxChainDepth: DefaultMaxChainDepth, specs: map[string]Spec{}}
 }
 
+// Now 是命令落账用的时钟（事件的 at 取它）：要与事件时刻比较的调用方（如撤销窗口）用同一个时钟。
+func (x *Executor) Now() time.Time { return x.now() }
+
 // Register 登记命令；名称重复、缺 Apply/Object 或没有登记档位会被拒绝。
 func (x *Executor) Register(s Spec) error {
 	if s.Name == "" || s.Apply == nil || s.Object == nil {
