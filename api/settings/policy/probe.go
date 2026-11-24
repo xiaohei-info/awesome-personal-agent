@@ -265,7 +265,7 @@ func (pr *prober) recordIfSaved(ctx context.Context, kind string, draft kpolicy.
 			same = s != nil && s.URL == d.URL && s.Model == d.Model && s.Protocol == d.Protocol && s.APIKey == d.APIKey
 		} else {
 			s, d := saved.GenerateEndpoint, draft.GenerateEndpoint
-			same = s.URL == d.URL && s.Model == d.Model && s.Protocol == d.Protocol && s.APIKey == d.APIKey
+			same = s.URL == d.URL && s.Model == d.Model && kpolicy.GenerateProtocol(s.Protocol) == kpolicy.GenerateProtocol(d.Protocol) && s.APIKey == d.APIKey
 		}
 		if !same {
 			return nil

@@ -273,8 +273,8 @@ func (e *env) runList() []proc.Record {
 	return rs
 }
 
-// assertUnrecorded：事项上最近的 run.finished 是失败、写明结果没落账、带类别码，失败附注含 want。
-func (e *env) assertUnrecorded(t *testing.T, item, want string) {
+// assertUnrecorded：事项上最近的 run.finished 是运行故障（state 是终态）、写明结果没落账、带类别码，失败附注含 want。
+func (e *env) assertUnrecorded(t *testing.T, item, state, want string) {
 	t.Helper()
 	var last *domain.Event
 	for _, ev := range e.ofType(domain.EvRunFinished) {
@@ -292,7 +292,7 @@ func (e *env) assertUnrecorded(t *testing.T, item, want string) {
 		Recorded *bool         `json:"recorded"`
 		Fault    *domain.Fault `json:"fault"`
 	}
-	if err := json.Unmarshal(last.Payload, &p); err != nil || p.State != "failed" || p.Recorded == nil || *p.Recorded || p.Fault == nil || !strings.Contains(p.Error, want) {
+	if err := json.Unmarshal(last.Payload, &p); err != nil || p.State != state || p.Recorded == nil || *p.Recorded || p.Fault == nil || !strings.Contains(p.Error, want) {
 		t.Fatalf("run.finished payload: %s (%v)", last.Payload, err)
 	}
 }
@@ -556,7 +556,7 @@ func TestFailureAndTimeoutGoToNeedsInputWithoutRetry(t *testing.T) {
 			if res.Run.Fault == nil || (res.Run.Fault.Code != domain.FaultExitNonzero && res.Run.Fault.Code != domain.FaultTimeout) {
 				t.Fatalf("fault = %+v", res.Run.Fault)
 			}
-			e.assertUnrecorded(t, id, tc.want)
+			e.assertUnrecorded(t, id, tc.want, tc.want)
 			if n := len(e.runList()); n != 1 {
 				t.Fatalf("runs = %d", n)
 			}
@@ -827,7 +827,7 @@ func TestRecoveredRunGoesToNeedsInput(t *testing.T) {
 	if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask != nil || failed[0].Fault == nil || failed[0].Fault.Code != domain.FaultLost {
 		t.Fatalf("item = %+v fault = %+v", it, failed[0].Fault)
 	}
-	e.assertUnrecorded(t, id, "restart")
+	e.assertUnrecorded(t, id, "failed", "restart")
 	if n := len(e.runList()); n != 1 {
 		t.Fatalf("runs = %d", n)
 	}

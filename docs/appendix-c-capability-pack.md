@@ -200,7 +200,7 @@ front matter 二选一：`agent` 声明专属 agent 类别，或 `run_as` 声明
 | `output_schema` | 生成型，必填 | JSON Schema，含"信息不足"的标记 `insufficient_info` |
 | `relay_to` | 生成型 | 信息不足时接力的任务型模板。未声明时取该用途的默认处置 |
 | `event_stats` | 判断型、生成型 | 要附带的 Event 统计，当前只有 `proposal_outcome`：同一来源、kind、项目下，建议被本人接受和丢弃的次数，默认统计最近 90 天（主文档 §8.4）。web_only 初筛不附带统计 |
-| `timeout` | 全部 | 超时。判断型走分类端点时以判断端点的 `timeout_ms` 为准 |
+| `timeout` | 判断型、生成型 | 单次模型调用的超时。后台运行（`agent: task` 与 `run_as: main_session` 的模板、规则动作）不读它：后台运行的时限统一取策略 `background_run_timeout_sec`（主文档 §13.6）。判断型走分类端点时以判断端点的 `timeout_ms` 为准 |
 | `access` | 任务型 | 经 `call_agent` 调用任务型时需要的权限档位。后台运行以规则动作里的声明为准 |
 | `cwd` | 任务型 | 工作目录：`run_dir`（默认）或 `project_checkout`（项目在 APA 主机上的检出，即检出的 Host 等于 APA 主机名）。没有这样的检出时不拉起，记带类别码的告警写明原因；规则建的事项转 `dropped`，本人的事项阶段不变（主文档 §8.7）。后台运行同样解析，规则动作的 `cwd` 优先 |
 | `result_fields` | 任务型 | 结果写在目标事项 `spec` 里时要写全的字段，每项是顶层键（`period`）或数组元素的键（`sections[].body`：数组非空，每个元素的这个键都有内容）。写全后内核代为转 `done`，没写全转 `needs_input` 并写明缺哪些字段（主文档 §8.4） |
@@ -424,7 +424,6 @@ clock_rules:
 ```markdown
 ---
 agent: task
-timeout: 15m
 access: read
 materials: [context, prior, schedule, decisions, due_waiting, planned, activity, proposals, digest, spot_check]
 result_fields:

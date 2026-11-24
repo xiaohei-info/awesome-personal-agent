@@ -209,14 +209,16 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Notice,
 		return attention.Notice{}, false, nil
 	}
 	why := "运行失败"
-	if pl.State == string(domain.RunTimeout) {
-		why = "运行超时"
-	}
 	if pl.Error != "" {
 		why += "：" + firstLine(pl.Error)
 	}
+	summary := why + "。去事项里看原因，决定重跑还是放弃。"
+	if pl.State == string(domain.RunTimeout) {
+		// 超时不是失败：这条运行到点停止，事项状态未变，已写的进展保留（§15.2）。不露秒数与内部状态词。
+		summary = "运行到点停止，事项状态未变，可以继续。"
+	}
 	return attention.Notice{ID: fmt.Sprintf("push:run:%s:%d", it.ID, e.At.Truncate(runCooldown).Unix()), Item: it.ID, Class: domain.DeliveryHealth,
-		Content: domain.DeliveryContent{Title: title, Summary: why + "。去事项里看原因，决定重跑还是放弃。", WebURL: "/items/" + it.ID + "#agent"}}, true, nil
+		Content: domain.DeliveryContent{Title: title, Summary: summary, WebURL: "/items/" + it.ID + "#agent"}}, true, nil
 }
 
 func firstLine(s string) string {

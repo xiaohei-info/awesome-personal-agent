@@ -202,9 +202,10 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 
 | 协议 | Web 显示名 | 对应的接口 | 本版的取法 |
 |---|---|---|---|
-| `chat-completions` | OpenAI 兼容 | OpenAI Chat Completions，及讲同一形状的本机推理服务与网关 | 见主文档 §8.1 |
-| `messages` | Anthropic 兼容 | Anthropic Messages API（`/v1/messages`），及讲同一形状的网关 | 版本头 `anthropic-version: 2023-06-01`，密钥放 `x-api-key`；`max_tokens` 固定 4096；输出工具名 `output` |
-| `responses` | OpenAI Responses | OpenAI Responses API（`/v1/responses`） | `instructions` 放系统段，`input` 放用户段，`store: false` |
+| `chat-completions` | OpenAI Chat Completions | OpenAI Chat Completions，及讲同一形状的本机推理服务与网关 | 见主文档 §8.1；裸根地址默认补 `/v1` |
+| `responses` | OpenAI Responses | OpenAI Responses API（`/v1/responses`） | `instructions` 放系统段，`input` 放用户段，`store: false`；裸根地址默认补 `/v1` |
+| `messages` | Anthropic Messages | Anthropic Messages API（`/v1/messages`），及讲同一形状的网关 | 版本头 `anthropic-version: 2023-06-01`，密钥放 `x-api-key`；`max_tokens` 固定 16384；输出工具名 `output`；裸根地址默认补 `/v1` |
+| `generate-content` | Google Gemini 原生 | Google Gemini 原生 API（`/v1beta/models/{model}:generateContent`），及讲同一形状的网关 | 密钥放 `x-goog-api-key`；`systemInstruction` 放系统段，`contents` 放用户段，`generationConfig` 设 `responseMimeType: "application/json"` 与 `responseJsonSchema`；响应过滤 `thought: true` 思考段，读取 `usageMetadata`，安全拦截或空候选报错；裸根地址默认补 `/v1beta`（已带 `/v1` 或 `/v1beta` 原样保留） |
 
 **消息接口里结构化输出与思考的处理**。依据：[Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)、[Thinking in tool and multi-turn workflows](https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows)、[Define tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools)、[Claude Haiku 5.5 迁移指南](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide)。
 
@@ -215,9 +216,10 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 
 **经网关接入时选哪种协议**。网关在对话补全接口与消息接口之间转换时，`response_format` 没有对应字段，结构化约束会丢掉，思考内容也可能混进正文；这正是"起草建议的输出不合格"的常见原因。选网关对外讲的、与上游模型原生一致的接口：
 
-- 上游是 Claude 模型、网关对外提供 `/v1/messages`（New API、Magpie 这类网关都提供）：选「Anthropic 兼容」，地址填网关的 `…/v1`。上游模型对强制工具调用返回 400 时（见上），改选「OpenAI 兼容」或「OpenAI Responses」并确认网关为它保留结构化约束。
-- 上游是 OpenAI 模型：选「OpenAI Responses」或「OpenAI 兼容」。
-- 本机推理服务一般只讲对话补全接口：选「OpenAI 兼容」。
+- 上游是 Claude 模型、网关对外提供 `/v1/messages`（New API、Magpie 这类网关都提供）：选「Anthropic Messages」，地址填网关的 `…/v1`。上游模型对强制工具调用返回 400 时（见上），改选「OpenAI Chat Completions」或「OpenAI Responses」并确认网关为它保留结构化约束。
+- 上游是 OpenAI 模型：选「OpenAI Responses」或「OpenAI Chat Completions」。
+- 上游是 Gemini 模型（如 `gemini-4-hydrogen`）：选「Google Gemini 原生」，官方地址填 `https://generativelanguage.googleapis.com/v1beta`（或只填根域名，自动补 `/v1beta`），经 New API 等网关时填网关根地址或 `…/v1beta`（`…/v1` 亦可）。
+- 本机推理服务一般只讲对话补全接口：选「OpenAI Chat Completions」。
 
 无论选哪种，先点"测试连接"：它用起草建议模板的真实约束发一次请求，结论写明协议与原生结构化输出方式；不合格时写明返回内容的形态。
 

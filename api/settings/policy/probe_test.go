@@ -186,6 +186,63 @@ func TestProbeGenerateMessagesProtocol(t *testing.T) {
 	}
 }
 
+// 生成端点选内容生成协议（generate-content）：裸地址默认补 /v1beta，鉴权用 x-goog-api-key，
+// 获取模型剥离 models/ 前缀，测试连接过滤 thought 块并回报 responseJsonSchema 与 usage，保存后 GET 读回协议；未知协议返回 400。
+func TestProbeGenerateContentProtocol(t *testing.T) {
+	e := setup(t)
+	var heads []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		heads = append(heads, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" "+r.Header.Get("x-goog-api-key")+" "+r.Header.Get("Authorization"))
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/v1beta/models":
+			fmt.Fprint(w, `{"models":[{"name":"models/gemini-4-hydrogen"},{"name":"gemini-4-neon"}]}`)
+		case "/v1beta/models/gemini-4-hydrogen:generateContent":
+			var req struct {
+				GenerationConfig struct {
+					ResponseMimeType   string         `json:"responseMimeType"`
+					ResponseJsonSchema map[string]any `json:"responseJsonSchema"`
+				} `json:"generationConfig"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if req.GenerationConfig.ResponseMimeType != "application/json" || req.GenerationConfig.ResponseJsonSchema["type"] != "object" {
+				http.Error(w, `{"error":{"message":"missing json schema"}}`, 400)
+				return
+			}
+			fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"text":"reasoning","thought":true},{"text":"{\"answer\":\"yes\",\"sufficient\":true}"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":50,"candidatesTokenCount":12,"thoughtsTokenCount":20,"totalTokenCount":82}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	out := decode(t, e.do("POST", modelsPath, `{"endpoint":"generate","protocol":"generate-content","url":"`+srv.URL+`","api_key":"sk-g"}`, e.web))
+	if out["ok"] != true || fmt.Sprint(out["models"]) != "[gemini-4-hydrogen gemini-4-neon]" {
+		t.Fatalf("models %v", out)
+	}
+	rec := e.do("POST", testPath, `{"endpoint":"generate","config":{"url":"`+srv.URL+`","protocol":"generate-content","model":"gemini-4-hydrogen","api_key":"sk-g","locality":"external"}}`, e.web)
+	out = decode(t, rec)
+	data, _ := out["data"].(map[string]any)
+	usage, _ := data["usage"].(map[string]any)
+	if out["code"] != "ok" || data["protocol"] != "generate-content" || data["structured_output"] != "responseJsonSchema" || usage["total_tokens"] != float64(82) {
+		t.Fatalf("test %s", rec.Body)
+	}
+	if fmt.Sprint(heads) != "[GET /v1beta/models?pageSize=1000 sk-g  POST /v1beta/models/gemini-4-hydrogen:generateContent? sk-g ]" {
+		t.Fatalf("endpoint saw %q", heads)
+	}
+	if rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"`+srv.URL+`","protocol":"generate-content","model":"gemini-4-hydrogen","locality":"external"}}`, e.web); rec.Code != 200 {
+		t.Fatalf("PUT %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", routes[2], "", e.web); !strings.Contains(rec.Body.String(), `"protocol":"generate-content"`) {
+		t.Fatalf("GET %s", rec.Body)
+	}
+	if rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"`+srv.URL+`","protocol":"bogus","model":"m","locality":"external"}}`, e.web); rec.Code != 400 {
+		t.Fatalf("invalid protocol: %d %s", rec.Code, rec.Body)
+	}
+}
+
 // URL 换到另一个源时不沿用已存密钥：返回 400，端点收不到任何请求。
 func TestProbeRefusesStoredKeyForOtherOrigin(t *testing.T) {
 	e := setup(t)

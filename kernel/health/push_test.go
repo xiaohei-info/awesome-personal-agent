@@ -307,3 +307,41 @@ func TestPauseAllLetsHealthPushesThrough(t *testing.T) {
 		t.Fatalf("paused: got %v, want %v", got, want)
 	}
 }
+
+// 后台运行超时的推送（§15.2）：说"这条运行到点停止、事项状态未变、可以继续"，
+// 不说运行失败，也不露 timeout、failed 或秒数这类内部词。
+func TestPushRunTimeoutUsesStoppedAtLimitCopy(t *testing.T) {
+	e := setup(t)
+	for _, err := range []error{items.Register(e.x, items.NewKinds()), executors.Register(e.x, executors.Options{Owner: "owner"})} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := NewPusher(e.att())
+	e.push(p)
+	body, _ := json.Marshal(map[string]any{"kind": "task", "title": "整理周报", "phase": "open", "assignee": "owner"})
+	r, err := e.x.Do(bg, command.Request{Identity: owner, Command: "item.create", Input: body, Owner: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var it struct{ ID string }
+	_ = json.Unmarshal(r.Value, &it)
+	e.event(domain.EvRunFinished, it.ID, "", map[string]any{"category": "background", "state": "timeout", "run_id": "run_t",
+		"error": "运行timeout：timeout after 14400s", "fault": map[string]any{"code": "timeout", "params": map[string]string{"timeout": "14400"}}})
+	e.push(p)
+	var summary string
+	e.update(func(tx *store.Tx) error {
+		row, err := tx.Query(`SELECT json_extract(content, '$.summary') FROM delivery_delivery`)
+		if err != nil {
+			return err
+		}
+		defer row.Close()
+		if row.Next() {
+			return row.Scan(&summary)
+		}
+		return row.Err()
+	})
+	if want := "运行到点停止，事项状态未变，可以继续。"; summary != want {
+		t.Fatalf("summary %q, want %q", summary, want)
+	}
+}

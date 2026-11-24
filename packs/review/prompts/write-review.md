@@ -1,6 +1,5 @@
 ---
 agent: task
-timeout: 15m
 access: read
 materials: [context, prior, activity, open_items, due_waiting, decisions, planned, schedule]
 result_fields:
