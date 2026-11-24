@@ -64,6 +64,10 @@ type Fired struct {
 	Due     time.Time       `json:"due"`
 }
 
+// Ready 报告一个动作此刻能否为触发事项执行（条件 agent_ready，C.6）：返回非空原因表示不能，规则这次不命中、也不留记录。
+// Call 只带 Rule、Action、Item、Depth，不能用来写。
+type Ready func(ctx context.Context, c Call) (string, error)
+
 // Handler 执行一个枚举动作。set_phase、add_tag、create_item、create_timer 由本包内置；
 // start_background_run 由后台运行模块、call_agent 由专属 agent 的装配处登记。没有登记的动作按未知动作失败，
 // 不伪造成功。
@@ -76,6 +80,8 @@ type Options struct {
 	Packs PackSource
 	// Handlers 登记内置之外的动作处理器，键是动作名。
 	Handlers map[string]Handler
+	// Ready 登记动作的就绪检查，键是动作名；条件 agent_ready 按它求值（start_background_run 由后台运行模块登记）。
+	Ready map[string]Ready
 	// Owner 是本人的标识，作为规则动作的 on_behalf_of 与执行者校验的主人。
 	Owner string
 	Now   func() time.Time
@@ -209,7 +215,8 @@ func (e *Engine) pass(ctx context.Context) (int, error) {
 			return 0, err
 		}
 	}
-	return len(fires) + len(events), nil
+	n, err := e.scan(ctx, rs, modes)
+	return len(fires) + len(events) + n, err
 }
 
 type fire struct {
@@ -286,7 +293,7 @@ func (e *Engine) event(ctx context.Context, rs []ruleDef, modes map[string]strin
 	if !en.Tombstone && en.Event.Actor.Via != domain.ViaRule {
 		var t *trigger
 		for _, d := range rs {
-			if d.Group != groupEvent || modes[d.Key] == "" || modes[d.Key] == ModeOff {
+			if d.Group != groupEvent || d.ByState || modes[d.Key] == "" || modes[d.Key] == ModeOff {
 				continue
 			}
 			if t == nil {
@@ -301,6 +308,11 @@ func (e *Engine) event(ctx context.Context, rs []ruleDef, modes map[string]strin
 					return err
 				}
 				continue
+			}
+			if ok {
+				if ok, err = e.ready(ctx, d, t); err != nil {
+					return err
+				}
 			}
 			if ok {
 				if err := e.run(ctx, d, modes[d.Key], t); err != nil {
@@ -384,8 +396,9 @@ func (e *Engine) skipped(ctx context.Context, d ruleDef, t *trigger, f Fired, wh
 	})
 }
 
-// startNow 执行本人“现在开工”：只挑事件规则里的 start_background_run 动作，规则条件去掉事件与阶段转移后仍匹配这件事（如 kind、tag）才执行；
-// 不看规则模式（本人的显式指令，与“立即跑一次”同理），权限上限、项目允许的执行者、链路深度与在途运行由动作处理器照旧复核。
+// startNow 执行本人“现在开工”：只挑事件规则里的 start_background_run 动作，规则条件去掉事件、阶段转移与 agent_ready 后仍匹配这件事（如 kind、tag）才执行；
+// 不看规则模式（本人的显式指令，与“立即跑一次”同理），也不看状态规则的幂等记录；每次先记一条 trigger=manual 的 rule.fired，
+// 它同时让状态规则之后不再自动为这件事开工。权限上限、Agent 是否可用、项目允许的执行者、链路深度与在途运行由动作处理器照旧复核。
 // 没有一条规则能为它拉起时记一条告警，不假装成功。
 func (e *Engine) startNow(ctx context.Context, rs []ruleDef, en eventlog.Entry) error {
 	t, err := e.trigger(ctx, en)
@@ -410,7 +423,7 @@ func (e *Engine) startNow(ctx context.Context, rs []ruleDef, en eventlog.Entry) 
 		}
 		when := map[string]any{}
 		for k, v := range d.When {
-			if k != "event" && k != "to_phase" && k != "from_phase" {
+			if k != "event" && k != "to_phase" && k != "from_phase" && k != "agent_ready" {
 				when[k] = v
 			}
 		}
@@ -419,6 +432,9 @@ func (e *Engine) startNow(ctx context.Context, rs []ruleDef, en eventlog.Entry) 
 		}
 		ran = true
 		d.Do = do
+		if _, err := e.claim(ctx, d, ModeAuto, t, "manual"); err != nil {
+			return err
+		}
 		if err := e.execute(ctx, d, t); err != nil {
 			return err
 		}
@@ -458,13 +474,162 @@ func (e *Engine) trigger(ctx context.Context, en eventlog.Entry) (*trigger, erro
 	return t, err
 }
 
+// 状态规则的幂等记录（规则, 事项）：这些类型、依据为该规则、挂在该事项上的事件有一条，自动就不再做。
+// launchedType 是后台运行模块的 background.launched：让升级前事件规则已拉起过的事项也算“起过一次”（本包不能 import 它）。
+const launchedType = "background.launched"
+
+var (
+	autoRecords    = []string{EvFired, launchedType}
+	observeRecords = []string{EvFired, launchedType, EvObserved}
+)
+
+// scan 是状态规则的求值（§7.3、C.6）：trigger: state 的事件规则不看事件流，每一轮按 phase 取候选事项、用它们的当前状态匹配其余条件。
+// 命中且这条规则还没对该事项留过记录才动作：auto 先记 rule.fired 再执行，observe 只记一条 rule.observed。
+// 记录就是幂等键：之后不论事项怎么变、扫多少轮，自动都不再重复；执行失败也不重试（告警一次），只有本人“现在开工”能再起。
+// 规则动作改出来的状态同样会被扫到，间接回环由链路深度（取事项当前深度）与每事项一次的记录共同兜底。
+// shortcut: 每轮全量列出该阶段的事项再在内存里匹配，进行中的事项到上万件、提交明显变慢时改为只求值本轮事件涉及的事项加周期全量。
+func (e *Engine) scan(ctx context.Context, rs []ruleDef, modes map[string]string) (int, error) {
+	n := 0
+	for _, d := range rs {
+		mode := modes[d.Key]
+		if !d.ByState || (mode != ModeAuto && mode != ModeObserve) {
+			continue
+		}
+		var hits []*trigger
+		err := e.o.Store.View(ctx, func(tx *store.Tx) error {
+			for _, ph := range scalars(d.When["phase"]) {
+				l, err := items.List(tx, items.Filter{Phase: domain.Phase(ph)})
+				if err != nil {
+					return err
+				}
+				for i := range l {
+					t := &trigger{item: &l[i], object: l[i].ID, ref: "st:" + l[i].ID}
+					ok, err := match(d.When, t)
+					if err != nil {
+						return err // 条件键已由加载器校验，出错是引擎与加载器不一致
+					}
+					if !ok {
+						continue
+					}
+					if done, err := recorded(tx, d.Key, l[i].ID, mode); err != nil || done {
+						if err != nil {
+							return err
+						}
+						continue
+					}
+					if t.depth, err = items.ChainDepth(tx, l[i].ID); err != nil {
+						return err
+					}
+					hits = append(hits, t)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return n, err
+		}
+		for _, t := range hits {
+			if ok, err := e.ready(ctx, d, t); err != nil || !ok {
+				if err != nil {
+					return n, err
+				}
+				continue
+			}
+			claimed, err := e.claim(ctx, d, mode, t, "state")
+			if err != nil {
+				return n, err
+			}
+			if !claimed {
+				continue
+			}
+			n++
+			if mode == ModeAuto {
+				if err := e.execute(ctx, d, t); err != nil {
+					return n, err
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+func recorded(tx *store.Tx, rule, item, mode string) (bool, error) {
+	types := autoRecords
+	if mode == ModeObserve {
+		types = observeRecords
+	}
+	return eventlog.RuleRecorded(tx, item, rule, types...)
+}
+
+// claim 写状态规则的幂等记录：auto 记 rule.fired，observe 记 rule.observed；trigger=manual（本人“现在开工”）总是记，
+// 其余在同一事务里先复查，已有记录就报告没抢到。
+func (e *Engine) claim(ctx context.Context, d ruleDef, mode string, t *trigger, via string) (bool, error) {
+	claimed := false
+	err := e.o.Store.Update(ctx, func(tx *store.Tx) error {
+		if via != "manual" {
+			if done, err := recorded(tx, d.Key, t.item.ID, mode); err != nil || done {
+				return err
+			}
+		}
+		pv, _, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		typ, reason := EvFired, "rule fired on current state: "+d.Key
+		p := map[string]any{"rule": d.Key, "item": t.item.ID, "trigger": via}
+		switch {
+		case via == "manual":
+			reason = "owner started now: " + d.Key
+			p["trigger_seq"] = t.entry.Event.Seq
+		case mode == ModeObserve:
+			typ, reason = EvObserved, "observe: would run "+d.Key
+			p["would_do"] = d.Do
+		}
+		b, _ := json.Marshal(p)
+		if _, err := eventlog.Append(tx, domain.Event{Type: typ, Object: t.item.ID, Actor: ruleActor(d.Key),
+			Basis: &domain.Basis{PolicyVersion: pv, RuleID: d.Key}, Reason: reason, Payload: b, ChainDepth: t.depth, At: e.now()}); err != nil {
+			return err
+		}
+		claimed = true
+		return nil
+	})
+	return claimed, err
+}
+
+// ready 求值条件 agent_ready：do[] 里登记了就绪检查的动作都说能执行才算满足；一个都没登记是装配错误，不当作满足。
+func (e *Engine) ready(ctx context.Context, d ruleDef, t *trigger) (bool, error) {
+	if _, ok := d.When["agent_ready"]; !ok {
+		return true, nil
+	}
+	checked := false
+	for _, a := range d.Do {
+		name, _ := a["action"].(string)
+		r, ok := e.o.Ready[name]
+		if !ok {
+			continue
+		}
+		checked = true
+		why, err := r(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Depth: t.depth})
+		if err != nil || why != "" {
+			return false, err
+		}
+	}
+	if !checked {
+		return false, fmt.Errorf("rules: %s uses agent_ready, but no action in do[] has a readiness check registered", d.Key)
+	}
+	return true, nil
+}
+
 // match 判断平铺条件：每个键的值是标量（相等）或标量列表（成员）；全部满足才命中。不支持表达式。
-// 条件键：event、kind、phase、to_phase、from_phase、tag、tag_any、project、assignee、source。
+// 条件键：event、kind、phase、to_phase、from_phase、tag、tag_any、project、assignee、source、agent_ready；
+// agent_ready 要问动作处理器，由 ready 在其余条件都满足后求值，这里放过。
 func match(when map[string]any, t *trigger) (bool, error) {
 	for k, v := range when {
 		want := scalars(v)
 		var got []string
 		switch k {
+		case "agent_ready":
+			continue
 		case "event":
 			got = []string{t.entry.Event.Type}
 		case "kind", "phase", "to_phase", "project", "assignee", "source":
@@ -483,7 +648,7 @@ func match(when map[string]any, t *trigger) (bool, error) {
 			}
 			got = t.item.Tags
 		default:
-			return false, fmt.Errorf("condition %q is not supported (event, kind, phase, to_phase, from_phase, tag, tag_any, project, assignee, source)", k)
+			return false, fmt.Errorf("condition %q is not supported (event, kind, phase, to_phase, from_phase, tag, tag_any, project, assignee, source, agent_ready)", k)
 		}
 		if !slices.ContainsFunc(got, func(g string) bool { return slices.Contains(want, g) }) {
 			return false, nil

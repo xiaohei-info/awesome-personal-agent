@@ -128,6 +128,9 @@ type EventRule struct {
 	When map[string]any `yaml:"when"`
 	Mode string         `yaml:"mode"`
 	Do   []Action       `yaml:"do"`
+	// Trigger 为 state 时是状态规则（C.6）：不看事件流，按事项的当前状态求值，同一事项自动只做一次；省略即事件规则。
+	// omitempty 让没写它的规则内容 hash 与之前一致（hash 变了动作类规则会回到 observe）。
+	Trigger string `yaml:"trigger" json:",omitempty"`
 }
 
 // Prompt 是提示词模板：front matter 加正文。
@@ -499,6 +502,9 @@ func finishAll(p *Pack, files map[string][]byte, names []string, checkSchema fun
 		if err := flat("event_rules."+r.ID+".when", r.When); err != nil {
 			return nil, err
 		}
+		if err := checkEventWhen(r); err != nil {
+			return nil, err
+		}
 		actions = append(actions, r.Do...)
 	}
 	for _, r := range p.SourceRules {
@@ -626,6 +632,41 @@ func flat(where string, m map[string]any) error {
 					return fmt.Errorf("%s.%s: list members must be scalars", where, k)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// StateRule 报告事件规则是不是状态规则（trigger: state）：按事项的当前状态求值，同一规则对同一事项自动只做一次（C.6）。
+func (r EventRule) StateRule() bool { return r.Trigger == "state" }
+
+// checkEventWhen 校验状态规则与 agent_ready 条件（C.6）：状态规则必须限定 phase（不然要扫全部事项），
+// 不能写 event 与只在阶段转移事件里才有的 to_phase、from_phase；agent_ready 只能写 true，且 do[] 要有拉起后台运行的动作。
+func checkEventWhen(r EventRule) error {
+	where := "event_rules." + r.ID + ".when"
+	if r.Trigger != "" && r.Trigger != "state" {
+		return fmt.Errorf("event_rules.%s.trigger: only state is supported (omit it for an event rule)", r.ID)
+	}
+	if r.StateRule() {
+		if _, ok := r.When["phase"]; !ok {
+			return fmt.Errorf("%s: a trigger: state rule needs phase", where)
+		}
+		for k := range r.When {
+			switch k {
+			case "phase", "kind", "tag", "tag_any", "project", "assignee", "source", "agent_ready":
+			case "event", "to_phase", "from_phase":
+				return fmt.Errorf("%s.%s: a trigger: state rule is evaluated on current item state, not on events; use phase", where, k)
+			default:
+				return fmt.Errorf("%s.%s: not supported in a trigger: state rule (phase, kind, tag, tag_any, project, assignee, source, agent_ready)", where, k)
+			}
+		}
+	}
+	if v, ok := r.When["agent_ready"]; ok {
+		if v != true {
+			return fmt.Errorf("%s.agent_ready: only true is supported", where)
+		}
+		if !slices.ContainsFunc(r.Do, func(a Action) bool { return a["action"] == "start_background_run" }) {
+			return fmt.Errorf("%s.agent_ready: do[] has no start_background_run to check", where)
 		}
 	}
 	return nil

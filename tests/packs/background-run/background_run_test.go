@@ -63,6 +63,7 @@ type env struct {
 	x    *command.Executor
 	runs string
 	done chan proc.Result
+	eng  *rules.Engine
 }
 
 // 真实内置包 + 真实规则引擎与后台运行模块；只有无头 harness 是脚本替身（外部边界）。
@@ -106,13 +107,14 @@ func newEnv(t *testing.T, taskExecutor string) *env {
 		t.Fatal(err)
 	}
 	eng, err := rules.New(rules.Options{Store: st, Exec: e.x, Packs: ld, Owner: "owner", Now: func() time.Time { return t0 },
-		Handlers: map[string]rules.Handler{background.Action: svc.Handler()}, OnError: func(err error) { t.Errorf("rules: %v", err) }})
+		Handlers: map[string]rules.Handler{background.Action: svc.Handler()}, Ready: map[string]rules.Ready{background.Action: svc.Ready}, OnError: func(err error) { t.Errorf("rules: %v", err) }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := eng.Reconcile(bg); err != nil {
 		t.Fatal(err)
 	}
+	e.eng = eng
 	// harness：Web 默认 harness，权限上限 edit。
 	e.must(owner, "executor.put", map[string]any{"id": "work-host.cli", "kind": "external-cli"})
 	sh := filepath.Join(t.TempDir(), "h.sh")
@@ -362,7 +364,7 @@ func TestUnlabelledItemIsNotLaunched(t *testing.T) {
 }
 
 // 「交给 Agent」就是 Web 对事项做一次 item.update 写 tags：建议阶段加上标签，接受进入 open 时拉起；
-// 去掉标签后不拉起；已在 open 的事项后加标签不会补拉起（规则只认进入 open 的那一刻）。
+// 去掉标签后不拉起；已在 open 的事项后加标签也拉起（状态规则看的是“现在是不是进行中且交给了 Agent”，C.5）。
 func TestHandoffTagWrittenByItemUpdateDrivesTheRule(t *testing.T) {
 	e := newEnv(t, "")
 	e.auto(mainRule)
@@ -389,11 +391,17 @@ func TestHandoffTagWrittenByItemUpdateDrivesTheRule(t *testing.T) {
 	tag(off, []string{"agent-ok"})
 	tag(off, []string{})
 	open(off)
+	if n := len(e.runs_()); n != 1 {
+		t.Fatalf("runs = %d, the untagged item must not start", n)
+	}
 	late := mk("开了才交")
 	open(late)
-	tag(late, []string{"agent-ok"})
 	if n := len(e.runs_()); n != 1 {
-		t.Fatalf("runs = %d, want only the first item's", n)
+		t.Fatalf("runs = %d, an open item without agent-ok must not start", n)
+	}
+	tag(late, []string{"agent-ok"})
+	if n, all := len(e.runsFor(late)), len(e.runs_()); n != 1 || all != 2 {
+		t.Fatalf("tagging an open item: runs for it = %d, all = %d", n, all)
 	}
 }
 

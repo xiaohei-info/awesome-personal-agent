@@ -42,6 +42,7 @@ const (
 	EvObserved     = "rule.observed"      // observe 档：本来会做什么
 	EvTimerCreated = "rule.timer_created" // create_timer 动作建出的 Timer
 	EvSkipped      = "rule.skipped"       // 实例到期但 Options.Gate 让这次整次跳过（§7.3）
+	EvFired        = "rule.fired"         // 状态规则为某事项动作了一次（trigger=state 自动，或 manual 本人“现在开工”）；它就是幂等键
 )
 
 const (
@@ -382,6 +383,7 @@ type ruleDef struct {
 	State
 	// State.Mode 在这里是包里写的 mode（可能为空）；初始模式由类别决定（sync）。
 	Reminder bool   // 提醒类：follow_up、stale 时钟规则（§14.8）；类别由规则类型推定，包不能自报
+	ByState  bool   // 状态规则：trigger: state 的事件规则，按事项当前状态求值（scan）
 	Type     string // 时钟规则类型
 	When     map[string]any
 	Do       []packs.Action
@@ -398,7 +400,7 @@ func defs(src PackSource) []ruleDef {
 		for _, r := range p.EventRules {
 			k := key(p.Name, groupEvent, r.ID)
 			out = append(out, ruleDef{State: State{Key: k, Pack: p.Name, Group: groupEvent, ID: r.ID, Mode: r.Mode, Hash: p.RuleHashes[groupEvent+"/"+r.ID]},
-				When: r.When, Do: r.Do})
+				When: r.When, Do: r.Do, ByState: r.StateRule()})
 		}
 	}
 	// 只有 accept: auto、then: alert 与 notify_urgent 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。

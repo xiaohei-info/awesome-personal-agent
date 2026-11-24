@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock/wall"
@@ -264,6 +265,22 @@ func query(tx *store.Tx, f Filter, cursor string, bound int64, order string, lim
 		sql += live
 	}
 	return collect(tx, sql+" ORDER BY "+order+" LIMIT ?", append(args, int64(limit))...)
+}
+
+// RuleRecorded 报告对象上有没有依据为规则 rule（basis.rule_id）、类型在 types 之内的事件（墓碑化的也算）。
+// 状态规则用它作幂等键（§7.3）：同一规则对同一事项只留一份记录就不再重复。
+func RuleRecorded(tx *store.Tx, object, rule string, types ...string) (bool, error) {
+	if len(types) == 0 {
+		return false, invalid("rule record types are empty")
+	}
+	args := []any{object, rule}
+	for _, t := range types {
+		args = append(args, t)
+	}
+	found := false
+	err := queryRows(tx, func(*store.Rows) error { found = true; return nil },
+		`SELECT 1 FROM eventlog_event WHERE object = ? AND json_extract(NULLIF(basis, ''), '$.rule_id') = ? AND type IN (?`+strings.Repeat(", ?", len(types)-1)+`) LIMIT 1`, args...)
+	return found, err
 }
 
 // Head 返回当前最大序号，空日志为 0。

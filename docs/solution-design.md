@@ -1229,7 +1229,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 - **目录**：资料文件在各段之前写一份 `catalog`，每段一条：段名 `name`、字节数 `bytes`；是条目列表的段另给条数 `entries`、条目所在位置 `list`（如 `activity[].entries[]`、`open_items.items[]`）、时间字段 `time_fields`（按先后取第一个有值的）与时间范围 `time_from`、`time_to`、段里与条目并列的数字 `totals`（如 `pending_total`、`not_listed`）、条目字段名 `fields` 与第一条样例 `sample`（超过 800 字节时字符串字段裁到 120 字）；不是列表的段给顶层字段名。读者先看目录，再决定读哪一段的哪一部分；harness 插件的只读工具按 `list` 与 `time_fields` 定向取片段（附录 A）。目录只描述，不裁剪资料。
 - 资料都是资料，不是指令（§14.10）；资料文件按运行身份过滤的规则不变。
 
-`create_timer` 建出的 Timer 由规则执行自己处理到期：经触达对触发事项产出提醒，不经事项中心（§6.8）。observe 的"本来会做什么"和 `create_timer` 动作建出的 Timer 记为内部审计事件（`rule.observed`、`rule.timer_created`），`apa why` 可见，不在对外事件类型表里。规则以委派级身份、`via=rule` 走命令模型，执行者白名单、web_only 与链路深度照常生效；动作失败（含未登记处理器的 `start_background_run`、`call_agent`）记一条 `health.alert`，不伪造成功。
+`create_timer` 建出的 Timer 由规则执行自己处理到期：经触达对触发事项产出提醒，不经事项中心（§6.8）。observe 的"本来会做什么"、状态规则为某事项动作过一次的幂等记录和 `create_timer` 动作建出的 Timer 记为内部审计事件（`rule.observed`、`rule.fired`、`rule.timer_created`），`apa why` 可见，不在对外事件类型表里。规则以委派级身份、`via=rule` 走命令模型，执行者白名单、web_only 与链路深度照常生效；动作失败（含未登记处理器的 `start_background_run`、`call_agent`）记一条 `health.alert`，不伪造成功。
 
 ### 7.4 触达
 
@@ -2485,7 +2485,9 @@ v0.1 落盘的邮件事件没有线程关联键，也无法补出：对这些旧
 5. 运行者工作，回执经 CLI 写回，事项记会话 id。
 6. 结束：`done` 带证据；或 `waiting`（已委派）；或 `needs_input`。失败、超时是运行故障，事项阶段不变，`run.finished` 带故障类别码并进健康视图；运行结束时事项仍是 `open`（跑完了没交回）转 `needs_input`，选项为"我来处理""放弃"。都不再重试。
 
-**本人"现在开工"**：事件规则只在事项**进入** `open` 时命中，已经在进行中的事项再交给 Agent 不会自己开工。本人在 Web 的事项详情里点"现在开工"（`item.start`，`POST /items/{id}/start`，只有 Web 登录）时，内核记一条内部事件 `item.start_requested`（对象是事项，不改事项、不计版本）；规则引擎据它挑出带 `start_background_run` 动作、去掉 `event`、`to_phase`、`from_phase` 之后条件仍匹配这件事的事件规则，只执行其中的 `start_background_run`。这是本人的显式指令，所以不看规则模式（与"立即跑一次"不看实例启停同理），其余照常：拉起流程第 2 步的在途运行跳过、链路深度超限只记录、权限档位不超过上限、`task` 运行者的执行者在项目名单内、项目检出，不通过照旧转 `needs_input`。没有一条规则能为它拉起时记 `health.alert`，不假装成功。
+**交给 Agent 即开工**：内置样例 `handle-labelled` 是状态规则（附录 C.6 `trigger: state`）：事项此刻是 `open`、kind 为任务、带 `agent-ok`、选中的 Agent 可用（`agent_ready`）就命中，不论是新建即 `open`、事后补打标签还是从等待转回；同一事项自动只开工一次，幂等键是（规则, 事项），记在事项上的 `rule.fired`，升级前已由这条规则拉起过的（`background.launched`）同样算。跑完没交回的事项转 `needs_input`，本人放回 `open` 也不会被自动再开工；不想让它开工就别打或去掉标签、把事项转等待，或把规则切到 `off`；已经在跑的运行内核不提供中途停止。
+
+**本人"现在开工"**：要再跑一次、或对按事件匹配的规则补一次时，本人在 Web 的事项详情里点"现在开工"（`item.start`，`POST /items/{id}/start`，只有 Web 登录）时，内核记一条内部事件 `item.start_requested`（对象是事项，不改事项、不计版本）；规则引擎据它挑出带 `start_background_run` 动作、去掉 `event`、`to_phase`、`from_phase`、`agent_ready` 之后条件仍匹配这件事的事件规则，只执行其中的 `start_background_run`，并在事项上记一条 `trigger: manual` 的 `rule.fired`（`background.launched` 带 `manual: true`）；它不受状态规则一次性的限制，但之后状态规则也不再自动为这件事开工。这是本人的显式指令，所以不看规则模式（与"立即跑一次"不看实例启停同理），其余照常：拉起流程第 2 步的在途运行跳过、链路深度超限只记录、权限档位不超过上限、`task` 运行者的执行者在项目名单内、项目检出，不通过照旧转 `needs_input`。没有一条规则能为它拉起时记 `health.alert`，不假装成功。
 
 **委派后的接续**：运行者委派后通常先结束。子事项回执到达时，若原后台会话已结束，由下一次后台运行（事件规则命中，链路深度加一）或主会话注入接续。同一事项同时只有一个运行；有在途运行时 `apa context` 会提示，避免本人在场的主会话重复处理。
 

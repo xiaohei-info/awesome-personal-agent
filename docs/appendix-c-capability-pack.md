@@ -157,7 +157,8 @@ webhook_mappings:
 | 字段 | 语义 |
 |---|---|
 | `id` | 规则 id |
-| `when` | 平铺的条件：事件类型、kind、阶段变化、tag、项目、来源。只支持相等与成员判断，不支持表达式，避免成为第二个规则引擎 |
+| `when` | 平铺的条件：事件类型、kind、阶段变化、tag、项目、来源，以及 `agent_ready: true`（见下）。只支持相等与成员判断，不支持表达式，避免成为第二个规则引擎 |
+| `trigger` | 可选。省略时按事件流匹配；为 `state` 时是状态规则，按事项的当前状态求值（见下） |
 | `mode` | 初始模式，只能是 `off` 或 `observe`（事件规则都是动作类） |
 | `do[]` | 枚举动作 |
 
@@ -171,6 +172,15 @@ webhook_mappings:
 | `start_background_run` | 拉起后台运行：`runner`、`prompt`、`access`、`cwd`，可选 `harness`（默认用 Web 设置的默认 harness）；`runner: task` 时再加 `executor`，内核先把子事项委派给该执行者（与 `apa delegate` 同一路径），运行者在子事项上回执 | §13.6 的前置校验 |
 
 规则动作产生的 Event 不再触发规则。规则内容 hash 记入账本，动作类规则内容变化后回到 `observe`，提醒类规则保持本人上一次的选择（主文档 §14.8）。
+
+**状态规则（`trigger: state`）。** 要表达“事项处在某种状态就该做”而不是“刚发生了某事就该做”时用它，例如“进行中、交给了 Agent 的任务就开工”：新建即 `open`、事后补打标签、从等待转回进行中都一样命中。
+
+- 求值：规则引擎每一轮（每条命令提交后，以及维护循环的每次周期）按 `phase` 取出候选事项，用它们的当前状态匹配其余条件；不看事件流，也不区分状态是谁改出来的。`when` 必须写 `phase`，只能用 `phase`、`kind`、`tag`、`tag_any`、`project`、`assignee`、`source`、`agent_ready`；写 `event`、`to_phase`、`from_phase` 的包被拒绝。
+- 一次性：幂等键是（规则, 事项）。`auto` 命中时先在事项上记一条 `rule.fired`（`trigger: state`），再执行 `do[]`；该事项上已有这条规则的 `rule.fired` 或 `background.launched` 时不再自动执行，执行失败也不重试。`observe` 对每件事只记一条 `rule.observed`。`off` 不求值。
+- 本人“现在开工”不受一次性限制：每次记一条 `trigger: manual` 的 `rule.fired`，`background.launched` 带 `manual: true`；这条记录同样让状态规则之后不再自动为这件事开工。
+- `agent_ready: true`：只能写 `true`，`do[]` 要有 `start_background_run`。按拉起时同一口径选出的 Agent 存在、未停用、有已确认的无头声明、权限上限够这次的 `access`，且事项没有在途运行，才算满足。不满足时这一轮不命中、不留记录，条件成立后的下一轮照常命中。“现在开工”不看它，由动作处理器照旧拒绝并告警。
+- 链路：状态规则也会看到规则动作改出来的状态；拉起的运行取事项当前的链路深度加一，与每事项一次的记录共同防止回环。
+- 切到 `auto` 的那一轮就会对此刻全部满足条件、还没记录的事项动作；切换前可在 `observe` 的记录里看到会动哪些事。
 
 ## C.7 提示词模板
 
@@ -345,11 +355,12 @@ description: 无人值守运行与续接
 event_rules:
   - id: handle-labelled
     mode: observe
+    trigger: state
     when:
-      event: item.phase_changed
-      to_phase: open
+      phase: open
       kind: [task]
       tag_any: [agent-ok]
+      agent_ready: true
     do:
       - action: start_background_run
         runner: main_session
@@ -445,7 +456,7 @@ default_instruction: |-
 | `review` | 实例参数（周期、项目范围、内容要求 `instruction`、`schedule_days`）；周期时钟规则；任务型提示词（带 `default_instruction`；`materials` 为 `context`、`prior`、`activity`、`open_items`、`due_waiting`、`decisions`、`planned`、`schedule`，不带知会与抽检；`result_fields` 为 `period` 与 `sections[].body`）；写回 `brief` kind，由 `spec.period` 区分周期。开箱默认安排每周五 17:30 |
 | `follow-up` | 跟进梯度时钟规则 `follow-up-interval`（`follow_up`，72 小时一轮，`remind_rounds: 2`~~，`defer_with: follow-up-defer`~~；规则 id 沿用 v0.1）；久未推进规则 `stale-check`（`stale`，每天检查，`stale_after: 14d`）；~~判断型模板 `follow-up-defer`（是非题，上限 0.85，未定取"否"即照常提醒）~~ **已取消（2026-11-23）**：模板已删除，包里不再带模板。v0.1 的三选一判断型模板与逐级升级用的生成型、任务型模板移除 |
 | `decision-card` | 生成型提示词（决策卡片文案，选项按事项上的选项 id 对齐；一句话摘要；材料修订摘要）；~~判断型模板 `delivery-defer`（是非题"这条决策可以晚点送吗"，`single_shot`，上限 0.85，未定取"否"；取代 v0.1 的三选一模板 `delivery-threshold`，"只留 Web 未读"这一去向不再由模型决定）~~ **已取消（2026-11-23）**：模板已删除，推迟多久不可预期、推迟了也不告诉本人，少打扰由安静时段、每天上限、合并与暂停承担；判断型提示词 `web-only-screening`（是非题，`single_shot`，下限 0.20，未定取"是"即升级；**已取消（2026-11-20）**：初筛取消，内核不再调用，文件只读保留）。消费方都是内核：触达（卡片文案~~、投递推迟~~，主文档 §7.4）、事项中心的摘要起草（一句话摘要、修订摘要，主文档 §6.3、§12.4） |
-| `background-run` | `start_background_run` 的规则样例，初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
+| `background-run` | `start_background_run` 的状态规则样例（`trigger: state`，每件事自动只开工一次），初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |
 | `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`reminder-open`（没有到期日的提醒事项 `reminder.open`，`proposed`；只在来源配了 `undated_lists` 时才有这类事件）、`reminder-status`（离开未完成集合的提醒：核实已完成的 `reminder.completed`，与只是移出拉取范围或读不到的 `reminder.out_of_view`；`ignore`，`on_update: attach`：挂到这条提醒建出的事项上，不关闭它，附录 D.2）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠，并刷新它建出的事项）、`pr-discussion`（PR 上的评论与评审，`ignore`，`on_update: attach`）、`issue-comment`（issue 上的评论，`screen`，`on_update: attach`）；评论与评审挂到已有事项时只记为挂靠消息，不改事项的标题、正文与摘要；issue 更新没有规则，交初筛。webhook 校验方案与字段映射（`github-issues`，以及评论与评审的 `github-issue-comments`、`github-pr-reviews`、`github-pr-review-comments`）。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"；问"有没有需要记下的事，或与所列未关闭事项有关的进展"）；跨来源合并的批量归类 `merge-batch`（生成型，一批一次调用，超时 300s；先输出 `groups[]`：`group`、`topic`、`members[]`；再输出 `decisions[]`：`new`、`group`、`step`（1 并入事项、2 批内整合、3 保留）、`action`（`attach`/`merge`/`duplicate`/`keep`）、`target`、`reason`、`confident`；第 2 步的整合在 `combined[]`：`merge`、`group`、`members[]`、`title`、`summary`；正文即设置 › 跨来源合并里的内置默认提示词，本人改的只换正文、不换输出结构，主文档 §9.3）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置、`urgent`）与 `triage-extract`（一段内容抽出零到多条候选，每条与起草同一组字段并带 `refs`）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
