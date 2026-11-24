@@ -9,7 +9,7 @@
 | `nginx/apa-ingest-only.conf.example`、`caddy/Caddyfile.ingest-only.example` | 只转发 `/ingest/`，其余 404 |
 | `tunnel/cloudflared.yml.example` | 不开放入站端口，经 cloudflared 隧道暴露（Tailscale 等私有网络同理，指向 `127.0.0.1:7777`） |
 | `container/Dockerfile` | 可选容器镜像 |
-| `launchd/update.sh` | macOS 上以 LaunchAgent 运行时换新二进制：重启前确认没有在跑的运行、备份账本与旧二进制、拷贝后以固定标识重签、kickstart、对比账本序号与阶段分布、打印回退命令 |
+| `launchd/update.sh` | macOS 上以 LaunchAgent 运行时换新二进制：重启前确认没有在跑的运行、备份账本与旧二进制、拷贝后以固定标识重签、kickstart、对比账本序号与阶段分布、打印回退命令；每次在 `<APA_HOME>/backup/update-<时刻>/` 留账本与旧二进制，只保留最近 10 份（脚本内常量 `keep_backups`），更早的列出体积后删除 |
 
 要点：
 - `apa` 默认只监听回环（`config.yaml` 的 `listen`）。代理与 `apa` 同机时无需改动；容器用 `--network host` 运行（Linux），不要 `-p` 发布端口：经发布端口到达的请求源地址不是回环，apa 会拒绝登录。

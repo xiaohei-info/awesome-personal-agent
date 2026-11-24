@@ -4,6 +4,7 @@ package deploy
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -244,5 +246,47 @@ func TestUpdateScriptResignsTheCopyBeforeSwap(t *testing.T) {
 	}
 	if strings.Contains(s, `-r="designated => identifier \"$sign_id\"" "$install"`) {
 		t.Error("不得就地重签已安装的文件")
+	}
+}
+
+// 备份保留：update.sh 只留最近 keep_backups 份 update-*（含本次），更早的删除；本次的与非 update-* 的目录不动。
+func TestUpdateScriptPrunesOldBackups(t *testing.T) {
+	s := read(t, "launchd/update.sh")
+	fn := regexp.MustCompile(`(?s)\nprune_backups\(\) \{.*?\n\}\n`).FindString(s)
+	if fn == "" || !strings.Contains(s, "\nkeep_backups=10\n") {
+		t.Fatal("update.sh 须有常量 keep_backups=10 与函数 prune_backups")
+	}
+	if strings.Index(s, "\nprune_backups\n") < strings.Index(s, "launchctl kickstart") {
+		t.Fatal("须在换完二进制并核对之后才清旧备份")
+	}
+	home := t.TempDir()
+	var names []string
+	for i := 1; i <= 13; i++ {
+		names = append(names, fmt.Sprintf("update-20261124-0000%02d", i))
+	}
+	for _, n := range append(names, "repair-20261101-000000") {
+		if err := os.MkdirAll(filepath.Join(home, "backup", n), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cur := filepath.Join(home, "backup", names[len(names)-1])
+	out, err := exec.Command("sh", "-c", "set -eu; keep_backups=10; home=\"$1\"; backup=\"$2\""+fn+"prune_backups", "sh", home, cur).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	left, _ := os.ReadDir(filepath.Join(home, "backup"))
+	var got []string
+	for _, e := range left {
+		got = append(got, e.Name())
+	}
+	want := append([]string{"repair-20261101-000000"}, names[3:]...)
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("剩下 %v，应为 %v\n%s", got, want, out)
+	}
+	for _, n := range names[:3] {
+		if !strings.Contains(string(out), n) {
+			t.Errorf("删除前须列出 %s：%s", n, out)
+		}
 	}
 }
