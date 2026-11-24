@@ -180,8 +180,10 @@ func ruleKeep(pol policy.Policy, it domain.Item) (sweepIn, bool) {
 	return sweepIn{}, false
 }
 
-// sameOwner 是合并护栏：两边的项目归属必须相同（同一个项目，或都不属于任何项目）。阶段相配不够，跨项目、跨归属一律不合。
-func sameOwner(a, b domain.Item) bool { return a.Project == b.Project }
+// sameOwner 是合并护栏：只拦跨项目——两边都有项目且不是同一个。一边或两边没有项目放行（建议不带项目是常态，§9.3）。阶段相配另由 fits 判。
+func sameOwner(a, b domain.Item) bool {
+	return a.Project == "" || b.Project == "" || a.Project == b.Project
+}
 
 // batchPlan 是一批的规则层结果，不调模型、不写账本：手动合并的演练输出它，真跑在同一份结果上调模型、落账。
 type batchPlan struct {

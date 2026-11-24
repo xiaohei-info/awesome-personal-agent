@@ -101,30 +101,41 @@ func TestMergeGuardBlocksCrossProjectCandidates(t *testing.T) {
 	e.verify()
 }
 
-// 护栏在落账处硬拦：即使结论绕过了规则层直接给到 inbound.sweep，去处与建议的项目归属不同（含一边不属于任何项目）也不折叠。
-func TestSweepCommandRefusesCrossOwnerTarget(t *testing.T) {
+// 护栏口径：只有两边都有项目且不同才拦。无→无、无→有、有→无、同项目放行；有 A→有 B 拦。
+// 在落账处验（绕过规则层直接给 inbound.sweep），规则层用的是同一个 sameOwner。
+func TestSweepGuardOnlyBlocksTwoDifferentProjects(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 50 })
-	a := e.proposal("src_a", "a1", "供应商合同续签", e.web)
-	b := e.proposal("src_b", "b1", "供应商合同续签（邮件）", e.mail)
-	n := e.proposal("src_c", "c1", "供应商合同续签（无项目）", "")
-	for _, x := range []domain.Item{b, n} {
-		for _, action := range []string{domain.SweepMerge, domain.SweepDuplicate} {
-			if err := e.svc.settle(bg, system, sweepIn{Item: x.ID, Batch: "mb_test", Action: action, Target: a.ID, By: "generate", Why: "同一件事"}); err != nil {
-				t.Fatal(err)
-			}
-			if !pending(e.item(x.ID)) {
-				break // 已归类：第二个动作是 no-op
-			}
+	for i, c := range []struct {
+		name     string
+		from, to string
+		fold     bool
+	}{
+		{"无→无", "", "", true},
+		{"无→有", "", e.web, true},
+		{"有→无", e.web, "", true},
+		{"同项目", e.web, e.web, true},
+		{"有A→有B", e.mail, e.web, false},
+	} {
+		to := e.proposal("src_t", fmt.Sprintf("t%d", i), fmt.Sprintf("供应商合同续签 去处%d", i), c.to)
+		x := e.proposal("src_x", fmt.Sprintf("x%d", i), fmt.Sprintf("供应商合同续签 新到%d", i), c.from)
+		if err := e.svc.settle(bg, system, sweepIn{Item: x.ID, Batch: "mb_test", Action: domain.SweepMerge, Target: to.ID, By: "generate", Why: "同一件事"}); err != nil {
+			t.Fatal(err)
 		}
-		got := e.item(x.ID)
-		if got.Phase != domain.PhaseProposed || got.Proposal.Sweep.State != "done" || got.Proposal.Sweep.Action != domain.SweepKeep || !strings.Contains(got.Proposal.Sweep.Why, "另一个项目") {
-			t.Fatalf("%s: cross-owner fold must be refused at apply: %s %+v", x.Title, got.Phase, got.Proposal.Sweep)
+		got, ap := e.item(x.ID), e.item(to.ID).Proposal
+		if c.fold {
+			if got.Phase != domain.PhaseDropped || got.Proposal.Sweep.Action != domain.SweepMerge || len(ap.Absorbed) != 1 || ap.Absorbed[0].Item != x.ID {
+				t.Fatalf("%s must fold: %s %+v, target %+v", c.name, got.Phase, got.Proposal.Sweep, ap.Absorbed)
+			}
+			continue
 		}
-	}
-	if ap := e.item(a.ID).Proposal; len(ap.Merges) != 0 || len(ap.Absorbed) != 0 || !slices.Equal(ap.Sources, a.Proposal.Sources) {
-		t.Fatalf("target untouched: %+v", ap)
+		if got.Phase != domain.PhaseProposed || got.Proposal.Sweep.Action != domain.SweepKeep || !strings.Contains(got.Proposal.Sweep.Why, "另一个项目") {
+			t.Fatalf("%s must be refused at apply: %s %+v", c.name, got.Phase, got.Proposal.Sweep)
+		}
+		if len(ap.Merges) != 0 || len(ap.Absorbed) != 0 || !slices.Equal(ap.Sources, to.Proposal.Sources) {
+			t.Fatalf("%s: target untouched: %+v", c.name, ap)
+		}
 	}
 	e.verify()
 }
