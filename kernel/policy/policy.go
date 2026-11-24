@@ -194,21 +194,14 @@ type MergeSettings struct {
 	BudgetTokens *int       `json:"budget_tokens,omitempty"`
 	Prompt       string     `json:"prompt"` // 空串用内置提示词
 	PromptAt     *time.Time `json:"prompt_at,omitempty"`
-	// Similarity 是规则初筛的相似度档位：loose、strict；空即默认档（与改成档位前写死的 0.30 相同）。
+	// Similarity 已不参与判定（规则检索改为只按分数排序取前 Candidates 条，不设下限）；只为旧策略文档读取兼容而保留，原样往返。
 	Similarity string `json:"similarity,omitempty"`
+	// Candidates 是规则检索给每条待归类建议至多带几条已有事项（按分数从高到低）；0 取默认。
+	Candidates int `json:"candidates,omitempty"`
 }
 
-// 规则初筛的相似度档位（§9.3）：宽 0.25、默认 0.30、严 0.40。
-const (
-	SimilarityLoose  = "loose"
-	SimilarityStrict = "strict"
-)
-
-// SimilarityMin 是各档的相似度下限；空串是默认档。
-var SimilarityMin = map[string]float64{SimilarityLoose: 0.25, "": 0.30, SimilarityStrict: 0.40}
-
-// MinScore 是生效的相似度下限。
-func (m MergeSettings) MinScore() float64 { return SimilarityMin[m.Similarity] }
+// Cands 是生效的每条候选条数。
+func (m MergeSettings) Cands() int { return cmp.Or(m.Candidates, DefaultMergeCandidates) }
 
 // 合并批量参数的默认值与范围。
 const (
@@ -216,6 +209,9 @@ const (
 	MaxMergeBatch     = 100
 	DefaultMergeWait  = 30
 	MaxMergePrompt    = 8000
+	// 每条待归类建议带的候选条数：缺省 20，可设 1–50。
+	DefaultMergeCandidates = 20
+	MaxMergeCandidates     = 50
 
 	// CharsPerToken 是资料预算的 token 估算系数：每这么多个字符记 1 个 token（向上取整）。合并与写作两处预算共用它。
 	// 模型由本人配置、分词各家不同，内核不带 tokenizer，按这个明写的系数估算（§9.3）。
@@ -680,8 +676,8 @@ func normalize(p Policy) (Policy, error) {
 	if err := CheckMergePrompt(p.Merge.Prompt); err != nil {
 		return p, err
 	}
-	if _, ok := SimilarityMin[p.Merge.Similarity]; !ok {
-		return p, invalid("merge similarity %q: use loose or strict, or leave it empty for the default", p.Merge.Similarity)
+	if c := p.Merge.Candidates; c < 0 || c > MaxMergeCandidates {
+		return p, invalid("merge candidates %d: use 1 to %d, or 0 for the default", c, MaxMergeCandidates)
 	}
 	for k, r := range p.Disturb.Push {
 		if !slices.Contains(PushCategories, k) {
