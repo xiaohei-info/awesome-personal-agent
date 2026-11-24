@@ -4,7 +4,8 @@
 #   环境变量（都有默认值）：APA_HOME（~/.apa）、APA_LAUNCHD_LABEL（info.xiaohei.apa）、
 #   APA_INSTALL（~/.local/bin/apa）、APA_SIGN_ID（同 APA_LAUNCHD_LABEL）、APA_FORCE=1 跳过"有在跑的任务"检查。
 # 步骤：重启前确认没有在跑或排队的运行 → 备份账本与旧二进制 → 记下账本序号与阶段分布 →
-#       拷贝新二进制、以固定标识重签 → 原子替换 → kickstart → 核对 PID、版本与账本前后对比 → 打印回退命令。
+#       拷贝新二进制、以固定标识重签 → 原子替换 → kickstart → 核对 PID、版本与账本前后对比 →
+#       只留最近 keep_backups 份 update-* 备份 → 打印回退命令。
 #
 # 为什么重签：本地 go build 出来的是 ad-hoc 签名，标识是 a.out、每次构建 cdhash 都变；macOS 的隐私授权（如"可移除宗卷"）
 # 按签名记，换一次二进制授权就对不上，Agent 运行在外置盘上时会以退出码 126 失败。以固定标识和只认标识的指定要求重签后，
@@ -21,6 +22,17 @@ sign_id=${APA_SIGN_ID:-$label}
 ledger=$home/ledger.db
 stamp=$(date +%Y%m%d-%H%M%S)
 backup=$home/backup/update-$stamp
+# 保留的 update-* 备份份数（含本次）。只清本脚本生成的 update-*，$home/backup 下别的目录（手工备份）不动。
+keep_backups=10
+
+# 列出并删除最近 keep_backups 份以外的 update-* 备份；目录名里的时间戳定宽，字典序即时间序。本次的 $backup 永不删除。
+prune_backups() {
+	old=$(for d in "$home"/backup/update-*; do [ -d "$d" ] && [ "$d" != "$backup" ] && echo "$d"; done | sort -r | tail -n +"$keep_backups")
+	[ -n "$old" ] || return 0
+	echo "--- pruning update backups beyond the newest $keep_backups"
+	echo "$old" | while IFS= read -r d; do du -sh "$d"; done
+	echo "$old" | while IFS= read -r d; do rm -rf "$d"; done
+}
 
 q() { sqlite3 -cmd ".timeout 5000" "file:$ledger?mode=ro" "$1"; }
 snapshot() {
@@ -64,6 +76,7 @@ diff "$backup/before.txt" "$backup/after.txt" || true
 old_max=$(awk '$1 == "max_seq" { print $2 }' "$backup/before.txt")
 echo "--- events since seq $old_max"
 q "select seq, type, object, coalesce(json_extract(actor, '\$.principal'), '') from eventlog_event where seq > ${old_max:-0} order by seq"
+prune_backups
 cat <<EOF
 --- rollback
 cp -p '$backup/apa' '$install' && launchctl kickstart -k gui/\$(id -u)/$label
