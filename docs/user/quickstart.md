@@ -40,7 +40,7 @@ apa doctor
 ## 5. 往上加一档（可选）
 
 - 模型端点：在 Web 的“设置 › 模型”配置生成端点，判断端点可选。填好地址和密钥后点“获取模型”从列表里选（取不到就手动填写），再点“测试连接”确认能用，最后保存；每个端点要选在本机还是外部（`locality`）。外部端点会让来源内容离开你的主机，先读[安全说明](security.md)的“外发范围”。
-  - 生成端点：第一项先选协议，按端点实际讲的接口选：“OpenAI 兼容”（`/chat/completions`，默认，本机推理服务一般选它）、“Anthropic 兼容”（`/messages`）或“OpenAI Responses”（`/responses`）。经 New API、Magpie 这类网关接 Claude 模型时选“Anthropic 兼容”，地址填网关的 `…/v1`；网关把一种接口转成另一种时结构化约束可能丢失，起草会逐条失败。“测试连接”用起草建议的真实约束试一次，结果写明协议与原生结构化输出方式；提示“端点可能不支持结构化输出，试试另一种协议”时换一种再测。详见附录 D.7。
+  - 生成端点：第一项先选协议，按端点实际讲的接口选：“OpenAI Chat Completions”（`/chat/completions`，默认，本机推理服务一般选它）、“OpenAI Responses”（`/responses`）、“Anthropic Messages”（`/messages`）或“Google Gemini 原生”（`/v1beta/models/...:generateContent`）。经 New API、Magpie 这类网关接 Claude 模型时选“Anthropic Messages”，接 Gemini 模型时选“Google Gemini 原生”；网关把一种接口转成另一种时结构化约束可能丢失，起草会逐条失败。“测试连接”用起草建议的真实约束试一次，结果写明协议与原生结构化输出方式；提示“端点可能不支持结构化输出，试试另一种协议”时换一种再测。详见附录 D.7。
   - 判断端点：协议默认“TypeSafe Jev（System One 接口）”，地址已预填 `https://api.typesafe.ai/v1`、模型 `jev-latest`，填上密钥即可“测试连接”；直连受地区限制时（“测试连接”会提示“服务在当前网络位置不可用”），可填兼容的网关地址：把地址改成网关的接口根（APA 会在后面追加 `/systemone`），模型名按网关的写法填。超时预填 30000 毫秒，因为首次调用可能需要约 10 秒。自己部署的分类服务选“自建分类服务（probability-judgment/1）”，地址填完整路径。不需要写任何转换程序。
 - Agent：在你用的 Agent 里安装发布包内的 APA 插件，填入 APA 地址和 token；再到“设置 › Agent”允许 APA 在后台拉起它。简报和复盘已经默认安排好（工作日 08:30 简报、每周五 17:30 复盘），这一步之后从下一个时间点开始出；在“今天 › 简报”点开卡片可改时间、项目和写作要求。
 - 来源：仓库自带的来源程序登记时自带名字（如"iCloud 邮件""Apple 日历""GitHub"），表单里预填，可以改；自己写的脚本或程序登记时必须起名。之后可在来源页改名。再选默认项目和外发范围；附带的拉取程序用 `apa source auth <id>` 认证。

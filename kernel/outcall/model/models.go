@@ -21,16 +21,16 @@ const (
 	maxListBody = 1 << 20
 )
 
-// ListModels 取端点的模型列表：GET <url>/models，读 data[].id 或 models[].name（设计 §4.1 "设置 › 模型"）。
-// protocol 是生成端点的协议，决定鉴权头（同 Complete）；消息协议的列表默认分页，带 limit 取最多一页。判断端点传空串。
+// ListModels 取端点的模型列表：GET <base>/models，读 data[].id 或 models[].name（设计 §4.1 "设置 › 模型"）。
+// protocol 是生成端点的协议，决定默认版本前缀、鉴权头与分页参数（同 Complete）。判断端点传空串。
 // 请求只带鉴权头，不带任何账本内容。返回去重排序后的 id，至多 MaxModels 个，超出时 truncated 为真。
 // 非 2xx 返回 *StatusError；超时返回 ErrTimeout；响应不是模型列表返回 ErrBadResponse。
 func (c *Client) ListModels(ctx context.Context, url, key, protocol string) (ids []string, truncated bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, ModelsTimeout)
 	defer cancel()
-	target := strings.TrimRight(url, "/") + "/models"
-	if protocol == policy.ProtocolMessages {
-		target += "?limit=1000"
+	target := endpointBase(url, protocol) + "/models"
+	if w, ok := wires[policy.GenerateProtocol(protocol)]; ok && w.listQuery != "" {
+		target += w.listQuery
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
@@ -56,7 +56,7 @@ func (c *Client) ListModels(ctx context.Context, url, key, protocol string) (ids
 	if len(raw) > maxListBody {
 		return nil, false, fmt.Errorf("%w: body exceeds %d bytes", ErrBadResponse, maxListBody)
 	}
-	// 生成端点（三种协议）给 data[].id；system-one 判断接口给 models[].name。
+	// 生成端点给 data[].id 或 models[].name（内容生成协议可能带 models/ 前缀）；system-one 判断接口给 models[].name。
 	var out struct {
 		Data *[]struct {
 			ID string `json:"id"`
@@ -75,7 +75,11 @@ func (c *Client) ListModels(ctx context.Context, url, key, protocol string) (ids
 		}
 	} else {
 		for _, m := range *out.Models {
-			names = append(names, m.Name)
+			n := m.Name
+			if protocol == policy.ProtocolGenerateContent {
+				n = strings.TrimPrefix(n, "models/")
+			}
+			names = append(names, n)
 		}
 	}
 	seen := map[string]bool{}

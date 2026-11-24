@@ -1,6 +1,6 @@
 // Package model 是外呼调用器的模型 HTTP 部分（设计 §7.7、§8.1）：
-// 生成端点按本人选定的协议（chat-completions、messages、responses，见 wire.go）+ 各自原生的 JSON Schema 结构化输出调用用户配置的端点（base_url + api_key）。
-// 不起子进程、不占额度、不重试、不统计用量；失败如实返回，由调用模块决定降级语义。
+// 生成端点按本人选定的协议（chat-completions、responses、messages、generate-content，见 wire.go）+ 各自原生的 JSON Schema 结构化输出调用用户配置的端点（base_url + api_key）。
+// 不起子进程、不占额度、不重试；失败如实返回，由调用模块决定降级语义。
 package model
 
 import (
@@ -118,9 +118,23 @@ type Request struct {
 	Timeout time.Duration
 }
 
+// Usage 是端点在单次响应里回报的 token 用量；端点未回报时各字段为零。
+type Usage struct {
+	InputTokens    int `json:"input_tokens,omitempty"`
+	OutputTokens   int `json:"output_tokens,omitempty"`
+	ThoughtsTokens int `json:"thoughts_tokens,omitempty"`
+	TotalTokens    int `json:"total_tokens,omitempty"`
+}
+
+// IsZero 报告端点是否未回报任何 token 用量。
+func (u Usage) IsZero() bool {
+	return u.InputTokens == 0 && u.OutputTokens == 0 && u.ThoughtsTokens == 0 && u.TotalTokens == 0
+}
+
 // Response 是模型的回答。Schema 非空时 Content 已确认是符合 schema 的 JSON。
 type Response struct {
 	Content string
+	Usage   Usage
 }
 
 // Client 向配置的端点发起调用。HTTP 为空时用独立的 http.Client（不走全局 DefaultClient）。
@@ -160,7 +174,7 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(ep.URL, "/")+w.path, bytes.NewReader(payload))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL(ep.URL, ep.Protocol, ep.Model), bytes.NewReader(payload))
 	if err != nil {
 		return Response{}, fmt.Errorf("model: bad endpoint url: %w", scrub(err, ep.APIKey))
 	}
@@ -203,7 +217,7 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 			return Response{}, &SchemaError{Detail: err.Error()}
 		}
 	}
-	return Response{Content: r.content}, nil
+	return Response{Content: r.content, Usage: r.usage}, nil
 }
 
 func transportErr(ctx context.Context, err error, key string) error {
@@ -225,13 +239,20 @@ func scrub(err error, key string) error {
 }
 
 func errorMessage(raw []byte, key string) string {
-	var e struct {
+	type errWrap struct {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
+	var e errWrap
 	_ = json.Unmarshal(raw, &e)
 	m := e.Error.Message
+	if m == "" {
+		var list []errWrap
+		if json.Unmarshal(raw, &list) == nil && len(list) > 0 {
+			m = list[0].Error.Message
+		}
+	}
 	if key != "" {
 		m = strings.ReplaceAll(m, key, "***")
 	}

@@ -182,7 +182,9 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 		}
 		return d
 	}
-	_ = resp
+	if !resp.Usage.IsZero() {
+		d.Data["usage"] = resp.Usage
+	}
 	d.Why = fmt.Sprintf("answered the structured-output sample request in %d ms (protocol %s, %s)", ms, proto, model.StructuredOutput(proto))
 	if real {
 		d.Why = fmt.Sprintf("answered the %s structured-output sample request in %d ms (protocol %s, %s)", DraftTemplate, ms, proto, model.StructuredOutput(proto))

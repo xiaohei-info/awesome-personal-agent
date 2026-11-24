@@ -367,6 +367,7 @@ const (
 	ProtocolChatCompletions = "chat-completions"
 	ProtocolMessages        = "messages"
 	ProtocolResponses       = "responses"
+	ProtocolGenerateContent = "generate-content"
 )
 
 // GenerateProtocol 是生成端点协议的实际取值：未写按 chat-completions。
@@ -891,7 +892,7 @@ func normalizeEndpoints(p *Policy) (err error) {
 		if g.Locality, err = normLocality("generate_endpoint", g.Locality); err != nil {
 			return err
 		}
-		if !oneOf(g.Protocol, "", ProtocolChatCompletions, ProtocolMessages, ProtocolResponses) {
+		if !oneOf(g.Protocol, "", ProtocolChatCompletions, ProtocolMessages, ProtocolResponses, ProtocolGenerateContent) {
 			return invalid("generate_endpoint protocol %q", g.Protocol)
 		}
 		if g.MaxMaterialTokens == 0 && g.MaxMaterialChars > 0 { // 旧文档：换算一次；有了 token 值就以它为准，所以重复读不会二次换算

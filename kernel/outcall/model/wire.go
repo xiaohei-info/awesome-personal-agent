@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
 
-// 生成协议的线上差异（设计 §8.1）：每种协议各用原生的结构化输出方式，各自解析，再走同一套 schema 校验。
-// 新增协议在这里加一项，并同步 policy 的协议枚举与附录 B.2。
+// 生成协议的线上差异（设计 §8.1）：四种官方协议各用原生的请求形态、鉴权头与结构化输出方式，
+// 各自解析正文与用量，再走同一套 schema 校验。新增协议在这里加一项，并同步 policy 的协议枚举与附录 B.2。
 
 const (
 	// outputTool 是消息协议里承载结构化输出的工具名：tool_choice 强制调用它，结果取它的 input。
@@ -20,6 +21,8 @@ const (
 	messagesMaxTokens = 16384
 	// messagesVersion 是消息协议的版本头取值。
 	messagesVersion = "2023-06-01"
+	// generateContentKeyHeader 是内容生成协议的原生鉴权头。
+	generateContentKeyHeader = "x-goog-api-key"
 )
 
 // reply 是一种协议解析出的回答。missing 非空：结构化通道里没有结果，值是内容形态（Shape*）。
@@ -27,35 +30,133 @@ type reply struct {
 	content   string
 	truncated bool
 	missing   string
+	usage     Usage
 }
 
 type wire struct {
-	path       string
-	structured string // 结构化输出的方式，写进自检结论（data.structured_output）
-	body       func(model string, req Request, schema map[string]any) map[string]any
-	parse      func(raw []byte, structured bool) (reply, error)
+	defaultPrefix string
+	path          func(model string) string
+	stripLeaf     func(path string) string
+	listQuery     string
+	structured    string // 结构化输出的方式，写进自检结论（data.structured_output）
+	auth          func(h http.Header, key string)
+	body          func(model string, req Request, schema map[string]any) map[string]any
+	parse         func(raw []byte, structured bool) (reply, error)
 }
 
 var wires = map[string]wire{
-	policy.ProtocolChatCompletions: {path: "/chat/completions", structured: "response_format", body: chatBody, parse: chatParse},
-	policy.ProtocolResponses:       {path: "/responses", structured: "text.format", body: responsesBody, parse: responsesParse},
-	policy.ProtocolMessages:        {path: "/messages", structured: "tool_use", body: messagesBody, parse: messagesParse},
+	policy.ProtocolChatCompletions: {
+		defaultPrefix: "/v1",
+		path:          func(string) string { return "/chat/completions" },
+		stripLeaf:     func(p string) string { return strings.TrimSuffix(p, "/chat/completions") },
+		structured:    "response_format",
+		auth:          bearerAuth,
+		body:          chatBody,
+		parse:         chatParse,
+	},
+	policy.ProtocolResponses: {
+		defaultPrefix: "/v1",
+		path:          func(string) string { return "/responses" },
+		stripLeaf:     func(p string) string { return strings.TrimSuffix(p, "/responses") },
+		structured:    "text.format",
+		auth:          bearerAuth,
+		body:          responsesBody,
+		parse:         responsesParse,
+	},
+	policy.ProtocolMessages: {
+		defaultPrefix: "/v1",
+		path:          func(string) string { return "/messages" },
+		stripLeaf:     func(p string) string { return strings.TrimSuffix(p, "/messages") },
+		listQuery:     "?limit=1000",
+		structured:    "tool_use",
+		auth:          messagesAuth,
+		body:          messagesBody,
+		parse:         messagesParse,
+	},
+	policy.ProtocolGenerateContent: {
+		defaultPrefix: "/v1beta",
+		path:          generateContentPath,
+		stripLeaf:     stripGenerateContentLeaf,
+		listQuery:     "?pageSize=1000",
+		structured:    "responseJsonSchema",
+		auth:          generateContentAuth,
+		body:          generateContentBody,
+		parse:         generateContentParse,
+	},
 }
 
-// StructuredOutput 返回协议 p（空 = chat-completions）用哪种原生方式约束输出：response_format、text.format 或 tool_use。
+// StructuredOutput 返回协议 p（空 = chat-completions）用哪种原生方式约束输出：
+// response_format、text.format、tool_use 或 responseJsonSchema。
 func StructuredOutput(p string) string { return wires[policy.GenerateProtocol(p)].structured }
 
-// setAuth 按协议放鉴权头：消息协议用 x-api-key 与版本头，其余用 Bearer。key 为空时不带鉴权头。
-func setAuth(h http.Header, protocol, key string) {
-	if protocol == policy.ProtocolMessages {
-		h.Set("anthropic-version", messagesVersion)
-		if key != "" {
-			h.Set("x-api-key", key)
+// endpointBase 规范化生成端点的接口根：
+// 去掉末尾斜杠与误粘贴的协议子路径（避免重复拼接）；路径为空时补上该协议的默认版本前缀（/v1 或 /v1beta），
+// 已带 /v1、/v1beta 或自定义前缀时原样保留。
+func endpointBase(rawURL, protocol string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return strings.TrimRight(rawURL, "/")
+	}
+	p := strings.TrimRight(u.Path, "/")
+	w, ok := wires[policy.GenerateProtocol(protocol)]
+	if ok && w.stripLeaf != nil {
+		p = w.stripLeaf(p)
+	}
+	p = strings.TrimSuffix(p, "/models")
+	p = strings.TrimRight(p, "/")
+	if p == "" && ok {
+		p = w.defaultPrefix
+	}
+	u.Path = p
+	u.RawPath = ""
+	return strings.TrimRight(u.String(), "/")
+}
+
+func endpointURL(rawURL, protocol, model string) string {
+	w := wires[policy.GenerateProtocol(protocol)]
+	return endpointBase(rawURL, protocol) + w.path(model)
+}
+
+func generateContentPath(model string) string {
+	name := strings.TrimPrefix(strings.TrimSpace(model), "models/")
+	return "/models/" + url.PathEscape(name) + ":generateContent"
+}
+
+func stripGenerateContentLeaf(p string) string {
+	if i := strings.LastIndex(p, "/models/"); i >= 0 {
+		tail := p[i+len("/models/"):]
+		if strings.HasSuffix(tail, ":generateContent") || strings.HasSuffix(tail, ":streamGenerateContent") {
+			return p[:i]
 		}
+	}
+	return p
+}
+
+// setAuth 按协议放鉴权头：消息协议用 x-api-key 与版本头，内容生成协议用 x-goog-api-key，其余用 Bearer。key 为空时不带密钥头。
+func setAuth(h http.Header, protocol, key string) {
+	if w, ok := wires[policy.GenerateProtocol(protocol)]; ok && w.auth != nil {
+		w.auth(h, key)
 		return
 	}
+	bearerAuth(h, key)
+}
+
+func bearerAuth(h http.Header, key string) {
 	if key != "" {
 		h.Set("Authorization", "Bearer "+key)
+	}
+}
+
+func messagesAuth(h http.Header, key string) {
+	h.Set("anthropic-version", messagesVersion)
+	if key != "" {
+		h.Set("x-api-key", key)
+	}
+}
+
+func generateContentAuth(h http.Header, key string) {
+	if key != "" {
+		h.Set(generateContentKeyHeader, key)
 	}
 }
 
@@ -84,11 +185,20 @@ func chatParse(raw []byte, _ bool) (reply, error) {
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Usage *struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || len(out.Choices) == 0 || out.Choices[0].Message.Content == nil {
 		return reply{}, fmt.Errorf("%w: no choices[0].message.content", ErrBadResponse)
 	}
-	return reply{content: *out.Choices[0].Message.Content, truncated: out.Choices[0].FinishReason == "length"}, nil
+	r := reply{content: *out.Choices[0].Message.Content, truncated: out.Choices[0].FinishReason == "length"}
+	if out.Usage != nil {
+		r.usage = makeUsage(out.Usage.PromptTokens, out.Usage.CompletionTokens, 0, out.Usage.TotalTokens)
+	}
+	return r, nil
 }
 
 // responsesBody：系统段放 instructions，用户段放 input；store 关掉，端点不留存请求内容（§14.14）。
@@ -119,11 +229,19 @@ func responsesParse(raw []byte, _ bool) (reply, error) {
 		Incomplete *struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
+		Usage *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || (out.Output == nil && out.OutputText == nil) {
 		return reply{}, fmt.Errorf("%w: no output[] or output_text", ErrBadResponse)
 	}
 	r := reply{truncated: out.Status == "incomplete" && out.Incomplete != nil && out.Incomplete.Reason == "max_output_tokens"}
+	if out.Usage != nil {
+		r.usage = makeUsage(out.Usage.InputTokens, out.Usage.OutputTokens, 0, out.Usage.TotalTokens)
+	}
 	if out.Output == nil {
 		r.content = *out.OutputText
 		return r, nil
@@ -171,11 +289,18 @@ func messagesParse(raw []byte, structured bool) (reply, error) {
 			Text  string          `json:"text"`
 		} `json:"content"`
 		StopReason string `json:"stop_reason"`
+		Usage      *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || out.Content == nil {
 		return reply{}, fmt.Errorf("%w: no content[]", ErrBadResponse)
 	}
 	r := reply{truncated: out.StopReason == "max_tokens"}
+	if out.Usage != nil {
+		r.usage = makeUsage(out.Usage.InputTokens, out.Usage.OutputTokens, 0, 0)
+	}
 	var b strings.Builder
 	for _, blk := range *out.Content {
 		switch {
@@ -199,4 +324,103 @@ func messagesParse(raw []byte, structured bool) (reply, error) {
 	}
 	r.content = b.String()
 	return r, nil
+}
+
+// generateContentBody：系统段放 systemInstruction，用户段放 contents；有 schema 时通过
+// generationConfig.responseMimeType + responseJsonSchema 约束原生 JSON Schema 输出。
+func generateContentBody(_ string, req Request, schema map[string]any) map[string]any {
+	body := map[string]any{
+		"contents": []map[string]any{
+			{"role": "user", "parts": []map[string]string{{"text": req.User}}},
+		},
+	}
+	if req.System != "" {
+		body["systemInstruction"] = map[string]any{
+			"parts": []map[string]string{{"text": req.System}},
+		}
+	}
+	if schema != nil {
+		body["generationConfig"] = map[string]any{
+			"responseMimeType":   "application/json",
+			"responseJsonSchema": schema,
+		}
+	}
+	return body
+}
+
+var blockedFinishReasons = map[string]bool{
+	"SAFETY":                  true,
+	"RECITATION":              true,
+	"PROHIBITED_CONTENT":      true,
+	"BLOCKLIST":               true,
+	"SPII":                    true,
+	"IMAGE_SAFETY":            true,
+	"MALFORMED_FUNCTION_CALL": true,
+}
+
+// generateContentParse 取 candidates[0].content.parts 中非思考（thought != true）的文本段；
+// 处理安全拦截、空候选、MAX_TOKENS 截断与 usageMetadata。
+func generateContentParse(raw []byte, _ bool) (reply, error) {
+	var out struct {
+		Candidates *[]struct {
+			Content struct {
+				Parts []struct {
+					Text    string `json:"text"`
+					Thought bool   `json:"thought"`
+				} `json:"parts"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+		PromptFeedback *struct {
+			BlockReason string `json:"blockReason"`
+		} `json:"promptFeedback"`
+		UsageMetadata *struct {
+			PromptTokenCount     int `json:"promptTokenCount"`
+			CandidatesTokenCount int `json:"candidatesTokenCount"`
+			ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+			TotalTokenCount      int `json:"totalTokenCount"`
+		} `json:"usageMetadata"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || (out.Candidates == nil && out.PromptFeedback == nil) {
+		return reply{}, fmt.Errorf("%w: no candidates", ErrBadResponse)
+	}
+	if out.Candidates == nil || len(*out.Candidates) == 0 {
+		if out.PromptFeedback != nil && out.PromptFeedback.BlockReason != "" {
+			return reply{}, fmt.Errorf("%w: prompt blocked (%s)", ErrBadResponse, out.PromptFeedback.BlockReason)
+		}
+		return reply{}, fmt.Errorf("%w: empty candidates", ErrBadResponse)
+	}
+	cand := (*out.Candidates)[0]
+	var b strings.Builder
+	for _, part := range cand.Content.Parts {
+		if part.Thought {
+			continue
+		}
+		b.WriteString(part.Text)
+	}
+	if b.Len() == 0 && blockedFinishReasons[cand.FinishReason] {
+		return reply{}, fmt.Errorf("%w: candidate blocked (%s)", ErrBadResponse, cand.FinishReason)
+	}
+	r := reply{content: b.String(), truncated: cand.FinishReason == "MAX_TOKENS"}
+	if out.UsageMetadata != nil {
+		r.usage = makeUsage(
+			out.UsageMetadata.PromptTokenCount,
+			out.UsageMetadata.CandidatesTokenCount,
+			out.UsageMetadata.ThoughtsTokenCount,
+			out.UsageMetadata.TotalTokenCount,
+		)
+	}
+	return r, nil
+}
+
+func makeUsage(in, out, thoughts, total int) Usage {
+	if total == 0 && (in > 0 || out > 0 || thoughts > 0) {
+		total = in + out + thoughts
+	}
+	return Usage{
+		InputTokens:    in,
+		OutputTokens:   out,
+		ThoughtsTokens: thoughts,
+		TotalTokens:    total,
+	}
 }

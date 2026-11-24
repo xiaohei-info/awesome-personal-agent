@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -95,8 +96,35 @@ func TestMissingProtocolIsChatCompletions(t *testing.T) {
 	if got.path != "/v1/chat/completions" || got.header.Get("Authorization") != "Bearer sekret-key" || dig(got.body, "response_format", "type") != "json_schema" {
 		t.Fatalf("path %s body %v", got.path, got.body)
 	}
-	if StructuredOutput("") != "response_format" || StructuredOutput(policy.ProtocolMessages) != "tool_use" || StructuredOutput(policy.ProtocolResponses) != "text.format" {
+	if StructuredOutput("") != "response_format" || StructuredOutput(policy.ProtocolMessages) != "tool_use" || StructuredOutput(policy.ProtocolResponses) != "text.format" || StructuredOutput(policy.ProtocolGenerateContent) != "responseJsonSchema" {
 		t.Fatal("structured output names")
+	}
+}
+
+// 内容生成协议：POST <base>/models/<model>:generateContent，x-goog-api-key，不带 Bearer；
+// systemInstruction + contents + generationConfig(responseMimeType, responseJsonSchema)；支持 models/ 前缀剥离。
+func TestGenerateContentRequestShape(t *testing.T) {
+	url, got := wireServer(t, `{"candidates":[{"content":{"parts":[{"text":"thinking...","thought":true},{"text":"{\"choice\":\"remind\",\"confidence\":0.8}"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":15,"thoughtsTokenCount":40,"totalTokenCount":175}}`)
+	base := strings.TrimSuffix(url, "/v1") // 裸根地址应默认补 /v1beta
+	ep := policy.GenerateEndpoint{URL: base, Model: "models/gemini-4-hydrogen", APIKey: "sekret-key", Protocol: policy.ProtocolGenerateContent}
+	resp, err := (&Client{}).Complete(context.Background(), ep, Request{System: "sys", User: "usr", Schema: json.RawMessage(judgeSchema)})
+	if err != nil || resp.Content != `{"choice":"remind","confidence":0.8}` {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+	if resp.Usage != (Usage{InputTokens: 120, OutputTokens: 15, ThoughtsTokens: 40, TotalTokens: 175}) {
+		t.Fatalf("usage %+v", resp.Usage)
+	}
+	if got.path != "/v1beta/models/gemini-4-hydrogen:generateContent" || got.header.Get("x-goog-api-key") != "sekret-key" || got.header.Get("Authorization") != "" {
+		t.Fatalf("path %s header %v", got.path, got.header)
+	}
+	sysParts, _ := dig(got.body, "systemInstruction", "parts").([]any)
+	contents, _ := got.body["contents"].([]any)
+	if len(sysParts) != 1 || dig(sysParts[0].(map[string]any), "text") != "sys" || len(contents) != 1 {
+		t.Fatalf("body %v", got.body)
+	}
+	if dig(got.body, "generationConfig", "responseMimeType") != "application/json" ||
+		dig(got.body, "generationConfig", "responseJsonSchema", "type") != "object" {
+		t.Fatalf("generationConfig %v", got.body["generationConfig"])
 	}
 }
 
@@ -121,6 +149,15 @@ func TestProtocolParsing(t *testing.T) {
 		{"responses only reasoning", policy.ProtocolResponses, `{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"reasoning"}]}`, false, ShapeEmpty, false},
 		{"responses truncated", policy.ProtocolResponses, `{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","content":[{"type":"output_text","text":"{\"choice\":\"wa"}]}]}`, false, ShapeTruncated, false},
 		{"responses not a responses reply", policy.ProtocolResponses, `{"choices":[{"message":{"content":"{}"}}]}`, false, "", true},
+		{"generate-content thinking ignored", policy.ProtocolGenerateContent, `{"candidates":[{"content":{"parts":[{"text":"先想一下","thought":true},{"text":"{\"choice\":\"wait\",\"confidence\":0.3}"}]},"finishReason":"STOP"}]}`, true, "", false},
+		{"generate-content fenced", policy.ProtocolGenerateContent, "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"```json\\n{}\\n```\"}]}}]}", false, ShapeFence, false},
+		{"generate-content only thinking", policy.ProtocolGenerateContent, `{"candidates":[{"content":{"parts":[{"text":"想太久","thought":true}]},"finishReason":"MAX_TOKENS"}]}`, false, ShapeEmpty, false},
+		{"generate-content truncated", policy.ProtocolGenerateContent, `{"candidates":[{"content":{"parts":[{"text":"{\"choice\":\"wa"}]},"finishReason":"MAX_TOKENS"}]}`, false, ShapeTruncated, false},
+		{"generate-content violates schema", policy.ProtocolGenerateContent, `{"candidates":[{"content":{"parts":[{"text":"{\"choice\":\"nope\",\"confidence\":1}"}]},"finishReason":"STOP"}]}`, false, "", false},
+		{"generate-content prompt blocked", policy.ProtocolGenerateContent, `{"promptFeedback":{"blockReason":"SAFETY"}}`, false, "", true},
+		{"generate-content empty candidates", policy.ProtocolGenerateContent, `{"candidates":[]}`, false, "", true},
+		{"generate-content candidate blocked", policy.ProtocolGenerateContent, `{"candidates":[{"finishReason":"SAFETY"}]}`, false, "", true},
+		{"generate-content not a gemini reply", policy.ProtocolGenerateContent, `{"choices":[{"message":{"content":"{}"}}]}`, false, "", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			url, _ := wireServer(t, c.reply)
@@ -168,5 +205,95 @@ func TestListModelsByProtocol(t *testing.T) {
 	}
 	if _, _, err := (&Client{}).ListModels(context.Background(), url, "sekret-key", policy.ProtocolResponses); err != nil || got.header.Get("Authorization") != "Bearer sekret-key" || got.query != "" {
 		t.Fatalf("responses: err %v header %v", err, got.header)
+	}
+	gurl, ggot := wireServer(t, `{"models":[{"name":"models/gemini-4-hydrogen"},{"name":"gemini-4-neon"},{"name":"models/gemini-4-hydrogen"}]}`)
+	gbase := strings.TrimSuffix(gurl, "/v1")
+	gids, _, err := (&Client{}).ListModels(context.Background(), gbase, "sekret-key", policy.ProtocolGenerateContent)
+	if err != nil || strings.Join(gids, ",") != "gemini-4-hydrogen,gemini-4-neon" {
+		t.Fatalf("generate-content ids=%v err=%v", gids, err)
+	}
+	if ggot.path != "/v1beta/models" || ggot.query != "pageSize=1000" || ggot.header.Get("x-goog-api-key") != "sekret-key" || ggot.header.Get("Authorization") != "" {
+		t.Fatalf("generate-content path=%s?%s header=%v", ggot.path, ggot.query, ggot.header)
+	}
+}
+
+// 不带 schema 时内容生成协议过滤 thought 块、拼接文本块，不发 generationConfig 与 systemInstruction。
+func TestGenerateContentFreeText(t *testing.T) {
+	url, got := wireServer(t, `{"candidates":[{"content":{"parts":[{"text":"思路","thought":true},{"text":"你"},{"text":"好"}]},"finishReason":"STOP"}]}`)
+	ep := policy.GenerateEndpoint{URL: url, Model: "gemini-4-hydrogen", Protocol: policy.ProtocolGenerateContent}
+	resp, err := (&Client{}).Complete(context.Background(), ep, Request{User: "hi"})
+	if err != nil || resp.Content != "你好" {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+	if _, ok := got.body["generationConfig"]; ok {
+		t.Fatalf("unexpected generationConfig: %v", got.body)
+	}
+	if _, ok := got.body["systemInstruction"]; ok {
+		t.Fatalf("unexpected systemInstruction: %v", got.body)
+	}
+	if got.header.Get("x-goog-api-key") != "" {
+		t.Fatalf("unexpected key header: %v", got.header)
+	}
+}
+
+// 4 种协议的 usage 解析都落到统一的 Usage 结构。
+func TestUsageParsingAllProtocols(t *testing.T) {
+	for _, c := range []struct {
+		name, protocol, reply string
+		want                  Usage
+	}{
+		{"chat", policy.ProtocolChatCompletions, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`, Usage{InputTokens: 10, OutputTokens: 4, TotalTokens: 14}},
+		{"responses", policy.ProtocolResponses, `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":11,"output_tokens":5,"total_tokens":16}}`, Usage{InputTokens: 11, OutputTokens: 5, TotalTokens: 16}},
+		{"messages", policy.ProtocolMessages, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":12,"output_tokens":6}}`, Usage{InputTokens: 12, OutputTokens: 6, TotalTokens: 18}},
+		{"generate-content", policy.ProtocolGenerateContent, `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":7,"thoughtsTokenCount":5,"totalTokenCount":25}}`, Usage{InputTokens: 13, OutputTokens: 7, ThoughtsTokens: 5, TotalTokens: 25}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			url, _ := wireServer(t, c.reply)
+			ep := policy.GenerateEndpoint{URL: url, Model: "m1", Protocol: c.protocol}
+			resp, err := (&Client{}).Complete(context.Background(), ep, Request{User: "hi"})
+			if err != nil || resp.Usage != c.want {
+				t.Fatalf("usage=%+v want=%+v err=%v", resp.Usage, c.want, err)
+			}
+		})
+	}
+}
+
+// URL 规范化：裸根地址按协议补 /v1 或 /v1beta；已带 /v1、/v1beta、自定义前缀或误粘贴了完整子路径时不重复拼接。
+func TestURLNormalizationAllProtocols(t *testing.T) {
+	cases := []struct {
+		raw, proto, model, wantCall, wantBase string
+	}{
+		{"https://gw.example.com", "", "m1", "https://gw.example.com/v1/chat/completions", "https://gw.example.com/v1"},
+		{"https://gw.example.com/", policy.ProtocolChatCompletions, "m1", "https://gw.example.com/v1/chat/completions", "https://gw.example.com/v1"},
+		{"https://gw.example.com/v1", policy.ProtocolChatCompletions, "m1", "https://gw.example.com/v1/chat/completions", "https://gw.example.com/v1"},
+		{"https://gw.example.com/v1/", policy.ProtocolChatCompletions, "m1", "https://gw.example.com/v1/chat/completions", "https://gw.example.com/v1"},
+		{"https://gw.example.com/v1/chat/completions", policy.ProtocolChatCompletions, "m1", "https://gw.example.com/v1/chat/completions", "https://gw.example.com/v1"},
+		{"https://gw.example.com/api/v1", policy.ProtocolChatCompletions, "m1", "https://gw.example.com/api/v1/chat/completions", "https://gw.example.com/api/v1"},
+		{"https://gw.example.com", policy.ProtocolResponses, "m1", "https://gw.example.com/v1/responses", "https://gw.example.com/v1"},
+		{"https://gw.example.com/v1/responses", policy.ProtocolResponses, "m1", "https://gw.example.com/v1/responses", "https://gw.example.com/v1"},
+		{"https://gw.example.com", policy.ProtocolMessages, "m1", "https://gw.example.com/v1/messages", "https://gw.example.com/v1"},
+		{"https://gw.example.com/v1/messages", policy.ProtocolMessages, "m1", "https://gw.example.com/v1/messages", "https://gw.example.com/v1"},
+		{"https://gw.example.com", policy.ProtocolGenerateContent, "gemini-4-hydrogen", "https://gw.example.com/v1beta/models/gemini-4-hydrogen:generateContent", "https://gw.example.com/v1beta"},
+		{"https://gw.example.com/v1beta", policy.ProtocolGenerateContent, "gemini-4-hydrogen", "https://gw.example.com/v1beta/models/gemini-4-hydrogen:generateContent", "https://gw.example.com/v1beta"},
+		{"https://gw.example.com/v1beta/", policy.ProtocolGenerateContent, "models/gemini-4-hydrogen", "https://gw.example.com/v1beta/models/gemini-4-hydrogen:generateContent", "https://gw.example.com/v1beta"},
+		{"https://gw.example.com/v1", policy.ProtocolGenerateContent, "gemini-4-hydrogen", "https://gw.example.com/v1/models/gemini-4-hydrogen:generateContent", "https://gw.example.com/v1"},
+		{"https://gw.example.com/v1beta/models/old:generateContent", policy.ProtocolGenerateContent, "gemini-4-hydrogen", "https://gw.example.com/v1beta/models/gemini-4-hydrogen:generateContent", "https://gw.example.com/v1beta"},
+		{"https://gw.example.com/v1beta/models/old:streamGenerateContent", policy.ProtocolGenerateContent, "gemini-4-hydrogen", "https://gw.example.com/v1beta/models/gemini-4-hydrogen:generateContent", "https://gw.example.com/v1beta"},
+	}
+	for _, c := range cases {
+		if got := endpointBase(c.raw, c.proto); got != c.wantBase {
+			t.Errorf("endpointBase(%q, %q) = %q, want %q", c.raw, c.proto, got, c.wantBase)
+		}
+		if got := endpointURL(c.raw, c.proto, c.model); got != c.wantCall {
+			t.Errorf("endpointURL(%q, %q, %q) = %q, want %q", c.raw, c.proto, c.model, got, c.wantCall)
+		}
+	}
+}
+
+// 数组包裹的错误体也能提取消息并脱敏 api_key。
+func TestErrorMessageArrayWrapped(t *testing.T) {
+	msg := errorMessage([]byte(`[{"error":{"code":400,"message":"bad key sekret-key"}}]`), "sekret-key")
+	if msg != "bad key ***" {
+		t.Fatalf("got %q", msg)
 	}
 }
