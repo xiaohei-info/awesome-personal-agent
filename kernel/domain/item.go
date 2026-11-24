@@ -267,7 +267,7 @@ const (
 	RejectOtherChange    = "other_change"    // 同一仓库的不同 PR 号
 	RejectNotSame        = "not_same"        // 本人拆开过
 	RejectNotCandidate   = "not_candidate"   // 去处不在这一条当时的候选里，或合并项不存在、没列这一条
-	RejectFactsMissing   = "facts_missing"   // 整合后的文本或正文缺成员的关键数字或编号
+	RejectFactsMissing   = "facts_missing"   // 整合后的文本或正文缺成员必须保留的事实（金额、日期与时间、单据类编号、明确的数量）
 	RejectActionMismatch = "action_mismatch" // 结论与去处的状态不相配（attach 要进行中，duplicate 要已完成）
 	RejectCombine        = "combine_invalid" // 整合不成立：只剩一条、跨组、标题摘要或正文为空
 	RejectTargetChanged  = "target_changed"  // 落账时去处已经变了
@@ -296,6 +296,16 @@ type ProposalSweep struct {
 	Topic string `json:"topic,omitempty"`
 	// Backfill 是本人补打的待归类标记（apa merge mark-pending）：维护循环不自动归类它，只由 apa merge run --apply 处理；归类后保留。
 	Backfill *SweepBackfill `json:"backfill,omitempty"`
+	// Retry 记这条建议被 apa merge run --retry-rejected 重新纳入过：上一次判定的批号、拒绝码与原因。有它说明重判过一次，不再重复纳入。
+	Retry *SweepRetry `json:"retry,omitempty"`
+}
+
+// SweepRetry 是一条被退回的建议重新纳入待归类时留下的来源：Of 是上一次判定的批号，Rejected 与 Why 是那次的拒绝码与原因，At 是纳入时刻。
+type SweepRetry struct {
+	Of       string    `json:"of"`
+	Rejected string    `json:"rejected"`
+	Why      string    `json:"why,omitempty"`
+	At       time.Time `json:"at"`
 }
 
 // SweepBackfill 记谁、何时补打的待归类标记。

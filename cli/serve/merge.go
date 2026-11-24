@@ -24,7 +24,7 @@ import (
 
 func init() { client.Register("merge", mergeCmd) }
 
-const mergeUsage = "usage: apa merge run [--dry-run [--with-model]|--apply] [--source <id|prefix*>] [--project <id|->] [--since <time>] [--until <time>] [--limit <n>]" +
+const mergeUsage = "usage: apa merge run [--dry-run [--with-model]|--apply] [--retry-rejected] [--source <id|prefix*>] [--project <id|->] [--since <time>] [--until <time>] [--limit <n>]" +
 	" | mark-pending [--dry-run|--apply] [--by <name>] [--source <id|prefix*>] [--project <id|->] [--since <time>] [--until <time>] [--limit <n>]"
 
 // hostCLI 是主机终端上的本人：同 apa serve 读主机配置文件的 hostOwner，与 Web 上的本人同级（§14.12）。
@@ -50,11 +50,12 @@ func mergeCmd(c *client.Ctx, args []string) error {
 	withModel := fs.Bool("with-model", false, "")
 	by := fs.String("by", "", "")
 	var f inbound.ManualFilter
+	fs.BoolVar(&f.RetryRejected, "retry-rejected", false, "")
 	fs.StringVar(&f.Source, "source", "", "")
 	fs.StringVar(&f.Project, "project", "", "")
 	since, until := fs.String("since", "", ""), fs.String("until", "", "")
 	fs.IntVar(&f.Limit, "limit", 0, "")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*dry && *apply) || f.Limit < 0 || (*by != "" && sub != "mark-pending") ||
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*dry && *apply) || f.Limit < 0 || (*by != "" && sub != "mark-pending") || (f.RetryRejected && sub != "run") ||
 		(*withModel && (sub != "run" || *apply)) {
 		return usage("invalid arguments for apa merge "+sub, mergeUsage)
 	}

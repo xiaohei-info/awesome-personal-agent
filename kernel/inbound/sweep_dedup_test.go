@@ -87,7 +87,7 @@ func TestMergeBodyDedupStillChecksEveryMember(t *testing.T) {
 	if err != nil || len(rep.Combined) != 1 {
 		t.Fatalf("run: %v %+v", err, rep)
 	}
-	if mc := rep.Combined[0]; mc.Rejected != domain.RejectFactsMissing || strings.Join(mc.Missing, ",") != "原文：z99887766,原文：z99887766" {
+	if mc := rep.Combined[0]; mc.Rejected != domain.RejectFactsMissing || strings.Join(mc.Missing, ",") != "原文：Z99887766,原文：Z99887766" {
 		t.Fatalf("each member is checked on its own, the shared tail number is missing for both: %+v %+v", mc.Rejected, mc.Missing)
 	}
 	for _, title := range titles {

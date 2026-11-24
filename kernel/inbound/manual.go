@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -29,6 +30,8 @@ type ManualFilter struct {
 	Project      string
 	Since, Until time.Time
 	Limit        int
+	// RetryRejected 先把上一次被第 6 层校验退回的建议重新纳入待归类（见 retryable），再按常规跑；不碰已保留的、已合并的。
+	RetryRejected bool
 }
 
 func (f ManualFilter) match(it domain.Item) bool {
@@ -91,15 +94,17 @@ type ManualGroup struct {
 // ManualCombined 是模型给的一项批内整合与内核校验的结果：Missing 非空是关键事实校验没过（要点清单里缺的带「正文：」、成员原文里缺的带「原文：」），Body 是要落到载体上的整段正文（要点清单 + 来源原文），
 // Rejected、Why 非空即没有整合、成员都留着。
 type ManualCombined struct {
-	Topic    string      `json:"topic"`
-	Carrier  string      `json:"carrier,omitempty"`
-	Members  []ManualRef `json:"members"`
-	Title    string      `json:"title"`
-	Summary  string      `json:"summary"`
-	Body     string      `json:"body"`
-	Missing  []string    `json:"missing,omitempty"`
-	Rejected string      `json:"rejected,omitempty"`
-	Why      string      `json:"why,omitempty"`
+	Topic   string      `json:"topic"`
+	Carrier string      `json:"carrier,omitempty"`
+	Members []ManualRef `json:"members"`
+	Title   string      `json:"title"`
+	Summary string      `json:"summary"`
+	Body    string      `json:"body"`
+	Missing []string    `json:"missing,omitempty"`
+	// MissingWhy 与 Missing 一一对应：缺在哪里、缺的是哪一项、被判成哪一类（金额、日期时间、单据编号、数量）、为什么算强制。
+	MissingWhy []string `json:"missing_why,omitempty"`
+	Rejected   string   `json:"rejected,omitempty"`
+	Why        string   `json:"why,omitempty"`
 }
 
 // ManualCall 是一批里的一次模型调用：问了几条、是不是重问（不复用旧回答）、耗时与输出字数（端点不回报用量，靠它看余量）、
@@ -127,6 +132,7 @@ type ManualDecision struct {
 	Topic      string `json:"topic,omitempty"`
 	Rejected   string `json:"rejected,omitempty"`   // 第 6 层校验拒绝模型结论的类别码
 	Integrated bool   `json:"integrated,omitempty"` // 它是整合的载体：标题、摘要与正文已改写
+	RetryOf    string `json:"retry_of,omitempty"`   // 它是被重新纳入的：上一次判定的批号
 }
 
 // ManualReport 是一轮手动合并的结果。演练与真跑的规则层部分（batch 到 chars）同一算法、同一输入下逐字段相同；
@@ -149,6 +155,7 @@ type ManualReport struct {
 	Calls       []ManualCall     `json:"calls,omitempty"`
 	Decisions   []ManualDecision `json:"decisions,omitempty"`
 	Rejected    map[string]int   `json:"rejected,omitempty"` // 落账后读回的拒绝码计数
+	Retry       *RetryReport     `json:"retry,omitempty"`    // --retry-rejected 时：重新纳入了（演练时为将纳入）哪些
 }
 
 // planManual 选出这一轮的待归类（含本人补打的），算规则层结果。
@@ -156,6 +163,13 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 	pol, all, srcs, err := s.sweepView(ctx)
 	if err != nil {
 		return pol, ManualReport{}, nil, nil, err
+	}
+	if f.RetryRejected { // 演练时还没有真的纳入：按已纳入算规则层
+		list, _ := retryList(all, f)
+		for _, r := range list {
+			i := slices.IndexFunc(all, func(x domain.Item) bool { return x.ID == r.ID })
+			all[i] = asRetried(all[i], time.Time{})
+		}
 	}
 	var sel []domain.Item
 	for _, it := range all {
@@ -229,7 +243,7 @@ func (rep *ManualReport) modelPart(p *batchPlan) {
 		rep.Groups = append(rep.Groups, ManualGroup{Group: g.key, Topic: g.topic, Reused: g.reused, Members: refs(g.members)})
 	}
 	for _, c := range p.combined {
-		mc := ManualCombined{Topic: c.topic, Members: refs(c.members), Title: c.title, Summary: c.summary, Body: c.body, Missing: c.missing, Rejected: c.code, Why: c.why}
+		mc := ManualCombined{Topic: c.topic, Members: refs(c.members), Title: c.title, Summary: c.summary, Body: c.body, Missing: c.missing, MissingWhy: c.lacks, Rejected: c.code, Why: c.why}
 		if c.carrier != nil {
 			mc.Carrier = c.carrier.it.ID
 		}
@@ -242,7 +256,15 @@ func (rep *ManualReport) modelPart(p *batchPlan) {
 
 // PlanManual 是手动合并的演练：只算规则层，不调模型、不写账本。
 func (s *Service) PlanManual(ctx context.Context, f ManualFilter) (ManualReport, error) {
+	var retry *RetryReport
+	if f.RetryRejected {
+		var err error
+		if retry, err = s.requeueRejected(ctx, nil, f, false); err != nil {
+			return ManualReport{}, err
+		}
+	}
 	_, rep, _, _, err := s.planManual(ctx, f)
+	rep.Retry = retry
 	return rep, err
 }
 
@@ -251,7 +273,16 @@ func (s *Service) PlanManual(ctx context.Context, f ManualFilter) (ManualReport,
 // 在服务进程里跑时与维护循环共用 sweeping：规则层与模型调用在锁外，只有落账在锁内，一批的落账不和维护循环的一批交错；
 // 两边算到同一条时，后落账的那次在 inbound.sweep 里见它已归类，什么都不改。
 func (s *Service) RunManual(ctx context.Context, id command.Identity, f ManualFilter) (ManualReport, error) {
+	var retry *RetryReport
+	if f.RetryRejected { // 先纳入：被退回的变回待归类（标 backfill，维护循环不碰），再同一轮按常规跑
+		var err error
+		if retry, err = s.requeueRejected(ctx, id, f, true); err != nil {
+			return ManualReport{Retry: retry}, err
+		}
+	}
+	f.RetryRejected = false // 已真的纳入；规则层不再按「将纳入」虚算
 	pol, rep, keep, p, err := s.planManual(ctx, f)
+	rep.Retry = retry
 	if err != nil {
 		return rep, err
 	}
@@ -281,6 +312,9 @@ func (s *Service) RunManual(ctx context.Context, id command.Identity, f ManualFi
 			if sw := it.Proposal.Sweep; sw != nil && sw.State == "done" && sw.Batch == v.Batch {
 				rep.Decisions = append(rep.Decisions, ManualDecision{Item: it.ID, Title: it.Title, Action: sw.Action, Target: sw.Target, Why: sw.Why, By: sw.By,
 					Topic: sw.Topic, Rejected: sw.Rejected, Integrated: it.Proposal.Integrated != nil && it.Proposal.Integrated.Batch == v.Batch})
+				if sw.Retry != nil {
+					rep.Decisions[len(rep.Decisions)-1].RetryOf = sw.Retry.Of
+				}
 				if sw.Rejected != "" {
 					if rep.Rejected == nil {
 						rep.Rejected = map[string]int{}
@@ -406,9 +440,166 @@ func registerMarkPending(x *command.Executor) error {
 		}})
 }
 
-// RegisterManual 只登记手动合并要用的两条命令（归类落账、补打待归类），给离线的 `apa merge` 用（不起入站流水线）。
+// ---- 重新纳入被退回的建议（apa merge run --retry-rejected） ----
+
+// CmdRetryRejected 把一条上一次被第 6 层校验退回的建议变回待归类。
+const CmdRetryRejected = "inbound.retry_rejected"
+
+// retryable：上一次被第 6 层校验退回（留着并带拒绝码）、仍是建议、还没被重新纳入过。
+// 规则性的禁止（跨项目、同仓库不同 PR、本人拆开过）重判结果不会变，且「拆开」是本人的决定，不重判；其余（事实缺失、整合不成立、去处不在候选、结论与去处不相配、落账时已变）才重判。
+// 模型自己留着（没有拒绝码）的、已并入或合并的、做过整合载体的、已被本人处理的都不是；重判过一次仍被退回的不再纳入，同一条件再跑零变化。
+func retryable(it domain.Item) bool {
+	if it.Phase != domain.PhaseProposed || it.Proposal == nil || it.Proposal.Integrated != nil {
+		return false
+	}
+	sw := it.Proposal.Sweep
+	return sw != nil && sw.State == "done" && sw.Action == domain.SweepKeep && sw.Rejected != "" && sw.Retry == nil && !vetoCode(sw.Rejected)
+}
+
+// vetoCode 是规则性禁止的拒绝码：同样的输入永远同样的结果。
+func vetoCode(code string) bool {
+	return code == domain.RejectCrossProject || code == domain.RejectOtherChange || code == domain.RejectNotSame
+}
+
+// asRetried 是 it 被重新纳入后的样子：待归类、标 backfill（维护循环不自动归类）、记上一次判定的来源。
+func asRetried(it domain.Item, at time.Time) domain.Item {
+	p := *it.Proposal
+	old := *p.Sweep
+	sw := domain.ProposalSweep{State: "pending", Backfill: old.Backfill, Retry: &domain.SweepRetry{Of: old.Batch, Rejected: old.Rejected, Why: old.Why, At: at}}
+	if sw.Backfill == nil {
+		sw.Backfill = &domain.SweepBackfill{By: "retry-rejected", At: at}
+	}
+	p.Sweep = &sw
+	it.Proposal = &p
+	return it
+}
+
+// RetryRef 是一条被重新纳入的建议：它是哪一次判定退回的（批号、组、拒绝码、原因、时刻）。
+type RetryRef struct {
+	ManualRef
+	Of       string     `json:"of"`
+	Group    string     `json:"group,omitempty"`
+	Rejected string     `json:"rejected"`
+	Why      string     `json:"why,omitempty"`
+	JudgedAt *time.Time `json:"judged_at,omitempty"`
+}
+
+// RetryReport 是 --retry-rejected 的结果：纳入（演练时为将纳入）了哪些、各来自哪一次判定。
+type RetryReport struct {
+	DryRun   bool           `json:"dry_run"`
+	Requeued []RetryRef     `json:"requeued"`
+	ByBatch  map[string]int `json:"by_batch"`          // 上一次判定的批号 -> 条数
+	ByCode   map[string]int `json:"by_rejected"`       // 拒绝码 -> 条数
+	Skipped  map[string]int `json:"skipped,omitempty"` // already_retried：重判过一次仍被退回的，不再纳入；over_limit；changed_meanwhile
+	Notice   string         `json:"notice,omitempty"`  // 没有可纳入的时说明原因
+}
+
+// retryList 选出可重新纳入的（按建立时刻、受筛选与条数上限），并数出被排除的原因。
+func retryList(all []domain.Item, f ManualFilter) (list []domain.Item, skipped map[string]int) {
+	skipped = map[string]int{}
+	sorted := slices.Clone(all)
+	slices.SortStableFunc(sorted, func(a, b domain.Item) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	for _, it := range sorted {
+		if it.Phase != domain.PhaseProposed || !f.match(it) {
+			continue
+		}
+		switch {
+		case retryable(it):
+			if f.Limit > 0 && len(list) >= f.Limit {
+				skipped["over_limit"]++
+				continue
+			}
+			list = append(list, it)
+		case it.Proposal != nil && it.Proposal.Sweep != nil && it.Proposal.Sweep.Rejected != "" && it.Proposal.Sweep.Retry != nil && it.Proposal.Sweep.Action == domain.SweepKeep:
+			skipped["already_retried"]++
+		}
+	}
+	return
+}
+
+type retryIn struct {
+	Item string `json:"item"`
+}
+
+// requeueRejected 把可重新纳入的变回待归类（apply 为假时只列出将纳入哪些）。每条一个 inbound.retry_rejected 命令；
+// 纳入后不再满足条件，第二遍零写入。已保留的与已合并的不在其中。
+func (s *Service) requeueRejected(ctx context.Context, id command.Identity, f ManualFilter, apply bool) (*RetryReport, error) {
+	rep := &RetryReport{DryRun: !apply, Requeued: []RetryRef{}, ByBatch: map[string]int{}, ByCode: map[string]int{}}
+	_, all, _, err := s.sweepView(ctx)
+	if err != nil {
+		return rep, err
+	}
+	list, skipped := retryList(all, f)
+	rep.Skipped = skipped
+	for _, it := range list {
+		if apply {
+			res, err := s.do(ctx, id, "", "", CmdRetryRejected, retryIn{Item: it.ID}, command.Chain{})
+			if err != nil {
+				return rep, err
+			}
+			var ok struct {
+				Marked bool `json:"marked"`
+			}
+			if json.Unmarshal(res.Value, &ok) != nil || !ok.Marked {
+				rep.Skipped["changed_meanwhile"]++
+				continue
+			}
+		}
+		sw := it.Proposal.Sweep
+		rep.Requeued = append(rep.Requeued, RetryRef{ManualRef: refOf(&sweepRec{it: it}, 0), Of: sw.Batch, Group: sw.Group, Rejected: sw.Rejected, Why: sw.Why, JudgedAt: sw.At})
+		rep.ByBatch[sw.Batch]++
+		rep.ByCode[sw.Rejected]++
+	}
+	if len(rep.Requeued) == 0 {
+		rep.Notice = "没有可重新纳入的建议：只纳入上一次被校验退回（留着并带拒绝码）、还没重判过的；模型自己留着的、已合并的、已处理的不动"
+		if n := rep.Skipped["already_retried"]; n > 0 {
+			rep.Notice += fmt.Sprintf("；另有 %d 条重判过一次仍被退回，不再重复纳入", n)
+		}
+	}
+	return rep, nil
+}
+
+func registerRetryRejected(x *command.Executor) error {
+	parse := func(in json.RawMessage) (retryIn, error) {
+		var v retryIn
+		if err := json.Unmarshal(in, &v); err != nil || v.Item == "" {
+			return v, invalid("retry_rejected needs item")
+		}
+		return v, nil
+	}
+	return x.Register(command.Spec{Name: CmdRetryRejected, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, KeepVersion: true,
+		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(in)
+			return authz.Object{ID: v.Item, Assignee: systemPrinc}, err // 内核整理自己建的建议，同 inbound.sweep
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, err := parse(c.Input)
+			if err != nil {
+				return nil, err
+			}
+			it, err := items.Get(c.Tx, v.Item)
+			if err != nil {
+				return nil, err
+			}
+			if !retryable(it) {
+				return map[string]bool{"marked": false}, nil // 已不是被退回的：什么都不改
+			}
+			at := c.Now()
+			from := it.Proposal.Sweep
+			w, err := items.SetProposal(c.Tx, it.ID, *asRetried(it, at).Proposal, at)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]bool{"marked": true}, emitWrite(c, w, "retry rejected: back to pending, rejected "+from.Rejected+" in batch "+from.Batch)
+		}})
+}
+
+// RegisterManual 只登记手动合并要用的几条命令（归类落账、补打待归类、重新纳入被退回的），给离线的 `apa merge` 用（不起入站流水线）。
 func RegisterManual(x *command.Executor) error {
 	if err := registerSweep(x); err != nil {
+		return err
+	}
+	if err := registerRetryRejected(x); err != nil {
 		return err
 	}
 	return registerMarkPending(x)

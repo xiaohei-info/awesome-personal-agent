@@ -258,7 +258,28 @@ type batchCombined struct {
 	title, summary string
 	body           string   // 整合后的正文：模型的要点清单 + 内核附上的各成员原文（integratedBody）
 	missing        []string // 关键事实校验没找到的片段（要点清单里缺的带「正文：」、成员原文里的带「原文：」前缀）；非空即整组留着
+	lacks          []string // 与 missing 一一对应的说明：缺在哪里、缺的是哪一项、被判成哪一类、为什么算强制
 	code, why      string   // 没整合时的拒绝码与原因
+}
+
+// checkFacts 查整合后的标题摘要、要点清单、整段正文是否保留了每个成员必须保留的事实（四类，见 facts.go），缺的记进 missing 与 lacks。
+// 标题摘要里的事实要在整合后的标题摘要与要点清单里都有；原文里的事实要在整合后的整段正文里有（被截掉的只能靠要点清单带上）。
+func (bc *batchCombined) checkFacts(set []*sweepRec, list string) {
+	for _, m := range set {
+		facts := keyFacts(m.it.Title, m.it.Summary)
+		bc.lack("", "标题与摘要", missingFacts(bc.title+"\n"+bc.summary, facts))
+		bc.lack("正文：", "要点清单", missingFacts(list, facts))
+		own := slices.DeleteFunc(keyFacts(m.it.Body, ""), func(f fact) bool { return slices.ContainsFunc(facts, func(g fact) bool { return g.Text == f.Text }) })
+		bc.lack("原文：", "来源原文", missingFacts(bc.body, own))
+	}
+}
+
+// lack 记下 facts 在 where 里缺失：missing 带 prefix，lacks 写明缺哪一项、判成哪一类、为什么算强制。
+func (bc *batchCombined) lack(prefix, where string, facts []fact) {
+	for _, f := range facts {
+		bc.missing = append(bc.missing, prefix+f.Text)
+		bc.lacks = append(bc.lacks, where+"缺"+f.String())
+	}
 }
 
 // batchPlan 是一批的规则层结果，不调模型、不写账本：手动合并的演练输出它，真跑在同一份结果上调模型、落账。
@@ -294,6 +315,9 @@ func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain
 	h := sha256.New()
 	for _, it := range batch {
 		h.Write([]byte(it.ID + "|"))
+		if it.Proposal != nil && it.Proposal.Sweep != nil && it.Proposal.Sweep.Retry != nil {
+			h.Write([]byte("retry:" + it.Proposal.Sweep.Retry.Of + "|")) // 重新纳入的是另一次判定，批号不能与上次相同
+		}
 	}
 	p := &batchPlan{id: "mb_" + hex.EncodeToString(h.Sum(nil))[:12], size: len(batch), srcs: srcs, topics: recentTopics(all)}
 
@@ -642,7 +666,7 @@ func (s *Service) askOnce(ctx context.Context, pol policy.Policy, p *batchPlan, 
 //
 // 第 6 层校验（内核强制）：去处必须在这一条自己当时的候选里（not_candidate）；结论与去处阶段相配，attach 要进行中、duplicate 要已完成（action_mismatch）；
 // 跨项目、同一仓库不同 PR、本人拆开过的不折叠也不整合（veto）；整合要至少两条、同组、标题摘要正文都不空（combine_invalid），
-// 标题与摘要、正文各自都要含每个成员的关键数字与编号（facts_missing）。
+// 标题与摘要、正文各自都要含每个成员必须保留的四类事实：金额、日期与时间、单据类编号、明确的数量（facts_missing，见 facts.go）。
 // 内核管不到、只靠提示词的两处（§9.3）：先判事项再判建议（step 字段不读）；拿不准就保留（confident=false 的一律留着，但填 true 是否真有把握核对不了）。
 func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan) ([]sweepIn, error) {
 	id, size := p.id, p.size
@@ -769,18 +793,9 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 			// 标题摘要里的关键事实要在整合后的标题摘要与要点清单里都有；原文里的关键事实要在整合后的整段正文里有（被截掉的只能靠要点清单带上）。
 			list := bc.body
 			bc.body = integratedBody(list, set, carrierOf(set), p.srcs, pol.Merge.BodyMax())
-			for _, m := range set {
-				facts := keyFacts(m.it.Title, m.it.Summary)
-				bc.missing = append(bc.missing, missingFacts(bc.title+"\n"+bc.summary, facts)...)
-				for _, f := range missingFacts(list, facts) {
-					bc.missing = append(bc.missing, "正文："+f)
-				}
-				for _, f := range missingFacts(bc.body, slices.DeleteFunc(keyFacts(m.it.Body, ""), func(f string) bool { return slices.Contains(facts, f) })) {
-					bc.missing = append(bc.missing, "原文："+f)
-				}
-			}
+			bc.checkFacts(set, list)
 			if len(bc.missing) > 0 {
-				bc.code, bc.why = domain.RejectFactsMissing, "整合后的文本或正文缺少成员的关键数字或编号（"+strings.Join(bc.missing, "、")+"），不合并"
+				bc.code, bc.why = domain.RejectFactsMissing, "整合后的文本或正文缺少成员必须保留的事实（"+strings.Join(bc.lacks, "；")+"），不合并"
 			}
 		}
 		bc.members = set
@@ -981,8 +996,9 @@ func fits(action string, t domain.Item) bool {
 	return false
 }
 
+// 幂等键带批号：同一条建议被重新纳入后会再落一次账（apa merge run --retry-rejected），不同批的输入不同。
 func (s *Service) settle(ctx context.Context, id command.Identity, v sweepIn) error {
-	_, err := s.do(ctx, id, "", "inbound:sweep:"+v.Item, CmdSweep, v, command.Chain{})
+	_, err := s.do(ctx, id, "", "inbound:sweep:"+v.Item+":"+v.Batch, CmdSweep, v, command.Chain{})
 	return err
 }
 
@@ -1037,7 +1053,7 @@ func registerSweep(x *command.Executor) error {
 			}
 			at := c.Now()
 			sw := domain.ProposalSweep{State: "done", Batch: v.Batch, Action: v.Action, Target: v.Target, Why: v.Why, By: v.By, Run: v.Run, Size: v.Size, Chars: v.Chars, Deferred: v.Deferred, At: &at,
-				Group: v.Group, Topic: v.Topic, Backfill: it.Proposal.Sweep.Backfill, Rejected: v.Rejected}
+				Group: v.Group, Topic: v.Topic, Backfill: it.Proposal.Sweep.Backfill, Retry: it.Proposal.Sweep.Retry, Rejected: v.Rejected}
 			p := *it.Proposal
 			p.Sweep = &sw
 			if v.Action == domain.SweepKeep {

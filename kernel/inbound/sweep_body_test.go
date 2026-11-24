@@ -142,7 +142,7 @@ func TestMergeBodyTruncatedAndOriginalFactsChecked(t *testing.T) {
 		t.Fatalf("absorbed keeps the full, uncut body: %+v", ab)
 	}
 
-	if mc := rep.Combined[1]; mc.Rejected != domain.RejectFactsMissing || strings.Join(mc.Missing, ",") != "原文：z99887766" {
+	if mc := rep.Combined[1]; mc.Rejected != domain.RejectFactsMissing || strings.Join(mc.Missing, ",") != "原文：Z99887766" {
 		t.Fatalf("a key number cut from an original rejects the merge: %+v", mc.Missing)
 	}
 	for _, m := range []domain.Item{b1, b2} {
