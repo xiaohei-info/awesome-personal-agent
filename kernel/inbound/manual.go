@@ -99,6 +99,20 @@ type ManualCombined struct {
 	Why     string      `json:"why,omitempty"`
 }
 
+// ManualCall 是一批里的一次模型调用：问了几条、是不是重问（不复用旧回答）、耗时与输出字数（端点不回报用量，靠它看余量）、
+// 完整与否；不完整时 Error 是 truncated（输出到了上限）、schema 等回答形态，或 missing（Missing 条成员没有结论）。
+type ManualCall struct {
+	Run         string `json:"run,omitempty"`
+	Size        int    `json:"size"`
+	Fresh       bool   `json:"fresh,omitempty"`
+	Reused      bool   `json:"reused,omitempty"`
+	ElapsedMS   int64  `json:"elapsed_ms"`
+	OutputChars int    `json:"output_chars"`
+	Complete    bool   `json:"complete"`
+	Missing     int    `json:"missing,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
 // ManualDecision 是落账后从账本读回的归类结论。
 type ManualDecision struct {
 	Item       string `json:"item"`
@@ -127,6 +141,7 @@ type ManualReport struct {
 	Groups      []ManualGroup    `json:"groups,omitempty"`
 	Combined    []ManualCombined `json:"combined,omitempty"`
 	CheckFailed int              `json:"check_failed,omitempty"` // 关键事实校验没过、退回留着的整合项数
+	Calls       []ManualCall     `json:"calls,omitempty"`
 	Decisions   []ManualDecision `json:"decisions,omitempty"`
 }
 
@@ -155,7 +170,7 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 			rep.RuleKept = append(rep.RuleKept, ManualKept{ManualRef: refOf(&sweepRec{it: it}, 0), Why: v.Why})
 			continue
 		}
-		if len(batch) < pol.Merge.Batch() { // 一批不超过 batch_size，同维护循环
+		if len(batch) < s.batchSize(pol) { // 一批不超过 batch_size（降过批取降后的），同维护循环
 			batch = append(batch, it)
 		}
 	}
@@ -168,7 +183,6 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 	if err != nil {
 		return pol, rep, nil, nil, err
 	}
-	rep.Batch, rep.Chars = p.id, len([]rune(p.text))
 	byID := map[string]*sweepRec{}
 	for _, m := range p.members {
 		byID[m.it.ID] = m
@@ -176,6 +190,14 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 	for _, v := range p.settle {
 		rep.RuleKept = append(rep.RuleKept, ManualKept{ManualRef: refOf(byID[v.Item], 0), Why: v.Why})
 	}
+	rep.askPart(p)
+	return pol, rep, keep, p, nil
+}
+
+// askPart 写报告里送模型的与留到下一轮的：回答不完整降批后重写一遍。
+func (rep *ManualReport) askPart(p *batchPlan) {
+	rep.Batch, rep.Chars = p.id, len([]rune(p.text))
+	rep.Ask, rep.Deferred = []ManualAsk{}, []ManualRef{}
 	for _, m := range p.later {
 		rep.Deferred = append(rep.Deferred, refOf(&sweepRec{it: m.it}, 0))
 	}
@@ -189,7 +211,6 @@ func (s *Service) planManual(ctx context.Context, f ManualFilter) (policy.Policy
 		}
 		rep.Ask = append(rep.Ask, a)
 	}
-	return pol, rep, keep, p, nil
 }
 
 // modelPart 把模型的分组与整合（连同校验结果）写进报告。
@@ -235,8 +256,12 @@ func (s *Service) RunManual(ctx context.Context, id command.Identity, f ManualFi
 	settle := keep
 	if p != nil {
 		out, err := s.decide(ctx, pol, p)
+		rep.Calls = p.calls
+		if len(p.calls) > 1 {
+			rep.askPart(p) // 可能降过批
+		}
 		if err != nil {
-			return rep, err // 模型没答上：什么都没落，下次再跑
+			return rep, err // 模型没答上或回答不完整：什么都没落，下次再跑
 		}
 		settle = append(slices.Clone(keep), out...)
 		rep.modelPart(p)

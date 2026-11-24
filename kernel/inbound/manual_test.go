@@ -199,7 +199,7 @@ func TestMarkPendingThenManualMerge(t *testing.T) {
 		t.Fatalf("apply: %v, calls %d", err, e.batchCalls())
 	}
 	strip := func(r ManualReport) string {
-		r.DryRun, r.Decisions, r.Groups, r.Combined, r.CheckFailed = false, nil, nil, nil, 0
+		r.DryRun, r.Decisions, r.Groups, r.Combined, r.CheckFailed, r.Calls = false, nil, nil, nil, 0, nil
 		b, _ := json.Marshal(r)
 		return string(b)
 	}

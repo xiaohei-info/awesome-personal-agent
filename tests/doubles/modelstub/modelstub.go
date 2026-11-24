@@ -33,6 +33,8 @@ func (r Reply) delay() time.Duration {
 type Rule struct {
 	Match string `json:"match"`
 	Reply Reply  `json:"reply"`
+	// Func 非空时按请求体现算回答（只在进程内用，脚本接口不带它）。
+	Func func(body string) Reply `json:"-"`
 }
 
 // Script 是控制接口 POST /_stub/script 的载荷。
@@ -112,6 +114,13 @@ func (s *Stub) When(match string, r Reply) {
 	s.mu.Unlock()
 }
 
+// WhenFunc 在请求体包含 match 时按 f 现算回答（持久，不消耗）。
+func (s *Stub) WhenFunc(match string, f func(body string) Reply) {
+	s.mu.Lock()
+	s.rules = append(s.rules, Rule{Match: match, Func: f})
+	s.mu.Unlock()
+}
+
 // Requests 返回已收到请求的拷贝，含因客户端超时而未完成的请求。
 func (s *Stub) Requests() []Request {
 	s.mu.Lock()
@@ -131,6 +140,9 @@ func (s *Stub) pick(body string) Reply {
 	defer s.mu.Unlock()
 	for _, r := range s.rules {
 		if strings.Contains(body, r.Match) {
+			if r.Func != nil {
+				return r.Func(body)
+			}
 			return r.Reply
 		}
 	}

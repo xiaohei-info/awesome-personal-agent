@@ -1,8 +1,10 @@
 package inbound
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -55,6 +57,23 @@ func (e *env) progressOf(id string) (out []domain.Progress) {
 // reply 拼一份模型回答：groups、decisions、combined 三段（各是 JSON 数组的内容）。
 func reply(groups, decisions, combined string) modelstub.Reply {
 	return modelstub.Reply{Content: `{"groups":[` + groups + `],"decisions":[` + decisions + `],"combined":[` + combined + `]}`}
+}
+
+var memberRef = regexp.MustCompile(`(N\d+)［待归类的建议］`)
+
+// keepAll 是一份按请求现算的回答：资料里的每个成员单独成组、留着；drop 里的编号不给结论（漏答）。
+func keepAll(drop ...string) func(string) modelstub.Reply {
+	return func(body string) modelstub.Reply {
+		var gs, ds []string
+		for _, m := range memberRef.FindAllStringSubmatch(body, -1) {
+			if slices.Contains(drop, m[1]) {
+				continue
+			}
+			gs = append(gs, fmt.Sprintf(`{"group":"G%s","topic":"","members":["%s"]}`, m[1], m[1]))
+			ds = append(ds, fmt.Sprintf(`{"new":"%s","group":"G%s","step":3,"action":"keep","reason":"不是同一件事","confident":true}`, m[1], m[1]))
+		}
+		return reply(strings.Join(gs, ","), strings.Join(ds, ","), ``)
+	}
 }
 
 func (e *env) lastBatchBody() (body string) {
@@ -281,7 +300,7 @@ func TestMergeBatchSettings(t *testing.T) {
 	e.setPolicy(func(p *policy.Policy) {
 		p.Merge = policy.MergeSettings{ExcludeSources: []string{"src_x"}, SkipExisting: true, BatchSize: 2, Prompt: body}
 	})
-	e.stub.When(batchMark, reply(``, ``, ``))
+	e.stub.WhenFunc(batchMark, keepAll())
 	e.emit("src_x", "ticket", ev("x1", "ticket.opened", "季度预算评审会议改期", nil))
 	e.emit("src_a", "ticket", ev("a1", "ticket.opened", "季度预算评审会议改期了", nil))
 	e.emit("src_b", "ticket", ev("b1", "ticket.opened", "导出报表加一列", nil))
@@ -296,8 +315,8 @@ func TestMergeBatchSettings(t *testing.T) {
 	if req := e.lastBatchBody(); strings.Contains(req, "［进行中］") || !strings.Contains(req, "自定义标记XYZ") || strings.Contains(req, "改期\\n") {
 		t.Fatalf("no existing items, the owner's prompt is sent, the excluded source is not: %s", req)
 	}
-	if sw := e.byTitle("导出报表加一列").Proposal.Sweep; sw.By != "generate" || sw.Action != domain.SweepKeep || !strings.Contains(sw.Why, "没有给这条结论") {
-		t.Fatalf("no answer keeps: %+v", sw)
+	if sw := e.byTitle("导出报表加一列").Proposal.Sweep; sw.By != "generate" || sw.Action != domain.SweepKeep || sw.Why != "不是同一件事" {
+		t.Fatalf("keeps with the model's reason: %+v", sw)
 	}
 
 	e.setPolicy(func(p *policy.Policy) { p.Merge.SkipExisting = false })
@@ -321,7 +340,7 @@ func TestMergeBatchBudgetHalves(t *testing.T) {
 			p.Merge.BatchSize = 20
 			p.Merge.BudgetTokens = budget
 		})
-		e.stub.When(batchMark, reply(``, ``, ``))
+		e.stub.WhenFunc(batchMark, keepAll())
 		long := strings.Repeat("需要本人确认的资产信息与负责人说明", 6)
 		for i := range 20 {
 			e.now = e.now.Add(time.Second)
@@ -598,7 +617,7 @@ func TestMergeBatchSimilarityTiers(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	e.openItem("季度预算评审会议")
-	e.stub.When(batchMark, reply(``, ``, ``))
+	e.stub.WhenFunc(batchMark, keepAll())
 	n, done := 0, []string{}
 	round := func(tier string, titles ...string) (withItem []string) {
 		t.Helper()
@@ -682,4 +701,90 @@ func TestChangeRefAndKeyFacts(t *testing.T) {
 	if miss := missingFacts("Bitget 提现 840 USDT，11 月 16 日晚，0x82df…5057，手续费 0.01", want); !slices.Equal(miss, []string{"2026-11-16", "22:55"}) {
 		t.Fatalf("rewritten dates are missing: %q", miss)
 	}
+}
+
+// 回答必须对每个成员编号都给出结论：缺一个就整批不落账、同样大小重问一次（不复用刚才的回答），仍缺就降到 50 条一批，
+// 余下的留在待归类、之后的批也不超过 50；每次调用的耗时与输出字数记进报告与 run.finished。被截断、不合 schema 的同样算不完整。
+// 同一批再跑零变化。
+func TestMergeBatchIncompleteRetriesThenHalves(t *testing.T) {
+	e := newEnv(t, true)
+	e.svc.o.Now = e.Now
+	e.setPolicy(func(p *policy.Policy) { p.MergeJudge, p.Merge.BatchSize = policy.MergeSame, 60 })
+	asked := 0
+	e.stub.WhenFunc(batchMark, func(body string) modelstub.Reply {
+		if asked++; asked <= 2 {
+			return keepAll("N60")(body) // 前两次漏了最后一条
+		}
+		return keepAll()(body)
+	})
+	for i := range 60 {
+		e.now = e.now.Add(time.Second)
+		e.emit(fmt.Sprintf("src_%02d", i), "ticket", ev(fmt.Sprintf("c%02d", i), "ticket.opened", fmt.Sprintf("互不相干的第 %02d 件事 %s", i, strings.Repeat("字", i)), nil))
+	}
+	tally := func() (done, pending int) {
+		for _, it := range e.proposed() {
+			if sw := it.Proposal.Sweep; sw != nil && sw.State == "pending" {
+				pending++
+			} else if sw != nil {
+				done++
+			}
+		}
+		return
+	}
+
+	rep, err := e.svc.RunManual(bg, cliOwner, ManualFilter{})
+	if err != nil || e.batchCalls() != 3 || len(rep.Calls) != 3 {
+		t.Fatalf("two incomplete answers then a smaller batch: %v, calls %d, %+v", err, e.batchCalls(), rep.Calls)
+	}
+	c := rep.Calls
+	if c[0].Size != 60 || c[0].Complete || c[0].Missing != 1 || c[0].Error != "missing" || c[0].Fresh ||
+		c[1].Size != 60 || c[1].Complete || !c[1].Fresh || c[1].Reused ||
+		c[2].Size != 50 || !c[2].Complete || c[2].OutputChars == 0 || c[2].Run == "" {
+		t.Fatalf("calls: %+v", c)
+	}
+	if done, pending := tally(); done != 50 || pending != 10 || len(rep.Decisions) != 50 || len(rep.Ask) != 50 || len(rep.Deferred) != 10 {
+		t.Fatalf("only the 50 asked last land: done %d, pending %d, decisions %d, ask %d, deferred %d", done, pending, len(rep.Decisions), len(rep.Ask), len(rep.Deferred))
+	}
+	if sw := e.item(rep.Decisions[0].Item).Proposal.Sweep; sw.Run != c[2].Run || sw.Deferred != 10 || sw.Size != 60 {
+		t.Fatalf("landed from the complete call: %+v", sw)
+	}
+	var fin map[string]any
+	for _, ev := range e.eventsOf(c[2].Run) {
+		if ev.Type == domain.EvRunFinished {
+			_ = json.Unmarshal(ev.Payload, &fin)
+		}
+	}
+	if _, ok := fin["elapsed_ms"]; !ok || fin["output_chars"] != float64(c[2].OutputChars) {
+		t.Fatalf("run record carries elapsed and output size: %v", fin)
+	}
+	var pol policy.Policy
+	e.view(func(tx *store.Tx) { _, pol, _ = policy.Current(tx) })
+	if e.svc.batchSize(pol) != sweepFallback {
+		t.Fatalf("later batches stay at %d, got %d", sweepFallback, e.svc.batchSize(pol))
+	}
+
+	// 余下 10 条下一轮归完；再跑一遍零变化。
+	if rep, err = e.svc.RunManual(bg, cliOwner, ManualFilter{}); err != nil || len(rep.Calls) != 1 || !rep.Calls[0].Complete || len(rep.Decisions) != 10 {
+		t.Fatalf("the rest: %v %+v", err, rep.Calls)
+	}
+	h, calls := e.head(), e.batchCalls()
+	if rep, err = e.svc.RunManual(bg, cliOwner, ManualFilter{}); err != nil || rep.Matched != 0 || e.head() != h || e.batchCalls() != calls {
+		t.Fatalf("second pass changes nothing: %v %+v", err, rep)
+	}
+
+	// 不合 schema（含截断）也算不完整：重问一次，不超过 50 条就不再降，什么都不落。
+	e.stub.Reset()
+	e.configureModel()
+	e.stub.When(batchMark, modelstub.Reply{Content: `{"groups":[{"group":"G1","topic":"`})
+	for i := range 3 {
+		e.emit(fmt.Sprintf("src_t%d", i), "ticket", ev(fmt.Sprintf("t%d", i), "ticket.opened", fmt.Sprintf("截断测试第 %d 件", i), nil))
+	}
+	rep, err = e.svc.RunManual(bg, cliOwner, ManualFilter{})
+	if err == nil || len(rep.Calls) != 2 || rep.Calls[0].Error == "" || !rep.Calls[1].Fresh || len(rep.Decisions) != 0 {
+		t.Fatalf("malformed answers land nothing: %v %+v", err, rep.Calls)
+	}
+	if _, pending := tally(); pending != 3 {
+		t.Fatalf("all three stay pending, got %d", pending)
+	}
+	e.verify()
 }

@@ -42,7 +42,18 @@ const (
 	sweepTitle   = 120              // 送给模型的标题、摘要各自至多几个字
 	sweepSummary = 200
 	sweepActor   = "kernel:merge"
+	// sweepFallback 是回答不完整时降到的批量：同样大小问两次（第二次不复用第一次的回答）都缺结论或被截断，就只问前这么多条。
+	sweepFallback = 50
 )
+
+// batchSize 是这一轮一批的条数上限：策略的批量，降过就取降后的。
+func (s *Service) batchSize(pol policy.Policy) int {
+	n := pol.Merge.Batch()
+	if c := int(s.sweepCap.Load()); c > 0 && c < n {
+		return c
+	}
+	return n
+}
 
 // sweepRec 是一批里的一条记录：待归类的建议（成员，N 编号）或检索出的已有事项（E 编号）。
 type sweepRec struct {
@@ -161,11 +172,10 @@ func (s *Service) Sweep(ctx context.Context) error {
 		return err
 	}
 	slices.SortStableFunc(batch, func(a, b domain.Item) int { return a.CreatedAt.Compare(b.CreatedAt) })
-	if len(batch) < pol.Merge.Batch() && now.Sub(batch[0].CreatedAt) < pol.Merge.Wait() {
+	if n := s.batchSize(pol); len(batch) < n && now.Sub(batch[0].CreatedAt) < pol.Merge.Wait() {
 		return nil
-	}
-	if len(batch) > pol.Merge.Batch() {
-		batch = batch[:pol.Merge.Batch()]
+	} else if len(batch) > n {
+		batch = batch[:n]
 	}
 	p, err := s.planBatch(ctx, pol, all, srcs, batch)
 	var settle []sweepIn
@@ -250,6 +260,7 @@ type batchPlan struct {
 	srcs     map[string]domain.Source
 	groups   []batchGroup
 	combined []*batchCombined
+	calls    []ManualCall // 这一批的每次模型调用（含不完整而重问的）
 }
 
 // planBatch 跑一批的规则层：成员互相全量可见；每个成员按合并键、仓库 + PR 号、origin.ref、相似度与同项目检索已有事项；护栏；资料打包与超预算砍半。
@@ -516,25 +527,87 @@ func (s *Service) compose(pol policy.Policy, srcs map[string]domain.Source, ask 
 	}
 }
 
-// askBatch 按 plan 调一次写作模型，按组、按优先级把回答对回到每条成员；不合规则的回答一律按"留着"。
-// 模型的分组与整合（连同校验结果）记在 p.groups、p.combined 上，给手动合并的报告用。
-func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan) ([]sweepIn, error) {
-	locality := policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
-	id, size, ask, text, total := p.id, p.size, p.ask, p.text, len(p.ask)+len(p.later)
+// askOnce 调一次写作模型。回答被截断、不合 schema、没有可用的答案，或缺任一成员的结论，即为不完整：ok 为假、不报错，由 askBatch 重问或降批。
+// 每次调用记进 p.calls（耗时、输出字数、缺几条）；同样的耗时与输出字数也在这次的 run.finished 里。
+func (s *Service) askOnce(ctx context.Context, pol policy.Policy, p *batchPlan, fresh bool) (x sweepOut, run string, ok bool, err error) {
 	in, _ := json.Marshal(p.input)
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: DefaultPack, Template: MergeTemplate, Input: in, Material: text, Body: pol.Merge.Prompt,
-		RequireLocality: locality, NoStats: true, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
-	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, model.ErrPaused) || errors.Is(err, direct.ErrUnavailable) || errors.Is(err, direct.ErrLocalityChanged) {
-		return nil, fmt.Errorf("merge batch %s waits: %w", id, err) // 留在待归类里，过一会儿再试；建议本身已经在建议页上
+	t0 := s.o.Now()
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: DefaultPack, Template: MergeTemplate, Input: in, Material: p.text, Body: pol.Merge.Prompt, Fresh: fresh,
+		RequireLocality: policy.EffectiveLocality(pol.GenerateEndpoint.Locality), NoStats: true, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
+	c := ManualCall{Size: len(p.ask), Fresh: fresh, ElapsedMS: s.o.Now().Sub(t0).Milliseconds()}
+	defer func() { p.calls = append(p.calls, c) }()
+	var se *model.SchemaError
+	switch {
+	case errors.As(err, &se):
+		c.Error = cmp.Or(se.Shape, "schema") // truncated 即输出到了上限
+		return x, "", false, nil
+	case errors.Is(err, model.ErrNotConfigured), errors.Is(err, model.ErrPaused), errors.Is(err, direct.ErrUnavailable), errors.Is(err, direct.ErrLocalityChanged):
+		c.Error = "unavailable"
+		return x, "", false, fmt.Errorf("merge batch %s waits: %w", p.id, err) // 留在待归类里，过一会儿再试；建议本身已经在建议页上
+	case err != nil:
+		c.Error = "failed"
+		return x, "", false, err
+	case len(out.Steps) == 0:
+		c.Error = "no_answer"
+		return x, "", false, nil
 	}
-	if err != nil {
-		return nil, err
+	f := out.Final()
+	c.Run, c.Reused, c.OutputChars = f.RunID, f.Reused, len([]rune(string(f.Result)))
+	if !out.Settled || json.Unmarshal(f.Result, &x) != nil {
+		c.Error = "no_answer"
+		return x, "", false, nil
 	}
+	answered := map[string]bool{}
+	for _, d := range x.Decisions {
+		answered[d.New] = true
+	}
+	for _, m := range p.ask {
+		if !answered[m.ref] {
+			c.Missing++
+		}
+	}
+	if c.Missing > 0 {
+		c.Error = "missing"
+		return x, "", false, nil
+	}
+	c.Complete = true
+	return x, f.RunID, true, nil
+}
+
+// askBatch 按 plan 问写作模型，按组、按优先级把回答对回到每条成员；不合规则的结论一律按"留着"。
+// 回答必须对每个成员编号都给出结论：不完整就整批不落账、同样大小重问一次（不复用刚才的回答），仍不完整且多于 sweepFallback 条就只问前 sweepFallback 条
+// （余下的留在待归类，本进程之后的批也不超过它），再同样重问一次；都不完整就报错，什么都不落。
+// 模型的分组与整合（连同校验结果）记在 p.groups、p.combined 上，给手动合并的报告用。
+//
+// 内核管不到、只靠提示词的两处（§9.3）：
+//   - 先判事项、再判建议：内核只校验去处在本组可选事项里、结论与去处阶段相配；本可以并入事项却被判成批内整合（或保留）的，内核看不出来，step 字段不读。
+//   - 拿不准就保留：内核把 confident=false 的 attach、duplicate、merge 一律留着，但模型自己填了 true 的是否真有把握、
+//     以及"合并后还有没有哪一条要本人单独处理"，只有不同 PR 号这一种由内核硬拦（apart），其余只靠模型判断。
+func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan) ([]sweepIn, error) {
+	id, size := p.id, p.size
 	var x sweepOut
-	if !out.Settled || json.Unmarshal(out.Final().Result, &x) != nil {
-		return nil, fmt.Errorf("merge batch %s: the model gave no usable answer", id)
+	var run string
+	for try := 0; ; try++ {
+		var ok bool
+		var err error
+		if x, run, ok, err = s.askOnce(ctx, pol, p, try%2 == 1); err != nil {
+			return nil, err
+		}
+		if ok {
+			break
+		}
+		switch {
+		case try%2 == 0: // 同样大小重问一次
+		case len(p.ask) > sweepFallback:
+			s.sweepCap.Store(sweepFallback)
+			head, rest := p.ask[:sweepFallback], append(slices.Clone(p.ask[sweepFallback:]), p.later...)
+			p.ask, p.text, p.input = s.compose(pol, p.srcs, head)
+			p.later = append(slices.Clone(head[len(p.ask):]), rest...)
+		default:
+			return nil, fmt.Errorf("merge batch %s: the model's answer was incomplete (truncated or missing decisions) %d times, nothing landed", id, try+1)
+		}
 	}
-	run, chars := out.Final().RunID, len([]rune(text))
+	ask, total, chars := p.ask, len(p.ask)+len(p.later), len([]rune(p.text))
 	byRef := map[string]*sweepRec{}
 	for _, m := range ask {
 		byRef[m.ref] = m
