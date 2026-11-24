@@ -1,18 +1,17 @@
-// Package wake 是唤醒投递与租约（设计 §13.6 "唤醒真实主会话"、§7.4）。
+// Package wake 是唤醒投递与租约记录（设计 §13.6 "唤醒真实主会话"、§7.4）。
 //
 // 唤醒真实主会话时，内核只做两件事，且都不外呼、不向本人发消息：
 //  1. 产出 class=wake 的投递（路由 wake，带运行 id、不带凭据明文）。它不是提醒本人，所以不经打扰控制，
 //     直接写投递队列；网关插件领取后自行开回合。
-//  2. 网关插件换取运行凭据时，为换取所用的 delegate token（即真实主会话手里的那个）开租约：
-//     到运行结束（回执）或运行超时为止，该 token 的代答一律拒绝（退出码 4）。本人在 Web 的决定不受影响。
+//  2. 网关插件换取运行凭据时，为换取所用的 delegate token 记一条租约：哪次运行、哪把钥匙、运行截止时刻、
+//     何时结束。租约只供观测与统计，不参与授权判定。
+//
+// 2026-11-24 取消"租约期间钥匙降级"（本人决定）：此前认证层见到租约内的 delegate 就把整把钥匙降成范围为空的
+// 运行级身份，本机 CLI 与主会话在唤醒期间对任何事项的写入都是退出码 4。现在运行身份只由调用方是否携带运行凭据
+// （apa_run_…，runidentity.Identity）决定；持 delegate 钥匙的调用一律按钥匙本身的级别与 Agent 档位判定。
 //
 // 唤醒运行的进程不在本机（proc.QueueExternal）：目标事项离开 open 即为回执，由 Settle 按成功落账；
-// 到期由调度器按超时落账。
-//
-// 租约不靠吊销：Identity 在每次认证时读租约与运行状态，所以运行进入终态、显式 Release、到期都立即恢复，
-// 不依赖调用方记得收尾。被租约约束的 delegate 按运行凭据级（LevelRun，范围为空）处理——决策、接受、丢弃、
-// 改任意事项都是退出码 4，且决策类拒绝由授权层记 command.rejected。
-// shortcut: 租约期间该 token 的其他 delegate 能力（如管理项目）也一并拒绝，需要按命令区分时再扩展授权层。
+// 到期由调度器按超时落账。无论哪种终态（回执、失败、超时），Settle 都把该运行的租约标记释放。
 //
 // Run（launch=wake）由后台触发方写入；本包以运行 id 为入口，不建 Run，只经外呼调用器的写入接口落终态。
 package wake
@@ -24,7 +23,6 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
@@ -113,9 +111,8 @@ func (s *Service) Open(tx *store.Tx, runID string) (domain.Delivery, error) {
 }
 
 // Exchange 是 POST /runs/{id}/credential 的内核入口：经 runidentity.Exchange 换出运行凭据（谁能换、换什么由它判定），
-// 并在同一事务为换取所用的 delegate token 开租约。网关插件与真实主会话在同一进程、持同一 token，
-// 所以换取者就是要被约束的那个 token；worker token 本就没有代答能力，不开租约。
-// 租约期限是运行的截止时刻（开始时间加运行超时，未设时 1 小时）；同一 token 再次换取不重复开。
+// 并在同一事务为换取所用的 delegate token 记租约（只供观测，不影响授权）；worker 换取不记。
+// 租约截止时刻就是运行的截止时刻（与运行凭据同一个值：运行开始加运行超时）；同一 token 再次换取不重复记。
 func (s *Service) Exchange(tx *store.Tx, c command.Caller, runID string) (string, time.Time, error) {
 	now := s.o.Now()
 	secret, expires, err := runidentity.Exchange(tx, c, runID, now)
@@ -126,17 +123,9 @@ func (s *Service) Exchange(tx *store.Tx, c command.Caller, runID string) (string
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	ttl := runidentity.DefaultExchangeTTL
-	if r.TimeoutSec > 0 {
-		ttl = time.Duration(r.TimeoutSec) * time.Second
-	}
-	start := now
-	if r.StartedAt != nil {
-		start = *r.StartedAt
-	}
-	// delegate 没有执行者绑定，auth.Credential.Actor 的 Principal 就是凭据 id（与 guard 同一口径）。
+	// delegate 没有执行者绑定，auth.Credential.Actor 的 Principal 就是凭据 id。
 	n, err := tx.Exec(`INSERT INTO wake_lease (run_id, credential, expires_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
-		runID, c.Actor.Principal, start.Add(ttl).UnixNano())
+		runID, c.Actor.Principal, expires.UnixNano())
 	if err != nil || n == 0 {
 		return secret, expires, err
 	}
@@ -156,13 +145,19 @@ func (s *Service) Attach(x *command.Executor, onEnd func(proc.Result), onErr fun
 }
 
 // Settle 结束已有回执的唤醒运行：目标事项离开 open（done、waiting、needs_input、dropped）即为回执（§13.6），
-// 运行按成功落账并释放租约，再逐个交给 onEnd。运行超时由调度器落账，不在这里。
+// 运行按成功落账，再逐个交给 onEnd。运行超时由调度器落账，不在这里。
+// 同一事务里把所有已到终态（回执、失败、超时）的运行上未释放的租约标记释放。
 // 每次重新从账本判定，所以漏掉的提交（如重启前）会在下次调用时补上；与超时落账在写事务里互斥，只结束一次。
 func (s *Service) Settle(ctx context.Context, st *store.Store, onEnd func(proc.Result)) error {
 	var has bool
 	if err := st.View(ctx, func(tx *store.Tx) error {
 		recs, err := proc.External(tx)
-		has = len(recs) > 0
+		if err != nil || len(recs) > 0 {
+			has = len(recs) > 0
+			return err
+		}
+		open, err := openLeases(tx)
+		has = len(open) > 0
 		return err
 	}); err != nil || !has {
 		return err
@@ -188,16 +183,13 @@ func (s *Service) Settle(ctx context.Context, st *store.Store, onEnd func(proc.R
 			if err := proc.Settle(tx, rec.Run.ID, domain.RunSucceeded, nil, "", s.o.Now()); err != nil {
 				return err
 			}
-			if err := s.Release(tx, rec.Run.ID); err != nil {
-				return err
-			}
 			got, err := proc.Get(tx, rec.Run.ID)
 			if err != nil {
 				return err
 			}
 			done = append(done, proc.Result{Run: got.Run})
 		}
-		return nil
+		return s.releaseEnded(tx)
 	})
 	if err != nil {
 		return err
@@ -208,78 +200,56 @@ func (s *Service) Settle(ctx context.Context, st *store.Store, onEnd func(proc.R
 	return nil
 }
 
-// Release 在回执时提前结束租约；运行不存在或没有租约不报错（幂等）。
-func (s *Service) Release(tx *store.Tx, runID string) error {
-	now := s.o.Now()
-	n, err := tx.Exec(`UPDATE wake_lease SET released_at = ? WHERE run_id = ? AND released_at = 0`, now.UnixNano(), runID)
+// openLeases 返回还有未释放租约的运行 id。
+func openLeases(tx *store.Tx) ([]string, error) {
+	rows, err := tx.Query(`SELECT DISTINCT run_id FROM wake_lease WHERE released_at = 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var runs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		runs = append(runs, id)
+	}
+	return runs, rows.Err()
+}
+
+// releaseEnded 释放运行已到终态的租约。
+func (s *Service) releaseEnded(tx *store.Tx) error {
+	runs, err := openLeases(tx)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return nil
+	for _, id := range runs {
+		rec, err := proc.Get(tx, id)
+		if err != nil {
+			return err
+		}
+		if rec.Run.State.Terminal() {
+			if err := s.Release(tx, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Release 把运行的租约标记释放；运行不存在或没有未释放的租约不报错（幂等）。事件带运行终态，供统计。
+func (s *Service) Release(tx *store.Tx, runID string) error {
+	now := s.o.Now()
+	n, err := tx.Exec(`UPDATE wake_lease SET released_at = ? WHERE run_id = ? AND released_at = 0`, now.UnixNano(), runID)
+	if err != nil || n == 0 {
+		return err
 	}
 	rec, err := proc.Get(tx, runID)
 	if err != nil {
 		return err
 	}
 	_, err = eventlog.Append(tx, domain.Event{Type: EvReleased, Object: rec.Run.Target, Actor: systemActor,
-		Reason: "wake run " + runID, ChainDepth: rec.Run.ChainDepth, At: now, Payload: []byte(fmt.Sprintf(`{"run_id":%q}`, runID))})
+		Reason: "wake run " + runID, ChainDepth: rec.Run.ChainDepth, At: now, Payload: []byte(fmt.Sprintf(`{"run_id":%q,"state":%q}`, runID, rec.Run.State))})
 	return err
-}
-
-// Leased 报告凭据此刻是否在唤醒租约内：存在未释放、未到期、且运行未结束的租约。
-func (s *Service) Leased(tx *store.Tx, credential string) (bool, error) {
-	rows, err := tx.Query(`SELECT run_id FROM wake_lease WHERE credential = ? AND released_at = 0 AND expires_at > ?`,
-		credential, s.o.Now().UnixNano())
-	if err != nil {
-		return false, err
-	}
-	var runs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return false, err
-		}
-		runs = append(runs, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	for _, id := range runs {
-		rec, err := proc.Get(tx, id)
-		if err != nil {
-			return false, err
-		}
-		if !rec.Run.State.Terminal() {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// Identity 包装一个认证入口：认证出的 delegate 若在租约内，降为不能代答的运行级身份（范围为空）；
-// 其余调用者原样通过。把它放在 command.Bearer 外面使用。
-func (s *Service) Identity(inner command.Identity) command.Identity { return guard{s, inner} }
-
-type guard struct {
-	s     *Service
-	inner command.Identity
-}
-
-func (g guard) Authenticate(tx *store.Tx) (command.Caller, error) {
-	c, err := g.inner.Authenticate(tx)
-	if err != nil || c.Kind != auth.Delegate {
-		return c, err
-	}
-	// delegate 没有执行者绑定，auth.Credential.Actor 的 Principal 就是凭据 id。
-	leased, err := g.s.Leased(tx, c.Actor.Principal)
-	if err != nil {
-		return command.Caller{}, err
-	}
-	if leased {
-		c.Level, c.RunScope = authz.LevelRun, nil
-	}
-	return c, nil
 }

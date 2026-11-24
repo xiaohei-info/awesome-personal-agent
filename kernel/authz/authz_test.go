@@ -63,6 +63,10 @@ func TestScopeIsTheKey(t *testing.T) {
 		{req(LevelRun, agent, ActionChangeSettings, TierRules, open), domain.CodePermissionDenied},
 		{req(LevelDelegate, agent, ActionWebRead, TierRead, open), domain.CodePermissionDenied},
 		{req(LevelDelegate, agent, ActionEditAnyItem, TierOrganize, policy.AgentAllowance{}), ""},
+		// 无效级别一律范围外：未知级别、空级别、非本人在 Web 之外自称 web。
+		{req(Level("root"), agent, ActionRead, TierRead, open), domain.CodePermissionDenied},
+		{req("", agent, ActionRead, TierRead, open), domain.CodePermissionDenied},
+		{req(LevelWeb, agent, ActionRead, TierRead, open), domain.CodePermissionDenied},
 	}
 	for i, c := range cases {
 		d := Decide(p, c.r)

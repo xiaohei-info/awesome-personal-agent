@@ -23,8 +23,8 @@ func TestFlowWakeLease(t *testing.T) {
 	}
 	f.webOK("PUT", "/settings/policy", `{"disturb":{"routes":{"decision":"acc-chan","reminder":"web","brief":"web","health":"web"},"merge_window_sec":2}}`, 200)
 
-	// 唤醒的网关钥匙是未归属 Agent 的 delegate（DELO，唤醒路由按钥匙的 Agent 归属分）；租约期间它降为运行身份，
-	// 所以各步要用的普通决策事先备好。
+	// 唤醒的网关钥匙是未归属 Agent 的 delegate（DELO，唤醒路由按钥匙的 Agent 归属分）；各步要用的普通决策事先备好。
+	// 2026-11-24 起租约只记录、不降级：唤醒期间 DELO 始终按自己的级别与档位判定（未归属 Agent，二档为 23）。
 	var dec [5]string
 	for i := range dec {
 		dec[i] = f.decision("acc-open", fmt.Sprintf("WAK-D%d", i+1))
@@ -133,11 +133,14 @@ func TestFlowWakeLease(t *testing.T) {
 	})
 
 	d1, d2 := dec[0], dec[1]
-	f.step("ACT-WAK-04 唤醒租约内该 delegate token 降为运行身份，不能代答", func(t *testing.T) {
+	// 2026-11-24 改写（本人决定取消租约降级）：唤醒期间 delegate 钥匙按钥匙本身判定——能改任意事项，
+	// 二档仍按它的档位（未归属 Agent 为 23），不再是降级时的 4。
+	f.step("ACT-WAK-04 唤醒期间该 delegate token 按自己的级别与档位判定，不降级", func(t *testing.T) {
 		if st, _ := f.runState(run1); st != "running" {
 			t.Fatalf("运行应仍未结束: %s", st)
 		}
-		f.delAnswer(d1, 4)
+		f.apaEnv(f.DELO, 0, nil, "item", "update", d1, "--title", "WAK-D1 edited during wake", "--reason", "wake")
+		f.delAnswer(d1, 23)
 		if ph := f.phase(d1); ph != "needs_input" {
 			t.Errorf("被拒绝的代答不应改变事项，阶段 = %s", ph)
 		}
@@ -166,18 +169,19 @@ func TestFlowWakeLease(t *testing.T) {
 		}
 	})
 
-	f.step("ACT-WAK-06 回执后运行成功结束、租约释放、代答恢复", func(t *testing.T) {
+	f.step("ACT-WAK-06 回执后运行成功结束、租约标记释放", func(t *testing.T) {
 		f.asRun(run1, cred1, 0, nil, "report", i1, "--outcome", "done", "--summary", "完成", "--link", "https://example.invalid/acc/result/1")
 		if ph := f.phase(i1); ph != "done" {
 			t.Errorf("WAK-I1 应转 done: %s", ph)
 		}
 		f.waitRunState(run1, "succeeded")
 		f.waitEvent("租约释放", ofRun("wake.lease_released", run1))
-		f.delAnswer(d1, 23) // 租约释放后回到它自己的档位判定：未归属 Agent，只整理（23），不再是租约内的 4
+		f.delAnswer(d1, 23) // 与唤醒期间相同：未归属 Agent，只整理（23）
 		f.asRun(run1, cred1, 3, nil, "inbox")
 	})
 
 	// 2026-11-20 改写：超时是运行故障（事件），事项阶段不变、不挂问题；租约照样释放。
+	// 2026-11-24 改写：超时也写 wake.lease_released；租约期间判定不变。
 	f.step("ACT-WAK-07 运行超时也释放租约，事项阶段不变", func(t *testing.T) {
 		i2 := f.tagged("WAK-I2", "acc-wake-short")
 		r := f.waitRun(i2)
@@ -186,10 +190,10 @@ func TestFlowWakeLease(t *testing.T) {
 		}
 		f.exchange(f.DELO, r.ID, 200)
 		d3 := dec[2]
-		f.delAnswer(d3, 4) // 租约内
-		f.TCAdvance(120)   // 不回执，等待 2 分钟（测试时钟）
+		f.delAnswer(d3, 23) // 租约内也按自己的档位
+		f.TCAdvance(120)    // 不回执，等待 2 分钟（测试时钟）
 		f.waitRunState(r.ID, "timeout")
-		time.Sleep(2 * time.Second) // 等超时收尾落账
+		f.waitEvent("超时后租约释放", ofRun("wake.lease_released", r.ID))
 		if ph := f.phase(i2); ph != "open" {
 			t.Errorf("超时后 WAK-I2 应留在 open（运行故障不是问题）: %s", ph)
 		}
@@ -201,7 +205,7 @@ func TestFlowWakeLease(t *testing.T) {
 		r := f.waitRun(i3)
 		first, _ := f.exchange(f.WRK, r.ID, 200)
 		d4 := dec[3]
-		f.delAnswer(d4, 23) // worker 换取不开租约，DEL 仍按自己的档位判定（只整理：23），不是租约内的 4
+		f.delAnswer(d4, 23) // worker 换取不开租约；DEL 按自己的档位判定（只整理：23）
 		f.exchange(f.OBS, r.ID, 403)
 		f.exchange(first, r.ID, 403)
 		f.exchange(f.DELO, headlessRun, 409)
