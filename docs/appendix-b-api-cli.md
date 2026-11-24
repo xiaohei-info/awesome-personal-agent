@@ -342,7 +342,7 @@
 
 `GET /runs` 每条运行在失败或超时时另带 `fault`（`{code, params?}`，故障类别码见主文档 §6.11，参数只有 `exit`、`timeout`），失败附注与 stderr 不返回。`GET /runs` 返回 `{"runs": [...]}`，按入队顺序升序，只留最新的 `limit` 条（缺省 100、上限 500）。`state`、`category` 取值各可逗号分隔多个（任一匹配，如 `state=failed,timeout`、`category=task,background`），`target` 精确匹配；取值不在枚举内返回 400。`before` 是上一页最旧一条的 id，只取在它之前入队的运行，与其他筛选和 `limit` 叠加，Web「运行日志」据此「加载更多」；不是已知运行 id 返回 400。
 
-`POST /runs/{id}/credential` 不带请求体，成功返回 200：`{"run": "...", "token": "apa_run_…", "expires_at": "<RFC 3339>"}`。`token` 只出现这一次，不进幂等结果表。运行不存在返回 404，不是未结束的 `launch: wake` 后台运行返回 409，其他凭据返回 403。用 delegate token 换取时，同时为该 token 开唤醒租约（§13.6）。
+`POST /runs/{id}/credential` 不带请求体，成功返回 200：`{"run": "...", "token": "apa_run_…", "expires_at": "<RFC 3339>"}`。`token` 只出现这一次，不进幂等结果表。运行不存在返回 404，不是未结束的 `launch: wake` 后台运行返回 409，其他凭据返回 403。用 delegate token 换取时，同时为该 token 记一条唤醒租约（§13.6），只供观测，不改变这把 token 的判定（~~租约期间降为运行身份~~ **已取消（2026-11-24，决定 89）**）。
 
 `GET /deliveries/next` 返回的投递：`content.recommend` 是决策的推荐选项，未给推荐时省略；`content.form_url` 与 `content.web_only` 是旧模型的字段，协议里保留，内核恒不填（一次性表单与 web_only 类别已取消，主文档 §14.4）；只能发文字的渠道在决策投递里只发 `web_url`，本人点开后登录作答；Agent 替本人回答问题后，内核另投一条提醒类投递（`class` 为 `reminder`），标题与摘要写明替答的问题与所选选项，`web_url` 指向"Agent 改动"页，不带选项（主文档 §14.3）；`run` 只出现在唤醒类投递上。规则 `alert` 出口的提醒没有事项：`item` 为空，带 `origin`（`{source_event, rule, source}`，触发它的来源事件、规则 id 与来源 id），`content` 取来源事件的标题、摘要与链接，不带选项；`notify_urgent` 规则的紧急建议提醒同样没有事项，投递 id 等于建议事项 id，`origin` 另带 `item`（这条建议），`content` 是建议的标题、摘要、起草理由与指向它的 Web 链接；渠道 ext 须能处理空的 `item`（主文档 §6.9）。
 

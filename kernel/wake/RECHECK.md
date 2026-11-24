@@ -1,5 +1,7 @@
 # 唤醒租约复验记录（缺陷 dfx-5410a4c832ad，GT-296）
 
+> **2026-11-24 更新（决定 89，本人决定）**：租约期间 delegate 降为运行身份的机制已取消，下表 ACT-WAK-04 的"租约内不能代答"不再成立；租约只记录、运行到任一终态即标记释放。现行验证见 `kernel/wake` TestDelegateKeepsItsOwnLevelDuringWakeRun、TestLeaseReleasedWhenRunEnds 与 `tests/e2e/hostplugin` TestFlowWakeLease。下文为当时的复验记录，保留原样。
+
 v0.2.0 不改唤醒与租约。本记录用替身（STUB_HARNESS、插件契约测试、内核/HTTP 单元测试）逐条复验
 `flow-wake-lease` 的 ACT-WAK-02..09，全部通过，未发现需要修复的缺陷，无代码改动。
 

@@ -1,6 +1,7 @@
 //go:build live
 
-// Package wake 按验收文档 flow-wake-lease（ACT-WAK-01..05）用真实 apa 内核、真实 Hermes 网关与真实 apa-wake 插件走唤醒租约流程。
+// Package wake 按验收文档 flow-wake-lease（ACT-WAK-01..05）用真实 apa 内核、真实 Hermes 网关与真实 apa-wake 插件走唤醒流程
+// （2026-11-24 起租约只记录、不降级 delegate）。
 //
 // 真实主会话：Hermes 网关（webhook 平台，只监听回环）+ apa-wake 插件（allow_gateway_injection），插件与主会话持同一个
 // delegate token（DEL）。唤醒回合是真实模型驱动的 agent 回合，它的 apa 调用结果取自 Hermes 自己的会话库，内核侧的事实取自账本审计。
@@ -688,7 +689,9 @@ func TestWakeLease(t *testing.T) {
 	})
 
 	var runB string
-	f.step("ACT-WAK-04 唤醒租约内 delegate 不能代答，回执后恢复", func(t *testing.T) {
+	// 2026-11-24 改写（本人决定取消租约降级）：唤醒运行未结束时，持同一 DEL 的会话按 DEL 本身的级别与档位判定，
+	// 与运行结束后相同；租约只记录，回执后标记释放。
+	f.step("ACT-WAK-04 唤醒期间 delegate 按自己的档位判定，回执后租约释放", func(t *testing.T) {
 		// 另开一个唤醒运行，让它保持未结束：回合里什么都不做，也不 ask。
 		taskB := f.task("ACCWAKE-B 验收脚本：本回合什么都不要做，不要运行任何 apa 命令，不要 ask，只回复 ok。")
 		var rs []run
@@ -702,15 +705,15 @@ func TestWakeLease(t *testing.T) {
 		}
 		// 另一个持同一 DEL 的会话：这里就是测试进程用同一个 token 运行 apa。
 		r := f.Apa(f.DEL, "", "decide", other[1], "--option", "A", "--evidence", "x")
-		if r.Code != 4 {
-			t.Fatalf("租约期间持同一 DEL 的会话 apa decide 退出码 = %d，期望 4\nstdout: %s\nstderr: %s", r.Code, r.Stdout, r.Stderr)
+		if r.Code != 0 {
+			t.Fatalf("唤醒期间持同一 DEL 的会话 apa decide 退出码 = %d，期望 0（不再降级）\nstdout: %s\nstderr: %s", r.Code, r.Stdout, r.Stderr)
 		}
-		if ph := f.phase(other[1]); ph != "needs_input" {
-			t.Fatalf("被拒绝的代答不应改变事项，阶段 = %s", ph)
-		}
-		// 本人在 Web 仍可决定同一件事。
-		f.webOK("POST", "/items/"+other[1]+"/decide", `{"choice":"A"}`, 200)
 		if ph := f.phase(other[1]); ph == "needs_input" {
+			t.Fatalf("DEL 的代答应生效，事项仍是 needs_input")
+		}
+		// 本人在 Web 照样可以决定。
+		f.webOK("POST", "/items/"+other[2]+"/decide", `{"choice":"A"}`, 200)
+		if ph := f.phase(other[2]); ph == "needs_input" {
 			t.Errorf("本人在 Web 的决定应生效，事项仍是 needs_input")
 		}
 		// 回执：目标事项离开 open（本人在 Web 收起它）。运行按成功结束，租约释放。
@@ -719,10 +722,6 @@ func TestWakeLease(t *testing.T) {
 		f.waitFor("租约释放", 30*time.Second, func() bool {
 			return f.find(func(e event) bool { return e.Type == "wake.lease_released" && e.Payload["run_id"] == runB }) != nil
 		})
-		r = f.Apa(f.DEL, "", "decide", other[2], "--option", "A", "--evidence", "x")
-		if r.Code != 0 {
-			t.Fatalf("回执后 DEL 应恢复代答，apa decide 退出码 = %d\nstdout: %s\nstderr: %s", r.Code, r.Stdout, r.Stderr)
-		}
 	})
 
 	f.step("ACT-WAK-05 需要本人时转 needs_input，不直接打扰", func(t *testing.T) {

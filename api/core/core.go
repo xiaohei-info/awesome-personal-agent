@@ -137,8 +137,6 @@ type Deps struct {
 	// LoginDelay 是全部地址失败过多时每次登录尝试的延迟应答时长；0 用 DefaultLoginDelay。
 	LoginDelay time.Duration
 	Logger     *slog.Logger // nil 用 slog.Default()
-	// Guard 非空时包装每个 Bearer 认证入口（唤醒租约，§13.6）：内核据账本把认证出的调用者降级，本层不判定。
-	Guard func(command.Identity) command.Identity
 	// Groups 是除 Register 登记外额外挂载的分组（测试与嵌入用）。
 	Groups []RouteGroup
 	// Web 非空时，未命中 API 路由的 GET/HEAD（/v1 之外）交给它——嵌入的 Web 中台。
@@ -301,9 +299,6 @@ func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 		var id command.Identity = command.Bearer{Auth: s.d.Auth, Secret: secret, Origin: origin}
 		if runidentity.IsSecret(secret) { // 运行凭据：worker 级、绑定一次运行、没有代答能力
 			id = runidentity.Identity{Secret: secret, Origin: origin}
-		}
-		if s.d.Guard != nil {
-			id = s.d.Guard(id)
 		}
 		var caller command.Caller
 		if err := s.d.Store.View(r.Context(), func(tx *store.Tx) (err error) { caller, err = id.Authenticate(tx); return }); err != nil {

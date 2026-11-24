@@ -61,13 +61,13 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// whoami 回显认证出的级别，用来证明 Bearer 认证经过了唤醒租约的包装。
+	// whoami 回显认证出的级别：运行身份只由是否携带运行凭据决定。
 	whoami := func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/whoami", Handler: func(w http.ResponseWriter, _ *http.Request, p *core.Principal) error {
 			return core.WriteJSON(w, 200, map[string]string{"level": string(p.Caller.Level)})
 		}})
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Guard: wk.Identity, Groups: []core.RouteGroup{Routes(st, wk), whoami}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, wk), whoami}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestExchangeWakeRunCredentialRoute(t *testing.T) {
 		t.Fatalf("unknown run: %d", rec.Code)
 	}
 
-	// delegate 换取即为它开唤醒租约：此后它的 Bearer 认证降为运行级（不能代答）；worker 换取不开租约。
+	// 2026-11-24 起 delegate 换取后仍按 delegate 认证（只记租约，不降级）；换出的运行凭据才是运行级。
 	level := func(set func(*http.Request)) string {
 		var out struct{ Level string }
 		rec := e.do("GET", "/v1/whoami", "", set)
@@ -340,16 +340,17 @@ func TestExchangeWakeRunCredentialRoute(t *testing.T) {
 	if got := level(dlg); got != string(authz.LevelDelegate) {
 		t.Fatalf("delegate before exchange: %q", got)
 	}
-	if rec := e.do("POST", path, "", dlg); rec.Code != 200 {
+	rec = e.do("POST", path, "", dlg)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 {
 		t.Fatalf("delegate exchange: %d %s", rec.Code, rec.Body)
 	}
-	if got := level(dlg); got != string(authz.LevelRun) {
-		t.Fatalf("leased delegate: %q", got)
+	if got := level(dlg); got != string(authz.LevelDelegate) {
+		t.Fatalf("delegate after exchange must keep its own level: %q", got)
 	}
-	if rec := e.do("POST", path, "", dlg); rec.Code != 200 { // 租约内仍能再换（插件续期）
-		t.Fatalf("leased delegate re-exchange: %d %s", rec.Code, rec.Body)
+	if got := level(func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+out.Token) }); got != string(authz.LevelRun) {
+		t.Fatalf("run credential: %q", got)
 	}
-	if got := level(e.token(auth.Delegate)); got != string(authz.LevelDelegate) {
-		t.Fatal("lease must hold only the exchanging token")
+	if rec := e.do("POST", path, "", dlg); rec.Code != 200 { // 运行中仍能再换（插件续期）
+		t.Fatalf("delegate re-exchange: %d %s", rec.Code, rec.Body)
 	}
 }

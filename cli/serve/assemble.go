@@ -331,6 +331,11 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 			bg.Settle(ctx, res)
 		}
 		hs.OnResult(res)
+		if res.Run.Launch == kpolicy.LaunchWake { // 超时、失败等不经命令提交的终态：立即释放租约
+			if err := k.wk.Settle(ctx, st, k.result); err != nil {
+				slog.Error("wake lease release", "run", res.Run.ID, "err", err)
+			}
+		}
 	}
 	// 运行凭据在启动时签发并注入（§7.7）：任务型与后台运行各自签发，其他类别没有凭据。
 	env := func(r domain.Run) map[string]string {
@@ -365,7 +370,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if draftGuideline, err = guideline.Handler(guideline.Options{Store: st, Drafter: tk, Host: host, Executor: cfg.GuidelineDraftExecutor}); err != nil {
 		return nil, err
 	}
-	// 唤醒（§13.6）：后台运行落到声明了 launch: wake 的 harness 时产出唤醒投递；换取凭据时开租约；回执后收尾，与调度器结果同一条路。
+	// 唤醒（§13.6）：后台运行落到声明了 launch: wake 的 harness 时产出唤醒投递；换取凭据时记租约（只观测）；回执后收尾，与调度器结果同一条路。
 	if k.wk, err = wake.New(wake.Options{Delivery: q}); err != nil {
 		return nil, err
 	}
@@ -454,7 +459,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
+	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Groups: []core.RouteGroup{
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), apipolicy.OverviewRoutes(st, ld, k.stale.After), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
