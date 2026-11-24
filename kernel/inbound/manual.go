@@ -91,15 +91,17 @@ type ManualGroup struct {
 // ManualCombined 是模型给的一项批内整合与内核校验的结果：Missing 非空是关键事实校验没过（要点清单里缺的带「正文：」、成员原文里缺的带「原文：」），Body 是要落到载体上的整段正文（要点清单 + 来源原文），
 // Rejected、Why 非空即没有整合、成员都留着。
 type ManualCombined struct {
-	Topic    string      `json:"topic"`
-	Carrier  string      `json:"carrier,omitempty"`
-	Members  []ManualRef `json:"members"`
-	Title    string      `json:"title"`
-	Summary  string      `json:"summary"`
-	Body     string      `json:"body"`
-	Missing  []string    `json:"missing,omitempty"`
-	Rejected string      `json:"rejected,omitempty"`
-	Why      string      `json:"why,omitempty"`
+	Topic   string      `json:"topic"`
+	Carrier string      `json:"carrier,omitempty"`
+	Members []ManualRef `json:"members"`
+	Title   string      `json:"title"`
+	Summary string      `json:"summary"`
+	Body    string      `json:"body"`
+	Missing []string    `json:"missing,omitempty"`
+	// MissingWhy 与 Missing 一一对应：缺在哪里、缺的是哪一项、被判成哪一类（金额、日期时间、单据编号、数量）、为什么算强制。
+	MissingWhy []string `json:"missing_why,omitempty"`
+	Rejected   string   `json:"rejected,omitempty"`
+	Why        string   `json:"why,omitempty"`
 }
 
 // ManualCall 是一批里的一次模型调用：问了几条、是不是重问（不复用旧回答）、耗时与输出字数（端点不回报用量，靠它看余量）、
@@ -229,7 +231,7 @@ func (rep *ManualReport) modelPart(p *batchPlan) {
 		rep.Groups = append(rep.Groups, ManualGroup{Group: g.key, Topic: g.topic, Reused: g.reused, Members: refs(g.members)})
 	}
 	for _, c := range p.combined {
-		mc := ManualCombined{Topic: c.topic, Members: refs(c.members), Title: c.title, Summary: c.summary, Body: c.body, Missing: c.missing, Rejected: c.code, Why: c.why}
+		mc := ManualCombined{Topic: c.topic, Members: refs(c.members), Title: c.title, Summary: c.summary, Body: c.body, Missing: c.missing, MissingWhy: c.lacks, Rejected: c.code, Why: c.why}
 		if c.carrier != nil {
 			mc.Carrier = c.carrier.it.ID
 		}

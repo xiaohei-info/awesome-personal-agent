@@ -2,9 +2,7 @@ package inbound
 
 import (
 	"regexp"
-	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
@@ -90,48 +88,7 @@ func otherChange(a, b string) bool {
 	return oka && okb && ra == rb && a != b
 }
 
-// ---- 关键事实（§9.3 整合校验） ----
-
-var factNumber = regexp.MustCompile(`^\d+(?:[.:/-]\d+)*$`)
-
-// keyFacts 是一条建议标题与摘要里必须原样出现在整合文本里的片段：强标识（链接、#编号、带数字的编号）与至少两位的独立数字（金额、日期、时刻）。
-func keyFacts(title, summary string) []string {
-	s := title + " " + summary
-	var out []string
-	for t := range tokens(s) {
-		if i := strings.IndexFunc(t, func(r rune) bool { return r > unicode.MaxASCII }); i > 0 {
-			t = t[:i] // 链接后面紧跟的中文标点不算链接
-		}
-		out = append(out, t)
-	}
-	// 独立数字：按字母数字与 . : / - 以外的字符切开，整段是数字（可带这几个连接符）才算，编号里嵌的数字不单算。
-	for _, f := range strings.FieldsFunc(s, func(r rune) bool {
-		return r > unicode.MaxASCII || !(unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(".:/-", r))
-	}) {
-		f = strings.Trim(f, ".:/-")
-		if factNumber.MatchString(f) && len(strings.Map(func(r rune) rune {
-			if unicode.IsDigit(r) {
-				return r
-			}
-			return -1
-		}, f)) >= 2 {
-			out = append(out, f)
-		}
-	}
-	slices.Sort(out)
-	return slices.Compact(out)
-}
-
-// missingFacts 是 facts 里在 text 中找不到的（小写、空白合一后按子串比）。
-func missingFacts(text string, facts []string) (out []string) {
-	text = normalizeText(text)
-	for _, f := range facts {
-		if !strings.Contains(text, normalizeText(f)) {
-			out = append(out, f)
-		}
-	}
-	return
-}
+// ---- 关键事实见 facts.go ----
 
 // originSource 是事项的来源 id；本人或 Agent 直接建的事项没有来源（Origin 为空），记为空串。
 func originSource(it domain.Item) string {

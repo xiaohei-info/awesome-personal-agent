@@ -267,7 +267,7 @@ const (
 	RejectOtherChange    = "other_change"    // 同一仓库的不同 PR 号
 	RejectNotSame        = "not_same"        // 本人拆开过
 	RejectNotCandidate   = "not_candidate"   // 去处不在这一条当时的候选里，或合并项不存在、没列这一条
-	RejectFactsMissing   = "facts_missing"   // 整合后的文本或正文缺成员的关键数字或编号
+	RejectFactsMissing   = "facts_missing"   // 整合后的文本或正文缺成员必须保留的事实（金额、日期与时间、单据类编号、明确的数量）
 	RejectActionMismatch = "action_mismatch" // 结论与去处的状态不相配（attach 要进行中，duplicate 要已完成）
 	RejectCombine        = "combine_invalid" // 整合不成立：只剩一条、跨组、标题摘要或正文为空
 	RejectTargetChanged  = "target_changed"  // 落账时去处已经变了

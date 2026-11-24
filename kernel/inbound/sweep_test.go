@@ -195,7 +195,7 @@ func TestMergeBatchPriorityAndIntegration(t *testing.T) {
 	e.verify()
 }
 
-// 关键事实校验：整合文本漏掉成员的一个数字（301）就不整合，两条都留着、载体文本不变，手动合并的报告计 check_failed。
+// 关键事实校验：整合文本漏掉成员的一个时刻（14:00）就不整合，两条都留着、载体文本不变，手动合并的报告计 check_failed。
 // 同一仓库不同 PR 号的两条即使模型放进同一项整合也不合并（other_change）；PR 号相同的已有事项按强标识检索成满分候选，
 // 另一个 PR 的事项检索不拦、照样是候选。
 func TestMergeIntegrationChecks(t *testing.T) {
@@ -209,7 +209,7 @@ func TestMergeIntegrationChecks(t *testing.T) {
 		 {"new":"N2","group":"G1","step":2,"action":"merge","target":"M1","reason":"同一场会","confident":true},
 		 {"new":"N3","group":"G2","step":2,"action":"merge","target":"M2","reason":"同一仓库","confident":true},
 		 {"new":"N4","group":"G2","step":2,"action":"merge","target":"M2","reason":"同一仓库","confident":true}`,
-		`{"merge":"M1","group":"G1","members":["N1","N2"],"title":"季度预算评审会议","summary":"会议 11-28 14:00 开，地点 3 楼会议室","body":"- 会议 11-28 14:00\n- 地点 301"},
+		`{"merge":"M1","group":"G1","members":["N1","N2"],"title":"季度预算评审会议","summary":"会议 11-28 开，地点 3 楼会议室","body":"- 会议 11-28 14:00\n- 地点 301"},
 		 {"merge":"M2","group":"G2","members":["N3","N4"],"title":"org/app PR #220 与 PR #221","summary":"[org/app] fix A (PR #220)；[org/app] fix A (PR #221) T-6661","body":"- PR #220\n- PR #221 T-6661"}`))
 	a := e.proposal("src_a", "a1", "季度预算评审会议改到 11-28 14:00", "")
 	e.now = e.now.Add(time.Minute)
@@ -237,7 +237,7 @@ func TestMergeIntegrationChecks(t *testing.T) {
 		}
 	}
 	rep, err := e.svc.RunManual(bg, cliOwner, ManualFilter{})
-	if err != nil || rep.CheckFailed != 1 || len(rep.Combined) != 2 || !slices.Equal(rep.Combined[0].Missing, []string{"301"}) || len(rep.Groups) != 2 {
+	if err != nil || rep.CheckFailed != 1 || len(rep.Combined) != 2 || !slices.Equal(rep.Combined[0].Missing, []string{"14:00"}) || len(rep.Combined[0].MissingWhy) != 1 || len(rep.Groups) != 2 {
 		t.Fatalf("one integration fails the fact check: %v %+v", err, rep)
 	}
 	for _, it := range []domain.Item{a, b, c, d} {
@@ -246,7 +246,7 @@ func TestMergeIntegrationChecks(t *testing.T) {
 			t.Fatalf("%s stays as it was: %+v", it.Title, got)
 		}
 	}
-	if why := e.item(a.ID).Proposal.Sweep.Why; !strings.Contains(why, "缺少") || !strings.Contains(why, "301") {
+	if why := e.item(a.ID).Proposal.Sweep.Why; !strings.Contains(why, "缺少") || !strings.Contains(why, "「14:00」（日期时间：") {
 		t.Fatalf("why names the missing fact: %q", why)
 	}
 	if sw := e.item(c.ID).Proposal.Sweep; sw.Rejected != domain.RejectOtherChange || !strings.Contains(sw.Why, "另一个 PR") {
@@ -639,17 +639,6 @@ func TestChangeRefAndKeyFacts(t *testing.T) {
 	}
 	if !otherChange("org/app#220", "org/app#221") || otherChange("org/app#220", "org/app#220") || otherChange("org/app#220", "org/web#221") || otherChange("", "org/app#1") {
 		t.Fatal("otherChange")
-	}
-	got := keyFacts("核实 Bitget 840 USDT 提现记录", "提现已于 2026-11-16 22:55（UTC+8）完成，地址 0x82df…5057，手续费 0.01 USDT")
-	want := []string{"0.01", "0x82df", "2026-11-16", "22:55", "5057", "840"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("facts: %q", got)
-	}
-	if miss := missingFacts("Bitget 提现 840 USDT，2026-11-16 22:55，0x82df…5057，手续费 0.01", want); len(miss) != 0 {
-		t.Fatalf("all there: %q", miss)
-	}
-	if miss := missingFacts("Bitget 提现 840 USDT，11 月 16 日晚，0x82df…5057，手续费 0.01", want); !slices.Equal(miss, []string{"2026-11-16", "22:55"}) {
-		t.Fatalf("rewritten dates are missing: %q", miss)
 	}
 }
 

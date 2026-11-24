@@ -97,7 +97,7 @@ func TestMergeIntegrationRewritesBody(t *testing.T) {
 			t.Fatalf("%s stays as it was with %s: %+v", title, code, it.Proposal.Sweep)
 		}
 	}
-	if c := rep.Combined[1]; c.Rejected != domain.RejectFactsMissing || strings.Join(c.Missing, ",") != "正文：16:00,正文：3.2" {
+	if c := rep.Combined[1]; c.Rejected != domain.RejectFactsMissing || strings.Join(c.Missing, ",") != "正文：16:00,正文：3.2 USDT" {
 		t.Fatalf("the report names what the body misses: %+v", c)
 	}
 	if rep.CheckFailed != 1 || rep.Rejected[domain.RejectFactsMissing] != 2 || rep.Rejected[domain.RejectCombine] != 2 {
