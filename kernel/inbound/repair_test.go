@@ -52,6 +52,19 @@ func (e *env) oldBuild(from, to string, evs []string) {
 	}
 }
 
+// legacyFold 按旧版的样子落一次归类：to 留着，其余逐条 merge 进 to（直接发 inbound.sweep，没有整合）。
+func (e *env) legacyFold(to string, from ...string) {
+	e.t.Helper()
+	if err := e.svc.settle(bg, system, sweepIn{Item: to, Batch: "mb_legacy", Action: domain.SweepKeep, By: "generate", Why: "留着"}); err != nil {
+		e.t.Fatal(err)
+	}
+	for _, id := range from {
+		if err := e.svc.settle(bg, system, sweepIn{Item: id, Batch: "mb_legacy", Action: domain.SweepMerge, Target: to, By: "generate", Why: "同一个 PR #227"}); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+}
+
 func (e *env) lastSeq() (n int64) {
 	e.view(func(tx *store.Tx) {
 		r, err := tx.Query(`SELECT COALESCE(MAX(seq), 0) FROM eventlog_event`)
@@ -71,12 +84,12 @@ func (e *env) lastSeq() (n int64) {
 // 把后者补记进自己的清单；第二遍零变更；修复后撤销合并照样整组搬回。
 func TestRepairMovesWhatOldFoldsLeftBehind(t *testing.T) {
 	e := followEnv(t)
-	keep, _, gp, i, m, g := pr227(e)
+	keep, mid, gp, i, m, g := pr227(e)
 	e.emit("src_github", "pr", ev("h1", "pr.opened", "fix: 设置页保存按钮", map[string]any{"sender": "dev", "link": "https://github.com/org/app/pull/228", "correlation_keys": []string{"org/app#228"}}),
 		ev("h2", "pr.updated", "fix: 设置页保存按钮", map[string]any{"sender": "dev", "link": "https://github.com/org/app/pull/228", "correlation_keys": []string{"org/app#228"}}))
 	other := e.byTitle("fix: 设置页保存按钮")
 	h := e.sev("src_github", "h1", "h2")
-	e.sweep227()
+	e.legacyFold(keep.ID, mid.ID, gp.ID) // 旧版那次归类：mid、gp 并进 keep（没有整合）
 	e.oldBuild(gp.ID, keep.ID, g[1:])
 	e.oldBuild(other.ID, "", h[1:])
 	all := append(append(append([]string{}, i...), m...), g[0])

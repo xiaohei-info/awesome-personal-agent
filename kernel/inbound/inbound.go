@@ -137,6 +137,9 @@ type Service struct {
 	// sweeping 让同一时刻只有一批合并归类；sweepAfter 是模型调用失败后的退避（只在内存）。
 	sweeping   sync.Mutex
 	sweepAfter time.Time
+	// sweepCap 非零时是本进程里一批的条数上限：某批同样大小两次回答都不完整后降到 sweepFallback。
+	// shortcut: 只在内存，重启后回到策略批量；要长期降就在设置里把批量改小。
+	sweepCap atomic.Int32
 	// captures 跟踪捕获触发的后台处理；测试在关账本前等它们退出，否则提交后钩子会撞上已关闭的连接。
 	captures sync.WaitGroup
 }

@@ -155,6 +155,8 @@ type Call struct {
 	Scope Scope
 	// NoStats 为真时不附带统计（web_only 初筛，§8.4）。
 	NoStats bool
+	// Fresh 为真时不复用指纹相同的旧结果、照常发请求，答上了就覆盖旧结果：调用方判定上一次的回答不可用（如不完整）时重问。
+	Fresh bool
 
 	// Actor 是触发这次调用的入口（Via 必填；Run、Harness 等照记）。类型缺省记为 agent，调用方给出的类型照记。
 	Actor      domain.Actor
@@ -179,6 +181,8 @@ type Step struct {
 	Reused      bool            `json:"reused"`
 	Result      json.RawMessage `json:"result"`
 	Stats       *Stats          `json:"stats,omitempty"`
+	ElapsedMS   int64           `json:"elapsed_ms,omitempty"`   // 这次模型请求的墙钟（含端点侧失败的重试）；复用时为 0
+	OutputChars int             `json:"output_chars,omitempty"` // 模型回答的字数（端点不回报用量，靠它判断离输出上限还有多远）
 }
 
 // Outcome 是一次 Call 的结果。Steps 按级联顺序，最后一级是最终答案。
@@ -459,12 +463,15 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 
 	step := Step{RunID: id, Category: m.Agent, Template: tmpl, Fingerprint: p.fp, Stats: p.stats}
 	var callErr error
-	if p.cached != nil {
+	if p.cached != nil && !c.Fresh {
 		step.Reused, step.Result = true, p.cached
 	} else {
 		req := PromptRequest(pr, c, id, p.stats, schema)
 		var resp model.Response
-		if resp, callErr = s.complete(ctx, p.ep, req, s.o.Attempts); callErr == nil {
+		t0 := s.o.Now()
+		resp, callErr = s.complete(ctx, p.ep, req, s.o.Attempts)
+		step.ElapsedMS, step.OutputChars = s.o.Now().Sub(t0).Milliseconds(), len([]rune(resp.Content))
+		if callErr == nil {
 			step.Result = json.RawMessage(resp.Content)
 			if m.Agent == "judge" {
 				step.Result = normalizeJudgement(step.Result)
@@ -633,10 +640,17 @@ func (s *Service) record(ctx context.Context, c Call, st Step, fp string, callEr
 	if st.Stats != nil {
 		payload["stats"] = st.Stats
 	}
+	if !st.Reused && st.Category == "generate" { // 判断型只写回枚举、ref、置信度（§8.1）
+		payload["elapsed_ms"], payload["output_chars"] = st.ElapsedMS, st.OutputChars
+	}
 	switch {
 	case callErr != nil:
 		state = "failed"
 		payload["error"] = errKind(callErr)
+		var se *model.SchemaError
+		if errors.As(callErr, &se) && se.Shape != "" {
+			payload["shape"] = se.Shape // 如 truncated：输出到了上限被截断
+		}
 	case st.Category == "judge":
 		// 判断型只写回枚举、ref、置信度（§8.1）。
 		payload["ref"] = c.Target
@@ -666,7 +680,11 @@ func (s *Service) record(ctx context.Context, c Call, st Step, fp string, callEr
 	}
 	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		if callErr == nil && !st.Reused {
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO direct_result (fingerprint, result, created_at) VALUES (?, ?, ?)`,
+			verb := "INSERT OR IGNORE"
+			if c.Fresh {
+				verb = "INSERT OR REPLACE" // 重问的回答取代被判不可用的旧结果
+			}
+			if _, err := tx.Exec(verb+` INTO direct_result (fingerprint, result, created_at) VALUES (?, ?, ?)`,
 				fp, string(st.Result), s.o.Now().UnixNano()); err != nil {
 				return err
 			}

@@ -42,10 +42,18 @@ func TestMergeDryRunNeedsNoStopAndApplyRefusesWithoutHostEntry(t *testing.T) {
 		t.Fatal("refusal and dry run must not touch the ledger")
 	}
 	for _, bad := range [][]string{{"merge"}, {"merge", "nope"}, {"merge", "run", "--dry-run", "--apply"}, {"merge", "run", "--by", "x"},
-		{"merge", "run", "--since", "yesterday"}, {"merge", "run", "--limit", "-1"}, {"merge", "run", "extra"}} {
+		{"merge", "run", "--since", "yesterday"}, {"merge", "run", "--limit", "-1"}, {"merge", "run", "extra"},
+		{"merge", "run", "--with-model", "--apply"}, {"merge", "mark-pending", "--with-model"}} {
 		if r := apa(t, home, "", bad...); r.code != 2 {
 			t.Fatalf("%v must be a usage error: %+v", bad, r)
 		}
+	}
+	// --with-model 也只在副本上跑（这里没有待归类，不调模型）：服务开着也行，真账本不动。
+	if r := apa(t, home, "", "merge", "run", "--dry-run", "--with-model"); r.code != 0 || !strings.Contains(r.out, `"with_model":true`) || !strings.Contains(r.out, `"dry_run":true`) {
+		t.Fatalf("run --dry-run --with-model: %+v", r)
+	}
+	if after, _ := os.Stat(ledger); !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size() {
+		t.Fatal("a dry run with the model must not touch the ledger")
 	}
 	l.Close()
 	for range 2 { // 没有服务：离线跑

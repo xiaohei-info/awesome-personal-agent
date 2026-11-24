@@ -53,50 +53,44 @@ func (e *env) sweepNow() {
 	}
 }
 
-func mergeReply(action string) modelstub.Reply {
-	return modelstub.Reply{Content: `{"decisions":[{"new":"N1","action":"` + action + `","target":"E1","reason":"N1 与 E1 是同一件事","confident":true}]}`}
+// stepOneReply 是一条成员第 1 步落到 E1 的回答。
+func stepOneReply(action string) modelstub.Reply {
+	return reply(`{"group":"G1","topic":"同一件事","members":["N1"]}`,
+		`{"new":"N1","group":"G1","step":1,"action":"`+action+`","target":"E1","reason":"N1 与 E1 是同一件事","confident":true}`, ``)
 }
 
-// 合并护栏：相似但属于别的项目的记录不当候选、不送模型，新建议按规则留着；同一项目的照常合并，去处记下被并那条的原始标题与 origin.ref。
-// 护栏加之前，跨项目的那条会作为候选送给模型并被合并。
+// 合并护栏：相似但属于别的项目的事项不当候选、不送模型；模型把它判给同组另一条的去处时，落账前也拦下。
+// 同一项目的照常并入，去处记下被并那条的原始标题、原始摘要与 origin.ref。
 func TestMergeGuardBlocksCrossProjectCandidates(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 2 })
-	e.stub.When(batchMark, mergeReply(domain.SweepMerge))
-	a := e.proposal("src_a", "a1", "季度预算评审会议", e.web)
-	e.sweepNow()
-	if e.item(a.ID).Proposal.Sweep.State != "done" || e.batchCalls() != 0 {
-		t.Fatalf("the first proposal has nothing to compare: %+v", e.item(a.ID).Proposal.Sweep)
-	}
-
+	open := e.openIn("季度预算评审会议", e.web)
+	e.stub.When(batchMark, reply(`{"group":"G1","topic":"预算评审会议","members":["N1","N2"]}`,
+		`{"new":"N1","group":"G1","step":1,"action":"attach","target":"E1","reason":"同一场会","confident":true},
+		 {"new":"N2","group":"G1","step":1,"action":"attach","target":"E1","reason":"同一场会","confident":true}`, ``))
 	b := e.proposal("src_b", "b1", "季度预算评审会议改到周五", e.mail)
-	e.sweepNow()
-	got := e.item(b.ID)
-	if got.Phase != domain.PhaseProposed || got.Proposal.Sweep.Action != domain.SweepKeep || !strings.Contains(got.Proposal.Sweep.Why, "别的项目") || e.batchCalls() != 0 {
-		t.Fatalf("a look-alike in another project must not be a candidate: %s %+v, calls %d", got.Phase, got.Proposal.Sweep, e.batchCalls())
-	}
-	if ap := e.item(a.ID).Proposal; len(ap.Merges) != 0 || len(ap.Absorbed) != 0 {
-		t.Fatalf("target untouched: %+v", ap)
-	}
-
+	e.now = e.now.Add(time.Minute)
 	c := e.proposal("src_c", "c1", "季度预算评审会议改期", e.web)
+	dry, err := e.svc.PlanManual(bg, ManualFilter{})
+	if err != nil || len(dry.Ask) != 2 || len(dry.Ask[0].Candidates) != 0 || len(dry.Ask[0].Blocked) != 1 || dry.Ask[0].Blocked[0].Item != open || len(dry.Ask[1].Candidates) != 1 {
+		t.Fatalf("the cross-project item is blocked, the same-project one is a candidate: %v %+v", err, dry.Ask)
+	}
 	e.sweepNow()
 	if e.batchCalls() != 1 {
-		t.Fatalf("same project goes to the model, got %d calls", e.batchCalls())
+		t.Fatalf("one call, got %d", e.batchCalls())
 	}
-	for _, r := range e.stub.Requests() {
-		if strings.Contains(r.BodyText, batchMark) && strings.Contains(r.BodyText, b.Title) {
-			t.Fatal("the cross-project record must not be sent as a candidate")
-		}
+	got := e.item(b.ID)
+	if got.Phase != domain.PhaseProposed || got.Proposal.Sweep.Action != domain.SweepKeep || !strings.Contains(got.Proposal.Sweep.Why, "不同项目") {
+		t.Fatalf("a look-alike in another project must not fold: %s %+v", got.Phase, got.Proposal.Sweep)
 	}
-	if got := e.item(c.ID); got.Phase != domain.PhaseDropped || got.Proposal.Sweep.Action != domain.SweepMerge || got.Proposal.Sweep.Target != a.ID {
-		t.Fatalf("same-project merge: %s %+v", got.Phase, got.Proposal.Sweep)
+	if got := e.item(c.ID); got.Phase != domain.PhaseDropped || got.Proposal.Sweep.Action != domain.SweepAttach || got.Proposal.Sweep.Target != open {
+		t.Fatalf("same-project attach: %s %+v", got.Phase, got.Proposal.Sweep)
 	}
-	ab := e.item(a.ID).Proposal.Absorbed
-	if len(ab) != 1 || ab[0].Item != c.ID || ab[0].Title != c.Title || ab[0].Source != "src_c" || ab[0].Ref == "" || ab[0].Ref != c.Origin.Ref ||
-		ab[0].Action != domain.SweepMerge || ab[0].Project != e.web || !ab[0].Created.Equal(c.CreatedAt) {
-		t.Fatalf("the target keeps the folded title and origin.ref: %+v (origin %+v)", ab, c.Origin)
+	ab := e.item(open).Proposal.Absorbed
+	if len(ab) != 1 || ab[0].Item != c.ID || ab[0].Title != c.Title || ab[0].Summary != c.Summary || ab[0].Source != "src_c" || ab[0].Ref == "" || ab[0].Ref != c.Origin.Ref ||
+		ab[0].Action != domain.SweepAttach || ab[0].Project != e.web || !ab[0].Created.Equal(c.CreatedAt) {
+		t.Fatalf("the target keeps the folded title, summary and origin.ref: %+v (origin %+v)", ab, c.Origin)
 	}
 	e.verify()
 }
@@ -146,8 +140,8 @@ func TestMarkPendingThenManualMerge(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 2 })
-	tgt := e.proposal("src_mail", "m1", "整理报销单据 R2201", "")
-	e.sweepNow() // 只有它一条：留着
+	tgt := e.item(e.openItem("整理报销单据 R2201"))
+	e.transition(tgt.ID, domain.PhaseDone)
 	var made struct{ ID string }
 	_ = json.Unmarshal(e.must("item.create", map[string]any{"kind": "task", "title": "整理报销单据 R2201（清单）", "phase": "proposed", "reason": "migrate",
 		"origin": map[string]any{"source": "agent:vault-migrate", "ref": "todo-migrate:abc"}}), &made)
@@ -176,7 +170,7 @@ func TestMarkPendingThenManualMerge(t *testing.T) {
 		t.Fatalf("audit event: %+v", last)
 	}
 	h = e.head()
-	if rep, err = e.svc.MarkPending(bg, cliOwner, "tester", ManualFilter{}, true); err != nil || len(rep.Marked) != 0 || e.head() != h || rep.Skipped["already_marked"] != 2 {
+	if rep, err = e.svc.MarkPending(bg, cliOwner, "tester", ManualFilter{}, true); err != nil || len(rep.Marked) != 0 || e.head() != h || rep.Skipped["already_marked"] != 1 {
 		t.Fatalf("second mark is a no-op: %+v %v", rep, err)
 	}
 
@@ -192,27 +186,27 @@ func TestMarkPendingThenManualMerge(t *testing.T) {
 	if err != nil || e.head() != h || e.batchCalls() != 0 {
 		t.Fatalf("dry run writes nothing and calls no model: %v", err)
 	}
-	if dry.Matched != 1 || len(dry.Ask) != 1 || dry.Ask[0].Item != mig.ID || dry.Ask[0].Ref != "todo-migrate:abc" ||
-		len(dry.Ask[0].Candidates) != 1 || dry.Ask[0].Candidates[0].Item != tgt.ID || dry.Ask[0].Candidates[0].Ref != tgt.Origin.Ref ||
-		len(dry.Groups) != 1 || len(dry.Groups[0]) != 2 || dry.Batch == "" || dry.Chars == 0 {
+	if dry.Matched != 1 || len(dry.Ask) != 1 || dry.Ask[0].Item != mig.ID || dry.Ask[0].Ref != "todo-migrate:abc" || dry.Ask[0].Num != "N1" ||
+		len(dry.Ask[0].Candidates) != 1 || dry.Ask[0].Candidates[0].Item != tgt.ID || dry.Ask[0].Candidates[0].Phase != domain.PhaseDone ||
+		len(dry.Groups) != 0 || dry.Batch == "" || dry.Chars == 0 {
 		t.Fatalf("dry plan: %+v", dry)
 	}
 
 	// 真跑：同一份规则层结果，一次模型调用，判定重复；去处留下溯源。
-	e.stub.When(batchMark, mergeReply(domain.SweepDuplicate))
+	e.stub.When(batchMark, stepOneReply(domain.SweepAttach)) // 去处已完成：内核按阶段定为判定重复
 	run, err := e.svc.RunManual(bg, cliOwner, ManualFilter{})
 	if err != nil || e.batchCalls() != 1 {
 		t.Fatalf("apply: %v, calls %d", err, e.batchCalls())
 	}
 	strip := func(r ManualReport) string {
-		r.DryRun, r.Decisions = false, nil
+		r.DryRun, r.Decisions, r.Groups, r.Combined, r.CheckFailed, r.Calls = false, nil, nil, nil, 0, nil
 		b, _ := json.Marshal(r)
 		return string(b)
 	}
 	if strip(run) != strip(dry) {
 		t.Fatalf("dry run and apply must match:\n%s\n%s", strip(dry), strip(run))
 	}
-	if len(run.Decisions) != 1 || run.Decisions[0].Action != domain.SweepDuplicate || run.Decisions[0].Target != tgt.ID {
+	if len(run.Decisions) != 1 || run.Decisions[0].Action != domain.SweepDuplicate || run.Decisions[0].Target != tgt.ID || run.Decisions[0].Topic != "同一件事" || len(run.Groups) != 1 {
 		t.Fatalf("decisions: %+v", run.Decisions)
 	}
 	got := e.item(mig.ID)
@@ -250,11 +244,10 @@ func TestManualRunHoldsTheSweepLockOnlyToLand(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
 	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 5 })
-	tgt := e.proposal("src_mail", "m1", "整理报销单据 R2201", "")
-	e.sweepNow()
+	tgt := e.item(e.openItem("整理报销单据 R2201"))
 	n := e.proposal("src_web", "w1", "整理报销单据 R2201（补发票）", "")
 	e.now = e.now.Add(31 * time.Minute) // 先拨好钟：下面两路并发只读它
-	r := mergeReply(domain.SweepMerge)
+	r := stepOneReply(domain.SweepAttach)
 	r.Delay = 400 * time.Millisecond
 	e.stub.When(batchMark, r)
 	done := make(chan error, 1)
@@ -275,7 +268,7 @@ func TestManualRunHoldsTheSweepLockOnlyToLand(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if got := e.item(n.ID); got.Phase != domain.PhaseDropped || got.Proposal.Sweep.Target != tgt.ID || e.batchCalls() != 2 {
+	if got := e.item(n.ID); got.Phase != domain.PhaseDropped || got.Proposal.Sweep.Target != tgt.ID || got.Proposal.Sweep.Action != domain.SweepAttach || e.batchCalls() != 2 {
 		t.Fatalf("folded once: %s %+v, calls %d", got.Phase, got.Proposal.Sweep, e.batchCalls())
 	}
 	if ab := e.item(tgt.ID).Proposal.Absorbed; len(ab) != 1 {

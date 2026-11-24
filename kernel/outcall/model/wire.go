@@ -15,8 +15,9 @@ import (
 const (
 	// outputTool 是消息协议里承载结构化输出的工具名：tool_choice 强制调用它，结果取它的 input。
 	outputTool = "output"
-	// messagesMaxTokens 是消息协议必填的 max_tokens；强制工具调用时模型不先思考（附录 D.7），起草的输出远小于它。
-	messagesMaxTokens = 4096
+	// messagesMaxTokens 是消息协议必填的 max_tokens（上限，不是用量）；强制工具调用时模型不先思考（附录 D.7）。
+	// 合并一批 100 条的分组与结论约 9 千 token（§9.3），4096 会截断；起草的输出远小于它，不受影响。
+	messagesMaxTokens = 16384
 	// messagesVersion 是消息协议的版本头取值。
 	messagesVersion = "2023-06-01"
 )

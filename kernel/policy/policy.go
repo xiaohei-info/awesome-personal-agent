@@ -184,7 +184,7 @@ const (
 )
 
 // MergeSettings 是跨来源合并任务本身的设置（§9.3）。零值即默认：全部来源参与、纳入已有事项与被忽略记录、
-// 攒够 20 条或最早一条等了 30 分钟成批、一批资料至多 DefaultMergeBudgetTokens、用内置提示词。用排除名单而不是勾选名单，以后新接的来源默认参与。
+// 攒够 100 条或最早一条等了 30 分钟成批、一批资料至多 DefaultMergeBudgetTokens、用内置提示词。用排除名单而不是勾选名单，以后新接的来源默认参与。
 type MergeSettings struct {
 	ExcludeSources []string `json:"exclude_sources"`
 	SkipExisting   bool     `json:"skip_existing"`
@@ -212,7 +212,8 @@ func (m MergeSettings) MinScore() float64 { return SimilarityMin[m.Similarity] }
 
 // 合并批量参数的默认值与范围。
 const (
-	DefaultMergeBatch = 20
+	DefaultMergeBatch = 100
+	MaxMergeBatch     = 100
 	DefaultMergeWait  = 30
 	MaxMergePrompt    = 8000
 
@@ -665,8 +666,8 @@ func normalize(p Policy) (Policy, error) {
 	if !oneOf(p.MergeJudge, "", MergeSame, MergeOff) {
 		return p, invalid("merge_judge %q: use same or off", p.MergeJudge)
 	}
-	if m := p.Merge; m.BatchSize != 0 && (m.BatchSize < 2 || m.BatchSize > 50) {
-		return p, invalid("merge batch_size %d: use 2 to 50", m.BatchSize)
+	if m := p.Merge; m.BatchSize != 0 && (m.BatchSize < 2 || m.BatchSize > MaxMergeBatch) {
+		return p, invalid("merge batch_size %d: use 2 to %d", m.BatchSize, MaxMergeBatch)
 	}
 	if m := p.Merge; m.WaitMinutes != 0 && (m.WaitMinutes < 5 || m.WaitMinutes > 1440) {
 		return p, invalid("merge wait_minutes %d: use 5 to 1440", m.WaitMinutes)
