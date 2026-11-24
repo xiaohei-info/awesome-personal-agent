@@ -261,6 +261,9 @@ const (
 	SweepUndone    = "undone"    // 本人撤销了折叠
 )
 
+// SweepByBulk 是本人批量接受时按合并键相同折叠的判断方（ProposalSweep.By、ProposalMerge.By，§7.2）：不是自动归类，不进"最近自动归类"。
+const SweepByBulk = "bulk"
+
 // 第 6 层校验（落账前）拒绝一条折叠结论的类别码（ProposalSweep.Rejected）：被拒的一律留着。
 const (
 	RejectCrossProject   = "cross_project"   // 去处（或整合的另一条）属于另一个项目
@@ -291,13 +294,15 @@ type ProposalSweep struct {
 	At       *time.Time `json:"at,omitempty"`
 	// Rejected 是第 6 层校验拒绝模型结论的类别码（domain.Reject*），被拒后这条留着；空为没有被拒。
 	Rejected string `json:"rejected,omitempty"`
-	// Group 与 Topic 是归类时模型给的分组（批号/G<k>）与主题：建议页按它把同组的建议放在一起，可整组处理。
+	// Group 与 Topic 是归类时模型给的分组（批号/G<k>）与主题：下一批作已有主题沿用；建议页的分组不读它（§7.2）。
 	Group string `json:"group,omitempty"`
 	Topic string `json:"topic,omitempty"`
 	// Backfill 是本人补打的待归类标记（apa merge mark-pending）：维护循环不自动归类它，只由 apa merge run --apply 处理；归类后保留。
 	Backfill *SweepBackfill `json:"backfill,omitempty"`
 	// Retry 记这条建议被 apa merge run --retry-rejected 重新纳入过：上一次判定的批号、拒绝码与原因。有它说明重判过一次，不再重复纳入。
 	Retry *SweepRetry `json:"retry,omitempty"`
+	// Prev 是批量接受折叠这一条之前它的归类记录（By 为 bulk 时才有）：按批撤销时原样恢复，建议回到折叠前的状态。
+	Prev *ProposalSweep `json:"prev,omitempty"`
 }
 
 // SweepRetry 是一条被退回的建议重新纳入待归类时留下的来源：Of 是上一次判定的批号，Rejected 与 Why 是那次的拒绝码与原因，At 是纳入时刻。

@@ -509,6 +509,16 @@ func (e *Env) WebRaw(method, path, body string, session bool) Resp {
 // Web 以已登录的本人会话请求内核（等同于 Web 页面调用的 HTTP API）。
 func (e *Env) Web(method, path, body string) Resp { return e.WebRaw(method, path, body, true) }
 
+// WebWith 同 Web，另带请求头（如页面发批量时带的 Idempotency-Key）。
+func (e *Env) WebWith(method, path, body string, extra map[string]string) Resp {
+	e.T.Helper()
+	hdr := map[string]string{"Cookie": "apa_session=" + e.session, "X-CSRF-Token": e.csrf}
+	for k, v := range extra {
+		hdr[k] = v
+	}
+	return e.do(method, path, body, hdr)
+}
+
 // APIRaw 以 Bearer 凭据请求内核。
 func (e *Env) APIRaw(method, path, body, token string) Resp {
 	e.T.Helper()

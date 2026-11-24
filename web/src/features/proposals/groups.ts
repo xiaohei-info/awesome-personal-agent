@@ -1,34 +1,14 @@
-// 建议页的分组与折叠（主文档 §7.2）：只按结构化字段（kind、优先级、起草的 urgent、GET /items?phase=proposed 的 origins），不读标题与正文。
+// 建议页的分组（主文档 §7.2）：分组由内核按合并键、来源类别与标题现算，随 GET /items?phase=proposed 的 groups 给出；
+// 本页只按它摆放、折叠，算批量的条数，不自己判类。
 
 /** origins 里的一条：第一条来源事件的类型、所属上游对象、对象已结束的依据（内核判定，附录 B.2）。 */
 export interface Origin { type?: string; object?: string; ended?: { event: string; type: string; at: string } }
 
-export interface Groupable {
-  id: string;
-  kind?: string;
-  priority?: string;
-  origin?: { source: string };
-  proposal?: { urgent?: boolean };
-}
+/** groups 里的一组：kind 为 pinned | topic | object | hosted | history | rest；items 按建立先后；bundles 是接受时合成一个事项的几条。 */
+export interface Group { key: string; kind: string; topic?: string; items: string[]; bundles?: string[][]; first: string; last: string }
 
-/** 需要本人拍板的：决定与承诺、起草判为紧急、优先级高或紧急。任何分组与折叠都不收起它们。 */
-export const needsYou = (i: Groupable): boolean =>
-  i.kind === "decision" || i.kind === "commitment" || i.proposal?.urgent === true || i.priority === "high" || i.priority === "urgent";
-
-/** 来源事件类型的大类（类型约定 <对象>.<动作>，取对象）；没有来源事件的为空串。 */
-export const family = (type?: string): string => (type ? type.split(".")[0] : "");
-
-/**
- * 历史清单迁移的来源前缀表：origin.source 以其中任一前缀开头的建议是从待办库迁进来的调研/学习类清单，不是当天要办的事，默认折成一组。
- * 按前缀而不是整串匹配，同类迁移来源（agent:vault-*）新增时不改代码；shortcut: 表在代码里，要让本人在设置页改时再升级成策略项。
- */
-// shortcut: 前缀表写在代码里，要让本人在设置页自己改时升级成策略项
-export const HISTORY_SOURCE_PREFIXES = ["agent:vault-"];
-
-export const isHistory = (i: Groupable, prefixes: string[] = HISTORY_SOURCE_PREFIXES): boolean =>
-  !!i.origin && prefixes.some((p) => i.origin!.source.startsWith(p));
-
-export interface ObjectGroup<T> { object: string; ended?: Origin["ended"]; items: T[] }
+/** 旧服务端没给 groups 时：全部逐条列出，不折叠任何一条。 */
+export const fallback = (ids: string[]): Group[] => (ids.length ? [{ key: "rest", kind: "rest", items: ids, first: "", last: "" }] : []);
 
 /** 按出现顺序分组，组按条数从多到少。 */
 export function groupBy<T>(items: T[], key: (i: T) => string): [string, T[]][] {
@@ -40,17 +20,27 @@ export function groupBy<T>(items: T[], key: (i: T) => string): [string, T[]][] {
   return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
 }
 
-/** 拆成四块：需要拍板的（置顶，不进任何折叠）、代码托管通知（属于上游对象的，按对象合组）、历史清单（按来源分组）、其余。 */
-export function arrange<T extends Groupable>(items: T[], origins: Record<string, Origin>) {
-  const pinned = items.filter(needsYou);
-  const hosted = items.filter((i) => !needsYou(i) && origins[i.id]?.object);
-  const history = items.filter((i) => !needsYou(i) && !origins[i.id]?.object && isHistory(i));
-  const rest = items.filter((i) => !needsYou(i) && !origins[i.id]?.object && !isHistory(i));
-  const historySources = groupBy(history, (i) => i.origin!.source);
-  const objects: ObjectGroup<T>[] = groupBy(hosted, (i) => origins[i.id].object!).map(([object, its]) => ({
-    object,
-    ended: its.map((i) => origins[i.id].ended).find(Boolean),
-    items: its,
-  }));
-  return { pinned, hosted, objects, history, historySources, rest };
+/**
+ * 批量接受 ids 会建几个事项：同一份（bundle）里选中的 k 条合成 1 个，其余各 1 个。与内核同一口径（内核执行时按账本现状重算）。
+ * 返回 { items: 新建事项数, merged: 被合进别处的条数, parts: 合成了几个 }。
+ */
+export function acceptPlan(ids: string[], bundles: string[][]) {
+  const chosen = new Set(ids);
+  let merged = 0;
+  let parts = 0;
+  for (const b of bundles) {
+    const k = b.filter((id) => chosen.has(id)).length;
+    if (k > 1) {
+      merged += k - 1;
+      parts++;
+    }
+  }
+  return { items: chosen.size - merged, merged, parts };
+}
+
+/** 上游对象的可读名：PR 与 Issue 写编号，认不出的为空（调用方改用标题）。路径只在悬停里给。 */
+export function objectName(path: string): string {
+  const m = path.match(/\/(pull|pulls|merge_requests|issues)\/(\d+)\/?$/);
+  if (!m) return "";
+  return (m[1] === "issues" ? "Issue #" : "PR #") + m[2];
 }
