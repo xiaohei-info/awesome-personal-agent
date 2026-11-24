@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
@@ -851,8 +852,8 @@ func carrierOf(set []*sweepRec) *sweepRec {
 const cutNoteRoom = 320
 
 // integratedBody 是落到载体上的整合正文：模型写的要点清单在前，后面按成员顺序逐字附上各自的原始正文，每条注明来源、时间、原题与原摘要。
-// 原文先按内容去重：非空且字节逐位相同的正文只附第一份（成员顺序在前的那条），其抬头里写「另有 N 条正文与此完全相同」并列出各条的编号、来源、时间与原题；
-// 只相似、不完全相同的一律各附各的，不做模糊去重。额度在去重之后才分配，省下的归还给留下的原文。
+// 原文先按内容去重：轻量归一化（见 dedupKey）后非空且完全相同的正文只附第一份（成员顺序在前的那条，附的是它的原始字节），其抬头里写「另有 N 条正文与此完全相同」并列出各条的编号、来源、时间与原题；
+// 归一化后仍不同的（前缀、只差一个词、大小写不同）一律各附各的，不做模糊去重。额度在去重之后才分配，省下的归还给留下的原文。
 // 总长不超过 limit 字节：要点清单与每条的抬头整段保留，原文均分余下的额度（从最短的起，用不完的额度留给其余成员），
 // 超出额度的按字节截断（不切开 UTF-8 字符）并写明全文多少、保留多少、截掉多少，以及全文存在哪里。只有要点清单与抬头本身就超限时才会超出。
 func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[string]domain.Source, limit int) string {
@@ -866,11 +867,12 @@ func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[st
 	same := map[int][]int{} // 留下的成员下标 -> 与它正文完全相同、不另附的成员下标
 	first := map[string]int{}
 	for i, m := range set {
-		if k, ok := first[m.it.Body]; ok && m.it.Body != "" {
+		key := dedupKey(m.it.Body)
+		if k, ok := first[key]; ok && key != "" {
 			same[k] = append(same[k], i)
 			continue
 		}
-		first[m.it.Body] = i
+		first[key] = i
 		kept = append(kept, i)
 	}
 	heads := make([]string, n)
@@ -922,6 +924,22 @@ func integratedBody(list string, set []*sweepRec, carrier *sweepRec, srcs map[st
 		}
 	}
 	return b.String()
+}
+
+// dedupKey 是去重比较用的轻量归一化，只用于比较、不写进正文：CRLF 与 CR 视为 LF，去掉每行行尾空白，连续两个以上空行压成一个，去掉整段首尾空白。
+func dedupKey(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	var out []string
+	blank := false
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRightFunc(line, unicode.IsSpace)
+		if line == "" && blank {
+			continue
+		}
+		blank = line == ""
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 // batchRef 是资料里给记录编的号（N1、E3、M2）；理由里出现时换成那条的标题，页面上不出现编号。

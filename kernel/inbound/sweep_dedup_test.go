@@ -97,10 +97,10 @@ func TestMergeBodyDedupStillChecksEveryMember(t *testing.T) {
 	}
 }
 
-// 高度重叠但不完全相同的一律保留：前缀、末尾多一个换行、大小写不同、只差一个字，都各附各的，没有任何「完全相同」标注。
+// 归一化后仍不同的一律保留：前缀、大小写不同、只差一个字、只差一个词，都各附各的，没有任何「完全相同」标注。
 func TestIntegratedBodyNoFuzzyDedup(t *testing.T) {
 	base := "请评审 PR #301。\n涉及 3 个文件，commit 9f3a1c2e。\n"
-	bodies := []string{base, base + "\n", base[:len(base)/2], strings.ToUpper(base), strings.Replace(base, "3 个", "4 个", 1)}
+	bodies := []string{base, base[:len(base)/2], strings.ToUpper(base), strings.Replace(base, "3 个", "4 个", 1), strings.Replace(base, "请评审", "请复核", 1)}
 	var set []*sweepRec
 	for i, b := range bodies {
 		set = append(set, &sweepRec{it: domain.Item{ID: fmt.Sprintf("it_%d", i), Title: fmt.Sprintf("t%d", i), Body: b}})
@@ -113,6 +113,43 @@ func TestIntegratedBodyNoFuzzyDedup(t *testing.T) {
 		if !strings.Contains(got, fmt.Sprintf("【%d/5】", i+1)) || !strings.Contains(got, "原题：「"+set[i].it.Title+"」\n"+b) {
 			t.Fatalf("member %d is attached on its own: %q", i+1, got)
 		}
+	}
+}
+
+// 轻量归一化只用于比较：只差 CRLF/CR、行尾空白、连续空行个数、首尾空白的判为相同只附一份，附上的是成员顺序在前那条的原始字节；只差一个词的仍各附各的。
+func TestIntegratedBodyDedupNormalized(t *testing.T) {
+	lf := "请评审 PR #301。\n涉及 3 个文件。\n\n截止 2026-11-30。"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+	mk := func(bodies ...string) (set []*sweepRec) {
+		for i, b := range bodies {
+			set = append(set, &sweepRec{it: domain.Item{ID: fmt.Sprintf("it_%d", i), Title: fmt.Sprintf("t%d", i), Body: b}})
+		}
+		return
+	}
+	cases := []struct{ name, a, b string }{
+		{"crlf", crlf, lf},
+		{"cr", strings.ReplaceAll(lf, "\n", "\r"), lf},
+		{"blank lines", strings.Replace(lf, "\n\n", "\n\n\n\n", 1), lf},
+		{"trailing space and outer blanks", "\n  " + strings.ReplaceAll(lf, "\n", " \t\n") + "\n\n", "  " + lf},
+	}
+	for _, c := range cases {
+		got := integratedBody("- 清单", mk(c.a, c.b), nil, nil, policy.DefaultMergeBodyBytes)
+		if !strings.Contains(got, "（另有 1 条正文与此完全相同") || strings.Contains(got, "【2/2】来源：") && strings.Count(got, "【2/2】") != 1 {
+			t.Fatalf("%s: judged identical, attached once: %q", c.name, got)
+		}
+		// 附上的是第一条的原始字节，不是归一化后的文本。
+		if !strings.HasSuffix(got, "）\n"+c.a) {
+			t.Fatalf("%s: raw bytes of the first member are attached: %q", c.name, got)
+		}
+	}
+	if got := integratedBody("- 清单", mk(crlf, lf), nil, nil, policy.DefaultMergeBodyBytes); strings.Count(got, "\r\n") != strings.Count(crlf, "\r\n") {
+		t.Fatalf("CRLF kept byte for byte: %q", got)
+	}
+	// 只差一个词：归一化后仍不同，两条都附。
+	other := strings.Replace(crlf, "评审", "复核", 1)
+	got := integratedBody("- 清单", mk(crlf, other), nil, nil, policy.DefaultMergeBodyBytes)
+	if strings.Contains(got, "完全相同") || !strings.Contains(got, crlf) || !strings.Contains(got, other) {
+		t.Fatalf("one word apart: both kept: %q", got)
 	}
 }
 
