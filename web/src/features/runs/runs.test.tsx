@@ -76,7 +76,7 @@ describe("诊断 › 运行记录（flow-bg-main-session、flow-outcall-limits�
     expect(screen.queryByText("会话 sess-abc")).not.toBeInTheDocument();
     await userEvent.click(row);
     expect(row).toHaveAttribute("aria-expanded", "true");
-    for (const part of ["由规则「handle-labelled」发起", "会话 sess-abc", "权限：可改文件", "连锁第 1 层", "时限 600 秒", "policy v7", "r1"]) {
+    for (const part of ["由规则「handle-labelled」发起", "会话 sess-abc", "权限：可改文件", "连锁第 1 层", "时限 10 分钟", "policy v7", "r1"]) {
       expect(await screen.findByText(new RegExp(part))).toBeInTheDocument();
     }
     expect(screen.getByRole("link", { name: "查看事项" })).toHaveAttribute("href", "/items/i1");
@@ -163,7 +163,8 @@ describe("诊断 › 运行记录（flow-bg-main-session、flow-outcall-limits�
     const t2 = { id: "run_t2", category: "background", runner: "task", launch: "headless", target: "i2", state: "timeout", started_at: "2030-01-03T05:00:00Z", finished_at: "2030-01-03T09:00:00Z", timeout: 14400 };
     const s = server([bg, timedOut, t1, t2]);
     mount(s.impl, "/runs?state=timeout&ids=run_t1,run_t2");
-    expect(await screen.findByText("当前只显示选中的 2 条超时运行")).toBeInTheDocument();
+    expect(await screen.findByText(/当前只显示选中的 2 条超时运行/)).toBeInTheDocument();
+    expect(screen.getByText("到点停止的运行，事项状态未变，可以继续。")).toBeInTheDocument();
     expect(s.calls).toContain("/v1/runs?limit=100&state=timeout");
     expect(lines()).toHaveLength(2);
     expect(lines().join(" ")).toContain("整理周报");

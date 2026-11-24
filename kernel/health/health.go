@@ -324,7 +324,8 @@ func outcall(tx *store.Tx, now time.Time) (Outcall, error) {
 		current := latest[key(r.Run)] == r.Run.ID && (r.Run.FinishedAt == nil || now.Sub(*r.Run.FinishedAt) < StaleAfter)
 		switch {
 		case !current:
-		case r.Run.State == domain.RunTimeout:
+		case r.Run.State == domain.RunTimeout && (r.Run.Category == domain.RunTask || r.Run.Category == domain.RunBackground):
+			// 只算 Agent 后台运行（含任务型：同一个时限，同一个说法，§13.6）；来源抓取与判断、生成调用的超时不经这里。
 			out.Timeouts = append(out.Timeouts, r.Run)
 		case r.Run.State == domain.RunFailed && (r.Run.Category == domain.RunTask || r.Run.Category == domain.RunBackground):
 			out.Failures = append(out.Failures, r.Run)

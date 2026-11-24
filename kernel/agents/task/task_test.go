@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -147,6 +148,22 @@ type env struct {
 	dir  string
 	done chan proc.Result
 	errs chan error
+	// now 只给调度器用：测试推进它就能让任务型到点超时（与后台运行同一个时限）。
+	nowMu sync.Mutex
+	now   time.Time
+}
+
+func (e *env) clock() time.Time {
+	e.nowMu.Lock()
+	defer e.nowMu.Unlock()
+	return e.now
+}
+
+// advance 推进调度器时钟。
+func (e *env) advance(d time.Duration) {
+	e.nowMu.Lock()
+	e.now = e.now.Add(d)
+	e.nowMu.Unlock()
 }
 
 func setup(t *testing.T) *env {
@@ -163,7 +180,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{t: t, st: st, runs: filepath.Join(t.TempDir(), "runs"), dir: t.TempDir(),
+	e := &env{t: t, st: st, runs: filepath.Join(t.TempDir(), "runs"), dir: t.TempDir(), now: t0,
 		done: make(chan proc.Result, 8), errs: make(chan error, 8)}
 	e.x = command.New(st, func() time.Time { return t0 })
 	for _, err := range []error{projects.Register(e.x), items.Register(e.x, items.NewKinds()), executors.Register(e.x, executors.Options{Owner: "owner"}),
@@ -198,6 +215,7 @@ func setup(t *testing.T) *env {
 	var svc *Service
 	e.disp = proc.New(st, config.Config{MaxSubprocesses: 2, MaxShortSubprocesses: 1}, proc.Options{
 		Env:      func(r domain.Run) map[string]string { return svc.Env(r) },
+		Now:      e.clock,
 		OnResult: func(r proc.Result) { svc.Settle(bg, r); e.done <- r },
 	})
 	t.Cleanup(e.disp.Close)
@@ -727,6 +745,7 @@ func TestFailureGoesToOwnerWithoutRetry(t *testing.T) {
 }
 
 // §8.3（2026-11-20 改写）：超时同样是运行故障：事项阶段不变，run.finished 带 timeout 类别码。
+// 任务型与后台运行共用策略里的同一个时限（§13.6）：模板里残留的 timeout 声明不再生效。
 func TestTimeoutGoesToOwner(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "hang")
@@ -734,6 +753,17 @@ func TestTimeoutGoesToOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if rs := e.runList(); len(rs) == 1 && rs[0].Run.State == domain.RunRunning {
+			if rs[0].Run.TimeoutSec != policy.DefaultBackgroundRunTimeoutSec {
+				t.Fatalf("timeout = %d, want the unified background default %d (template timeout must be ignored)", rs[0].Run.TimeoutSec, policy.DefaultBackgroundRunTimeoutSec)
+			}
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e.advance(time.Duration(policy.DefaultBackgroundRunTimeoutSec)*time.Second + time.Second)
 	if res := e.waitResult(); res.Run.State != domain.RunTimeout {
 		t.Fatalf("run state %s", res.Run.State)
 	}
@@ -743,9 +773,14 @@ func TestTimeoutGoesToOwner(t *testing.T) {
 	assertFaultEvent(t, e, out.Item, domain.FaultTimeout, "timeout")
 }
 
-// assertFaultEvent：事项上的 run.finished 是失败、写明结果没落账、带类别码，失败附注含 want。
+// assertFaultEvent：事项上的 run.finished 是运行故障（超时记 timeout，其余记 failed）、写明结果没落账、带类别码，失败附注含 want。
+// want 是失败附注里应出现的片段；state 按类别码的终态判。
 func assertFaultEvent(t *testing.T, e *env, item string, code domain.RunFaultCode, want string) {
 	t.Helper()
+	state := string(domain.RunFailed)
+	if code == domain.FaultTimeout {
+		state = string(domain.RunTimeout)
+	}
 	for _, ev := range e.eventsOfType(domain.EvRunFinished) {
 		if ev.Object != item {
 			continue
@@ -759,7 +794,7 @@ func assertFaultEvent(t *testing.T, e *env, item string, code domain.RunFaultCod
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			t.Fatal(err)
 		}
-		if p.State != "failed" || p.Recorded == nil || *p.Recorded || p.Fault == nil || p.Fault.Code != code || !strings.Contains(p.Error, want) {
+		if p.State != state || p.Recorded == nil || *p.Recorded || p.Fault == nil || p.Fault.Code != code || !strings.Contains(p.Error, want) {
 			t.Fatalf("run.finished payload: %s", ev.Payload)
 		}
 		return

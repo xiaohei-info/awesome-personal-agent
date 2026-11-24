@@ -84,8 +84,6 @@ type Options struct {
 	// Host 是 APA 主机名，用来判断项目在本机有没有检出；空时取 os.Hostname()，取不到按没有本机检出拒绝。
 	Host string
 	Now  func() time.Time
-	// DefaultTimeout 在模板未声明 timeout 时使用，默认 30 分钟。
-	DefaultTimeout time.Duration
 	// OnError 接收 Settle 里无法交给调用方的错误（落账失败等）；可为空。
 	OnError func(runID string, err error)
 }
@@ -100,9 +98,6 @@ func New(o Options) (*Service, error) {
 	}
 	if o.Now == nil {
 		o.Now = clock.Now
-	}
-	if o.DefaultTimeout <= 0 {
-		o.DefaultTimeout = 30 * time.Minute
 	}
 	if o.Host == "" {
 		o.Host, _ = os.Hostname()
@@ -204,15 +199,6 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	if access == "" {
 		access = "read"
 	}
-	timeout := s.o.DefaultTimeout
-	if pr.Meta.Timeout != "" {
-		d, err := time.ParseDuration(pr.Meta.Timeout)
-		if err != nil || d <= 0 {
-			return Outcome{}, fmt.Errorf("%w: timeout %q", ErrBadTemplate, pr.Meta.Timeout)
-		}
-		timeout = d
-	}
-
 	var hl executors.Headless
 	var selected executors.Selected
 	var forwarded, ran bool
@@ -312,7 +298,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	}
 
 	run := domain.Run{AgentSnapshot: &selected.Snapshot, Runner: "task", Launch: "headless", ID: runID, Category: domain.RunTask, Target: itemID, Harness: t.Harness, SessionID: sessionID,
-		Access: access, TimeoutSec: int(timeout / time.Second)}
+		Access: access, TimeoutSec: int(pol.BackgroundRunTimeout() / time.Second)} // 任务型与 wake 同一来源：策略 background_run_timeout_sec（§13.6）
 	err = s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		it, err := items.Get(tx, itemID)
 		if err != nil {
@@ -821,6 +807,9 @@ func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID,
 	state := "succeeded"
 	if failure != "" {
 		state = "failed"
+	}
+	if run.State == domain.RunTimeout { // 超时是独立终态，写进载荷；推送与健康视图按它说“到点停止”而不是“失败”（§15.2）
+		state = string(domain.RunTimeout)
 	}
 	// recorded 说清"结果落账了没有"：失败时运行者的结果没有写进事项；fault 是运行故障的类别码（§6.11）。
 	body, err := json.Marshal(map[string]any{"run_id": run.ID, "category": "task", "state": state, "via": via,

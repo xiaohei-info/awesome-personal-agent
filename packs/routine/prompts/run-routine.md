@@ -1,6 +1,5 @@
 ---
 agent: task
-timeout: 30m
 access: read
 result_fields:
   - result

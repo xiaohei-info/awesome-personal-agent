@@ -84,7 +84,8 @@ function Detail({ r }: { r: Run }) {
         {r.finished_at && <li>{t.finished(at(r.finished_at))}</li>}
         {r.chain_depth > 0 && <li>{t.depth(r.chain_depth)}</li>}
         {r.exit_code !== undefined && <li>{t.exitCode(r.exit_code)}</li>}
-        {r.timeout ? <li>{t.timeoutSec(r.timeout)}</li> : null}
+        {r.timeout ? <li>{t.runLimit(r.timeout)}</li> : null}
+        {r.state === "timeout" ? <li>{t.timeoutKept}</li> : null}
         {isItemRun(r) && <li><Link to={"/items/" + r.target}>{t.openItem}</Link></li>}
       </ul>
       {raw && <code className="raw-id">{[r.id, r.target, r.harness, r.runner, r.launch, r.basis ? `policy v${r.basis.policy_version}` : ""].filter(Boolean).join(" · ")}</code>}
@@ -169,6 +170,7 @@ export function RunsPage() {
       {(timeoutOnly || selectedIds.length > 0) && (
         <p role="note" className="panel">
           {selectedIds.length > 0 ? t.timeoutFilter(selectedIds.length) : t.timeoutOnly}{" "}
+          <span className="sub">{t.timeoutKept}</span>{" "}
           <button type="button" className="quiet" onClick={clearHealthFilter}>{t.showAll}</button>
         </p>
       )}

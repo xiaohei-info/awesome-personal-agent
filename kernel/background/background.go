@@ -613,8 +613,8 @@ func sessionOf(stdout []byte) string {
 }
 
 // Settle 在运行结束后收尾（供 proc.Options.OnResult 调用；非后台运行忽略）。
-// 失败、超时，或运行结束时目标事项仍是 open，都转 needs_input，不重试（§13.6）；
-// 目标事项已离开 open（done、waiting、运行者自己提了问题）则保留运行者写下的状态。
+// 运行故障（失败、超时、重启时中断）是事件不是问题：记 run.finished（带故障类别码）并进健康视图，不重试也不转 needs_input，事项阶段不变（§6.14 第 20 条）。
+// “跑完了却没交回”（运行结束时目标事项仍是 open）才转 needs_input；运行者自己提了问题则保留它的问题。
 func (s *Service) Settle(ctx context.Context, res proc.Result) {
 	run := res.Run
 	if run.Category != domain.RunBackground {
@@ -684,6 +684,9 @@ func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID,
 	state := "succeeded"
 	if failure != "" {
 		state = "failed"
+	}
+	if run.State == domain.RunTimeout { // 超时是独立终态，写进载荷；推送与健康视图按它说“到点停止”而不是“失败”（§15.2）
+		state = string(domain.RunTimeout)
 	}
 	body, err := json.Marshal(map[string]any{"run_id": run.ID, "category": "background", "runner": run.Runner, "state": state,
 		"session_id": sessionID, "error": failure, "recorded": failure == "", "fault": faultOf(run)})

@@ -1,6 +1,5 @@
 ---
 agent: task
-timeout: 30m
 access: read
 cwd: project_checkout
 result_material: true

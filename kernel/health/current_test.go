@@ -82,12 +82,17 @@ func TestTimeoutSupersededOrStale(t *testing.T) {
 			return proc.Settle(tx, r.ID, state, nil, "x", t0)
 		})
 	}
-	settle(e.enqueue(domain.RunSource, "src_a", t0), domain.RunTimeout)
+	settle(e.enqueue(domain.RunBackground, "item_a", t0), domain.RunTimeout)
 	settle(e.enqueue(domain.RunTask, "item_b", t0), domain.RunTimeout)
 	if v := e.collect(nil); len(v.Outcall.Timeouts) != 2 {
 		t.Fatalf("%+v", v.Outcall.Timeouts)
 	}
-	settle(e.enqueue(domain.RunSource, "src_a", t0), domain.RunFailed)
+	// 来源拉取超时不是"Agent 后台运行超时"，不进这个信号（§15.2）。
+	settle(e.enqueue(domain.RunSource, "src_a", t0), domain.RunTimeout)
+	if v := e.collect(nil); len(v.Outcall.Timeouts) != 2 {
+		t.Fatalf("source timeout counted as a background run timeout: %+v", v.Outcall.Timeouts)
+	}
+	settle(e.enqueue(domain.RunBackground, "item_a", t0), domain.RunFailed)
 	if v := e.collect(nil); len(v.Outcall.Timeouts) != 1 || v.Outcall.Timeouts[0].Target != "item_b" {
 		t.Fatalf("superseded: %+v", v.Outcall.Timeouts)
 	}
