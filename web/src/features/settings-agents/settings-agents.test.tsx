@@ -334,3 +334,35 @@ describe("设置 › Agent：接入其他 Agent", () => {
     await waitFor(() => expect(writes(s, "/settings/commands")).toEqual([{ method: "POST", url: "/v1/settings/commands", body: { harness: "x" } }]));
   });
 });
+
+describe("设置 › Agent › 所有 Agent 共用 › Agent 后台运行时限", () => {
+  it("默认 4 小时；可输入小数小时如 0.5 并保存为秒；超范围在本地拦截不发请求", async () => {
+    const s = server({ live: [hermes(1, "active")] });
+    mount(s.impl, "/settings/agents");
+    const card = (await screen.findByRole("region", { name: "Agent 后台运行时限" }));
+    expect(card).toHaveTextContent("只用来防止运行卡住，不影响事项本身；保存后对新运行生效");
+    expect(card).toHaveTextContent("已在跑的运行不受影响");
+    expect(card).not.toHaveTextContent(/outcall|timeout_sec|wake|proc/);
+    const input = within(card).getByRole("spinbutton");
+    expect(input).toHaveValue(4);
+    expect(within(card).getByText("默认")).toBeInTheDocument();
+
+    // 改为 0.5 小时并保存 → PUT /v1/settings/policy { background_run_timeout_sec: 1800 }
+    await userEvent.clear(input);
+    await userEvent.type(input, "0.5");
+    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(writes(s, "/settings/policy")).toContainEqual({ method: "PUT", url: "/v1/settings/policy", body: { background_run_timeout_sec: 1800 } }));
+
+    // 超出范围（0.1 小时 / 25 小时）不发请求并显示错误
+    const countBefore = writes(s, "/settings/policy").length;
+    await userEvent.clear(input);
+    await userEvent.type(input, "0.1");
+    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    expect(await within(card).findByRole("alert")).toHaveTextContent("请填写 0.25 到 24 之间的数字");
+    expect(writes(s, "/settings/policy")).toHaveLength(countBefore);
+
+    // 恢复默认按钮回到 4 小时
+    await userEvent.click(within(card).getByRole("button", { name: "恢复默认" }));
+    expect(input).toHaveValue(4);
+  });
+});

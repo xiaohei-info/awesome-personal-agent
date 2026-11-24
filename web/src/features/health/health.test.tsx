@@ -105,15 +105,18 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
       stalled_delegations: { ok: false, count: 1, severity: "warning", why: "stalled", detail: ["itm_5"] },
     };
     mount(serve(() => json(200, report(bad))).impl);
-    // 来源 1（停用的那个只是知晓）+ 超时 2 + 提醒 1 + 连锁 1 + 能力包 1 + 模型 1 + 外发范围 1 + 放开 1 + 规则 1 + 交回 1 + 久无回音 1 = 12
-    expect(await screen.findByRole("heading", { level: 1, name: "12 件要处理" })).toBeInTheDocument();
+    // 来源 1（停用的那个只是知晓）+ 超时汇总 1（2 条超时合并一行指向运行记录）+ 提醒 1 + 连锁 1 + 能力包 1 + 模型 1 + 外发范围 1 + 放开 1 + 规则 1 + 交回 1 + 久无回音 1 = 11
+    expect(await screen.findByRole("heading", { level: 1, name: "11 件要处理" })).toBeInTheDocument();
     const src = row(/邮件 要重新登录/);
     expect(src).toHaveTextContent("这个来源的新消息进不来");
     expect(src).not.toHaveTextContent("连续"); // 认证失败不说次数，更不会出现「连续 0 次」
     expect(within(src).getByRole("link", { name: "去修" })).toHaveAttribute("href", "/sources?open=src_mail");
     expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
     expect(document.querySelector("main")!.textContent).not.toMatch(/consecutive pull failures|band is required/);
-    expect(act().getAllByText("这件事没做完")).toHaveLength(2);
+    const timeoutRow = row(/2 条 Agent 后台运行超时/);
+    expect(timeoutRow).toHaveTextContent("运行因超时停止；事项状态未变，可以继续");
+    expect(timeoutRow).not.toHaveTextContent(/结果没有落账|事项没被修改|这件事没做完|outcall/);
+    expect(within(timeoutRow).getByRole("link", { name: "查看超时运行" })).toHaveAttribute("href", "/runs?state=timeout&ids=r1%2Cr2");
     expect(within(row(/条提醒没送到/)).getByRole("link", { name: "去看渠道" })).toHaveAttribute("href", "/settings/channels");
     expect(within(row(/层数太多/)).getByRole("link", { name: "看这件事" })).toHaveAttribute("href", "/items/itm_3");
     const pk = row(/个能力包没加载上/);

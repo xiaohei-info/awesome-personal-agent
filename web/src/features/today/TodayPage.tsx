@@ -202,7 +202,7 @@ function BackRow({ run }: { run: Run }) {
     <li className="act-row">
       <div>
         <span>{title}</span>
-        <span className="sub">{[ok ? t.backDone : fault ? t.backFault(fault.say) : t.backNotDone, when].filter(Boolean).join(" · ")}</span>
+        <span className="sub">{[ok ? t.backDone : fault ? (run.fault?.code === "timeout" ? t.backTimeout(fault.say) : t.backFault(fault.say)) : t.backNotDone, when].filter(Boolean).join(" · ")}</span>
         {!ok && <span className="sub">{t.backNext}</span>}
       </div>
       <Go className="btn" to={"/items/" + encodeURIComponent(run.target) + "#agent"}>{ok ? t.seeResult : fault ? t.seeWhy : t.answer}</Go>

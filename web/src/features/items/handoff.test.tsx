@@ -9,7 +9,7 @@ import { feature } from "./index";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const RULE = "background-run/event_rules/handle-labelled";
 
-function server(o: { mode?: string; declared?: boolean; items?: any[] } = {}) {
+function server(o: { mode?: string; declared?: boolean; items?: any[]; runs?: any[] } = {}) {
   const items = o.items ?? [{ id: "i1", version: 1, kind: "task", phase: "proposed", title: "修复登录", tags: ["mine"] }];
   const patches: { body: any; ifMatch: string | null }[] = [];
   const posts: string[] = [];
@@ -17,6 +17,7 @@ function server(o: { mode?: string; declared?: boolean; items?: any[] } = {}) {
     const method = init.method ?? "GET";
     const h = (init.headers ?? {}) as Record<string, string>;
     if (url === "/v1/rules") return json(200, { rules: o.mode ? [{ key: RULE, pack: "background-run", group: "event_rules", id: "handle-labelled", mode: o.mode, hash: "h" }] : [] });
+    if (url.startsWith("/v1/runs?")) return json(200, { runs: o.runs ?? [] });
     if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: o.declared ? { agent_id: "legacy:hx" } : {}, reason: o.declared ? "" : "还没选主 Agent" });
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items });
@@ -109,5 +110,33 @@ describe("事项 › 交给 Agent", () => {
     await userEvent.selectOptions(screen.getByLabelText("标签"), "agent-ok");
     expect(screen.queryByText("修复登录")).not.toBeInTheDocument();
     expect(screen.getByText("改文档")).toBeInTheDocument();
+  });
+
+  it("事项页运行超时提示：明确说明后台运行因超时停止、事项状态未变可继续，不再说「结果没有落账」", async () => {
+    const s = server({
+      mode: "auto",
+      declared: true,
+      items: [{ id: "i1", version: 1, kind: "task", phase: "open", title: "跟进需求", tags: ["agent-ok"] }],
+      runs: [{ id: "run_1", state: "timeout", fault: { code: "timeout", params: { timeout: "14400" } } }],
+    });
+    mount(s, "/items/i1");
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent("一条 Agent 后台运行因超时停止（超过 4 小时）。");
+    expect(note).toHaveTextContent("事项状态未变，可以继续。");
+    expect(note).not.toHaveTextContent(/结果没有落账|没跑起来|事项没被修改/);
+    expect(within(note).getByRole("link", { name: "看运行记录" })).toHaveAttribute("href", "/runs?state=timeout");
+  });
+
+  it("事项页非超时故障仍提示未启动与结果未落账", async () => {
+    const s = server({
+      mode: "auto",
+      declared: true,
+      items: [{ id: "i1", version: 1, kind: "task", phase: "open", title: "跟进需求", tags: ["agent-ok"] }],
+      runs: [{ id: "run_2", state: "failed", fault: { code: "exec_denied", params: { exit: "126" } } }],
+    });
+    mount(s, "/items/i1");
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent("Agent 上次没跑起来：执行程序无法启动（没有运行权限）。");
+    expect(note).toHaveTextContent("结果没有落账，这件事没被修改。");
   });
 });

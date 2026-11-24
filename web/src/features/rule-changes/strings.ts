@@ -44,6 +44,7 @@ const zh = {
     "item.update": "指定 Agent",
   } as Record<string, string>,
   section: {
+    background_run_timeout_sec: "Agent 后台运行时限",
     channels: "提醒渠道",
     disturb: "提醒与打扰",
     forward_allowlist: "信任的发件人",
@@ -96,6 +97,7 @@ const en: typeof zh = {
     "item.update": "Assigned Agent",
   },
   section: {
+    background_run_timeout_sec: "Background run time limit",
     channels: "Reminder channels",
     disturb: "Reminders and interruptions",
     forward_allowlist: "Trusted senders",

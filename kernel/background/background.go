@@ -90,8 +90,6 @@ type Options struct {
 	// Host 是 APA 主机名，用来判断项目在本机有没有检出；空时取 os.Hostname()，取不到按没有本机检出拒绝。
 	Host string
 	Now  func() time.Time
-	// DefaultTimeout 在模板未声明 timeout 时使用，默认 30 分钟。
-	DefaultTimeout time.Duration
 	// MaxChainDepth 是链路深度阈值，默认与命令管线一致（§14.9）。
 	MaxChainDepth int
 	// Wake 产出唤醒投递；为空时选了唤醒的 main_session 运行不拉起，转 needs_input。
@@ -110,9 +108,6 @@ func New(o Options) (*Service, error) {
 	}
 	if o.Now == nil {
 		o.Now = clock.Now
-	}
-	if o.DefaultTimeout <= 0 {
-		o.DefaultTimeout = 30 * time.Minute
 	}
 	if o.MaxChainDepth <= 0 {
 		o.MaxChainDepth = command.DefaultMaxChainDepth
@@ -145,7 +140,6 @@ func str(a map[string]any, k string) string {
 type spec struct {
 	runner, access, cwd, harness, executor string
 	prompt                                 packs.Prompt
-	timeout                                time.Duration
 }
 
 func (s *Service) parse(c rules.Call) (spec, error) {
@@ -160,7 +154,7 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 		return spec{}, invalid("prompt " + pack + "/" + tmpl + " does not exist")
 	}
 	sp := spec{runner: str(c.Action, "runner"), access: str(c.Action, "access"), cwd: str(c.Action, "cwd"),
-		harness: str(c.Action, "harness"), executor: str(c.Action, "executor"), prompt: pr, timeout: s.o.DefaultTimeout}
+		harness: str(c.Action, "harness"), executor: str(c.Action, "executor"), prompt: pr}
 	switch {
 	case sp.runner == "task" && pr.Meta.Agent != "task":
 		return sp, invalid("runner task needs a prompt with agent: task, got " + pack + "/" + tmpl)
@@ -182,14 +176,6 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 	}
 	if sp.cwd == "" {
 		sp.cwd = pr.Meta.Cwd
-	}
-
-	if pr.Meta.Timeout != "" {
-		d, err := time.ParseDuration(pr.Meta.Timeout)
-		if err != nil || d <= 0 {
-			return sp, invalid("timeout " + pr.Meta.Timeout + " is not a positive duration")
-		}
-		sp.timeout = d
 	}
 	return sp, nil
 }
@@ -464,7 +450,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 	}
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
 	run := domain.Run{AgentSnapshot: &f.selected.Snapshot, ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
-		Harness: harness, Access: sp.access, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(sp.timeout / time.Second)}
+		Harness: harness, Access: sp.access, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(f.pol.BackgroundRunTimeout() / time.Second)}
 	if how.launch == policy.LaunchWake { // 进程在真实主会话所在处：不写运行目录与命令，凭据由网关插件换取（§13.6）
 		run.Launch = runidentity.LaunchWake
 		return s.enqueue(ctx, c, f, how, proc.Request{Run: run, External: true}, func(tx *store.Tx) error {

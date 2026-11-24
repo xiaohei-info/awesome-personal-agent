@@ -83,10 +83,11 @@ type Options struct {
 // Dispatcher 按两个队列的额度拉起子进程。额度从账本里 running 的 Run 数得出，
 // 重启后仍存活的进程继续占额度。
 type Dispatcher struct {
-	st        *store.Store
-	limits    map[Queue]int
-	maxOutput int // 事件流类别单次 stdout 的总上限（字节）
-	opt       Options
+	st          *store.Store
+	limits      map[Queue]int
+	maxOutput   int // 事件流类别单次 stdout 的总上限（字节）
+	opt         Options
+	customClock bool // 仅在测试注入时钟或 apa_testclock 构建为真，生产构建恒为假
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -96,6 +97,7 @@ type Dispatcher struct {
 
 // New 用 config 里的两个额度创建调度器。
 func New(st *store.Store, cfg config.Config, opt Options) *Dispatcher {
+	customClock := opt.Now != nil || clock.TestClockBuild
 	if opt.Environ == nil {
 		opt.Environ = os.Environ
 	}
@@ -106,7 +108,7 @@ func New(st *store.Store, cfg config.Config, opt Options) *Dispatcher {
 		cfg.MaxSourceOutput = config.Default().MaxSourceOutput
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Dispatcher{st: st, opt: opt, ctx: ctx, cancel: cancel, maxOutput: cfg.MaxSourceOutput,
+	return &Dispatcher{st: st, opt: opt, customClock: customClock, ctx: ctx, cancel: cancel, maxOutput: cfg.MaxSourceOutput,
 		limits: map[Queue]int{QueueLong: cfg.MaxSubprocesses, QueueShort: cfg.MaxShortSubprocesses}}
 }
 
@@ -227,10 +229,12 @@ func (d *Dispatcher) claim(ctx context.Context, q Queue) (rec Record, ok bool, e
 			return err
 		}
 		rec = next[0]
+		now := d.opt.Now()
 		if _, err := tx.Exec("UPDATE outcall_run SET state = 'running', started_at = ? WHERE id = ?",
-			d.opt.Now().UnixNano(), rec.Run.ID); err != nil {
+			now.UnixNano(), rec.Run.ID); err != nil {
 			return err
 		}
+		rec.Run.StartedAt = &now
 		ok = true
 		return nil
 	})
@@ -398,19 +402,48 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	timer := time.NewTimer(time.Duration(rec.Run.TimeoutSec) * time.Second)
+	timeout := time.Duration(rec.Run.TimeoutSec) * time.Second
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	var killed domain.RunState // 非空表示是我们杀的
 	var why string
 	var werr error
-	select {
-	case werr = <-done:
-	case <-timer.C:
-		killed, why = domain.RunTimeout, fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
-	case <-d.ctx.Done():
-		killed, why = domain.RunFailed, reasonShutdown
+	if !d.customClock || rec.Run.Category != domain.RunBackground {
+		select {
+		case werr = <-done:
+		case <-timer.C:
+			killed, why = domain.RunTimeout, fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
+		case <-d.ctx.Done():
+			killed, why = domain.RunFailed, reasonShutdown
+		}
+	} else {
+		start := d.opt.Now()
+		if rec.Run.StartedAt != nil {
+			start = *rec.Run.StartedAt
+		}
+		deadline := start.Add(timeout)
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			if !d.opt.Now().Before(deadline) {
+				killed, why = domain.RunTimeout, fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
+				goto waited
+			}
+			select {
+			case werr = <-done:
+				goto waited
+			case <-timer.C:
+				killed, why = domain.RunTimeout, fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
+				goto waited
+			case <-tick.C:
+			case <-d.ctx.Done():
+				killed, why = domain.RunFailed, reasonShutdown
+				goto waited
+			}
+		}
 	}
+waited:
 	if killed != "" {
 		syscall.Kill(-pgid, syscall.SIGKILL)
 		werr = <-done

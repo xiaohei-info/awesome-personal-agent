@@ -114,16 +114,21 @@ type env struct {
 	dir  string
 	done chan proc.Result
 	errs chan error
+	now  atomic.Int64
 }
+
+func (e *env) clock() time.Time { return time.Unix(0, e.now.Load()).UTC() }
+
+func (e *env) advance(d time.Duration) { e.now.Add(int64(d)) }
 
 // useClockNow 为真时 Service 不注入 Now（测试时钟构建的测试用）。
 var useClockNow bool
 
-func svcNow() func() time.Time {
+func (e *env) svcNow() func() time.Time {
 	if useClockNow {
 		return nil
 	}
-	return func() time.Time { return t0 }
+	return e.clock
 }
 
 func setup(t *testing.T, maxDepth int) *env {
@@ -142,7 +147,8 @@ func setup(t *testing.T, maxDepth int) *env {
 	t.Cleanup(func() { st.Close() })
 	e := &env{t: t, st: st, runs: filepath.Join(t.TempDir(), "runs"), dir: t.TempDir(),
 		done: make(chan proc.Result, 16), errs: make(chan error, 16)}
-	e.x = command.New(st, func() time.Time { return t0 })
+	e.now.Store(t0.UnixNano())
+	e.x = command.New(st, e.clock)
 	kinds := items.NewKinds()
 	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), executors.Register(e.x, executors.Options{Owner: "owner"}), rules.Register(e.x),
 		delegation.Register(e.x, delegation.Options{Owner: "owner", OnError: func(_ command.Commit, err error) { t.Errorf("delegation: %v", err) }})} {
@@ -163,15 +169,16 @@ func setup(t *testing.T, maxDepth int) *env {
 	e.disp = proc.New(st, config.Config{MaxSubprocesses: 4, MaxShortSubprocesses: 1}, proc.Options{
 		Env:      func(r domain.Run) map[string]string { return svc.Env(r) },
 		OnResult: func(r proc.Result) { svc.Settle(bg, r); e.done <- r },
+		Now:      e.clock,
 	})
 	t.Cleanup(e.disp.Close)
 	e.gate = &gate{d: e.disp}
-	e.wake, err = wake.New(wake.Options{Delivery: delivery.New(delivery.Options{}), Now: func() time.Time { return t0 }})
+	e.wake, err = wake.New(wake.Options{Delivery: delivery.New(delivery.Options{}), Now: e.clock})
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.gate, RunsDir: e.runs, APIURL: "http://apa.local", Owner: "owner", Host: "h", Wake: e.wake,
-		Now: svcNow(), MaxChainDepth: maxDepth, OnError: func(_ string, err error) { e.errs <- err }})
+		Now: e.svcNow(), MaxChainDepth: maxDepth, OnError: func(_ string, err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,6 +536,16 @@ func TestFailureAndTimeoutGoToNeedsInputWithoutRetry(t *testing.T) {
 			e.auto("hang")
 			id := e.newItem("a", []string{tc.tag}, nil)
 			e.open(id)
+			if tc.script == "hang" {
+				deadline := time.Now().Add(5 * time.Second)
+				for time.Now().Before(deadline) {
+					if rs := e.runList(); len(rs) == 1 && rs[0].Run.State == domain.RunRunning {
+						break
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				e.advance(time.Duration(policy.DefaultBackgroundRunTimeoutSec)*time.Second + time.Second)
+			}
 			res := e.waitResult()
 			if string(res.Run.State) != tc.want {
 				t.Fatalf("state = %s", res.Run.State)
@@ -915,7 +932,8 @@ func TestWakeDeclarationLaunchesWakeRun(t *testing.T) {
 	}
 
 	e.gate.paused.Store(false)
-	if err := e.gate.Dispatch(bg); err != nil { // 调度器时钟是真实时间，早已过了 t0+30s：按超时落账
+	e.advance(time.Duration(policy.DefaultBackgroundRunTimeoutSec)*time.Second + time.Second)
+	if err := e.gate.Dispatch(bg); err != nil { // 时钟超过 4 小时默认时限：按超时落账
 		t.Fatal(err)
 	}
 	res := e.waitResult()
@@ -1129,4 +1147,270 @@ func TestOwnerStartNow(t *testing.T) {
 	if n := len(e.ofType(domain.EvHealthAlert)); n != alerts+1 {
 		t.Fatalf("alerts = %d, want %d", n, alerts+1)
 	}
+}
+
+// 统一时限常数：wake（main_session 唤醒）、headless（main_session 无头）与 task（派给执行者）共用同一个 4 小时默认值，
+// 即使模板声明了不同的 timeout 也不再按模板分。
+func TestUnifiedDefaultTimeout4HoursIgnoresTemplateTimeout(t *testing.T) {
+	e := setup(t, 0)
+	e.gate.paused.Store(true)
+	e.configure("silent")
+	e.auto("main")
+	e.auto("hang") // 使用声明了 timeout: 1s 的 shortMD 模板，必须被忽略
+	e.auto("taskr")
+
+	// 1. main_session headless（即使模板写了 timeout: 1s，也统一取 4 小时）
+	h1 := e.newItem("headless-short-tmpl", []string{"hang"}, nil)
+	e.open(h1)
+
+	// 2. runner=task（派给执行者）
+	p := e.project("work-host.cli")
+	t1 := e.newItem("task-runner", []string{"taskr"}, map[string]any{"project": p})
+	e.open(t1)
+
+	// 3. main_session wake（推送主会话）
+	e.wakeHarness("hwake")
+	e.setPolicy(func(pol *policy.Policy) {
+		pol.DefaultHarness = "hwake"
+		pol.PermissionCap.ByHarness["hwake"] = policy.PermEdit
+	})
+	w1 := e.newItem("wake-runner", []string{"agent-ok"}, nil)
+	e.open(w1)
+
+	rs := e.runList()
+	if len(rs) != 3 {
+		t.Fatalf("runs = %d, want 3", len(rs))
+	}
+	want := policy.DefaultBackgroundRunTimeoutSec
+	if want != 4*3600 {
+		t.Fatalf("DefaultBackgroundRunTimeoutSec = %d, want 14400 (4h)", want)
+	}
+	var seenHeadless, seenTask, seenWake bool
+	for _, rec := range rs {
+		if rec.Run.TimeoutSec != want {
+			t.Errorf("run %s (runner=%s launch=%s) TimeoutSec = %d, want %d", rec.Run.ID, rec.Run.Runner, rec.Run.Launch, rec.Run.TimeoutSec, want)
+		}
+		switch {
+		case rec.Run.Runner == "main_session" && rec.Run.Launch == "headless":
+			seenHeadless = true
+		case rec.Run.Runner == "task":
+			seenTask = true
+		case rec.Run.Runner == "main_session" && rec.Run.Launch == runidentity.LaunchWake:
+			seenWake = true
+		}
+	}
+	if !seenHeadless || !seenTask || !seenWake {
+		t.Fatalf("missing run kinds: headless=%v task=%v wake=%v", seenHeadless, seenTask, seenWake)
+	}
+}
+
+// 设置改动即时生效且不影响已在跑的运行：先按默认 4 小时拉起运行 A，再把设置改成 0.5 小时（1800s），
+// 立即拉起运行 B 取到 1800s；推进 31 分钟后 B 超时，A 仍在跑且 TimeoutSec 仍为 14400s。
+func TestTimeoutPolicyChangeAppliesImmediatelyToNewRunsNotInFlight(t *testing.T) {
+	e := setup(t, 0)
+	e.wakeHarness("hwake")
+	e.setPolicy(func(pol *policy.Policy) {
+		pol.DefaultHarness = "hwake"
+		pol.PermissionCap.ByHarness["hwake"] = policy.PermEdit
+	})
+	e.auto("main")
+
+	aItem := e.newItem("run-a", []string{"agent-ok"}, nil)
+	e.open(aItem)
+	rs := e.runList()
+	if len(rs) != 1 || rs[0].Run.TimeoutSec != policy.DefaultBackgroundRunTimeoutSec {
+		t.Fatalf("run A = %+v", rs)
+	}
+	runA := rs[0].Run.ID
+
+	// 修改全局后台运行时限为 0.5 小时（1800 秒），保存即生效，无需外部刷新
+	e.setPolicy(func(pol *policy.Policy) {
+		pol.BackgroundRunTimeoutSec = 1800
+	})
+
+	bItem := e.newItem("run-b", []string{"agent-ok"}, nil)
+	e.open(bItem)
+	rs = e.runList()
+	if len(rs) != 2 {
+		t.Fatalf("runs = %d, want 2", len(rs))
+	}
+	var recA, recB proc.Record
+	for _, r := range rs {
+		if r.Run.ID == runA {
+			recA = r
+		} else {
+			recB = r
+		}
+	}
+	if recA.Run.TimeoutSec != 14400 || recA.Run.State != domain.RunRunning {
+		t.Fatalf("in-flight run A changed: %+v", recA.Run)
+	}
+	if recB.Run.TimeoutSec != 1800 || recB.Run.State != domain.RunRunning {
+		t.Fatalf("new run B did not pick up new timeout: %+v", recB.Run)
+	}
+
+	// 推进 31 分钟：B 超时落账，A 仍在运行不受影响
+	e.advance(31 * time.Minute)
+	if err := e.gate.Dispatch(bg); err != nil {
+		t.Fatal(err)
+	}
+	res := e.waitResult()
+	if res.Run.ID != recB.Run.ID || res.Run.State != domain.RunTimeout {
+		t.Fatalf("expected run B timeout, got %+v", res.Run)
+	}
+	var curA proc.Record
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { curA, err = proc.Get(tx, runA); return }); err != nil {
+		t.Fatal(err)
+	}
+	if curA.Run.State != domain.RunRunning || curA.Run.TimeoutSec != 14400 {
+		t.Fatalf("in-flight run A affected by new setting: %+v", curA.Run)
+	}
+}
+
+// 超时结算不丢已写内容：无头运行与唤醒运行在超时前写下的进展（item.progress）和委派进展报告（delegate.report progress + PR），
+// 在 Settle 成 timeout 后必须完整留在账上，事项阶段保持 open 可继续。
+func TestTimeoutSettlePreservesWrittenProgressAndReports(t *testing.T) {
+	t.Run("wake run keeps progress written before timeout", func(t *testing.T) {
+		e := setup(t, 0)
+		e.wakeHarness("hwake")
+		e.setPolicy(func(pol *policy.Policy) {
+			pol.DefaultHarness = "hwake"
+			pol.PermissionCap.ByHarness["hwake"] = policy.PermEdit
+			pol.BackgroundRunTimeoutSec = 1800
+		})
+		e.auto("main")
+
+		id := e.newItem("wake-progress", []string{"agent-ok"}, nil)
+		e.open(id)
+		runID := e.runList()[0].Run.ID
+
+		// 运行期间写一条进展（事项仍在 open）
+		e.must(e.runIdentity(t, runID), "item.progress", map[string]any{"id": id, "text": "已排查根因，待进一步验证"})
+
+		// 运行超时并结算（含 wake.Settle 释放租约）
+		e.advance(31 * time.Minute)
+		if err := e.gate.Dispatch(bg); err != nil {
+			t.Fatal(err)
+		}
+		res := e.waitResult()
+		if res.Run.ID != runID || res.Run.State != domain.RunTimeout {
+			t.Fatalf("result = %+v", res.Run)
+		}
+		if err := e.wake.Settle(bg, e.st, func(r proc.Result) { e.svc.Settle(bg, r) }); err != nil {
+			t.Fatal(err)
+		}
+
+		// 验证：事项阶段仍是 open，超时前写入的进展完整留在账上
+		if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask != nil {
+			t.Fatalf("item after timeout = %+v", it)
+		}
+		var prog []domain.Progress
+		if err := e.st.View(bg, func(tx *store.Tx) (err error) { prog, err = items.Progress(tx, id); return }); err != nil {
+			t.Fatal(err)
+		}
+		if len(prog) != 1 || prog[0].Text != "已排查根因，待进一步验证" {
+			t.Fatalf("progress lost or changed after timeout settle: %+v", prog)
+		}
+	})
+
+	t.Run("headless task run keeps delegate progress report and correlation written before timeout", func(t *testing.T) {
+		e := setup(t, 0)
+		e.configure("receipt") // 等待 $2/go（永远不写，模拟卡住直到超时），并把真实签发的 APA_TOKEN 写入 token 文件
+		e.setPolicy(func(pol *policy.Policy) {
+			pol.BackgroundRunTimeoutSec = 1800
+		})
+		e.auto("taskr")
+
+		p := e.project("work-host.cli")
+		parent := e.newItem("parent", []string{"taskr"}, map[string]any{"project": p})
+		e.open(parent)
+
+		// 等待子事项无头运行签发凭据并进入 running
+		rs := e.runList()
+		if len(rs) != 1 {
+			t.Fatalf("runs = %d, want 1", len(rs))
+		}
+		rec := rs[0]
+		childID := rec.Run.Target
+		rid := runidentity.Identity{Secret: waitFile(t, filepath.Join(e.runs, rec.Run.ID, "token"))}
+
+		// 运行期间写一条进展 + 一条委派进展报告（带 PR 证据）
+		const prURL = "https://example.invalid/org/repo/pull/42"
+		e.must(rid, "item.progress", map[string]any{"id": childID, "text": "已写完核心实现与单测"})
+		e.must(rid, "delegate.report", map[string]any{
+			"id": childID, "outcome": "progress", "summary": "已完成第一阶段提交", "evidence": map[string]any{"pr": prURL},
+		})
+
+		// 推进时钟触发超时并结算
+		e.advance(31 * time.Minute)
+		res := e.waitResult()
+		if res.Run.ID != rec.Run.ID || res.Run.State != domain.RunTimeout {
+			t.Fatalf("result = %+v", res.Run)
+		}
+
+		// 验证：子事项仍是 open，状态标签、进展记录、报告事件与 PR 证据链接完整保留
+		it := e.item(childID)
+		if it.Phase != domain.PhaseOpen || it.Ask != nil || it.StatusLabel != "已完成第一阶段提交" {
+			t.Fatalf("child item after timeout = %+v", it)
+		}
+		var (
+			prog []domain.Progress
+			link string
+		)
+		if err := e.st.View(bg, func(tx *store.Tx) error {
+			var err error
+			if prog, err = items.Progress(tx, childID); err != nil {
+				return err
+			}
+			r, err := tx.Query(`SELECT ref FROM delegation_link WHERE item = ?`, childID)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			if r.Next() {
+				return r.Scan(&link)
+			}
+			return r.Err()
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(prog) != 1 || prog[0].Text != "已写完核心实现与单测" {
+			t.Fatalf("progress lost after timeout settle: %+v", prog)
+		}
+		if link != prURL {
+			t.Fatalf("delegation_link lost after timeout settle: got %q, want %q", link, prURL)
+		}
+		var reported bool
+		for _, ev := range e.ofType(domain.EvDelegationReported) {
+			if ev.Object == childID && strings.Contains(string(ev.Payload), "已完成第一阶段提交") && strings.Contains(ev.Evidence, prURL) {
+				reported = true
+			}
+		}
+		if !reported {
+			t.Fatal("delegation.reported event lost after timeout settle")
+		}
+	})
+}
+
+func (e *env) wakeHarness(name string) {
+	e.t.Helper()
+	path := filepath.Join(e.dir, name+".sh")
+	_ = os.WriteFile(path, []byte("true\n"), 0o700)
+	e.must(owner, "executor.register", map[string]any{
+		"harness":      name,
+		"main_session": map[string]any{"launch": "wake"},
+		"headless":     map[string]any{"command": []string{"sh", path, "{prompt}", "{run_dir}"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string]any{"read": []string{}, "edit": []string{}}},
+	})
+}
+
+func (e *env) runIdentity(t *testing.T, runID string) command.Identity {
+	t.Helper()
+	var secret string
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		secret, err = runidentity.Issue(tx, runID, e.clock())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return runidentity.Identity{Secret: secret}
 }

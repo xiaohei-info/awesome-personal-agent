@@ -181,17 +181,17 @@ func TestFlowWakeLease(t *testing.T) {
 	})
 
 	// 2026-11-20 改写：超时是运行故障（事件），事项阶段不变、不挂问题；租约照样释放。
-	// 2026-11-24 改写：超时也写 wake.lease_released；租约期间判定不变。
+	// 2026-11-24 改写：超时也写 wake.lease_released；租约期间判定不变；后台运行时限统一为全局默认 4 小时（14400s），不再按模板分。
 	f.step("ACT-WAK-07 运行超时也释放租约，事项阶段不变", func(t *testing.T) {
 		i2 := f.tagged("WAK-I2", "acc-wake-short")
 		r := f.waitRun(i2)
-		if r.Launch != "wake" || r.Timeout != 60 {
-			t.Fatalf("规则的运行超时应为 1 分钟: %+v", r)
+		if r.Launch != "wake" || r.Timeout != 14400 {
+			t.Fatalf("后台运行超时应统一为默认 4 小时（14400s）: %+v", r)
 		}
 		f.exchange(f.DELO, r.ID, 200)
 		d3 := dec[2]
 		f.delAnswer(d3, 23) // 租约内也按自己的档位
-		f.TCAdvance(120)    // 不回执，等待 2 分钟（测试时钟）
+		f.TCAdvance(14460)  // 不回执，推进 4 小时 1 分钟（测试时钟）
 		f.waitRunState(r.ID, "timeout")
 		f.waitEvent("超时后租约释放", ofRun("wake.lease_released", r.ID))
 		if ph := f.phase(i2); ph != "open" {

@@ -36,10 +36,10 @@ function server(all: object[]) {
   return { impl, calls };
 }
 
-function mount(fetchImpl: typeof fetch) {
+function mount(fetchImpl: typeof fetch, path = "/runs") {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
-    <MemoryRouter initialEntries={["/runs"]}>
+    <MemoryRouter initialEntries={[path]}>
       <App features={[feature]} fetchImpl={fetchImpl} />
     </MemoryRouter>,
   );
@@ -156,5 +156,20 @@ describe("诊断 › 运行记录（flow-bg-main-session、flow-outcall-limits�
     fail = false;
     await userEvent.click(screen.getByRole("button", { name: "重新加载" }));
     expect(await screen.findByText("还没有运行记录")).toBeInTheDocument();
+  });
+
+  it("健康检查跳进 /runs?state=timeout&ids=：只看这几条超时运行，点「查看全部」清空筛选", async () => {
+    const t1 = { id: "run_t1", category: "background", runner: "main_session", launch: "wake", target: "i1", state: "timeout", started_at: "2030-01-03T00:00:00Z", finished_at: "2030-01-03T04:00:00Z", timeout: 14400 };
+    const t2 = { id: "run_t2", category: "background", runner: "task", launch: "headless", target: "i2", state: "timeout", started_at: "2030-01-03T05:00:00Z", finished_at: "2030-01-03T09:00:00Z", timeout: 14400 };
+    const s = server([bg, timedOut, t1, t2]);
+    mount(s.impl, "/runs?state=timeout&ids=run_t1,run_t2");
+    expect(await screen.findByText("当前只显示选中的 2 条超时运行")).toBeInTheDocument();
+    expect(s.calls).toContain("/v1/runs?limit=100&state=timeout");
+    expect(lines()).toHaveLength(2);
+    expect(lines().join(" ")).toContain("整理周报");
+    expect(lines().join(" ")).toContain("写周报");
+    expect(lines().join(" ")).not.toContain("日历");
+    await userEvent.click(screen.getByRole("button", { name: "查看全部" }));
+    await waitFor(() => expect(lines()).toHaveLength(4));
   });
 });

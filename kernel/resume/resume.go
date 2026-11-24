@@ -100,8 +100,6 @@ type Options struct {
 	Now     func() time.Time
 	// MaxChainDepth 是链路深度阈值，默认与命令管线一致（§14.9）。
 	MaxChainDepth int
-	// DefaultTimeout 在原运行没有超时记录时使用，默认 30 分钟。
-	DefaultTimeout time.Duration
 	// OnError 接收 Settle 里无法交给调用方的错误；可为空。
 	OnError func(runID string, err error)
 }
@@ -125,9 +123,6 @@ func New(o Options) (*Service, error) {
 	}
 	if o.MaxChainDepth <= 0 {
 		o.MaxChainDepth = command.DefaultMaxChainDepth
-	}
-	if o.DefaultTimeout <= 0 {
-		o.DefaultTimeout = 30 * time.Minute
 	}
 	return &Service{o: o}, nil
 }
@@ -478,10 +473,7 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 		sid = runID
 		argv = append(argv, expand(hl.Session.Assign, "{session_id}", sid)...)
 	}
-	timeout := base.Run.TimeoutSec
-	if timeout <= 0 {
-		timeout = int(s.o.DefaultTimeout / time.Second)
-	}
+	timeout := int(f.pol.BackgroundRunTimeout() / time.Second)
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: base.Run.Basis.RuleID}
 	snapshot := f.selected.Snapshot
 	snapshot.SelectionSource = "resume"

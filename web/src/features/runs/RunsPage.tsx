@@ -120,31 +120,44 @@ export function RunsPage() {
   const t = useT(strings);
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [more, setMore] = useState(false);
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [kind, setKind] = useState<Kind>(() => (params.get("kind") ?? "all") in KINDS ? (params.get("kind") as Kind) : "all");
   const [failedOnly, setFailedOnly] = useState(false);
+  const timeoutOnly = params.get("state") === "timeout";
+  const selectedIds = (params.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const idsKey = selectedIds.join(",");
   const [error, setError] = useState<unknown>(null);
   const seq = useRef(0); // 换筛选后丢弃迟到的旧响应
+
+  const clearHealthFilter = () => {
+    const next = new URLSearchParams(params);
+    next.delete("state");
+    next.delete("ids");
+    setParams(next);
+  };
 
   const load = useCallback(async (before?: string) => {
     const me = ++seq.current;
     const p = new URLSearchParams({ limit: String(PAGE) });
     if (KINDS[kind]) p.set("category", KINDS[kind]);
-    if (failedOnly) p.set("state", FAILED);
+    if (timeoutOnly) p.set("state", "timeout");
+    else if (failedOnly) p.set("state", FAILED);
     if (before) p.set("before", before);
     try {
       const page = (await api.get<{ runs: Run[] }>("/runs?" + p)).runs;
       if (me !== seq.current) return;
       setError(null);
-      setMore(page.length === PAGE);
-      setRuns((prev) => (before ? [...(prev ?? []), ...page.reverse()] : page.reverse()));
+      setMore(page.length === PAGE && !idsKey);
+      const idSet = idsKey ? new Set(idsKey.split(",")) : null;
+      const filtered = idSet ? page.filter((r) => idSet.has(r.id)) : page;
+      setRuns((prev) => (before ? [...(prev ?? []), ...filtered.reverse()] : filtered.reverse()));
     } catch (e) {
       if (me !== seq.current) return;
       setRuns(null); // 出错时不保留旧列表，避免把过期结果当成当前筛选的结果
       setMore(false);
       setError(e);
     }
-  }, [api, kind, failedOnly]);
+  }, [api, kind, failedOnly, timeoutOnly, idsKey]);
 
   useEffect(() => {
     void load();
@@ -153,6 +166,12 @@ export function RunsPage() {
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
+      {(timeoutOnly || selectedIds.length > 0) && (
+        <p role="note" className="panel">
+          {selectedIds.length > 0 ? t.timeoutFilter(selectedIds.length) : t.timeoutOnly}{" "}
+          <button type="button" className="quiet" onClick={clearHealthFilter}>{t.showAll}</button>
+        </p>
+      )}
       <div className="filters">
         <label>
           {t.kind}
@@ -161,7 +180,14 @@ export function RunsPage() {
           </select>
         </label>
         <label>
-          <input type="checkbox" checked={failedOnly} onChange={(e) => setFailedOnly(e.target.checked)} /> {t.failedOnly}
+          <input
+            type="checkbox"
+            checked={failedOnly || timeoutOnly}
+            onChange={(e) => {
+              if (timeoutOnly || selectedIds.length > 0) clearHealthFilter();
+              setFailedOnly(e.target.checked);
+            }}
+          /> {t.failedOnly}
         </label>
       </div>
       {error != null && (
