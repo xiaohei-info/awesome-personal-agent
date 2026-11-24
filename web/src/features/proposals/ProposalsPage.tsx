@@ -30,10 +30,12 @@ export interface Proposal {
   origin?: { source: string; actor?: string };
   // 入站流水线写入的建议信息（主文档 §6.3）；agent 直接提出的建议没有 recommend。
   proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[];
-    merges?: Merge[]; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep; urgent?: boolean };
+    merges?: Merge[]; absorbed?: Absorbed[]; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep; urgent?: boolean };
 }
 /** 一次合并的留痕（§9.3 跨来源合并）：并入的来源事件、当时的内容、判断方与理由；item 是被折叠的那条建议（批量归类才有）。 */
 interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; why?: string; batch?: string; item?: string; at: string }
+/** 归类折叠进这一条的建议本身（§9.3 proposal.absorbed）：撤销时服务端删掉，重新加载后随之消失。 */
+interface Absorbed { item: string; title: string; source?: string; ref?: string; created_at?: string; action: string; at: string }
 /** 批量归类的记录：结论、去处、理由、判断方。 */
 interface Sweep { state: string; action?: string; target?: string; why?: string; by?: string; at?: string }
 interface SourceRead { event: { id: string; source_id: string; subject: string; summary?: string; occurred_at: string; link?: string; disposition?: string; merge_key?: string } }
@@ -107,6 +109,7 @@ function Card({ item, rejection, candidates, onAct, ready }: { item: Proposal; r
         </p>
       )}
       {p && <Similar p={p} />}
+      {p?.absorbed?.length ? <AbsorbedFrom list={p.absorbed} onUnmerge={(member) => onAct(member, "unmerge", {})} /> : null}
       {p?.sources && p.sources.length > 1 && <Sources item={item} onSplit={(event) => onAct(item.id, "split", { event })} onUnmerge={(member) => onAct(member, "unmerge", {})} />}
       <RejectionNote rejection={rejection} what="handle" />
       <div className="actions">
@@ -161,6 +164,32 @@ function Similar({ p }: { p: NonNullable<Proposal["proposal"]> }) {
 function ItemName({ id, say }: { id: string; say: (title: string) => string }) {
   const title = useItemTitle(id);
   return <>{say(title || "…")}</>;
+}
+
+/** 这一条从哪几条建议合来：逐条列原始标题、来源、建立时间、怎么合的与合并时间，可逐条撤销。名下没有消息的（迁移来的）也在这里。 */
+function AbsorbedFrom({ list, onUnmerge }: { list: Absorbed[]; onUnmerge: (member: string) => Promise<void> }) {
+  const t = useT(strings);
+  const sourceName = useNames("source");
+  const [busy, setBusy] = useState(false);
+  return (
+    <details aria-label={t.absorbedHead(list.length)}>
+      <summary>{t.absorbedHead(list.length)}</summary>
+      <ul className="rows">
+        {list.map((a) => (
+          <li key={a.item} className="act-row" aria-label={a.title} title={a.ref || a.item}>
+            <div>
+              <span>
+                <Link to={"/items/" + encodeURIComponent(a.item)}>{a.title}</Link>
+                {a.ref && /^https?:\/\//.test(a.ref) && <> · <a href={a.ref} target="_blank" rel="noreferrer" title={a.ref}>{t.link}</a></>}
+              </span>
+              <span className="sub">{[a.source ? sourceName(a.source) : "", a.created_at ? t.createdAt(when(a.created_at)) : "", t.sweepAction[a.action] ?? a.action, t.mergedAt(when(a.at))].filter(Boolean).join(" · ")}</span>
+            </div>
+            <button type="button" title={t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(a.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 }
 
 /** 来源事件的读视图（GET /source-events/{id}）里本页用到的字段。 */

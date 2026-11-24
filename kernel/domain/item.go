@@ -216,6 +216,21 @@ type Proposal struct {
 	SplitFrom string `json:"split_from,omitempty"`
 	// Sweep 是跨来源合并的批量归类（§9.3）：新建议记 pending，归类后记结论与依据。升级前的建议没有，不回填。
 	Sweep *ProposalSweep `json:"sweep,omitempty"`
+	// Absorbed 是归类折叠进这一条的建议本身的溯源（§9.3）：折叠时不论那条名下有没有消息（迁移来的建议常没有）都记一条，撤销时删掉。
+	Absorbed []ProposalAbsorbed `json:"absorbed,omitempty"`
+}
+
+// ProposalAbsorbed 是一条被归类折叠进来的建议：它的 id、原始标题、origin 与项目，折叠的结论、批次与时刻。
+type ProposalAbsorbed struct {
+	Item    string    `json:"item"`
+	Title   string    `json:"title"`
+	Source  string    `json:"source,omitempty"` // 它的 origin.source
+	Ref     string    `json:"ref,omitempty"`    // 它的 origin.ref
+	Project string    `json:"project,omitempty"`
+	Created time.Time `json:"created_at"` // 它自己建立的时刻
+	Action  string    `json:"action"`
+	Batch   string    `json:"batch,omitempty"`
+	At      time.Time `json:"at"` // 折叠的时刻
 }
 
 // 跨来源合并的归类结论（ProposalSweep.Action）。
@@ -242,6 +257,14 @@ type ProposalSweep struct {
 	Chars    int        `json:"chars,omitempty"`
 	Deferred int        `json:"deferred,omitempty"`
 	At       *time.Time `json:"at,omitempty"`
+	// Backfill 是本人补打的待归类标记（apa merge mark-pending）：维护循环不自动归类它，只由 apa merge run --apply 处理；归类后保留。
+	Backfill *SweepBackfill `json:"backfill,omitempty"`
+}
+
+// SweepBackfill 记谁、何时补打的待归类标记。
+type SweepBackfill struct {
+	By string    `json:"by"`
+	At time.Time `json:"at"`
 }
 
 // Folded 为真表示这条建议被归类折叠进了别处（并入、合并或判定重复），且没有被撤销。
