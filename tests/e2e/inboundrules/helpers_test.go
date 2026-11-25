@@ -284,14 +284,20 @@ func (f *fx) clsLines() int { return len(f.Cls.Batches()) }
 func (f *fx) modelLines() int { return len(f.ModelStub.Requests()) }
 
 // 两个端点的请求体里没有来源事件的去重 id（只有标题、摘要等内容），所以替身与日志断言都按事件标题里的唯一片段匹配（"题目内容"）。
+// 匹配要落在结构化输入的 subject 字段上：输入还带来去重清单（recent_done、active_proposals），别的建议标题也在请求体里，
+// 只按标题子串匹配会命中错的那一条。
 func (f *fx) pYes(subject string, p float64) {
-	f.Cls.Judge(modelstub.ClsJudge{Key: modelstub.Key{Contains: subject}, PYes: &p})
+	// 判断题的结构化输入是请求体里的嵌套对象：字段原样出现（不转义）。
+	f.Cls.Judge(modelstub.ClsJudge{Key: modelstub.Key{Contains: `"subject":"` + subject + `"`}, PYes: &p})
 }
 
 func (f *fx) draft(subject string, reply any) {
 	b, _ := json.Marshal(reply)
-	f.ModelStub.When(subject, modelstub.Reply{Content: string(b)})
+	f.ModelStub.When(subjectField(subject), modelstub.Reply{Content: string(b)})
 }
+
+// subjectField 是事件标题在请求体里的转义形态（结构化输入以转义后的 JSON 嵌在消息里）。
+func subjectField(subject string) string { return `subject\":\"` + subject + `\"` }
 
 // judgment 读事件的判断记录（GET /judgments/{id}）；模板名只在记录里，不在发给端点的内容里。
 func (f *fx) judgment(e event) map[string]any {

@@ -236,22 +236,25 @@ func TestFlowProposalTriage(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-PROP-10 Web 建议流提供三种处置与批量入口，agent 直接提出的建议不显示推荐", func(t *testing.T) {
+	k.step("ACT-PROP-10 Web 建议流提供三种处置与合并展开，agent 直接提出的建议不显示推荐", func(t *testing.T) {
 		// 数据面：prop-d 由 agent 直接提出，没有 recommend。
 		if p := k.proposalOf(d); p != nil && p["recommend"] != nil {
 			t.Errorf("prop-d 不应带推荐: %v", p)
 		}
-		// 页面面：内核提供的 Web 页面脚本里有建议流的三个处置与"按推荐处理"批量入口。
+		// 页面面：内核提供的 Web 页面脚本里有建议流的三个处置、窄屏「更多」与「合并自 N 条」；「按推荐处理」已下线（决定 93）。
 		html := k.WebRaw("GET", "/", "", false)
 		js := regexp.MustCompile(`/assets/[^"]+\.js`).FindString(html.Body)
 		if js == "" {
 			t.Fatalf("Web 首页没有脚本入口: %.200s", html.Body)
 		}
 		bundle := k.WebRaw("GET", js, "", false).Body
-		for _, want := range []string{"接受", "补到已有事项", "忽略", "按推荐处理", "推荐："} {
+		for _, want := range []string{"接受", "补到已有事项", "忽略", "更多", "合并自 ", "推荐："} {
 			if !strings.Contains(bundle, want) {
 				t.Errorf("Web 页面脚本缺少 %q", want)
 			}
+		}
+		if strings.Contains(bundle, "按推荐处理") {
+			t.Error("Web 页面脚本不应再有「按推荐处理」入口")
 		}
 	})
 }
