@@ -136,6 +136,8 @@ webhook_schemes:
 
 **webhook_mappings**：字段映射，把 payload 映射成标准事件（§9.2 的字段）。没写 `detail` 的映射产出的事件不带 `detail`，原始 payload 不充当正文。特殊格式不写在这里，走 Source 登记里的转换脚本。
 
+`fields` 的键就是标准事件的字段名：`id`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`sender`、`correlation_keys`，以及统一时间字段 `due_at`、`starts_at`、`ends_at`、`all_day`。统一时间字段的值是模板，取到 `YYYY-MM-DD` 或 RFC3339 的字符串；`all_day` 取 `true`、`1` 或 `yes` 为真。映射带上它们就够，内核不按平台写分支（§9.2）。
+
 ```yaml
 webhook_mappings:
   - id: github-issues
