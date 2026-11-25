@@ -10,16 +10,18 @@ import { feature } from "./index";
 // 测试边界替身：按 api/items（phase 过滤）与 api/decisions（accept/dismiss）的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-interface P { id: string; phase: string; title: string; proposal?: { recommend?: string; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[] }; summary?: string; project?: string; priority?: string; origin?: { source: string; actor?: string }; ask?: unknown }
+interface P { id: string; phase: string; version?: number; title: string; proposal?: { recommend?: string; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[] }; summary?: string; project?: string; priority?: string; origin?: { source: string; actor?: string }; ask?: unknown;
+  deadline?: string | null; planned_for?: string; planned_slot?: string; ext?: Record<string, string> }
 const prop = (id: string, over: Partial<P> = {}): P => ({ id, phase: "proposed", title: "建议 " + id, ...over });
 
 function server(initial: P[], write?: (path: string, body: any) => Response | undefined, rejections: Record<string, unknown> = {}) {
   let items = initial;
-  const calls: { method: string; path: string; body?: any; csrf: string | null }[] = [];
+  const calls: { method: string; path: string; body?: any; csrf: string | null; ifMatch: string | null }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(init.body as string) : undefined;
-    calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
+    const hdrs = init.headers as Record<string, string> | undefined;
+    calls.push({ method, path: url, body, csrf: hdrs?.["X-CSRF-Token"] ?? null, ifMatch: hdrs?.["If-Match"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/sources") return json(200, { sources: [{ id: "src_mail_qq", name: "QQ 邮箱" }] });
     const q = url.match(/^\/v1\/items\?phase=(\w+)$/);
@@ -28,6 +30,13 @@ function server(initial: P[], write?: (path: string, body: any) => Response | un
       const res = write?.(url, body);
       if (res) return res;
       return json(200, { results: [] });
+    }
+    const patch = url.match(/^\/v1\/items\/([^/]+)$/);
+    if (patch && method === "PATCH") {
+      const res = write?.(url, body);
+      if (res) return res;
+      items = items.map((i) => (i.id === patch[1] ? { ...i, ...body, version: (i.version ?? 0) + 1 } : i));
+      return json(200, { item: items.find((i) => i.id === patch[1]) });
     }
     const w = url.match(/^\/v1\/items\/(.+)\/(accept|dismiss|attach)$/);
     if (w && method === "POST") {
@@ -56,6 +65,27 @@ const rej = (over: object = {}) => ({ seq: 9, at: "2030-01-01T00:00:00Z", actor:
 
 
 describe("建议流页（flow-proposal-triage）", () => {
+  it("卡片显示来源带来的截止、计划日期与时段并标来历；接受前可就地改（PATCH 带 If-Match）", async () => {
+    const s = server([prop("a", { version: 3, deadline: "2026-12-02T23:59:59+08:00", planned_for: "2026-12-03", planned_slot: "09:00 - 10:30",
+      ext: { source_deadline: "2026-12-02T23:59:59+08:00", source_planned_for: "2026-12-03", source_planned_slot: "09:00 - 10:30" } })]);
+    mount(s.impl);
+    const card = (await screen.findByText("建议 a")).closest("article")!;
+    expect(within(card).getByText(/截止 2026-12-02/)).toBeInTheDocument();
+    expect(within(card).getByText(/计划日期 2026-12-03/)).toBeInTheDocument();
+    expect(within(card).getByText(/时段 09:00 - 10:30/)).toBeInTheDocument();
+    expect(within(card).getAllByText(/来自来源/).length).toBe(3);
+
+    await userEvent.click(within(card).getByRole("button", { name: "改时间" }));
+    const date = within(card).getByLabelText("计划日期") as HTMLInputElement;
+    await userEvent.clear(date);
+    await userEvent.type(date, "2026-12-20");
+    await userEvent.click(within(card).getByRole("button", { name: "保存时间" }));
+    await waitFor(() => expect(s.calls.some((c) => c.method === "PATCH" && c.path === "/v1/items/a")).toBe(true));
+    const patch = s.calls.find((c) => c.method === "PATCH" && c.path === "/v1/items/a")!;
+    expect(patch.body.planned_for).toBe("2026-12-20");
+    expect(patch.ifMatch).toBe("3");
+  });
+
   it("ACT-PROP-01：只列 proposed 事项，请求 phase=proposed，不与决策待办混在一起", async () => {
     const s = server([prop("a", { project: "acc-open", origin: { source: "agent", actor: "observer" } }), prop("n", { phase: "needs_input", title: "决策 n" })]);
     mount(s.impl);

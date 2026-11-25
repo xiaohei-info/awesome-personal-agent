@@ -158,6 +158,16 @@ const zh = {
   undoPlan: (n: number) => `这批 ${n} 条改回建议，合并的拆回；之后改过的不动`,
   confirmUndo: (n: number) => `确认撤销 ${n} 条`,
   undone: (n: number) => `已改回建议 ${n} 条`,
+  due: "截止",
+  dueTimed: "带钟点",
+  dueTime: "截止时刻",
+  plannedDay: "计划日期",
+  slotRange: "时段",
+  timeFrom: { source: "来自来源", model: "模型推断" },
+  timeReason: "在建议页调整时间",
+  editTime: "改时间",
+  saveTime: "保存时间",
+  timeSaved: "时间已保存",
 };
 
 const en: typeof zh = {
@@ -317,6 +327,16 @@ const en: typeof zh = {
   undoPlan: (n) => `Puts these ${n} back, splitting merged ones; ones changed since stay`,
   confirmUndo: (n) => `Confirm undo of ${n}`,
   undone: (n) => `${n} back in proposals`,
+  due: "Deadline",
+  dueTimed: "With a time",
+  dueTime: "Deadline time",
+  plannedDay: "Planned date",
+  slotRange: "Time block",
+  timeFrom: { source: "from the source", model: "inferred by the model" },
+  timeReason: "changed times on proposals page",
+  editTime: "Edit times",
+  saveTime: "Save times",
+  timeSaved: "Times saved",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

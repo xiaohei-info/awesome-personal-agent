@@ -15,6 +15,8 @@ import { Prereqs } from "../../app/Prereqs";
 import { handoffPrereqs, useHandoff } from "../items/HandOff";
 import { strings as itemStrings } from "../items/strings";
 import { acceptPlan, fallback, groupBy, objectName, type Group, type Origin } from "./groups";
+import { deadlineText, deadlineValue, hostParts, useHostClock } from "../items/schedule";
+import { SlotFields, slotForm, slotValue } from "../items/ScheduleBlock";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
 export interface Proposal {
@@ -28,6 +30,12 @@ export interface Proposal {
   priority?: string;
   project?: string;
   origin?: { source: string; actor?: string };
+  // 来源与起草给出的时间（主文档 §6.3、§9.2）：接受前就在这里，可按 ext 的溯源标记显示来历、可就地改。
+  deadline?: string | null;
+  planned_for?: string;
+  planned_slot?: string;
+  // ext 是事项的扩展字段：来源给出的原值（source_*）与模型抽出的原值（model_*）在这里，用来标"来自来源/模型推断"。
+  ext?: Record<string, string>;
   // 入站流水线写入的建议信息（主文档 §6.3）；agent 直接提出的建议没有 recommend。
   proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[];
     merges?: Merge[]; absorbed?: Absorbed[]; integrated?: Integrated; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep; urgent?: boolean };
@@ -52,7 +60,104 @@ interface Dismissal { batch?: string; reason?: string; at: string }
 
 
 
-function Card({ item, failure, rejection, candidates, onAct, ready, checked, onCheck }: { item: Proposal; failure?: unknown; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void>; ready: boolean; checked?: boolean; onCheck?: (on: boolean) => void }) {
+/** 时间的两种来源：来源给出的原值、模型抽出的原值；当前值等于哪一个就标哪一个，都不同说明已经改过（不标）。 */
+const sameMoment = (a: string, b: string) => {
+  const x = Date.parse(a), y = Date.parse(b);
+  return !Number.isNaN(x) && !Number.isNaN(y) ? x === y : a === b;
+};
+
+const timeForm = (it: Proposal, offset: string) => {
+  const due = it.deadline ? hostParts(it.deadline, offset) : null;
+  const timedDue = !!due && due.time !== "23:59:59";
+  const slot = slotForm(it.planned_slot);
+  return { dueDate: due?.date ?? "", dueTimed: timedDue, dueTime: timedDue ? due!.time.slice(0, 5) : "18:00",
+    date: it.planned_for ?? "", timed: slot.timed, start: slot.start, end: slot.end };
+};
+
+/** 建议卡片上的时间（主文档 §6.3、§9.2）：显示来源或起草带来的截止、计划日期与时段，标明来自来源还是模型推断，
+ *  接受前可就地改（PATCH /items/{id} 带 If-Match，与事项详情同一口径）。 */
+function ProposalTime({ item, onSaved }: { item: Proposal; onSaved: () => Promise<void> }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const { utc_offset: offset } = useHostClock(api);
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState(() => timeForm(item, offset));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    if (!open) setF(timeForm(item, offset)); // 没在改时跟着服务端的最新值走
+  }, [item, offset, open]);
+
+  const ext = item.ext ?? {};
+  const origin = (cur: string | null | undefined, src?: string, model?: string) => {
+    if (!cur) return "";
+    if (src && sameMoment(cur, src)) return t.timeFrom.source;
+    if (model && sameMoment(cur, model)) return t.timeFrom.model;
+    return "";
+  };
+  const rows = [
+    item.deadline && [t.due, deadlineText(item.deadline, offset), origin(item.deadline, ext.source_deadline, ext.model_deadline)],
+    item.planned_for && [t.plannedDay, item.planned_for, origin(item.planned_for, ext.source_planned_for, ext.model_planned_for)],
+    item.planned_slot && [t.slotRange, item.planned_slot, origin(item.planned_slot, ext.source_planned_slot, ext.model_planned_slot)],
+  ].filter(Boolean) as [string, string, string][];
+  if (rows.length === 0 && !open && !ok) return null;
+
+  const v = slotValue(f.date, f);
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const body: Record<string, unknown> = {
+        deadline: f.dueDate ? deadlineValue(f.dueDate, f.dueTimed ? f.dueTime : null, offset) : null,
+        planned_for: f.date || null,
+        reason: t.timeReason,
+      };
+      if (f.date) body.planned_slot = v.slot; // 清日期时内核一起清时段，不必再发
+      await api.patch("/items/" + encodeURIComponent(item.id), body, item.version ? { "If-Match": String(item.version) } : undefined);
+      setOpen(false);
+      setOk(true);
+      await onSaved();
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="actions">
+      {rows.length > 0 && (
+        <p className="meta">
+          {rows.map(([label, value, from], i) => (
+            <span key={label}>{i > 0 && " · "}{label} {value}{from && <span className="sub"> · {from}</span>}</span>
+          ))}
+        </p>
+      )}
+      {!open && <button type="button" disabled={busy} onClick={() => { setOpen(true); setOk(false); }}>{t.editTime}</button>}
+      {ok && !open && <span role="status">{t.timeSaved}</span>}
+      {open && (
+        <form className="panel" onSubmit={(e) => { e.preventDefault(); if (!v.bad) void save(); }}>
+          <fieldset>
+            <legend>{t.due}</legend>
+            <label>{t.due} <input type="date" value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /></label>
+            {f.dueDate && <label><input type="checkbox" checked={f.dueTimed} onChange={(e) => setF({ ...f, dueTimed: e.target.checked })} /> {t.dueTimed}</label>}
+            {f.dueDate && f.dueTimed && <label>{t.dueTime} <input type="time" step={60} value={f.dueTime} onChange={(e) => setF({ ...f, dueTime: e.target.value })} /></label>}
+          </fieldset>
+          <label>{t.plannedDay} <input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></label>
+          <SlotFields date={f.date} timed={f.timed} start={f.start} end={f.end} bad={v.bad} onChange={(p) => setF({ ...f, ...p })} />
+          {err != null && <ErrorNote error={err} />}
+          <div className="actions">
+            <button type="submit" disabled={busy || v.bad}>{t.saveTime}</button>
+            <button type="button" disabled={busy} onClick={() => setOpen(false)}>{t.cancel}</button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function Card({ item, failure, rejection, candidates, onAct, onSaved, ready, checked, onCheck }: { item: Proposal; failure?: unknown; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void>; onSaved: () => Promise<void>; ready: boolean; checked?: boolean; onCheck?: (on: boolean) => void }) {
   const t = useT(strings);
   const [mode, setMode] = useState<"dismiss" | "attach" | null>(null);
   const [reason, setReason] = useState("");
@@ -98,6 +203,7 @@ function Card({ item, failure, rejection, candidates, onAct, ready, checked, onC
         <Val k="priority" id={pri} />
       </div>
       {item.summary && <p>{item.summary}</p>}
+      <ProposalTime item={item} onSaved={onSaved} />
       {p && (
         <p className="meta">
           {p.recommend && (
@@ -673,7 +779,7 @@ export function ProposalsPage() {
   const pick = (id: string) => (on: boolean) => setChosen((c) => (on ? [...c.filter((x) => x !== id), id] : c.filter((x) => x !== id)));
   const card = (i: Proposal, selectable = true) => (
     <Card key={i.id} item={i} failure={failure?.id === i.id ? failure.error : undefined} rejection={rejections[i.id]} candidates={() => candidates(i.id)}
-      onAct={(id, action, body) => act(id, action, body, i.id)} ready={ready}
+      onAct={(id, action, body) => act(id, action, body, i.id)} onSaved={load} ready={ready}
       checked={chosen.includes(i.id)} onCheck={selectable ? pick(i.id) : undefined} />
   );
   const stamp = (s: string) => (s ? new Date(s).toLocaleString() : "");
