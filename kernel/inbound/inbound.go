@@ -919,10 +919,23 @@ func OutboundPreview(ev domain.SourceEvent) map[string]OutboundView {
 }
 
 // eventInput 是送给每一级的结构化输入：只含元信息（类型、标题、发送者、时间、链接域名），正文走资料段按位置裁剪。
+// time 是来源已给的结构化时间（§9.2）：模型照抄，不从正文另推。
 func eventInput(src domain.Source, ev domain.SourceEvent, hint string, extra map[string]any) json.RawMessage {
 	t, _ := registry.Trim(ev, registry.ScopeMeta)
 	in := map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": t.Type, "subject": t.Subject, "link": t.Link,
 		"sender": t.Sender, "sender_verified": ev.SenderVerified, "occurred_at": t.OccurredAt, "correlation_hint": hint}
+	times := map[string]any{}
+	for k, v := range map[string]string{"due_at": ev.DueAt, "starts_at": ev.StartsAt, "ends_at": ev.EndsAt} {
+		if v != "" {
+			times[k] = v
+		}
+	}
+	if ev.AllDay {
+		times["all_day"] = true
+	}
+	if len(times) > 0 {
+		in["time"] = times
+	}
 	maps.Copy(in, extra)
 	b, _ := json.Marshal(in)
 	return b

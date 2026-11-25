@@ -1200,4 +1200,36 @@ func TestStructuredTimesBeatDraft(t *testing.T) {
 	if ext["source_deadline"] == "" || ext["model_deadline"] != "" || ext["model_planned_for"] != "2026-03-12" {
 		t.Fatalf("ext %+v", ext)
 	}
+	// 起草看得到来源给的时间（不再从正文另推），但写成事项的还是来源的。
+	var req string
+	for _, r := range e.stub.Requests() {
+		if strings.Contains(r.BodyText, "起草一条建议") {
+			req = r.BodyText
+		}
+	}
+	if !strings.Contains(req, "due_at") || !strings.Contains(req, "2026-03-20") {
+		t.Fatalf("structured time missing from the model input: %.300s", req)
+	}
+}
+
+// 模型输入显式带来源给出的结构化时间；来源没有时不送这个键（§9.2、§9.3）。
+func TestEventInputCarriesStructuredTimes(t *testing.T) {
+	ev := domain.SourceEvent{DueAt: "2026-03-20", StartsAt: "2026-03-21T09:00:00+08:00", EndsAt: "2026-03-21T10:00:00+08:00", AllDay: true}
+	var in struct {
+		Time map[string]any `json:"time"`
+	}
+	if err := json.Unmarshal(eventInput(domain.Source{ID: "src"}, ev, "", nil), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Time["due_at"] != "2026-03-20" || in.Time["starts_at"] != "2026-03-21T09:00:00+08:00" ||
+		in.Time["ends_at"] != "2026-03-21T10:00:00+08:00" || in.Time["all_day"] != true {
+		t.Fatalf("time %+v", in.Time)
+	}
+	in.Time = nil
+	if err := json.Unmarshal(eventInput(domain.Source{ID: "src"}, domain.SourceEvent{Subject: "s"}, "", nil), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Time != nil {
+		t.Fatalf("a source without structured times must not send the time key: %+v", in.Time)
+	}
 }
