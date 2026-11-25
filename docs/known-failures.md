@@ -31,7 +31,7 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
 | `tests/e2e/inbound` `TestFlowCapture/ACT-CAP-01` | 断言过期 | 否 | 已修（`8d525e43`） |
 | `tests/e2e/inbound` `TestFlowInboundPipeline/ACT-INP-08` | 断言过期 | 否 | 已修（`8d525e43`） |
 | `tests/e2e/inbound` `TestFlowTriageFailure/ACT-TRI-02`（含 ACT-TRI-07 同一处） | 断言过期 | 否 | 已修（`8d525e43`） |
-| `tests/e2e/workbench` `TestFlowWebWorkbench/ACT-WBN-16` | 前两处断言过期（已修），余下为真 bug | 否 | 部分已修（`8d525e43`）；360 像素溢出待修 |
+| `tests/e2e/workbench` `TestFlowWebWorkbench/ACT-WBN-16` | 前两处断言过期（`8d525e43`），余下为真 bug（`1a8f717d`） | 否 | 已修（`8d525e43`、`1a8f717d`） |
 
 ## 明细
 
@@ -85,13 +85,11 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
 
 **6b. 今天页分组标题过期（已修）**：`今天页四组 = [要你处理 今天的事（1）]，期望 [计划今天或更早（0） 今天到期（1） 等你决定（1） 久未推进（0）]`。今天页已按界面设计 §5 改为「要你处理 / Agent 交回的 / 今天的事（n） / 提醒（n）」，计划今天或更早与今天到期合成「今天的事」，久未推进收在折叠的 `details` 里（不是 `main section h2`）。期望改为按 `/v1/today` 的计数断言「今天的事（n）」与（有等你决定时）「要你处理」。
 
-**6c. 360 像素下今天页与事项页横向溢出（真 bug，待修）**：`页面 today 的 scrollWidth = 401，超出 360`、`页面 items 的 scrollWidth = 401`，`这些页面在 360 宽度下有控件超出视口: [today(1 个控件超出视口) items(12 个控件超出视口)]`。实测撑宽的是行内操作按钮组：`.act-row > .actions` 里五个按钮（排时间 69 + 交给 Agent 97 + 完成 55 + 记进展 69 + 更多 55，加 4 个 6px 间距共 369px），而 360 宽度下 `main` 左右各 16px 内边距只剩 328px。
+**6c. 360 像素下今天页与事项页横向溢出（已修，`1a8f717d`）**：`页面 today 的 scrollWidth = 401，超出 360`、`页面 items 的 scrollWidth = 401`，`这些页面在 360 宽度下有控件超出视口: [today(1 个控件超出视口) items(12 个控件超出视口)]`。实测撑宽的是行内操作按钮组：`.act-row > .actions` 里五个按钮（排时间 69 + 交给 Agent 97 + 完成 55 + 记进展 69 + 更多 55，加 4 个 6px 间距共 369px），而 360 宽度下 `main` 左右各 16px 内边距只剩 328px。
 
   - **根因**：`web/src/app/styles.css` 的手机断点（`@media (max-width: 820px)`）里 `.act-row > .actions { flex-wrap: nowrap }`、按钮 `white-space: nowrap`，注释写的是"行上四个快捷操作……占满一行并排放下，不收进「更多」"。`RowActions` 后来加了第五个按钮「更多」（`web/src/features/items/RowActions.tsx`），四个变五个后一行放不下，溢出的 41px 把整页撑宽。今天页（`TodayRow`）与事项列表共用这套行操作，所以两页都超。
   - **影响面**：360 像素宽度下今天页、事项列表出现横向滚动，与界面设计 §4.1/§web-ui 的"全部页面 360 宽度可读可操作、无横向滚动"不符；桌面与平板宽度不受影响，触控操作本身可用。
-  - **最小修法建议**：在窄断点（例如 `@media (max-width: 480px)`）把 `.act-row > .actions` 改成 `flex-wrap: wrap`，或把「更多」收进收起菜单／图标，并把 `styles.css` 的注释一起改。属界面口径，需先确认手机上五个动作怎么排，不要直接改 820px 断点影响平板。
-  - **是否阻塞上线**：否。不影响数据、安全与桌面主路径，冒烟清单里这条步骤（`workbench` 包的浏览器走查）在本机与 CI 无 `ego-browser` 时本来也会跳过。
-  - **处理**：已记录不修（代码不动）。状态标"仍失败（已知）"。
+  - **处理**：已修（`1a8f717d`）。按用户口径在窄屏（`≤ 820px`）保持主操作（「排时间」、「完成」）直接可见，将次要动作（「交给 Agent」、「记进展」、「删除…」）收进「更多」弹出菜单（`role="menu"`，支持方向键/Home/End/Esc 键盘操作、点外部关闭、44px 触控高度），桌面宽屏保持原五按钮布局不变；同时在 `ACT-WBN-16` 补充了展开「更多」菜单时的 360px 边界与 Esc 关闭断言。重跑 `TestFlowWebWorkbench` 全部 17 个子步骤通过，14 页 `scrollWidth` 均为 `360`，无其它断言问题。
 
 ## 维护约定
 
