@@ -76,12 +76,14 @@ func TestFlowCapture(t *testing.T) {
 	open := k.Projects["acc-open"]
 	var capTwoItems []string
 
-	k.step("ACT-CAP-01 默认关闭时不捕获", func(t *testing.T) {
+	k.step("ACT-CAP-01 关掉项目的捕获后不捕获", func(t *testing.T) {
 		before := len(k.proposed())
+		// 对话捕获对大项目默认开启（§6.5，默认值迁移见 §16.5）：要验关掉时不捕获，先显式关掉。
+		k.webOK("PATCH", "/v1/projects/"+open, `{"capture":false}`, 200)
 		k.clear()
 		code, out := k.capture(k.WRK, open, "下周我要把合同发给小王")
-		if code != http.StatusOK || out.Captured || out.Reason == "" {
-			t.Fatalf("应返回 200 {captured:false, reason}: %d %+v", code, out)
+		if code != http.StatusOK || out.Captured || out.Reason != "capture_disabled" {
+			t.Fatalf("关掉捕获后应返回 200 {captured:false, reason:capture_disabled}: %d %+v", code, out)
 		}
 		quiet()
 		eq(t, "CLS_LOG 新请求", len(k.Cls.Batches())-k.clsOff, 0)

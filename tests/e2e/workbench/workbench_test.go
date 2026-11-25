@@ -100,7 +100,9 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 `, wbNew))
 		before, after := r["before"].(map[string]any), r["after"].(map[string]any)
 		eq(t, "二级标题", fmt.Sprint(before["h2"]), "[行程]")
-		eq(t, "列表项", fmt.Sprint(before["li"]), "[周五出发]")
+		// 正文里链接行紧跟在列表项下、中间没有空行，Markdown 把它当作该列表项的续行（加上换行保留，列表项里是"周五出发<br>航司"），
+		// 所以列表项的文字是「周五出发」换行「航司」，而不是只有前者。
+		eq(t, "列表项", fmt.Sprint(before["li"]), "[周五出发\n航司]")
 		links, _ := before["links"].([]any)
 		if len(links) != 1 {
 			t.Fatalf("链接数 = %d，期望 1", len(links))
@@ -459,7 +461,6 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		pages := []string{"today", "decisions", "proposals", "items", "projects", "materials", "delegation", "briefs", "sources", "judgment", "health", "agent-changes", "settings", "audit"}
 		pagesJSON, _ := json.Marshal(pages)
 		td := k.webToday()
-		wantGroups := fmt.Sprintf("[计划今天或更早（%d） 今天到期（%d） 等你决定（%d） 久未推进（%d）]", len(td.Planned), len(td.Due), len(td.Pending), len(td.Stale))
 		r := k.browse("gt315-wbn-mobile", fmt.Sprintf(`
 await login();
 await page.cdp("Emulation.setDeviceMetricsOverride", { width: 360, height: 780, deviceScaleFactor: 2, mobile: true });
@@ -488,8 +489,9 @@ await page.click("loc=role:button[name='写进展']");
 await page.waitForFunction(() => document.body.textContent.includes("已交照片"));
 // ④ 按推荐处理
 await page.goto(base + "/proposals");
-await page.waitForSelector("loc=role:button[name='按推荐处理']", { state: "visible" });
-await page.click("loc=role:button[name='按推荐处理']");
+// 按钮的可访问名里带条数（「按推荐处理 12 条」），只能按子串找。
+await page.waitForSelector("loc=role:button[name*='按推荐处理']", { state: "visible" });
+await page.click("loc=role:button[name*='按推荐处理']");
 await page.click("loc=role:button[name='确认按推荐处理']");
 await page.waitForFunction(() => /已处理 \d+ 条/.test(document.body.textContent), undefined, { timeout: 30000 });
 out.outcome = await page.evaluate(() => (document.body.textContent.match(/已处理 \d+ 条[^。]*/) || [""])[0]);
@@ -508,7 +510,14 @@ for (const p of %s) {
   if (off > 0) out.empty.push(p + "(" + off + " 个控件超出视口)");
 }
 `, TMRW, wbD, pagesJSON))
-		eq(t, "今天页四组", fmt.Sprint(r["groups"]), wantGroups)
+		// 今天页的分组标题（界面设计 §5.3）：计划今天或更早与今天到期合成「今天的事（n）」；久未推进收在折叠的 details 里，不是分组标题。
+		groups := fmt.Sprint(r["groups"])
+		if want := fmt.Sprintf("今天的事（%d）", len(td.Planned)+len(td.Due)); !strings.Contains(groups, want) {
+			t.Errorf("今天页应有分组 %q: %s", want, groups)
+		}
+		if len(td.Pending) > 0 && !strings.Contains(groups, "要你处理") {
+			t.Errorf("有等你决定的事时今天页应有「要你处理」: %s", groups)
+		}
 		for p, w := range r["widths"].(map[string]any) {
 			if w.(float64) > 360 {
 				t.Errorf("页面 %s 的 scrollWidth = %v，超出 360", p, w)

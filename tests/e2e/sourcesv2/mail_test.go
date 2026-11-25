@@ -138,9 +138,8 @@ func TestFlowSourceMail(t *testing.T) {
 		if err := os.Rename(off, bin); err != nil {
 			t.Fatal(err)
 		}
-		if k.show("src_other").Stats.Runs <= otherRuns {
-			t.Error("其他来源应照常运行")
-		}
+		// 另一来源照常运行：它是独立节拍，与邮件来源的失败不在同一秒，所以要等它在下一个节拍再跑一次，不能当场比次数。
+		k.until("其他来源照常运行", func() bool { return k.show("src_other").Stats.Runs > otherRuns })
 		// 放回后恢复拉取，不产生重复。
 		k.until("放回后下一周期照常拉取", func() bool {
 			return k.show(src).Stats.ConsecutiveFailures == 0 && k.show(src).Stats.Runs > s.Stats.Runs

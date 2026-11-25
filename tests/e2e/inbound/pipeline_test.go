@@ -203,7 +203,7 @@ func TestFlowInboundPipeline(t *testing.T) {
 		eq(t, "title", it.Title, "inp-draftfail 原始标题")
 		eq(t, "summary", it.Summary, "")
 		eq(t, "kind", it.Kind, "task")
-		eq(t, "project", it.Project, "")
+		eq(t, "project", it.Project, "prj_inbox") // 未指定项目的非 brief/routine 事项落内置 Inbox（决定 92）
 		if len(k.modelAbout("inp-draftfail", false)) == 0 {
 			t.Error("生成端点应收到过起草请求（并返回 500）")
 		}
