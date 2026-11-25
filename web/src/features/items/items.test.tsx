@@ -249,7 +249,8 @@ describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
   it("在两个事项间建 relates 边，详情两端都能看到（关系显示名字与对方标题）", async () => {
     const l = ledger();
     mount(l.impl, "/items/item_a");
-    await userEvent.selectOptions(await screen.findByLabelText("关联事项"), "item_b");
+    await userEvent.click(await screen.findByRole("combobox", { name: "关联事项" }));
+    await userEvent.click(screen.getByRole("option", { name: "item-b" }));
     await userEvent.selectOptions(screen.getByLabelText("关系类型"), "relates");
     await userEvent.click(screen.getByRole("button", { name: "建立关联" }));
     const rels = within(await screen.findByRole("list", { name: "关系" }));
@@ -264,11 +265,34 @@ describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
     mount(l.impl, "/items/item_a");
     await screen.findByRole("list", { name: "关系" });
     l.rels.push({ type: "basis", from: "item_a", to: "mat_x" });
-    await userEvent.selectOptions(screen.getByLabelText("关联事项"), "item_b");
+    await userEvent.click(screen.getByRole("combobox", { name: "关联事项" }));
+    await userEvent.click(screen.getByRole("option", { name: "item-b" }));
     await userEvent.click(screen.getByRole("button", { name: "建立关联" }));
     // 指向材料的依据关系进材料区的“依据”组（读不到材料时按 id 显示），链接指向材料页。
     const basis = within(await screen.findByRole("group", { name: "依据" }));
     expect(basis.getByRole("link", { name: "mat_x" })).toHaveAttribute("href", "/materials?id=mat_x");
+  });
+
+  it("关联事项选择器支持按项目名与事项标题搜索并展示项目名", async () => {
+    const l = ledger();
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      if (url === "/v1/projects") return json(200, { projects: [{ id: "prj_apa", name: "APA" }, { id: "prj_home", name: "生活" }] });
+      if (url === "/v1/items") {
+        return json(200, {
+          items: [
+            { id: "item_a", phase: "open", version: 1, kind: "task", title: "item-a" },
+            { id: "item_b", phase: "open", version: 1, kind: "task", title: "item-b", project: "prj_apa" },
+            { id: "item_c", phase: "open", version: 1, kind: "task", title: "买咖啡豆", project: "prj_home" },
+          ],
+        });
+      }
+      return l.impl(url, init);
+    }) as unknown as typeof fetch;
+    mount(impl, "/items/item_a");
+    const combo = await screen.findByRole("combobox", { name: "关联事项" });
+    await userEvent.type(combo, "生活");
+    expect(screen.getByRole("option", { name: /买咖啡豆/ })).toHaveTextContent("生活");
+    expect(screen.queryByRole("option", { name: /item-b/ })).toBeNull();
   });
 
   it("标签、阶段在取回的列表上筛；选项带条数；正在筛一行可逐项去掉或清除全部", async () => {

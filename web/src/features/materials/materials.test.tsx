@@ -34,7 +34,7 @@ function backend(o: { materials?: Mat[]; revisions?: Rev[]; hits?: any[]; propos
       const p = u.searchParams.get("project");
       return json(200, { materials: materials.filter((m) => p === null || p === "" || m.project === p) });
     }
-    if (q === "/v1/items") return json(200, { items: [{ id: "item_1", title: "登录改造" }] });
+    if (q === "/v1/items") return json(200, { items: [{ id: "item_1", title: "登录改造", project: "acc-open" }, { id: "item_2", title: "买菜清单", project: "acc-home" }] });
     if (q === "/v1/settings/policy") return json(200, { version: 1, material_write: { default: "proposed", kinds: { minutes: "direct", design: "proposed" } } });
     if (q === "/v1/materials/search") return json(200, { hits: o.hits ?? [], ...{ _q: u.search } });
     if (q === "/v1/materials" && method === "POST") {
@@ -394,11 +394,15 @@ describe("检索与筛选（ACT-MAT-09 / ACT-MAT-13）", () => {
     await userEvent.selectOptions(screen.getByLabelText("按类型筛选"), "design");
     expect(screen.queryByRole("button", { name: "周会纪要" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录方案" })).toBeInTheDocument();
-    // 关联事项按标题找、按名字选，不再手打 id；提交的仍是 id。
-    await userEvent.type(screen.getByLabelText("按标题找事项"), "登录");
-    await screen.findByRole("option", { name: "登录改造" });
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "关联事项" }), "item_1");
-    expect(b.calls.some((c) => c.path.startsWith("/v1/items?q="))).toBe(true);
+    // 关联事项按项目名或标题实时搜索、按名字选，不再手打 id；提交的仍是 id。
+    const itemCombo = screen.getByRole("combobox", { name: "关联事项" });
+    await userEvent.type(itemCombo, "acc-home");
+    expect(await screen.findByRole("option", { name: /买菜清单/ })).toHaveTextContent("acc-home");
+    expect(screen.queryByRole("option", { name: /登录改造/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "清空" }));
+    await userEvent.type(itemCombo, "登录");
+    await userEvent.click(await screen.findByRole("option", { name: /登录改造/ }));
+    expect(b.calls.some((c) => c.path === "/v1/items")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "搜索" }));
     const hit = await screen.findByRole("listitem", { name: "mat_h" });
     expect(hit).toHaveTextContent("在仓库里（只读）");

@@ -173,9 +173,9 @@ export function MaterialsPage() {
           {t.search}
           <input value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
-        <div>
-          {t.relatedItem}
-          <ItemPick label={t.relatedItem} find={t.findItem} empty={t.anyItem} value={item} onChange={setItem} />
+        <div className="item-field">
+          <span>{t.relatedItem}</span>
+          <ItemPick label={t.relatedItem} placeholder={t.findItem} value={item} onChange={setItem} />
         </div>
         <div className="actions">
           <button onClick={search}>{t.searchBtn}</button>

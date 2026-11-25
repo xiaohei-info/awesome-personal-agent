@@ -581,3 +581,27 @@ pre.raw-text { margin: 6px 0; max-height: 32em; overflow: auto; font: 13px/1.5 v
 
 /* 已放弃的事项（被筛出来看时）：已闭合，不是当前问题，用中性灰，不用朱砂 */
 .rows li[data-phase="dropped"] > .act-row a { color: var(--ink-3); }
+
+/* 可搜索事项选择器 */
+.item-field { display: grid; gap: 5px; font-size: 12.5px; color: var(--ink-2); }
+.filters .item-field { flex: 0 1 240px; min-width: 180px; }
+.actions .item-field { flex: 1 1 240px; }
+.item-pick { position: relative; min-width: 220px; max-width: 100%; }
+.item-pick-input { position: relative; display: flex; align-items: center; }
+.item-pick-input input { padding-right: 30px; }
+.item-pick-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); line-height: 1; font-size: 15px; }
+.item-pick-menu {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 15;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow-lift);
+  overflow: hidden;
+}
+.item-pick-menu ul { list-style: none; margin: 0; padding: 4px; max-height: 240px; overflow-y: auto; }
+.item-pick-menu li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13.5px; color: var(--ink);
+}
+.item-pick-menu li small { flex: none; color: var(--ink-3); font-size: 12px; }
+.item-pick-menu li[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+.item-pick-menu li[aria-selected="true"] small { color: inherit; opacity: .75; }
+.item-pick-menu li[data-picked="true"]:not([aria-selected="true"]) { background: var(--sunken); font-weight: 600; }
+.item-pick-empty { margin: 0; padding: 10px 12px; font-size: 13px; color: var(--ink-3); }

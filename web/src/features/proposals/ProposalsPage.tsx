@@ -8,7 +8,7 @@ import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
-import { EntityPick, useItemTitle, useNamed, useNames } from "../../app/names";
+import { EntityPick, ItemPick, useItemTitle, useNamed, useNames } from "../../app/names";
 import { Val } from "../../app/values";
 import { HANDOFF_TAG } from "../../app/ids";
 import { Prereqs } from "../../app/Prereqs";
@@ -81,7 +81,7 @@ function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: {
   const sourceName = useNames("source");
   const p = item.proposal;
   const from = item.origin && t.from(item.origin.actor ? credential(item.origin.actor) : sourceName(item.origin.source));
-  const meta = [project(item.project), from].filter(Boolean).join(" · ");
+  const targetProjectName = item.project ? project(item.project) : t.noProject;
   const pri = item.priority && item.priority !== "normal" ? item.priority : "";
 
   return (
@@ -92,13 +92,11 @@ function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: {
         </label>
       )}
       <h3>{item.title}{p?.integrated && <> <span className="sub" title={t.integratedWhy}>· {t.integrated}</span></>}</h3>
-      {(meta || pri) && (
-        <p className="meta">
-          {meta}
-          {meta && pri && " · "}
-          <Val k="priority" id={pri} />
-        </p>
-      )}
+      <div className="meta">
+        <span className="badge plain">{t.targetProject(targetProjectName)}</span>
+        {from && <span>{from}</span>}
+        <Val k="priority" id={pri} />
+      </div>
       {item.summary && <p>{item.summary}</p>}
       {p && (
         <p className="meta">
@@ -128,12 +126,13 @@ function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: {
         <button disabled={busy} onClick={() => setMode("dismiss")}>{t.do.dismiss}</button>
         {projects.length > 0 && (
           <label className="sub">
-            {t.project}{" "}
+            {t.targetProjectField}{" "}
             <EntityPick
               kind="project"
               label={t.changeProject(item.title)}
               value={item.project ?? ""}
               empty={item.project ? undefined : t.noProject}
+              disabled={busy}
               onChange={(pid) => pid && pid !== item.project && void act("project", { project: pid })}
             />
           </label>
@@ -149,16 +148,19 @@ function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: {
         </div>
       )}
       {mode === "attach" && (
-        <div>
-          <label>
-            {t.attachTo}
-            <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={targets === null}>
-              <option value="">{targets === null ? t.loading : t.chooseItem}</option>
-              {targets?.map((x) => (
-                <option key={x.id} value={x.id}>{x.title}</option>
-              ))}
-            </select>
-          </label>
+        <div className="actions">
+          <div className="item-field">
+            <span>{t.attachTo}</span>
+            <ItemPick
+              label={t.attachTo}
+              items={targets ?? []}
+              loading={targets === null}
+              disabled={busy || targets === null}
+              value={target}
+              onChange={setTarget}
+              placeholder={t.chooseItem}
+            />
+          </div>
           <button disabled={busy || !target} onClick={() => act("attach", { to: target })}>{t.confirmAttach}</button>
         </div>
       )}

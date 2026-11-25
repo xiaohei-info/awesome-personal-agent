@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ApiClient } from "./api";
 import { useSession } from "./session";
-import { useLang } from "./i18n";
+import { useLang, useT } from "./i18n";
+import { common } from "./strings";
 import { vocab } from "./vocab";
 
 // id → 显示名（设计 §4.2）：项目、来源、凭据、执行者按 id 显示名字，不让本人看 id、手打 id。
@@ -92,18 +93,19 @@ export function useNames(kind: NameKind): (id?: string | null) => string {
 }
 
 /** 选一个对象：显示名字，提交 id。当前值不在名单里时仍保留为一个选项，不丢。 */
-export function EntityPick({ kind, value, onChange, label, empty }: {
+export function EntityPick({ kind, value, onChange, label, empty, disabled }: {
   kind: NameKind;
   value: string;
   onChange: (id: string) => void;
   label?: string;
   /** 空选项的文字；省略则没有空选项。 */
   empty?: string;
+  disabled?: boolean;
 }) {
   const list = useNamed(kind);
   const opts = value && !list.some((x) => x.id === value) ? [...list, { id: value, name: value }] : list;
   return (
-    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+    <select aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
       {empty !== undefined && <option value="">{empty}</option>}
       {opts.map((x) => (
         <option key={x.id} value={x.id}>{x.name}</option>
@@ -138,41 +140,187 @@ export function useItemTitle(id?: string | null): string {
   return id ? title || id : "";
 }
 
-/** 按标题找一个事项：输入几个字列出匹配的事项（GET /items?q=），选中后提交 id；不让人手打 id。 */
-export function ItemPick({ value, onChange, label, find, empty }: {
+export interface ItemOption {
+  id: string;
+  title: string;
+  project?: string;
+}
+
+/** 可搜索事项选择器：按项目名与事项标题实时过滤，支持键盘导航与清空。未传 items 时自动取 GET /items。 */
+export function ItemPick({ value, onChange, label, items, placeholder, disabled, loading }: {
   value: string;
   onChange: (id: string) => void;
-  /** 下拉的无障碍名称。 */
+  /** 输入框与列表的无障碍名称。 */
   label: string;
-  /** 搜索框的无障碍名称与提示。 */
-  find: string;
-  /** 「不限」选项的文字。 */
-  empty: string;
+  /** 外部传入候选项；省略时自动从 GET /items 拉取。 */
+  items?: ItemOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  loading?: boolean;
 }) {
   const { api } = useSession();
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState<{ id: string; title: string }[]>([]);
-  const current = useItemTitle(value);
+  const c = useT(common);
+  const projectName = useNames("project");
+  const [loaded, setLoaded] = useState<ItemOption[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const listId = useId();
+
   useEffect(() => {
-    if (!q.trim()) return setHits([]);
+    if (items !== undefined) return;
     let live = true;
-    // shortcut: 每次输入都查一次、只取第一页，事项很多时再加防抖与分页。
-    api.get<{ items: { id: string; title: string }[] }>("/items?q=" + encodeURIComponent(q.trim())).then(
-      (r) => live && setHits(r.items),
-      () => live && setHits([]),
+    api.get<{ items: ItemOption[] }>("/items").then(
+      (r) => live && setLoaded(r.items),
+      () => live && setLoaded([]),
     );
     return () => {
       live = false;
     };
-  }, [api, q]);
-  const opts = value && !hits.some((x) => x.id === value) ? [{ id: value, title: current || value }, ...hits] : hits;
+  }, [api, items]);
+
+  const list = items ?? loaded ?? [];
+  const isLoading = loading ?? (items === undefined && loaded === null);
+  const selected = list.find((x) => x.id === value);
+  const fallbackTitle = useItemTitle(value && !selected ? value : null);
+  const selectedLabel = selected ? selected.title || selected.id : value ? fallbackTitle : "";
+
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = list.filter((it) => {
+    if (terms.length === 0) return true;
+    const title = (it.title || "").toLowerCase();
+    const proj = (it.project ? projectName(it.project) : "").toLowerCase();
+    return terms.every((term) => title.includes(term) || proj.includes(term));
+  });
+  const at = Math.min(active, Math.max(filtered.length - 1, 0));
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    const el = listRef.current.children[at] as HTMLElement | undefined;
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [open, at, filtered.length]);
+
+  const choose = (id: string) => {
+    onChange(id);
+    setOpen(false);
+    setQuery("");
+    setActive(0);
+  };
+
+  const clear = () => {
+    onChange("");
+    setQuery("");
+    setActive(0);
+    setOpen(false);
+  };
+
   return (
-    <span>
-      <input aria-label={find} placeholder={find} value={q} onChange={(e) => setQ(e.target.value)} />
-      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{empty}</option>
-        {opts.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
-      </select>
-    </span>
+    <div className="item-pick" ref={rootRef}>
+      <div className="item-pick-input">
+        <input
+          type="text"
+          role="combobox"
+          aria-label={label}
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={open && filtered[at] ? `${listId}-${at}` : undefined}
+          disabled={disabled}
+          placeholder={isLoading ? c.loading : open && selectedLabel ? selectedLabel : placeholder || c.searchItemPlaceholder}
+          value={open ? query : selectedLabel}
+          onFocus={() => {
+            if (disabled) return;
+            setOpen(true);
+            const idx = value ? filtered.findIndex((x) => x.id === value) : 0;
+            setActive(idx >= 0 ? idx : 0);
+          }}
+          onClick={() => !disabled && setOpen(true)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setActive(0);
+            if (!open) setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              if (!open) setOpen(true);
+              else if (filtered.length) setActive((at + 1) % filtered.length);
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              if (!open) setOpen(true);
+              else if (filtered.length) setActive((at - 1 + filtered.length) % filtered.length);
+            } else if (e.key === "Enter" && open) {
+              e.preventDefault();
+              if (filtered[at]) choose(filtered[at].id);
+            } else if (e.key === "Escape" && open) {
+              e.preventDefault();
+              setOpen(false);
+              setQuery("");
+            }
+          }}
+          onBlur={(e) => {
+            if (e.relatedTarget && !rootRef.current?.contains(e.relatedTarget as Node)) {
+              setOpen(false);
+              setQuery("");
+            }
+          }}
+        />
+        {!disabled && (value || query) && (
+          <button
+            type="button"
+            className="quiet item-pick-clear"
+            aria-label={c.clearChoice}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={clear}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {open && !disabled && (
+        <div className="item-pick-menu">
+          {isLoading ? (
+            <p className="item-pick-empty" role="status">{c.loading}</p>
+          ) : filtered.length === 0 ? (
+            <p className="item-pick-empty">{c.itemSearchEmpty}</p>
+          ) : (
+            <ul id={listId} ref={listRef} role="listbox" aria-label={label}>
+              {filtered.map((it, idx) => {
+                const pName = it.project ? projectName(it.project) : "";
+                return (
+                  <li
+                    key={it.id}
+                    id={`${listId}-${idx}`}
+                    role="option"
+                    aria-selected={idx === at}
+                    data-picked={it.id === value ? "true" : undefined}
+                    onMouseEnter={() => setActive(idx)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => choose(it.id)}
+                  >
+                    <span>{it.title || it.id}</span>
+                    {pName && <small>{pName}</small>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -14,7 +14,7 @@ import { strings } from "./strings";
 import { HANDOFF_TAG, WAITING } from "../../app/ids";
 import { Pick, Val, useLabel } from "../../app/values";
 import { ErrorNote } from "../../app/errors";
-import { EntityPick, useItemTitle, useNamed, useNames } from "../../app/names";
+import { EntityPick, ItemPick, useItemTitle, useNamed, useNames } from "../../app/names";
 import { ViewTable, useViews } from "./TypeViews";
 import { AgentBlock, tagName } from "./HandOff";
 import { QuestionCard, useAnswer, type DecisionItem } from "../decisions/DecisionsPage";
@@ -531,7 +531,10 @@ function RelateForm({ others, onSubmit }: { others: Item[]; onSubmit: (b: { to: 
   const [type, setType] = useState("relates");
   return (
     <form className="panel" onSubmit={(e) => { e.preventDefault(); if (to) onSubmit({ to, type }); }}>
-      <label>{t.relateTo} <select value={to} onChange={(e) => setTo(e.target.value)}><option value="">{t.choose}</option>{others.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</select></label>
+      <div className="item-field">
+        <span>{t.relateTo}</span>
+        <ItemPick label={t.relateTo} items={others} value={to} onChange={setTo} placeholder={t.choose} />
+      </div>
       <label>{t.relType} <Pick k="relation" value={type} onChange={setType} ids={REL_TYPES} /></label>
       <button type="submit" disabled={!to}>{t.relate}</button>
     </form>

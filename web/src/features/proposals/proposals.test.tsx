@@ -182,11 +182,14 @@ describe("补到已有事项（ACT-PRH-10）", () => {
     mount(s.impl);
     const card = (await screen.findByText("建议 a")).closest("article")!;
     await userEvent.click(within(card).getByRole("button", { name: "补到已有事项" }));
+    const combo = within(card).getByRole("combobox", { name: "补到哪个事项" });
+    await waitFor(() => expect(combo).not.toBeDisabled());
+    await userEvent.click(combo);
     expect(await within(card).findByRole("option", { name: "T3 事项" })).toBeInTheDocument();
     expect(within(card).queryByRole("option", { name: "已完成事项" })).toBeNull();
     const confirm = within(card).getByRole("button", { name: "确认补到" });
     expect(confirm).toBeDisabled();
-    await userEvent.selectOptions(within(card).getByLabelText("补到哪个事项"), "t3");
+    await userEvent.click(within(card).getByRole("option", { name: "T3 事项" }));
     await userEvent.click(confirm);
     await screen.findByText("建议 b");
     expect(screen.queryByText("建议 a")).not.toBeInTheDocument();
@@ -200,8 +203,10 @@ describe("补到已有事项（ACT-PRH-10）", () => {
     mount(s.impl);
     const card = (await screen.findByText("建议 a")).closest("article")!;
     await userEvent.click(within(card).getByRole("button", { name: "补到已有事项" }));
-    await within(card).findByRole("option", { name: "T3 事项" });
-    expect(within(card).getByLabelText("补到哪个事项")).toHaveValue("t3");
+    const combo = within(card).getByRole("combobox", { name: "补到哪个事项" });
+    await waitFor(() => expect(combo).toHaveValue("T3 事项"));
+    await userEvent.click(combo);
+    expect(await within(card).findByRole("option", { name: "T3 事项" })).toBeInTheDocument();
   });
 
   it("目标已终结（409）：显示服务端原因，建议仍在", async () => {
@@ -209,10 +214,43 @@ describe("补到已有事项（ACT-PRH-10）", () => {
     mount(s.impl);
     const card = (await screen.findByText("建议 a")).closest("article")!;
     await userEvent.click(within(card).getByRole("button", { name: "补到已有事项" }));
-    await userEvent.selectOptions(await within(card).findByLabelText("补到哪个事项"), "t3");
+    const combo = within(card).getByRole("combobox", { name: "补到哪个事项" });
+    await waitFor(() => expect(combo).not.toBeDisabled());
+    await userEvent.click(combo);
+    await userEvent.click(await within(card).findByRole("option", { name: "T3 事项" }));
     await userEvent.click(within(card).getByRole("button", { name: "确认补到" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("target item is closed");
     expect(screen.getByText("建议 a")).toBeInTheDocument();
+  });
+
+  it("补到已有事项支持按项目名与事项标题搜索并展示所属项目", async () => {
+    const base = server([
+      prop("a"),
+      prop("t1", { phase: "open", title: "修复登录超时", project: "prj_apa" }),
+      prop("t2", { phase: "open", title: "周报整理", project: "prj_inbox" }),
+    ]);
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      if (url === "/v1/projects") {
+        return json(200, { projects: [{ id: "prj_inbox", name: "Inbox", system_role: "inbox" }, { id: "prj_apa", name: "APA" }] });
+      }
+      return base.impl(url, init);
+    }) as unknown as typeof fetch;
+    mount(impl);
+    const card = (await screen.findByText("建议 a")).closest("article")!;
+    await userEvent.click(within(card).getByRole("button", { name: "补到已有事项" }));
+    const combo = within(card).getByRole("combobox", { name: "补到哪个事项" });
+    await waitFor(() => expect(combo).not.toBeDisabled());
+    await userEvent.type(combo, "apa");
+    expect(within(card).getByRole("option", { name: /修复登录超时/ })).toHaveTextContent("APA");
+    expect(within(card).queryByRole("option", { name: /周报整理/ })).toBeNull();
+    await userEvent.clear(combo);
+    await userEvent.type(combo, "不存在");
+    expect(within(card).getByText("没有匹配的事项")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(within(card).queryByRole("listbox")).toBeNull();
+    await userEvent.click(combo);
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(combo).toHaveValue("周报整理");
   });
 });
 
@@ -876,9 +914,9 @@ describe("整合出来的那条能看到从哪几条合来（§9.3）", () => {
     expect(within(row).getByRole("button", { name: "撤销合并" })).toHaveAttribute("title", expect.stringContaining("整组还原"));
   });
 
-  it("建议卡片可直接修改归属项目，发送 PATCH /v1/items/{id} 带 If-Match 并刷新", async () => {
+  it("建议卡片展示目标项目标签；改选项目发送 PATCH /v1/items/{id} 带 If-Match 并刷新后再接受", async () => {
     const patches: { path: string; body: any; ifMatch: string | null }[] = [];
-    let currentProject = "prj_inbox";
+    let items: (P & { version: number })[] = [{ ...prop("p1", { title: "整理文档", project: "prj_inbox" }), version: 3 }];
     const base = server([]);
     const impl = (async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? "GET";
@@ -886,20 +924,31 @@ describe("整合出来的那条能看到从哪几条合来（§9.3）", () => {
         return json(200, { projects: [{ id: "prj_inbox", name: "Inbox", system_role: "inbox" }, { id: "prj_apa", name: "APA" }] });
       }
       if (url === "/v1/items?phase=proposed") {
-        return json(200, { items: [{ ...prop("p1", { title: "整理文档", project: currentProject }), version: 3 }], last_rejections: {} });
+        return json(200, { items, last_rejections: {} });
       }
       if (url === "/v1/items/p1" && method === "PATCH") {
         const body = JSON.parse(init.body as string);
         patches.push({ path: url, body, ifMatch: (init.headers as Record<string, string> | undefined)?.["If-Match"] ?? null });
-        currentProject = body.project;
+        items = [{ ...items[0], project: body.project, version: 4 }];
         return json(200, { id: "p1", version: 4 });
+      }
+      if (url === "/v1/items/p1/accept" && method === "POST") {
+        const accepted = items[0];
+        items = [];
+        expect(accepted.project).toBe("prj_apa");
+        return json(200, { id: "p1", version: 5, replayed: false });
       }
       return base.impl(url, init);
     }) as unknown as typeof fetch;
     mount(impl);
-    const pick = await screen.findByLabelText("修改「整理文档」的归属项目");
+    const card = (await screen.findByText("整理文档")).closest("article")!;
+    expect(within(card).getByText("目标项目：Inbox")).toBeInTheDocument();
+    const pick = within(card).getByLabelText("修改「整理文档」的归属项目");
     expect(pick).toHaveValue("prj_inbox");
     await userEvent.selectOptions(pick, "prj_apa");
     await waitFor(() => expect(patches).toEqual([{ path: "/v1/items/p1", body: { project: "prj_apa", reason: "在建议页调整归属项目" }, ifMatch: "3" }]));
+    await waitFor(() => expect(within(card).getByText("目标项目：APA")).toBeInTheDocument());
+    await userEvent.click(within(card).getByRole("button", { name: "接受" }));
+    expect(await screen.findByText("建议都处理完了")).toBeInTheDocument();
   });
 });
