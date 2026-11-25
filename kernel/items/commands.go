@@ -2,7 +2,9 @@ package items
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
@@ -473,10 +475,88 @@ func Register(x *command.Executor, kinds *Kinds) error {
 	return nil
 }
 
+// isSystemItemKind 报告该事项类型是否为系统级周期/简报事项（不强制归入 Inbox）。
+func isSystemItemKind(k domain.Kind) bool {
+	return k == domain.KindBrief || k == "routine"
+}
+
+// defaultProject 为未指定项目的非系统事项兜底归入内置 Inbox；未初始化 Inbox（如隔离单测）时保持原样。
+func defaultProject(tx *store.Tx, kind domain.Kind, project string) (string, error) {
+	if project != "" || isSystemItemKind(kind) {
+		return project, nil
+	}
+	id, ok, err := projects.InboxID(tx)
+	if err != nil || !ok {
+		return project, err
+	}
+	return id, nil
+}
+
+// BackfillInbox 是一次性幂等启动迁移（§6.5、§16.5）：把存量未终结（proposed/open/waiting/needs_input）且
+// 非系统类型（brief/routine）、非带父事项委派子事项的无项目事项迁入内置 Inbox；已终结（done/dropped）不动。
+func BackfillInbox(ctx context.Context, x *command.Executor, st *store.Store, owner string) (int, error) {
+	var (
+		inboxID string
+		todo    []string
+	)
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		id, ok, err := projects.InboxID(tx)
+		if err != nil || !ok {
+			return err
+		}
+		inboxID = id
+		all, err := List(tx, Filter{})
+		if err != nil {
+			return err
+		}
+		for _, it := range all {
+			if it.ID == "" || it.Project != "" || isSystemItemKind(it.Kind) {
+				continue
+			}
+			if it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped {
+				continue
+			}
+			if it.Kind == domain.KindDelegation {
+				if _, has, err := ParentOf(tx, it.ID); err != nil {
+					return err
+				} else if has {
+					continue
+				}
+			}
+			todo = append(todo, it.ID)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	if inboxID == "" || len(todo) == 0 {
+		return 0, nil
+	}
+	system := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:defaults", Via: domain.ViaClock, OnBehalfOf: owner},
+		Level: authz.LevelDelegate}
+	for _, id := range todo {
+		raw, _ := json.Marshal(map[string]any{"id": id, "project": inboxID, "reason": "backfill unassigned item to Inbox"})
+		if _, err := x.Do(ctx, command.Request{Identity: system, Command: "item.update", Input: raw,
+			IdemKey: "defaults:inbox:item:" + id, Owner: owner}); err != nil {
+			return 0, fmt.Errorf("items: backfill inbox for %s: %w", id, err)
+		}
+	}
+	return len(todo), nil
+}
+
 func (s *svc) create() command.Spec {
 	parse := func(in json.RawMessage) (createIn, error) {
 		var v createIn
 		return v, decode(in, &v)
+	}
+	build := func(tx *store.Tx, v createIn, id string) (domain.Item, error) {
+		it := v.item(id)
+		p, err := defaultProject(tx, it.Kind, it.Project)
+		if err != nil {
+			return it, err
+		}
+		it.Project = p
+		return it, nil
 	}
 	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed, Tier: authz.TierOrganize,
 		TierFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
@@ -495,20 +575,26 @@ func (s *svc) create() command.Spec {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			it := v.item(id)
+			it, err := build(tx, v, id)
+			if err != nil {
+				return authz.Object{}, err
+			}
 			return object(tx, it, it)
 		},
 		Actions: func(_ *store.Tx, c command.Caller, o authz.Object, in json.RawMessage) []authz.Action {
 			v, _ := parse(in)
 			own := o.Assignee != "" && o.Assignee == c.Actor.Principal
 			if v.phase() == domain.PhaseProposed {
-				return editActions(c, o, own, v.Assignee != "", v.Project != "", authz.ActionCreateProposed)
+				return editActions(c, o, own, v.Assignee != "", o.Project != "", authz.ActionCreateProposed)
 			}
-			return editActions(c, o, own, v.Assignee != "", v.Project != "")
+			return editActions(c, o, own, v.Assignee != "", o.Project != "")
 		},
 		Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
-			it := v.item(o.ID)
+			it, err := build(tx, v, o.ID)
+			if err != nil {
+				return err
+			}
 			if err := checkOrigin(it.Origin); err != nil {
 				return err
 			}
@@ -533,7 +619,11 @@ func (s *svc) create() command.Spec {
 			if err := askCodeBy(c.Caller, nil, v.Ask); err != nil {
 				return nil, err
 			}
-			it := stamped(v.item(c.Object.ID), c.Now())
+			built, err := build(c.Tx, v, c.Object.ID)
+			if err != nil {
+				return nil, err
+			}
+			it := stamped(built, c.Now())
 			it.ChainDepth = c.ChainDepth
 			if err := save(c.Tx, it); err != nil {
 				return nil, err

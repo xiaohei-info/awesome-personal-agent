@@ -43,7 +43,51 @@ var Module = store.Module{Name: "projects", Migrations: []store.Migration{{
 	// 账本结构版本 5（§6.5、§14.7）：按机器或 harness 匹配的项目名单。默认为空，名单判定与升级前一致。
 	Version: 3, Ledger: 5, Name: "ledger-v5-allowed-executor-match",
 	SQL: `ALTER TABLE projects ADD COLUMN allowed_executor_match TEXT NOT NULL DEFAULT '[]';`,
+}, {
+	// 账本结构版本 10（§6.5）：系统角色标记（目前仅 "inbox"），部分唯一索引保证全局至多一个内置 Inbox。
+	Version: 4, Ledger: 10, Name: "ledger-v10-project-system-role",
+	SQL: `ALTER TABLE projects ADD COLUMN system_role TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX projects_system_role ON projects(system_role) WHERE system_role <> '';`,
 }}}
+
+const (
+	// InboxDefaultID 与 InboxDefaultName 是全新账本初始化内置 Inbox 时使用的标识与显示名。
+	InboxDefaultID   = "prj_inbox"
+	InboxDefaultName = "Inbox"
+	// CmdEnsureInbox 是启动时确保内置 Inbox 存在的系统内部命令（认领既有收件箱或新建）。
+	CmdEnsureInbox = "project.inbox.ensure"
+)
+
+// EnsureInbox 确保账本存在唯一的内置 Inbox（§6.5、§16.5）：
+// 已有 system_role='inbox' 时直接返回；否则原地认领无仓库的活跃同名项目（"Inbox"/"收件箱"）并将显示名统一为 Inbox，
+// 若无匹配则创建 prj_inbox。经系统命令落账并记 project.updated，保持事件折叠一致且幂等。
+func EnsureInbox(ctx context.Context, x *command.Executor, st *store.Store, owner string) (string, error) {
+	var existing string
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		id, ok, err := InboxID(tx)
+		if ok {
+			existing = id
+		}
+		return err
+	}); err != nil {
+		return "", err
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	system := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:defaults", Via: domain.ViaClock, OnBehalfOf: owner},
+		Level: authz.LevelDelegate}
+	res, err := x.Do(ctx, command.Request{Identity: system, Command: CmdEnsureInbox, Input: json.RawMessage(`{}`),
+		IdemKey: "defaults:inbox:ensure", Owner: owner})
+	if err != nil {
+		return "", fmt.Errorf("projects: ensure inbox: %w", err)
+	}
+	var out ref
+	if err := json.Unmarshal(res.Value, &out); err != nil {
+		return "", err
+	}
+	return out.ID, nil
+}
 
 // SeedCapture 是对话捕获改为默认开启的一次性迁移（§16.5）：启动时把还没开启的项目逐个开启，
 // 经 project.update 落账，操作者是 system（kernel:defaults）。已开启的项目不动、不写事件，重复执行不重复写；
@@ -90,12 +134,12 @@ func conflict(why string) error {
 
 // ---- 读 ----
 
-const cols = "id, name, intro, tags, status, repos, allowed_executors, capture, capture_outbound, allowed_executor_match"
+const cols = "id, name, intro, tags, status, repos, allowed_executors, capture, capture_outbound, allowed_executor_match, system_role"
 
 func scan(r *store.Rows) (domain.Project, error) {
 	var p domain.Project
 	var tags, status, repos, allowed, capOut, match string
-	if err := r.Scan(&p.ID, &p.Name, &p.Intro, &tags, &status, &repos, &allowed, &p.Capture, &capOut, &match); err != nil {
+	if err := r.Scan(&p.ID, &p.Name, &p.Intro, &tags, &status, &repos, &allowed, &p.Capture, &capOut, &match, &p.SystemRole); err != nil {
 		return p, err
 	}
 	if capOut != "" { // 空串即未选择
@@ -145,9 +189,36 @@ func Get(tx *store.Tx, id string) (domain.Project, error) {
 	return ps[0], nil
 }
 
-// List 按名称（再按 id）排序返回全部项目。
+// List 按内置 Inbox 优先、其余按名称（再按 id）排序返回全部项目。
 func List(tx *store.Tx) ([]domain.Project, error) {
-	return query(tx, "ORDER BY name, id")
+	return query(tx, "ORDER BY CASE WHEN system_role = 'inbox' THEN 0 ELSE 1 END, name, id")
+}
+
+// Inbox 读取内置 Inbox 项目；未初始化时返回 not_found。
+func Inbox(tx *store.Tx) (domain.Project, error) {
+	ps, err := query(tx, "WHERE system_role = ?", domain.ProjectRoleInbox)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	if len(ps) == 0 {
+		return domain.Project{}, notFound(InboxDefaultID)
+	}
+	return ps[0], nil
+}
+
+// InboxID 返回内置 Inbox 项目的 id；未初始化（或最小单测未挂载 projects 表）时 ok 为 false。
+func InboxID(tx *store.Tx) (string, bool, error) {
+	ps, err := query(tx, "WHERE system_role = ?", domain.ProjectRoleInbox)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if len(ps) == 0 {
+		return "", false, nil
+	}
+	return ps[0].ID, true, nil
 }
 
 // ByRemote 按仓库身份找到所属项目（来源事件归属，§6.5）。仓库全局唯一，所以至多一个。
@@ -176,8 +247,8 @@ func save(tx *store.Tx, p domain.Project, insert bool) error {
 	if match == nil {
 		match = []domain.ExecutorMatch{}
 	}
-	_, err := tx.Exec(verb+" INTO projects ("+cols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		p.ID, p.Name, p.Intro, enc(p.Tags), string(p.Status), enc(p.Repos), enc(p.AllowedExecutors), p.Capture, derefOr(p.CaptureOutbound), enc(match))
+	_, err := tx.Exec(verb+" INTO projects ("+cols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		p.ID, p.Name, p.Intro, enc(p.Tags), string(p.Status), enc(p.Repos), enc(p.AllowedExecutors), p.Capture, derefOr(p.CaptureOutbound), enc(match), p.SystemRole)
 	return err
 }
 
@@ -252,6 +323,20 @@ func Resolve(tx *store.Tx, s Scope) (string, error) {
 		}
 	}
 	return "", conflict("current directory matches checkouts of more than one project; pass --project")
+}
+
+// ResolveOrInbox 先按 Resolve 精确解析（显式指定不存在报错、目录冲突报错，绝不静默降级）；
+// 未命中任何项目时兜底返回内置 Inbox 项目（fallback 为 true）。
+func ResolveOrInbox(tx *store.Tx, s Scope) (id string, fallback bool, err error) {
+	id, err = Resolve(tx, s)
+	if err != nil || id != "" {
+		return id, false, err
+	}
+	p, err := Inbox(tx)
+	if err != nil {
+		return "", false, err
+	}
+	return p.ID, true, nil
 }
 
 func inside(dir, root string) bool {
@@ -494,7 +579,7 @@ func Register(x *command.Executor) error {
 				return captureTier(v.Capture != nil), nil
 			},
 			Object: objectOf(func(v updateIn) string { return v.ID }),
-			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
+			Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 				var v updateIn
 				_ = decode(in, &v)
 				if v.Name == nil && v.Intro == nil && v.Tags == nil && v.Status == nil && v.Capture == nil {
@@ -507,6 +592,13 @@ func Register(x *command.Executor) error {
 				}
 				if v.Status != nil && !validStatus(*v.Status) {
 					return invalid("unknown status " + string(*v.Status))
+				}
+				if v.Status != nil && *v.Status != domain.ProjectActive {
+					if p, err := Get(tx, o.ID); err != nil {
+						return err
+					} else if p.IsInbox() {
+						return invalid("inbox project cannot be paused or archived")
+					}
 				}
 				if v.Tags != nil {
 					return validTags(*v.Tags)
@@ -537,9 +629,14 @@ func Register(x *command.Executor) error {
 			}},
 		{Name: "project.repo.add", Action: authz.ActionManageProject, Tier: authz.TierPower, Page: "/projects",
 			Object: objectOf(func(v repoIn) string { return v.ID }),
-			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
+			Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 				var v repoIn
 				_ = decode(in, &v)
+				if p, err := Get(tx, o.ID); err != nil {
+					return err
+				} else if p.IsInbox() {
+					return invalid("inbox project cannot bind repositories or checkouts")
+				}
 				return validRemote(v.Remote)
 			},
 			Apply: func(c *command.Ctx) (any, error) {
@@ -571,9 +668,14 @@ func Register(x *command.Executor) error {
 			}},
 		{Name: "project.checkout.set", Action: authz.ActionEditCheckout, Tier: authz.TierOrganize,
 			Object: objectOf(func(v checkoutIn) string { return v.ID }),
-			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
+			Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 				var v checkoutIn
 				_ = decode(in, &v)
+				if p, err := Get(tx, o.ID); err != nil {
+					return err
+				} else if p.IsInbox() {
+					return invalid("inbox project cannot bind repositories or checkouts")
+				}
 				return validCheckout(domain.Checkout{Host: v.Host, Path: v.Path})
 			},
 			Apply: func(c *command.Ctx) (any, error) {
@@ -652,6 +754,59 @@ func Register(x *command.Executor) error {
 				}
 				payload, _ := json.Marshal(map[string]any{"before": before, "after": next, "match_before": orEmpty(matchBefore), "match_after": orEmpty(match)})
 				if _, err := c.Emit(domain.Event{Type: domain.EvProjectAllowedExecutorsChanged, Object: p.ID, Payload: payload}); err != nil {
+					return nil, err
+				}
+				return ref{p.ID}, nil
+			}},
+		// 系统内部命令：启动时认领老库收件箱或新建内置 Inbox（§6.5、§16.5）。
+		{Name: CmdEnsureInbox, Action: authz.ActionManageProject, Tier: authz.TierInternal,
+			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+				var v struct{}
+				return authz.Object{}, decode(in, &v)
+			},
+			Apply: func(c *command.Ctx) (any, error) {
+				if id, ok, err := InboxID(c.Tx); err != nil {
+					return nil, err
+				} else if ok {
+					return ref{id}, nil
+				}
+				ps, err := List(c.Tx)
+				if err != nil {
+					return nil, err
+				}
+				var candidate *domain.Project
+				for i := range ps {
+					p := ps[i]
+					if p.Status != domain.ProjectActive || len(p.Repos) > 0 {
+						continue
+					}
+					n := strings.ToLower(strings.TrimSpace(p.Name))
+					if n != "inbox" && n != "收件箱" {
+						continue
+					}
+					if candidate == nil || p.ID < candidate.ID {
+						cp := p
+						candidate = &cp
+					}
+				}
+				if candidate != nil {
+					p := *candidate
+					p.SystemRole = domain.ProjectRoleInbox
+					p.Name = InboxDefaultName
+					p.Capture = true
+					if err := save(c.Tx, p, false); err != nil {
+						return nil, err
+					}
+					if _, err := c.Emit(domain.Event{Type: domain.EvProjectUpdated, Object: p.ID, Payload: snapshot("claim_inbox", p)}); err != nil {
+						return nil, err
+					}
+					return ref{p.ID}, nil
+				}
+				p := domain.Project{ID: InboxDefaultID, Name: InboxDefaultName, Status: domain.ProjectActive, Capture: true, SystemRole: domain.ProjectRoleInbox}
+				if err := save(c.Tx, p, true); err != nil {
+					return nil, err
+				}
+				if _, err := c.Emit(domain.Event{Type: domain.EvProjectUpdated, Object: p.ID, Payload: snapshot("create", p)}); err != nil {
 					return nil, err
 				}
 				return ref{p.ID}, nil

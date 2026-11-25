@@ -31,7 +31,11 @@ export interface Project {
   capture?: boolean;
   /** 对话增量送外部模型的范围；null 为还没选，没有缺省值（§6.5、§14.14）。 */
   capture_outbound?: string | null;
+  /** 系统角色标记（如 "inbox"）；外部不可写入（§6.5）。 */
+  system_role?: string;
 }
+
+const isInbox = (p: Project) => p.system_role === "inbox";
 
 const splitTags = (s: string) => s.split(",").map((t) => t.trim()).filter(Boolean);
 
@@ -80,12 +84,17 @@ function ProjectList() {
       {projects && !projects.length && error == null && <p className="empty">{t.none}</p>}
       {!!projects?.length && (
         <ul aria-label={t.list} className="rows">
-          {projects.map((p) => (
-            <li key={p.id}>
-              <Link to={p.id}>{p.name}</Link> <span className={"badge" + (p.status === "active" ? " ok" : "")}><Val k="projectStatus" id={p.status} /></span>
-              {p.tags?.length ? <span className="sub">{p.tags.map((t) => "#" + t).join(" ")}</span> : null}
-            </li>
-          ))}
+          {[...projects]
+            .sort((a, b) => Number(isInbox(b)) - Number(isInbox(a)))
+            .map((p) => (
+              <li key={p.id}>
+                <Link to={p.id}>{p.name}</Link>{" "}
+                {isInbox(p) && <span className="badge">{t.builtin}</span>}{" "}
+                <span className={"badge" + (p.status === "active" ? " ok" : "")}><Val k="projectStatus" id={p.status} /></span>
+                {isInbox(p) && <span className="sub">{t.inboxHint}</span>}
+                {p.tags?.length ? <span className="sub">{p.tags.map((t) => "#" + t).join(" ")}</span> : null}
+              </li>
+            ))}
         </ul>
       )}
       <h2>{t.create}</h2>
@@ -118,18 +127,19 @@ function ProjectDetail() {
 
   if (loadErr != null) return <main><ErrorNote error={loadErr} /><Link to="/projects">{t.back}</Link></main>;
   if (!p) return <main><p role="status">{t.loading}</p></main>;
+  const inbox = isInbox(p);
   return (
     <main>
       <p className="eyebrow"><Link to="/projects">{t.back}</Link></p>
-      <h1>{p.name}</h1>
-      {p.intro && <p className="lede">{p.intro}</p>}
+      <h1>{p.name} {inbox && <span className="badge">{t.builtin}</span>}</h1>
+      {p.intro ? <p className="lede">{p.intro}</p> : inbox && <p className="lede">{t.inboxHint}</p>}
       <ProjectItems id={p.id} />
       <ProjectMaterials project={p.id} />
       {/* 进项目是来看事的：名称、仓库、执行者这些设置低频，收在页底，仍是它们唯一的编辑处。 */}
       <details>
-        <summary>{t.settings}</summary>
+        <summary>{inbox ? t.inboxSettings : t.settings}</summary>
         <EditForm key={p.id + p.name} p={p} onSaved={setP} />
-        <Repos p={p} onChange={setP} />
+        {!inbox && <Repos p={p} onChange={setP} />}
         <Executors p={p} onSaved={setP} />
       </details>
     </main>
@@ -159,20 +169,26 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
   const [tags, setTags] = useState((p.tags ?? []).join(", "));
   const [status, setStatus] = useState(p.status);
 
+  const inbox = isInbox(p);
   const save = (e: FormEvent) => {
     e.preventDefault();
-    // 不带 allowed_executors：它只能经 settings 路由修改（§14.7）。
-    return run(async () => onSaved(await api.patch<Project>("/projects/" + p.id, { name, intro, tags: splitTags(tags), status })));
+    // 不带 allowed_executors：它只能经 settings 路由修改（§14.7）；内置 Inbox 保持 active 不改状态。
+    const body = inbox ? { name, intro, tags: splitTags(tags) } : { name, intro, tags: splitTags(tags), status };
+    return run(async () => onSaved(await api.patch<Project>("/projects/" + p.id, body)));
   };
   return (
     <form className="panel" onSubmit={save} aria-label={t.props}>
       <label>{t.name} <input value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label>{t.intro} <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
       <label>{t.tags} <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
-      <label>
-        {t.status}
-        <Pick k="projectStatus" value={status} onChange={setStatus} ids={PROJECT_STATUS} />
-      </label>
+      {inbox ? (
+        <p className="sub">{t.inboxStatusLocked}</p>
+      ) : (
+        <label>
+          {t.status}
+          <Pick k="projectStatus" value={status} onChange={setStatus} ids={PROJECT_STATUS} />
+        </label>
+      )}
       <button type="submit">{t.saveProject}</button>
       {error != null && <ErrorNote error={error} />}
     </form>

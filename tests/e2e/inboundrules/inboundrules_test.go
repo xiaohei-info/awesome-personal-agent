@@ -348,7 +348,7 @@ func TestFlowInboundRules(t *testing.T) {
 		eq(t, "irl-o1 project", f.item(o1.Item).Project, e.Projects["acc-open"])
 		patch(`{"default_project":""}`)
 		o2 := src.emit(ev("irl-o2", "acc.none", "清空后事件", ""))["irl-o2"]
-		eq(t, "irl-o2 project", f.item(o2.Item).Project, "")
+		eq(t, "irl-o2 project", f.item(o2.Item).Project, "prj_inbox")
 		eq(t, "irl-o1 事项项目不变", f.item(o1.Item).Project, e.Projects["acc-open"])
 	})
 
@@ -372,8 +372,8 @@ func TestFlowInboundRules(t *testing.T) {
 			}
 		}
 		eq(t, "irl-r1 project", f.item(got["irl-r1"].Item).Project, e.Projects["acc-work"])
-		if p := f.item(got["irl-r2"].Item).Project; p != "" {
-			t.Errorf("irl-r2 不得归到清单外的项目，实际 %q", p)
+		if p := f.item(got["irl-r2"].Item).Project; p != "prj_inbox" {
+			t.Errorf("irl-r2 不得归到清单外的项目（应兜底落入内置 Inbox），实际 %q", p)
 		}
 	})
 

@@ -533,6 +533,14 @@ func (k *kernel) start(ctx context.Context) error {
 	if err := instances.Seed(ctx, k.x, k.st, k.packs, owner, defaultSchedules); err != nil {
 		return err
 	}
+	if _, err := kprojects.EnsureInbox(ctx, k.x, k.st, owner); err != nil { // 内置 Inbox：认领既有收件箱或新建 prj_inbox（§6.5、§16.5）
+		return err
+	}
+	if n, err := kitems.BackfillInbox(ctx, k.x, k.st, owner); err != nil { // 存量未终结无项目事项一次性迁入 Inbox（§16.5）
+		return err
+	} else if n > 0 {
+		slog.Info("backfilled unassigned active items to Inbox", "count", n)
+	}
 	if err := kprojects.SeedCapture(ctx, k.x, k.st, owner); err != nil { // 对话捕获默认开启：已有项目一次性补开（§16.5）
 		return err
 	}

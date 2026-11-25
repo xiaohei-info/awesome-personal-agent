@@ -23,7 +23,7 @@ function ledger() {
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     const h = (init.headers ?? {}) as Record<string, string>;
     calls.push({ method, path: url, body, ifMatch: h["If-Match"] ?? null });
-    if (url === "/v1/projects") return json(200, { projects: [{ id: "acc-home", name: "家" }, { id: "acc-work" }] });
+    if (url === "/v1/projects") return json(200, { projects: [{ id: "acc-home", name: "家" }, { id: "acc-work" }, { id: "prj_inbox", name: "Inbox", system_role: "inbox" }] });
     if (url === "/v1/items" && method === "POST") {
       const it = { id: "item_new", version: 1, kind: body.kind, ...body };
       items.push(it);
@@ -103,7 +103,7 @@ describe("Web 新建与编辑事项", () => {
     await u.click(screen.getByRole("button", { name: "创建" }));
     await screen.findByRole("heading", { name: "WB-HO 整理接口文档", level: 1 });
     const post = l.calls.find((c) => c.method === "POST" && c.path === "/v1/items")!;
-    expect(post.body).toEqual({ kind: "task", phase: "open", title: "WB-HO 整理接口文档", tags: ["agent-ok"] });
+    expect(post.body).toEqual({ kind: "task", phase: "open", title: "WB-HO 整理接口文档", project: "prj_inbox", tags: ["agent-ok"] });
   });
 
   it("新建缺标题时不发请求", async () => {
@@ -193,6 +193,29 @@ describe("Web 新建与编辑事项", () => {
     expect(post.body).toEqual({ key: "fm-thread-5" });
     expect(post.ifMatch).toBe("1");
     expect(await timelineText()).toMatch(/改了(标题、正文|事项)/);
+  });
+
+  it("事项详情可改归属项目（带 If-Match），委派子事项不显示选择器；新建事项默认选内置 Inbox", async () => {
+    const l = ledger();
+    l.items.push(
+      { id: "item_task", phase: "open", version: 2, kind: "task", title: "普通事", project: "prj_inbox" },
+      { id: "item_del", phase: "open", version: 1, kind: "delegation", title: "委派事", project: "acc-home" },
+    );
+    const u = userEvent.setup();
+    const { unmount } = mount(l, "/items/item_task");
+    const pick = await screen.findByLabelText("项目");
+    expect(pick).toHaveValue("prj_inbox");
+    await u.selectOptions(pick, "acc-home");
+    await waitFor(() => expect(l.calls.some((c) => c.method === "PATCH" && c.path === "/v1/items/item_task" && c.body?.project === "acc-home" && c.ifMatch === "2")).toBe(true));
+    unmount();
+
+    const r2 = mount(l, "/items/item_del");
+    await screen.findByRole("heading", { name: "委派事" });
+    expect(screen.queryByLabelText("项目")).not.toBeInTheDocument();
+    r2.unmount();
+
+    mount(l, "/items/new");
+    await waitFor(() => expect(screen.getByLabelText("项目")).toHaveValue("prj_inbox"));
   });
 });
 

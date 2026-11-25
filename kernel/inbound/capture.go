@@ -37,14 +37,12 @@ const (
 // 未收下的原因（响应里的 reason）。
 const (
 	ReasonRunIdentity     = "run_identity"
-	ReasonNoProject       = "no_project"
 	ReasonCaptureDisabled = "capture_disabled"
 )
 
-// 没能捕获的原因类别（EvCaptureFailed 的 class）。前两类内核自己判定；其余由插件在下一次成功连上内核时补报，
+// 没能捕获的原因类别（EvCaptureFailed 的 class）。第一类内核自己判定；其余由插件在下一次成功连上内核时补报，
 // 内核不可达与没有凭据的那几次只有插件知道。
 const (
-	FailNoProject       = "no_project"       // 会话所在目录不属于任何项目：不捕获
 	FailDisabled        = "capture_disabled" // 项目的 capture 被直接调 API 关掉
 	FailUnreachable     = "kernel_unreachable"
 	FailNoCredentials   = "no_credentials"
@@ -79,7 +77,7 @@ func failed(c *command.Ctx, class, project string, at time.Time) error {
 	return err
 }
 
-// CaptureOut 是 CmdCapture 的结果；Captured 为假时不写来源事件，Reason 说明原因（只写机制）；没有项目与项目捕获被关掉时另记一条 EvCaptureFailed（只有类别与时间）。
+// CaptureOut 是 CmdCapture 的结果；Captured 为假时不写来源事件，Reason 说明原因（只写机制）；项目捕获被关掉时另记一条 EvCaptureFailed（只有类别与时间）。
 type CaptureOut struct {
 	Captured bool   `json:"captured"`
 	Reason   string `json:"reason,omitempty"`
@@ -131,12 +129,9 @@ func (s *Service) registerCapture(x *command.Executor) error {
 					return nil, err
 				}
 			}
-			id, err := projects.Resolve(c.Tx, projects.Scope{Flag: in.Project, Cwd: in.Path, Host: in.Host})
+			id, _, err := projects.ResolveOrInbox(c.Tx, projects.Scope{Flag: in.Project, Cwd: in.Path, Host: in.Host})
 			if err != nil {
 				return nil, err
-			}
-			if id == "" {
-				return CaptureOut{Reason: ReasonNoProject}, failed(c, FailNoProject, "", time.Time{})
 			}
 			p, err := projects.Get(c.Tx, id)
 			if err != nil {

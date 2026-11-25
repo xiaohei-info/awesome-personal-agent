@@ -497,3 +497,18 @@ func TestProbeGenerateFallsBackToTheBuiltinSample(t *testing.T) {
 		t.Fatalf("%+v", d)
 	}
 }
+
+// 外部端点下 Inbox 对话捕获未选外发范围时，sources 自检给出 warning（subject=capture:<inboxID>）；本机端点不告警。
+func TestDoctorWarnsExternalEndpointWithUnsetInboxCaptureOutbound(t *testing.T) {
+	inbox := &domain.Project{ID: "prj_inbox", Name: "Inbox", Status: domain.ProjectActive, Capture: true, SystemRole: domain.ProjectRoleInbox}
+	extPol := policy.Policy{GenerateEndpoint: policy.GenerateEndpoint{URL: "https://api.example/v1", Model: "m", Locality: policy.LocalityExternal}}
+	c := sources(Facts{Policy: extPol, Inbox: inbox}, Env{})
+	if c.Status != Warning || c.Code != CodeSourcesAttention || len(c.Details) != 1 || c.Details[0].Subject != "capture:prj_inbox" || c.Details[0].Code != CodeSourceOutboundUnset {
+		t.Fatalf("external unset inbox capture should warn: %+v", c)
+	}
+	localPol := policy.Policy{GenerateEndpoint: policy.GenerateEndpoint{URL: "http://127.0.0.1:8000/v1", Model: "m", Locality: policy.LocalityLocal}}
+	c2 := sources(Facts{Policy: localPol, Inbox: inbox}, Env{})
+	if c2.Status != OK || c2.Code != CodeSourcesNone {
+		t.Fatalf("local endpoint should not warn on unset capture_outbound: %+v", c2)
+	}
+}

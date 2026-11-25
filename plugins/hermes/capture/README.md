@@ -7,9 +7,7 @@ Candidate capture (design §11.2, appendix A.5): at `on_session_end` (turn level
 `POST /v1/capture` as `{text, path, host}` with `X-APA-Session`, `X-APA-Harness: hermes` and an `Idempotency-Key` (candidates land as `proposed`). Hermes' `on_session_end` carries no transcript, so
 `post_llm_call` buffers each finished turn (`user:` / `assistant:`) per session; each turn is sent once.
 
-- On by default for every project (no per-project switch). A session whose directory is in no project is not captured:
-  the kernel answers 200 `captured: false, reason: no_project` and records the class for the diagnostics page. Under a run identity (`APA_RUN`, or the session's run context, see `tools/README.md`) the kernel never captures either, and
-  the plugin only ever uses the run credential.
+- On by default for every project (no per-project switch). A session whose directory matches no registered project repo falls back to the kernel's built-in Inbox project (`capture:<inbox_id>`), where extraction may still classify concrete items into a matching business project or leave them in Inbox. Under a run identity (`APA_RUN`, or the session's run context, see `tools/README.md`) the kernel never captures either, and the plugin only ever uses the run credential.
 - Asynchronous and invisible: the POST runs in a detached helper process with all output discarded.
 - No forced continuation (`inject_message`, `continue`, ...); no judgment logic; any failure is swallowed.
 

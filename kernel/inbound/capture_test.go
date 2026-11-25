@@ -10,6 +10,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
@@ -182,19 +184,99 @@ func TestCaptureNoEffectUnderRunIdentity(t *testing.T) {
 	}
 }
 
-// observer 只读，不能提交增量；没有项目作用域时不入账。
-func TestCaptureRejectsObserverAndNoProject(t *testing.T) {
+// observer 只读，不能提交增量；空白正文被拒。
+func TestCaptureRejectsObserverAndBlankText(t *testing.T) {
 	e := newEnv(t, true)
 	e.setCapture(e.web, true)
 	if _, err := e.capture(caller(authz.LevelObserver, ""), map[string]any{"project": e.web, "text": "x"}); err == nil {
 		t.Fatal("observer must be denied")
 	}
-	out, err := e.capture(caller(authz.LevelWorker, ""), map[string]any{"text": "没有项目"})
-	if err != nil || out.Captured || out.Reason != ReasonNoProject {
-		t.Fatalf("out %+v err %v", out, err)
-	}
 	if _, err := e.capture(caller(authz.LevelWorker, ""), map[string]any{"project": e.web, "text": "  "}); err == nil {
 		t.Fatal("empty text must be rejected")
+	}
+}
+
+// 决策 1：主会话兜底进 Inbox 的对话允许 triage-extract 识别具体业务项目，识别不出则落入 Inbox；
+// 送给模型的 projects 清单不含 Inbox 自身；显式具体项目的捕获仍强锁定原项目。
+func TestCaptureInboxExtractClassifiesConcreteProjectOrFallsBack(t *testing.T) {
+	e := newEnv(t, true)
+	inboxID, err := projects.EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.screen(0.95)
+	e.draft(`{"candidates":[{"title":"修 web 登录超时","kind":"task","project":"` + e.web + `"},{"title":"周末买咖啡豆","kind":"task","project":""}]}`)
+	out, err := e.capture(caller(authz.LevelWorker, "s-main"), map[string]any{"text": "帮我记两件事：修 web 登录超时，另外周末买咖啡豆", "path": "/srv/demo", "host": "h"})
+	if err != nil || !out.Captured || out.Project != inboxID {
+		t.Fatalf("out %+v err %v", out, err)
+	}
+	ev := e.waitDisposed("capture:" + inboxID)
+	if ev.Disposition != domain.DispositionProposed || len(ev.Items) != 2 {
+		t.Fatalf("event %+v", ev)
+	}
+	if got := e.item(ev.Items[0]).Project; got != e.web {
+		t.Fatalf("first candidate should be classified to web (%s), got %q", e.web, got)
+	}
+	if got := e.item(ev.Items[1]).Project; got != inboxID {
+		t.Fatalf("second candidate should fall back to inbox (%s), got %q", inboxID, got)
+	}
+	if strings.Contains(e.sent(0), `"id":"`+inboxID+`"`) {
+		t.Fatalf("projects list sent to extractor should exclude Inbox (%s): %s", inboxID, e.sent(0))
+	}
+}
+
+// 决策 4：sweep 跨来源合并不再硬编码拦截 capture:*，本机模型允许进入 ask，外部模型遵循项目 capture_outbound。
+func TestCaptureSweepFollowsOutboundAndLocality(t *testing.T) {
+	e := newEnv(t, true)
+	inboxID, err := projects.EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.screen(0.95)
+	e.draft(`{"candidates":[{"title":"对话里的合同审阅","kind":"task"}]}`)
+	out, err := e.capture(caller(authz.LevelWorker, "s-sweep"), map[string]any{"text": "合同审阅别忘了", "path": "/tmp/nowhere", "host": "h"})
+	if err != nil || !out.Captured {
+		t.Fatalf("capture: %+v %v", out, err)
+	}
+	ev := e.waitDisposed("capture:" + inboxID)
+	capItem := e.item(ev.Item)
+	// 放一条进行中的已有事项作候选，避免“批内仅 1 条且无可选事项”被规则直接跳过
+	var openRef struct{ ID string }
+	_ = json.Unmarshal(e.must("item.create", map[string]any{"kind": "task", "phase": "open", "title": "合同审阅", "project": e.web}), &openRef)
+	all := []domain.Item{capItem, e.item(openRef.ID)}
+
+	var pol policy.Policy
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		_, pol, err = policy.Current(tx)
+		return err
+	})
+	pol.GenerateEndpoint.Locality = policy.LocalityLocal
+	plan, err := e.svc.planBatch(bg, pol, all, map[string]domain.Source{}, []domain.Item{capItem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ask) != 1 || len(plan.settle) != 0 {
+		t.Fatalf("local endpoint should include capture item in sweep ask: ask=%d settle=%d", len(plan.ask), len(plan.settle))
+	}
+
+	// 外部端点且 Inbox capture_outbound 未选：保守留着（settle）。
+	pol.GenerateEndpoint.Locality = policy.LocalityExternal
+	plan, err = e.svc.planBatch(bg, pol, all, map[string]domain.Source{}, []domain.Item{capItem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ask) != 0 || len(plan.settle) != 1 {
+		t.Fatalf("external endpoint with unset capture_outbound should settle capture item: ask=%d settle=%d", len(plan.ask), len(plan.settle))
+	}
+
+	// 外部端点且 Inbox 选了 capture_outbound=full：允许进 ask。
+	e.must(projects.CmdSetCaptureOutbound, map[string]any{"id": inboxID, "value": "full"})
+	plan, err = e.svc.planBatch(bg, pol, all, map[string]domain.Source{}, []domain.Item{capItem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ask) != 1 || len(plan.settle) != 0 {
+		t.Fatalf("external endpoint with full capture_outbound should include capture item: ask=%d settle=%d", len(plan.ask), len(plan.settle))
 	}
 }
 

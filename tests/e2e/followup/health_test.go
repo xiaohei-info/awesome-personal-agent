@@ -197,12 +197,12 @@ event_rules:
 		f.waitFor("HL-2 的到期补触发", 30*time.Second, func() bool { return len(f.eventsOf(lagItem, "item.deadline_passed")) == 1 })
 	})
 
-	step(t, "聊天没有对应项目：不捕获，也进诊断页（capture_failures）", func(t *testing.T) {
-		body := `{"text":"不属于任何项目的一段聊天","path":"/nowhere/at/all","host":"h"}`
-		if r := f.APIRaw("POST", "/v1/capture", body, f.WRK); r.Code != 200 || !strings.Contains(r.Body, `"no_project"`) {
-			t.Fatalf("capture without project: %d %s", r.Code, r.Body)
+	step(t, "聊天无匹配项目兜底进 Inbox，插件补报失败进诊断页（capture_failures）", func(t *testing.T) {
+		body := `{"text":"不属于任何项目的一段聊天","path":"/nowhere/at/all","host":"h","failures":[{"class":"kernel_unreachable"}]}`
+		if r := f.APIRaw("POST", "/v1/capture", body, f.WRK); r.Code != 200 || !strings.Contains(r.Body, `"captured":true`) {
+			t.Fatalf("capture fallback to inbox: %d %s", r.Code, r.Body)
 		}
-		f.waitFor("没记下的聊天进入健康视图", 30*time.Second, func() bool { return !f.health().sig("capture_failures").OK })
+		f.waitFor("插件补报的捕获失败进入健康视图", 30*time.Second, func() bool { return !f.health().sig("capture_failures").OK })
 	})
 
 	var cli healthView

@@ -137,12 +137,13 @@ func TestCaptureFailuresGroupedByClassWithinWindow(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	add("no_project", "", t0.Add(-30*time.Hour)) // 出窗，不算
-	add("no_project", "", t0.Add(-3*time.Hour))
-	add("no_project", "", t0.Add(-1*time.Hour))
+	add("no_project", "", t0.Add(-1*time.Hour)) // 历史 no_project 读取时忽略（决策 5）
+	add("capture_disabled", "prj_a", t0.Add(-30*time.Hour)) // 出窗，不算
+	add("capture_disabled", "prj_a", t0.Add(-3*time.Hour))
+	add("capture_disabled", "prj_a", t0.Add(-1*time.Hour))
 	add("kernel_unreachable", "", t0.Add(-2*time.Hour))
 	v := e.collectAt(t0, 0)
-	want := []CaptureFailure{{Class: "no_project", Count: 2, LastAt: t0.Add(-time.Hour)}, {Class: "kernel_unreachable", Count: 1, LastAt: t0.Add(-2 * time.Hour)}}
+	want := []CaptureFailure{{Class: "capture_disabled", Count: 2, LastAt: t0.Add(-time.Hour), Project: "prj_a"}, {Class: "kernel_unreachable", Count: 1, LastAt: t0.Add(-2 * time.Hour)}}
 	if len(v.CaptureFailures) != 2 || v.CaptureFailures[0] != want[0] || v.CaptureFailures[1] != want[1] {
 		t.Fatalf("got %+v, want %+v", v.CaptureFailures, want)
 	}

@@ -371,6 +371,7 @@ type snapshot struct {
 	modes   map[string]string
 	made    map[string]string // 来源事件 id → 已为它建出的事项（上一轮中途失败留下的）
 	projs   []domain.Project
+	inboxID string
 	policy  int
 	locs    []string   // 入站初筛与起草实际会调用的端点的位置：外发范围按它们取
 	open    []openItem // 未关闭的事项：预筛、起草、抽取共用清单的来源（§9.3）
@@ -406,6 +407,12 @@ func (sn *snapshot) loadFacts(tx *store.Tx) error {
 	}
 	if sn.projs, err = projects.List(tx); err != nil {
 		return err
+	}
+	for _, p := range sn.projs {
+		if p.IsInbox() {
+			sn.inboxID = p.ID
+			break
+		}
 	}
 	// shortcut: 每轮扫一遍全部事项找出已建事项；事项量大到拖慢时，给事项加按来源事件的索引。
 	its, err := items.List(tx, items.Filter{})
@@ -650,6 +657,9 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	}
 	if project == "" {
 		project = prop.project
+	}
+	if project == "" {
+		project = sn.inboxID
 	}
 	return s.propose(ctx, sn, src, ev, m, prop, project)
 }
@@ -1175,7 +1185,7 @@ type lists struct {
 func (sn *snapshot) lists(ev domain.SourceEvent, project, locality string) lists {
 	l := lists{Projects: []map[string]string{}}
 	for _, pr := range sn.projs {
-		if pr.Status == domain.ProjectActive {
+		if pr.Status == domain.ProjectActive && !pr.IsInbox() {
 			l.Projects = append(l.Projects, map[string]string{"id": pr.ID, "name": pr.Name})
 		}
 	}
@@ -1315,7 +1325,14 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	if err != nil {
 		return err
 	}
-	list := func(loc string) lists { return sn.lists(ev, project, loc) }
+	// 主会话兜底进入内置 Inbox 的对话捕获：不把未关闭事项排序偏置到 Inbox，并允许抽取模型识别具体业务项目；
+	// 显式指定或命中仓库目录的具体项目捕获仍锁定原项目（§9.3）。
+	fromInbox := IsCaptureSource(src.ID) && sn.inboxID != "" && project == sn.inboxID
+	listProject := project
+	if fromInbox {
+		listProject = ""
+	}
+	list := func(loc string) lists { return sn.lists(ev, listProject, loc) }
 	var a asked
 	if pr != packs.NoPrescreen || IsCaptureSource(src.ID) {
 		if a, err = s.ask(ctx, src, ev, prescreenPack, prescreen, "", o, list); err != nil {
@@ -1373,8 +1390,11 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 			rec: &domain.Proposal{LowConfidence: a.low, Sources: []string{ev.ID}}}
 		s.fill(sn, &p, c.fieldsOut, l)
 		cp := p.project
-		if project != "" { // 规则或来源给了项目就用它；候选的项目只在没有时补上
+		if project != "" && !fromInbox { // 规则、来源或具体项目捕获给了项目就锁定；Inbox 兜底捕获允许模型识别具体项目
 			cp = project
+		}
+		if cp == "" {
+			cp = sn.inboxID
 		}
 		trace := &domain.ProposalMerge{Title: p.title, Summary: p.summary, Kind: p.kind, Project: cp, By: "merge_key"}
 		if into != "" {

@@ -389,7 +389,7 @@ func TestCaptureFailuresIsWarningWithClassRows(t *testing.T) {
 	e := setup(t, nil)
 	at := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		pl, _ := json.Marshal(map[string]string{"class": "no_project", "at": at.Format(time.RFC3339)})
+		pl, _ := json.Marshal(map[string]string{"class": "kernel_unreachable", "at": at.Format(time.RFC3339)})
 		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvCaptureFailed, Object: "capture-failures", At: at, Payload: pl,
 			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent:x", Via: domain.ViaCLI}})
 		return err
@@ -401,7 +401,7 @@ func TestCaptureFailuresIsWarningWithClassRows(t *testing.T) {
 	if len(r.Signals) != 14 || !r.Healthy || s.OK || s.Count != 1 || s.Severity != SeverityWarning || s.Why == "" || s.Next == "" {
 		t.Fatalf("%+v", r)
 	}
-	if len(s.Captures) != 1 || s.Captures[0].Class != "no_project" || s.Captures[0].Count != 1 || !s.Captures[0].LastAt.Equal(at) {
+	if len(s.Captures) != 1 || s.Captures[0].Class != "kernel_unreachable" || s.Captures[0].Count != 1 || !s.Captures[0].LastAt.Equal(at) {
 		t.Fatalf("%+v", s.Captures)
 	}
 }

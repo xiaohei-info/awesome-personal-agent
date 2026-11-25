@@ -118,6 +118,9 @@ func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snaps
 	if err != nil {
 		return "", mergeFields{}, err
 	}
+	if project == "" {
+		project = sn.inboxID
+	}
 	kind := defaultKind
 	if m != nil && m.rule.Kind != "" {
 		kind = domain.Kind(m.rule.Kind)

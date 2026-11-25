@@ -344,8 +344,8 @@ func TestFlowSourceCalendar(t *testing.T) {
 		if ev.Type != "event.created" || ev.Disposition != "proposed" || ev.Item == "" {
 			t.Fatalf("e1 应成为建议: %+v", ev)
 		}
-		if p := k.item(ev.Item).Project; p != "" {
-			t.Errorf("清空默认项目后 e1 的建议不应归任何项目: %q", p)
+		if p := k.item(ev.Item).Project; p != "prj_inbox" {
+			t.Errorf("清空默认项目后 e1 的建议应兜底归入内置 Inbox，实际: %q", p)
 		}
 		if p := k.item(c1First).Project; p != home {
 			t.Errorf("已建事项的项目应仍是 acc-home: %q", p)
