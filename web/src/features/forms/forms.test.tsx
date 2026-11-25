@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -12,7 +13,7 @@ describe("旧的一次性表单链接", () => {
     const f = (async (u: string) => (urls.push(u), new Response("{}", { status: 404 }))) as unknown as typeof fetch;
     render(
       <MemoryRouter initialEntries={["/forms/tok_old"]}>
-        <App features={[feature]} fetchImpl={f} />
+        <App features={[feature]} fetchImpl={withSession(f)} />
       </MemoryRouter>,
     );
     expect(await screen.findByRole("heading", { name: "登录" })).toBeInTheDocument();

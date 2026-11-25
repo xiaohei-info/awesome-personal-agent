@@ -1,5 +1,5 @@
 // 类型化 API 客户端：只调 HTTP API（/v1），不含业务规则。错误体见设计附录 B.3。
-import { REAUTH } from "./ids";
+import { CSRF_INVALID, REAUTH } from "./ids";
 
 export interface ApiErrorBody {
   code: string;
@@ -32,6 +32,8 @@ export interface ClientOptions {
   onUnauthenticated: () => void;
   /** 3b 动作要再输一次口令（403 reauth_required）时调用：本人输对了返回 true，原请求重发一次；取消返回 false，照常报错。 */
   onReauth?: () => Promise<boolean>;
+  /** 403 csrf_invalid（手里的令牌过时，请求没有执行）时调用：重新同步成功返回 true，原请求重发一次。 */
+  onCsrfInvalid?: () => Promise<boolean>;
 }
 
 const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -39,7 +41,7 @@ const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 export function createClient(o: ClientOptions) {
   const f = o.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
 
-  async function request<T>(method: string, path: string, body?: unknown, extra?: Record<string, string>, again = true): Promise<T> {
+  async function request<T>(method: string, path: string, body?: unknown, extra?: Record<string, string>, tried: { reauth?: boolean; csrf?: boolean } = {}): Promise<T> {
     const headers: Record<string, string> = { ...extra };
     const text = typeof body === "string";
     if (body !== undefined && !text) headers["Content-Type"] = "application/json";
@@ -57,7 +59,8 @@ export function createClient(o: ClientOptions) {
       const err = new ApiError(res.status, await readError(res));
       // 再输口令输错也是 401，但会话仍然有效，不能因此退出登录。
       if (res.status === 401 && path !== "/auth/login" && path !== "/auth/reauth") o.onUnauthenticated();
-      if (again && res.status === 403 && err.code === REAUTH && o.onReauth && (await o.onReauth())) return request<T>(method, path, body, extra, false);
+      if (!tried.reauth && res.status === 403 && err.code === REAUTH && o.onReauth && (await o.onReauth())) return request<T>(method, path, body, extra, { ...tried, reauth: true });
+      if (!tried.csrf && res.status === 403 && err.body.reason === CSRF_INVALID && o.onCsrfInvalid && (await o.onCsrfInvalid())) return request<T>(method, path, body, extra, { ...tried, csrf: true });
       throw err;
     }
     if (res.status === 204) return undefined as T;
@@ -75,8 +78,8 @@ export function createClient(o: ClientOptions) {
     logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),
     /** 3b 动作前再输一次口令（POST /auth/reauth，204）。 */
     reauth: (password: string) => request<void>("POST", "/auth/reauth", { password }),
-    /** 会话探针：用已有的只读路由判断 Cookie 是否仍有效。 */
-    probe: () => request<unknown>("GET", "/projects"),
+    /** 当前会话的 CSRF 令牌；Cookie 无效为 401。 */
+    session: () => request<{ csrf_token?: string }>("GET", "/auth/session"),
   };
 }
 

@@ -1,3 +1,4 @@
+import { withSession } from "./test-session";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -52,7 +53,7 @@ describe("会话：再输口令的弹框", () => {
       if (url === "/v1/auth/reauth") return (fresh = true), json(204, null);
       return fresh ? json(200, {}) : need();
     }) as unknown as typeof fetch;
-    render(<SessionProvider fetchImpl={f}><Save /></SessionProvider>);
+    render(<SessionProvider fetchImpl={withSession(f)}><Save /></SessionProvider>);
     await userEvent.click(await screen.findByRole("button", { name: "go" }));
     const dialog = await screen.findByRole("dialog", { name: "再输一次口令" });
     await userEvent.type(dialog.querySelector("input")!, "secret-phrase");

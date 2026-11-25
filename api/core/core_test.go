@@ -459,7 +459,7 @@ func TestCSRFRequiredForCookieWritesOnly(t *testing.T) {
 	// 写：缺令牌与错令牌都拒绝，且是 403 permission_denied（退出码 4）。
 	for name, tok := range map[string]string{"missing": "", "wrong": "x" + csrf} {
 		r := e.do("POST", "/v1/echo", "{}", session(c, tok))
-		if b := errBody(t, r); r.Code != 403 || b.Code != domain.CodePermissionDenied {
+		if b := errBody(t, r); r.Code != 403 || b.Code != domain.CodePermissionDenied || b.Reason != ReasonCSRFInvalid {
 			t.Fatalf("%s: %d %+v", name, r.Code, b)
 		}
 	}
@@ -469,6 +469,31 @@ func TestCSRFRequiredForCookieWritesOnly(t *testing.T) {
 	// Bearer 不是环境凭据，不要求令牌。
 	if r := e.do("POST", "/v1/echo", "{}", bearer(e.issue(auth.Worker))); r.Code != 200 {
 		t.Fatalf("bearer POST: %d", r.Code)
+	}
+}
+
+func TestCurrentSessionReturnsOwnCSRFToken(t *testing.T) {
+	e := setup(t)
+	c1, csrf1 := e.login()
+	c2, csrf2 := e.login()
+	for _, s := range []struct {
+		c    *http.Cookie
+		csrf string
+	}{{c1, csrf1}, {c2, csrf2}} {
+		r := e.do("GET", "/v1/auth/session", "", session(s.c, ""))
+		var out struct {
+			CSRF string `json:"csrf_token"`
+		}
+		r.json(&out)
+		if r.Code != 200 || out.CSRF != s.csrf {
+			t.Fatalf("session: %d, token matches own session = %v", r.Code, out.CSRF == s.csrf)
+		}
+	}
+	if r := e.do("GET", "/v1/auth/session", "", nil); r.Code != 401 {
+		t.Fatalf("no cookie: %d", r.Code)
+	}
+	if r := e.do("GET", "/v1/auth/session", "", bearer(e.issue(auth.Worker))); r.Code != 403 || errBody(t, r).Code != domain.CodeWebOnly {
+		t.Fatalf("bearer: %d %s", r.Code, r.Body)
 	}
 }
 

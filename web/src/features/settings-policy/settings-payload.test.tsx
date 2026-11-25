@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -73,7 +74,7 @@ describe("改版前后 PUT 载荷逐字段一致", () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
       <MemoryRouter initialEntries={[at]}>
-        <App features={[notify, agents]} fetchImpl={s.impl} />
+        <App features={[notify, agents]} fetchImpl={withSession(s.impl)} />
       </MemoryRouter>,
     );
     const c = within(await screen.findByRole("region", { name: card }));
@@ -93,7 +94,7 @@ describe("设置 › Agent › 对我说话的语气（所有 Agent 共用）", 
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
       <MemoryRouter initialEntries={["/settings/agents"]}>
-        <App features={[agents]} fetchImpl={s.impl} />
+        <App features={[agents]} fetchImpl={withSession(s.impl)} />
       </MemoryRouter>,
     );
     const c = within(await screen.findByRole("region", { name: "对我说话的语气" }));
@@ -115,7 +116,7 @@ describe("设置 › Agent › 对我说话的语气（所有 Agent 共用）", 
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
       <MemoryRouter initialEntries={["/settings/agents"]}>
-        <App features={[agents]} fetchImpl={s.impl} />
+        <App features={[agents]} fetchImpl={withSession(s.impl)} />
       </MemoryRouter>,
     );
     const c = within(await screen.findByRole("region", { name: "对我说话的语气" }));

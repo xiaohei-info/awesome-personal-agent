@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -102,7 +103,7 @@ function mount(at: string, features: Feature[] = [sources]) {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
     <MemoryRouter initialEntries={[at]}>
-      <App features={features} fetchImpl={backend()} />
+      <App features={features} fetchImpl={withSession(backend())} />
     </MemoryRouter>,
   );
 }

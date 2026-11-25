@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -38,7 +39,7 @@ function Where() {
 }
 function mount(f: typeof fetch, path = "/items") {
   sessionStorage.setItem("apa.csrf", "tok-1");
-  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={f} /><Where /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={withSession(f)} /><Where /></MemoryRouter>);
 }
 const writes = (s: ReturnType<typeof server>) => s.calls.filter((c) => c.method !== "GET");
 const titles = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => li.querySelector("a")!.textContent);

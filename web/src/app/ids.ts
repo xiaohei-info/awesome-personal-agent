@@ -143,6 +143,8 @@ export type NoticeCode = (typeof NOTICE_CODE)[number];
 /** 拒绝的三种口径：kernel/domain/errors.go Reason*（错误体与拒绝记录的 reason，设计 §14.3）；reauth_required 是硬线下网页还没再输口令 */
 export const REJECT_REASON = ["hard_line", "reauth_required", "tier_closed", "out_of_scope"] as const;
 export const REAUTH = "reauth_required";
+/** api/core ReasonCSRFInvalid：手里的 CSRF 令牌过时 */
+export const CSRF_INVALID = "csrf_invalid";
 /** Agent 的档位：kernel/policy/policy.go Allow*（设计 §14.3） */
 export const AGENT_TIER = ["organize", "decide", "rules"] as const;
 export type AgentTier = (typeof AGENT_TIER)[number];

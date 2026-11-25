@@ -36,6 +36,9 @@ const (
 	DefaultMaxBody int64 = 1 << 20
 	// CSRFHeader 是 Cookie 会话的写请求必须携带的令牌头。
 	CSRFHeader = "X-CSRF-Token"
+	// ReasonCSRFInvalid 是 CSRF 校验失败的稳定原因（permission_denied 之下）：会话仍有效、令牌过时，
+	// Web 据此经 GET /auth/session 重新同步（§14.13）。它不是权限拒绝口径，所以不放在 domain 的 Reason* 里。
+	ReasonCSRFInvalid = "csrf_invalid"
 	// 旧客户端可能还带 X-APA-Evidence、X-APA-Grant、X-APA-Session-Kind：这些自报内容不参与任何判定，骨干不读（§14.3）。
 )
 
@@ -320,7 +323,9 @@ func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 			return nil, err
 		}
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get(CSRFHeader)), []byte(p.csrf)) != 1 {
-			return nil, domain.NewError(domain.CodePermissionDenied, "CSRF token is missing or wrong", "send the csrf_token from login in the "+CSRFHeader+" header")
+			e := domain.NewError(domain.CodePermissionDenied, "CSRF token is missing or wrong", "send the current session's csrf_token (GET /auth/session) in the "+CSRFHeader+" header")
+			e.Reason = ReasonCSRFInvalid
+			return nil, e
 		}
 	}
 	return p, nil

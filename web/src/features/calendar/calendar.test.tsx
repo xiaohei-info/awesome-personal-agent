@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -109,7 +110,7 @@ function server(items: Item[]) {
 
 function mount(f: typeof fetch, path: string) {
   sessionStorage.setItem("apa.csrf", "tok-1");
-  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={f} /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={withSession(f)} /></MemoryRouter>);
 }
 const ranges = (calls: string[]) => calls.filter((c) => c.startsWith("/v1/items?") && !c.includes("kind=")).map((c) => {
   const q = new URL(c, "http://x").searchParams;

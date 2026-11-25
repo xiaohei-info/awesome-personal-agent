@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { cleanup as cleanupAll, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -64,7 +65,7 @@ function server(o: { delivery?: unknown; patchFail?: boolean; fail?: boolean; it
 }
 function mount(f: typeof fetch, path = "/briefs/schedule") {
   sessionStorage.setItem("apa.csrf", "tok-1");
-  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={f} /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={withSession(f)} /></MemoryRouter>);
 }
 
 beforeEach(() => sessionStorage.clear());

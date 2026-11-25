@@ -292,6 +292,7 @@ func (s *Server) authRoutes(r *Router) {
 	r.Handle(Route{Method: "POST", Path: "/auth/logout", Handler: s.logout})
 	r.Handle(Route{Method: "POST", Path: "/auth/password", MaxBody: 4 << 10, Handler: s.changePassword})
 	r.Handle(Route{Method: "POST", Path: "/auth/reauth", MaxBody: 4 << 10, Handler: s.reauthenticate})
+	r.Handle(Route{Method: "GET", Path: "/auth/session", Handler: s.currentSession})
 	r.Handle(Route{Method: "GET", Path: "/auth/sessions", Handler: s.listSessions})
 	r.Handle(Route{Method: "DELETE", Path: "/auth/sessions/{id}", Handler: s.revokeSession})
 	r.Handle(Route{Method: "DELETE", Path: "/auth/sessions", Handler: s.revokeAllSessions})
@@ -466,6 +467,15 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, p *Princ
 	}
 	s.lim.success(addr)
 	return WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// currentSession 把当前会话的 CSRF 令牌交回持有其 Cookie 的 Web 页面：Cookie 全标签页共享而令牌各页各存，
+// 别处重新登录后旧页面靠它重新同步。跨源页面读不到应答（SameSite=Strict，且不发 CORS 头）。
+func (s *Server) currentSession(w http.ResponseWriter, r *http.Request, p *Principal) error {
+	if err := requireWeb(p); err != nil {
+		return err
+	}
+	return WriteJSON(w, http.StatusOK, map[string]string{"csrf_token": p.csrf})
 }
 
 type sessionInfo struct {

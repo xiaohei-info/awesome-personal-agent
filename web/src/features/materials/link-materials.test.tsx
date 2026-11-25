@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -49,7 +50,7 @@ function mount(fetchImpl: typeof fetch, path = "/materials") {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <App features={[materials, projects]} fetchImpl={fetchImpl} />
+      <App features={[materials, projects]} fetchImpl={withSession(fetchImpl)} />
     </MemoryRouter>,
   );
 }

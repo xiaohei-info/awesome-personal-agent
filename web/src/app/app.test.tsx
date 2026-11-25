@@ -24,6 +24,7 @@ function fakeServer() {
       return json(200, { csrf_token: "tok-1", expires_at: "2030-01-01T00:00:00Z" });
     }
     if (!sessionValid) return unauth();
+    if (url === "/v1/auth/session") return json(200, { csrf_token: "tok-1" });
     if (url === "/v1/auth/logout") {
       if (csrf !== "tok-1") return json(403, { code: "permission_denied", why: "CSRF token is missing or wrong", next: "x" });
       sessionValid = false;
@@ -78,7 +79,7 @@ describe("登录与导航框架", () => {
     srv.setValid();
     mount(srv.impl);
     expect(await screen.findByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(srv.calls[0]).toMatchObject({ method: "GET", path: "/v1/projects" });
+    expect(srv.calls[0]).toMatchObject({ method: "GET", path: "/v1/auth/session" });
   });
 
   it("Cookie 已过期：探针 401 回登录页并清掉 csrf", async () => {

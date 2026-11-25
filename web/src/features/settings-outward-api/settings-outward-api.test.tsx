@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -54,7 +55,7 @@ function mount(fetchImpl: typeof fetch, at = "/settings/outward-api") {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
     <MemoryRouter initialEntries={[at]}>
-      <App features={[feature, channels]} fetchImpl={fetchImpl} />
+      <App features={[feature, channels]} fetchImpl={withSession(fetchImpl)} />
     </MemoryRouter>,
   );
 }

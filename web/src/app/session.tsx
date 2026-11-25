@@ -22,18 +22,23 @@ export function useSession(): Session {
   return s;
 }
 
-// 会话 Cookie 是 HttpOnly，由浏览器保持；csrf_token 只在登录响应里给一次，放 sessionStorage 以便刷新后继续写。
-// 只有 Cookie 有效且手里有 csrf 才算已登录；缺 csrf 就回登录页重新签发，不让写请求在半路 403。
+// 会话 Cookie 是 HttpOnly，由浏览器保持且各标签页共享；csrf_token 按页存 sessionStorage，会因别处重新登录而过时，
+// 所以打开页面时与写请求返回 csrf_invalid 时都向服务端取当前会话的令牌。
 export function SessionProvider({ children, fetchImpl }: { children: ReactNode; fetchImpl?: typeof fetch }) {
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const csrf = useRef<string | null>(sessionStorage.getItem(KEY));
 
-  const drop = useCallback(() => {
-    csrf.current = null;
-    sessionStorage.removeItem(KEY);
-    setStatus("anon");
+  const remember = useCallback((token: string | null) => {
+    csrf.current = token;
+    if (token) sessionStorage.setItem(KEY, token);
+    else sessionStorage.removeItem(KEY);
   }, []);
+
+  const drop = useCallback(() => {
+    remember(null);
+    setStatus("anon");
+  }, [remember]);
 
   // 3b 动作要再输口令时弹框；同时撞上的几条请求共用一次输入，结果一起交回。
   const waiting = useRef<((ok: boolean) => void)[]>([]);
@@ -47,35 +52,50 @@ export function SessionProvider({ children, fetchImpl }: { children: ReactNode; 
     setAsking(false);
   }, []);
 
-  const api = useMemo(
-    () => createClient({ fetch: fetchImpl, getCsrf: () => csrf.current, onUnauthenticated: drop, onReauth }),
-    [fetchImpl, drop, onReauth],
-  );
+  const api: ApiClient = useMemo(() => {
+    // 重新同步不了（会话没了、网络或服务端出错）就回登录页。
+    const onCsrfInvalid = async () => {
+      try {
+        const token = (await client.session()).csrf_token;
+        if (token) {
+          remember(token);
+          return true;
+        }
+      } catch {
+        /* 落到下面回登录页 */
+      }
+      drop();
+      return false;
+    };
+    const client: ApiClient = createClient({ fetch: fetchImpl, getCsrf: () => csrf.current, onUnauthenticated: drop, onReauth, onCsrfInvalid });
+    return client;
+  }, [fetchImpl, remember, drop, onReauth]);
 
   const boot = useCallback(() => {
     setError(null);
-    if (!csrf.current) return setStatus("anon");
     setStatus("loading");
-    api.probe().then(
-      () => setStatus("authed"),
+    api.session().then(
+      (r) => {
+        if (r.csrf_token) remember(r.csrf_token);
+        setStatus(csrf.current ? "authed" : "anon");
+      },
       (e) => {
         if (e instanceof ApiError && e.status === 401) return; // onUnauthenticated 已处理
         setError(e instanceof Error ? e.message : "request failed");
         setStatus("error");
       },
     );
-  }, [api]);
+  }, [api, remember]);
 
   useEffect(boot, [boot]);
 
   const login = useCallback(
     async (password: string) => {
       const r = await api.login(password);
-      csrf.current = r.csrf_token;
-      sessionStorage.setItem(KEY, r.csrf_token);
+      remember(r.csrf_token);
       setStatus("authed");
     },
-    [api],
+    [api, remember],
   );
 
   const logout = useCallback(async () => {

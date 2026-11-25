@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -42,7 +43,7 @@ describe("用当前数据（v28）渲染每个编辑页", () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     const { container } = render(
       <MemoryRouter initialEntries={[HOME_PATH[home]]}>
-        <App features={features} fetchImpl={impl} />
+        <App features={features} fetchImpl={withSession(impl)} />
       </MemoryRouter>,
     );
     const rows = v28Overview().rows.filter((r) => r.produced && shown(r.key) && EDITORS[kindOf(r.key)] === home);

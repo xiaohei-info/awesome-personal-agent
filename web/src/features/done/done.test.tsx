@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -25,7 +26,7 @@ function server(items: Item[], at: Record<string, string>, moved: Record<string,
 }
 const mount = (f: typeof fetch, path = "/done") => {
   sessionStorage.setItem("apa.csrf", "tok-1");
-  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={f} /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={withSession(f)} /></MemoryRouter>);
 };
 
 beforeEach(() => sessionStorage.clear());

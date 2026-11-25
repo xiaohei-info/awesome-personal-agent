@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -36,7 +37,7 @@ function At() {
 }
 function mount(f: typeof fetch, at = "/items") {
   sessionStorage.setItem("apa.csrf", "tok-1");
-  return render(<MemoryRouter initialEntries={[at]}><App features={[feature]} fetchImpl={f} /><At /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[at]}><App features={[feature]} fetchImpl={withSession(f)} /><At /></MemoryRouter>);
 }
 const table = async (name = "简报列表") => within(await screen.findByRole("table", { name }));
 

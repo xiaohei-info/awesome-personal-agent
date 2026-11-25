@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -81,7 +82,7 @@ function mount(at: string) {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
     <MemoryRouter initialEntries={[at]}>
-      <App features={[sources]} fetchImpl={backend()} />
+      <App features={[sources]} fetchImpl={withSession(backend())} />
     </MemoryRouter>,
   );
 }
@@ -238,7 +239,7 @@ describe("附件取回与来源事件物理删除", () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
       <MemoryRouter initialEntries={["/sources/events/" + id]}>
-        <App features={[sources]} fetchImpl={server} />
+        <App features={[sources]} fetchImpl={withSession(server)} />
       </MemoryRouter>,
     );
   };

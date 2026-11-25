@@ -268,6 +268,7 @@
 | 认证 | `POST /auth/login`、`/logout` | Web 会话。连续失败的限速与锁定见主文档 §14.13，锁定期间返回 429 | |
 | | `POST /auth/password` | 改口令 `{current, new}`；新口令少于 12 个字符返回 400；成功后其他会话全部失效 | 只有 Web 登录 |
 | | `POST /auth/reauth` | 再输一次口令，请求体与登录相同：成功返回 204，当前会话在 10 分钟内可做 3b 动作；口令不对为 401，失败计入登录限速与锁定（主文档 §14.13） | 只有 Web 登录 |
+| | `GET /auth/session` | 当前会话的 `{"csrf_token"}`：Web 打开页面时与写请求返回 `csrf_invalid` 后据此重新同步（主文档 §14.13） | 只有 Web 登录 |
 | | `GET /auth/sessions`，`DELETE /auth/sessions/{id}`，`DELETE /auth/sessions` | 在线会话与吊销；吊销是 3b，会话须刚输过口令 | 只有 Web 登录 |
 | 动作链接 | `GET /act/{item}?do=done\|progress\|plan` | 不属于 API：Web 的确认页地址，不带版本前缀，不含凭据；未登录时先登录再回到确认页（主文档 §4.1、§14.13） | Web 登录 |
 
@@ -455,6 +456,7 @@ HTTP 200 返回登记过的现场事件，按 `seq > cursor` 升序排列，允�
 
 - `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。本版另加：`allowed_match`（按机器或 harness 的匹配规则）与 `candidates`（名录里当前命中名单的执行者 id）。
 - `reason`（可缺）：同一个 `code` 之下更细的稳定原因。权限拒绝只有三种口径（主文档 §14.3）：`hard_line`（`code` 为 `web_only`，退出码 20：3b 或系统内部动作，只有本人在 Web 做，与档位无关）、`tier_closed`（`code` 为 `tier_closed`，退出码 23：该 Agent 的档位没放开这一档）、`out_of_scope`（`code` 为 `permission_denied`，退出码 4：钥匙范围外）；Web 会话做 3b 而没刚输过口令时 `code` 与 `reason` 都是 `reauth_required`（退出码 20）。拒绝的 `web_url` 落在该动作所在的页面。同一取值记进 `command.rejected` 与回执告警的载荷，`last_rejection(s)` 与 `GET /health` 的 `receipt_failures.receipts` 也带它。旧模型的原因 `grant_screening_pending`、`grant_risk_ceiling`、`grant_not_for_background`、`untrusted_origin`、`untrusted_trigger` 不再产出，只出现在旧的拒绝记录里。
+- Web 会话的写请求缺 CSRF 令牌或令牌不符时 `code` 为 `permission_denied`、`reason` 为 `csrf_invalid`（HTTP 403）：会话仍有效，经 `GET /auth/session` 取当前令牌后可重发；该请求未执行。
 - 委派记录与执行者句柄未通过校验时返回 400（退出码 2），`why` 只写键路径与规则名，不回显取值（主文档 §6.17）。
 - HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21、23（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
 - 退出码 22（`risk_screening_pending`）与退出码 23 的旧码 `basis_required`、`session_not_direct` 属于已取消的初筛与本人原话机制（主文档 §14.4、§14.5），内核不再产出，取值保留为只读的历史值。

@@ -1,3 +1,4 @@
+import { withSession } from "../../app/test-session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -39,7 +40,7 @@ function server(o: { mode?: string; declared?: boolean; items?: any[]; runs?: an
 
 function mount(s: ReturnType<typeof server>, path = "/items/i1") {
   sessionStorage.setItem("apa.csrf", "tok-1");
-  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={s.impl} /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={withSession(s.impl)} /></MemoryRouter>);
 }
 const box = () => screen.findByRole("checkbox", { name: "交给 Agent 处理" });
 

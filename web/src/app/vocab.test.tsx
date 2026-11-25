@@ -1,3 +1,4 @@
+import { withSession } from "./test-session";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -104,7 +105,7 @@ describe("设置 › 通用 › 显示原始值", () => {
     const probe: Feature = { id: "probe", title: { zh: "探针", en: "Probe" }, path: "probe", element: <p data-testid="v"><Val k="perm" id="read" /></p> };
     render(
       <MemoryRouter initialEntries={["/settings/general"]}>
-        <App features={[general, probe]} fetchImpl={fetchImpl} />
+        <App features={[general, probe]} fetchImpl={withSession(fetchImpl)} />
       </MemoryRouter>,
     );
     const box = await screen.findByRole("checkbox", { name: "显示原始值" });
