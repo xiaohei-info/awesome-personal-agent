@@ -1050,7 +1050,11 @@ func TestSourceUpdateRefreshesTimesUnlessChangedByHand(t *testing.T) {
 		m["starts_at"], m["ends_at"], m["due_at"] = start, end, due
 		return m
 	}
-	e.emit(ev("t1", "2026-12-02T09:00:00+08:00", "2026-12-02T10:00:00+08:00", "2026-12-05"))
+	// 计划日期与时段按主机时区（§6.3），所以带钟点的时间用本机时区构造，结果与运行机器的时区无关。
+	at := func(day, hour, minute int) string {
+		return time.Date(2026, 12, day, hour, minute, 0, 0, time.Local).Format(time.RFC3339)
+	}
+	e.emit(ev("t1", at(2, 9, 0), at(2, 10, 0), "2026-12-05"))
 	item := e.msg("t1").Item
 	e.must(owner, "item.transition", map[string]any{"id": item, "to": "open", "reason": "接受"})
 	it := e.item(item)
@@ -1059,7 +1063,7 @@ func TestSourceUpdateRefreshesTimesUnlessChangedByHand(t *testing.T) {
 	}
 
 	// 来源改期：还等于上次来源给的值，照常跟上。
-	e.emit(ev("t2", "2026-12-03T14:00:00+08:00", "2026-12-03T15:30:00+08:00", "2026-12-08"))
+	e.emit(ev("t2", at(3, 14, 0), at(3, 15, 30), "2026-12-08"))
 	it = e.item(item)
 	if it.PlannedFor != "2026-12-03" || it.PlannedSlot != "14:00 - 15:30" || it.Deadline == nil || it.Deadline.Day() != 8 {
 		t.Fatalf("source reschedule %+v", it)
@@ -1067,8 +1071,8 @@ func TestSourceUpdateRefreshesTimesUnlessChangedByHand(t *testing.T) {
 
 	// 本人改过排期与截止之后，来源再改不覆盖。
 	e.must(owner, "item.update", map[string]any{"id": item, "planned_for": "2027-01-01", "planned_slot": "08:00 - 08:30",
-		"deadline": "2027-01-02T18:00:00+08:00"})
-	e.emit(ev("t3", "2026-12-04T09:00:00+08:00", "2026-12-04T10:00:00+08:00", "2026-12-09"))
+		"deadline": time.Date(2027, 1, 2, 18, 0, 0, 0, time.Local).Format(time.RFC3339)})
+	e.emit(ev("t3", at(4, 9, 0), at(4, 10, 0), "2026-12-09"))
 	it = e.item(item)
 	if it.PlannedFor != "2027-01-01" || it.PlannedSlot != "08:00 - 08:30" || it.Deadline == nil || it.Deadline.Format(time.DateOnly) != "2027-01-02" {
 		t.Fatalf("hand edit must win %+v", it)
