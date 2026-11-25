@@ -574,7 +574,7 @@ func addEchoSource(c *command.Ctx, v attachIn) error {
 	if err != nil || it.Phase != domain.PhaseProposed {
 		return err
 	}
-	w, changed, err := items.AddProposalSource(c.Tx, v.Item, v.Event, c.Now())
+	w, changed, err := items.AddProposalSource(c.Tx, v.Item, v.Event, nil, c.Now())
 	if err != nil || !changed {
 		return err
 	}

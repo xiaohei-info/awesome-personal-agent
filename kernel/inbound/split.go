@@ -82,11 +82,11 @@ func registerSplit(x *command.Executor) error {
 			if !slices.Contains(p.NotSame, v.To) {
 				p.NotSame = append(slices.Clone(p.NotSame), v.To)
 			}
-			w1, err := items.SetProposal(c.Tx, v.From, p, c.Now())
+			w1, err := items.SetProposal(c.Tx, v.From, p, nil, c.Now())
 			if err != nil {
 				return nil, err
 			}
-			w2, err := items.SetProposal(c.Tx, v.To, domain.Proposal{Sources: []string{v.Event}, SplitFrom: v.From, NotSame: []string{v.From}}, c.Now())
+			w2, err := items.SetProposal(c.Tx, v.To, domain.Proposal{Sources: []string{v.Event}, SplitFrom: v.From, NotSame: []string{v.From}}, nil, c.Now())
 			if err != nil {
 				return nil, err
 			}

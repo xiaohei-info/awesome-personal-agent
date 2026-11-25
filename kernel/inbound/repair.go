@@ -104,7 +104,7 @@ func registerRepair(x *command.Executor) error {
 			}
 			p := *it.Proposal
 			p.Sources = append(slices.Clone(p.Sources), r.Events...)
-			w, err := items.SetProposal(c.Tx, it.ID, p, c.Now())
+			w, err := items.SetProposal(c.Tx, it.ID, p, nil, c.Now())
 			if err != nil {
 				return nil, err
 			}

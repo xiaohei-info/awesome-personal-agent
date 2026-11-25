@@ -1088,7 +1088,7 @@ func registerSweep(x *command.Executor) error {
 						return nil, emitWrite(c, items.Write{Type: domain.EvItemUpdated, Object: it.ID, Payload: snap}, fmt.Sprintf("merge batch %s: integrated %d proposals", v.Batch, len(v.Integrate.Members)))
 					}
 				}
-				w, err := items.SetProposal(c.Tx, it.ID, p, at)
+				w, err := items.SetProposal(c.Tx, it.ID, p, nil, at)
 				if err != nil {
 					return nil, err
 				}
@@ -1186,7 +1186,7 @@ func absorb(c *command.Ctx, it domain.Item, to string, sw domain.ProposalSweep, 
 		a.Source, a.Ref = it.Origin.Source, it.Origin.Ref
 	}
 	tp.Absorbed = append(slices.DeleteFunc(slices.Clone(tp.Absorbed), func(x domain.ProposalAbsorbed) bool { return x.Item == it.ID }), a)
-	w, err := items.SetProposal(c.Tx, to, tp, at)
+	w, err := items.SetProposal(c.Tx, to, tp, nil, at)
 	if err != nil {
 		return err
 	}
@@ -1221,7 +1221,7 @@ func moveHeld(c *command.Ctx, it domain.Item, to string, also []string, sw domai
 		}
 		ids = append(ids, sev.ID)
 	}
-	w, err := items.SetProposal(c.Tx, to, tp, at)
+	w, err := items.SetProposal(c.Tx, to, tp, nil, at)
 	if err != nil {
 		return nil, err
 	}
@@ -1255,7 +1255,7 @@ func moveBack(c *command.Ctx, it, t domain.Item, notSame bool, at time.Time) err
 			return err
 		}
 	}
-	w, err := items.SetProposal(c.Tx, t.ID, tp, at)
+	w, err := items.SetProposal(c.Tx, t.ID, tp, nil, at)
 	if err != nil {
 		return err
 	}

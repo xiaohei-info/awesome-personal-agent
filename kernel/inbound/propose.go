@@ -195,7 +195,7 @@ func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 			}
 			p.Recommend, p.AttachTo = "attach", m.AttachTo
 		}
-		if w, err = items.SetProposal(c.Tx, item, p, c.Now()); err != nil {
+		if w, err = items.SetProposal(c.Tx, item, p, nil, c.Now()); err != nil { // 新建事项时已按 applyEventTime 写过时间
 			return err
 		}
 	}
@@ -206,11 +206,13 @@ func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 	return err
 }
 
-// mergeInto 把来源事件并入已有建议：记入 proposal.sources，并追加一条合并留痕（同一事件、同一候选标题只记一次）。
+// mergeInto 把来源事件并入已有建议：记入 proposal.sources，并追加一条合并留痕（同一事件、同一候选标题只记一次）；
+// 事件带来的结构化时间补到事项上缺的字段（§9.3），已有的值不覆盖。
 // 建议已不在 proposed（本人刚处理掉）时报冲突，处置命令失败后下一轮按新账本重新找去处。
 func mergeInto(c *command.Ctx, item string, ev domain.SourceEvent, trace *domain.ProposalMerge) (items.Write, bool, error) {
+	st := ev.Schedule(time.Local)
 	if trace == nil {
-		return items.AddProposalSource(c.Tx, item, ev.ID, c.Now())
+		return items.AddProposalSource(c.Tx, item, ev.ID, &st, c.Now())
 	}
 	cur, err := items.Get(c.Tx, item)
 	if err != nil {
@@ -232,11 +234,16 @@ func mergeInto(c *command.Ctx, item string, ev domain.SourceEvent, trace *domain
 	if !slices.ContainsFunc(p.Merges, func(x domain.ProposalMerge) bool { return x.Event == t.Event && x.Title == t.Title }) {
 		p.Merges, changed = append(slices.Clone(p.Merges), t), true
 	}
-	if !changed {
+	if !changed && !missingTime(cur, st) {
 		return items.Write{}, false, nil
 	}
-	w, err := items.SetProposal(c.Tx, item, p, c.Now())
+	w, err := items.SetProposal(c.Tx, item, p, &st, c.Now())
 	return w, err == nil, err
+}
+
+// missingTime 报告来源事件带来了事项上还缺的时间字段：这些字段要补，即使 proposal 没有别的变化。
+func missingTime(it domain.Item, st domain.EventSchedule) bool {
+	return st.Deadline != nil && it.Deadline == nil || st.PlannedFor != "" && it.PlannedFor == ""
 }
 
 // mergeKeyOf 算来源事件的合并键：来源自带的优先；否则取规范化后的链接；没有链接取规范化后的标题加发送者。

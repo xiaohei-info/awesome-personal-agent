@@ -156,24 +156,61 @@ func RecommendationOf(tx *store.Tx, id string) (rec Recommendation, ok bool, err
 }
 
 // SetProposal 在调用方事务内写入建议信息（§6.3 proposal），只有入站流水线的处置命令调用。
-// 规则可在记处置前自动接受，所以不要求仍在 proposed。调用方追加返回的事件并为 id 做一次 command.Bump。
-func SetProposal(tx *store.Tx, id string, p domain.Proposal, at time.Time) (Write, error) {
+// 规则可在记处置前自动接受，所以不要求仍在 proposed。st 非空时把来源事件带来、事项上还没有的时间字段一并补上（§9.3 合并），
+// 补写与事项的 Timer 对齐。调用方追加返回的事件并为 id 做一次 command.Bump。
+func SetProposal(tx *store.Tx, id string, p domain.Proposal, st *domain.EventSchedule, at time.Time) (Write, error) {
 	cur, err := Get(tx, id)
 	if err != nil {
 		return Write{}, err
 	}
 	next := cur
 	next.Proposal = &p
+	filled := st != nil && fillTimes(&next, *st)
 	next = stamped(next, at)
 	if err := save(tx, next); err != nil {
 		return Write{}, err
 	}
+	if filled {
+		if err := syncTimer(tx, cur, next); err != nil {
+			return Write{}, err
+		}
+	}
 	return write(domain.EvItemUpdated, id, payload{Op: "update", Before: &cur, Item: next})
+}
+
+// fillTimes 把来源事件的结构化时间补到事项上缺的字段：已有的值（含本人改过的）不覆盖。
+// 补上的字段同时记 source_* 溯源，与单一来源入账一致：跟随来源改期（followmsg.refreshTimes）、
+// 建议页标「来自来源」都靠这三个标记。
+func fillTimes(it *domain.Item, st domain.EventSchedule) bool {
+	ext := map[string]string{}
+	if len(it.Ext) > 0 {
+		_ = json.Unmarshal(it.Ext, &ext) // 不是平铺字符串时按没有溯源标记处理
+	}
+	changed := false
+	if it.Deadline == nil && st.Deadline != nil {
+		d := *st.Deadline
+		it.Deadline, ext["source_deadline"] = &d, d.In(time.Local).Format(time.RFC3339)
+		changed = true
+	}
+	if it.PlannedFor == "" && st.PlannedFor != "" {
+		it.PlannedFor, it.PlannedSlot = st.PlannedFor, st.Slot
+		ext["source_planned_for"] = st.PlannedFor
+		if st.Slot != "" {
+			ext["source_planned_slot"] = st.Slot
+		}
+		changed = true
+	}
+	if !changed {
+		return false
+	}
+	b, _ := json.Marshal(ext) // 平铺的字符串字典，编码不会失败
+	it.Ext = b
+	return true
 }
 
 // AddProposalSource 在调用方事务内把来源事件 source 记入建议 id 的 proposal.sources（§9.3 合并键命中）。
 // 建议必须仍在 proposed；已经记过该来源时什么都不改，返回 false；其余同 SetProposal。
-func AddProposalSource(tx *store.Tx, id, source string, at time.Time) (w Write, changed bool, err error) {
+func AddProposalSource(tx *store.Tx, id, source string, st *domain.EventSchedule, at time.Time) (w Write, changed bool, err error) {
 	cur, err := Get(tx, id)
 	if err != nil {
 		return w, false, err
@@ -189,6 +226,6 @@ func AddProposalSource(tx *store.Tx, id, source string, at time.Time) (w Write, 
 		return w, false, nil
 	}
 	p.Sources = append(slices.Clone(p.Sources), source)
-	w, err = SetProposal(tx, id, p, at)
+	w, err = SetProposal(tx, id, p, st, at)
 	return w, err == nil, err
 }

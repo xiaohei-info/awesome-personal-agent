@@ -432,7 +432,7 @@ func registerMarkPending(x *command.Executor) error {
 				p = *it.Proposal
 			}
 			p.Sweep = &domain.ProposalSweep{State: "pending", Backfill: &domain.SweepBackfill{By: v.By, At: at}}
-			w, err := items.SetProposal(c.Tx, it.ID, p, at)
+			w, err := items.SetProposal(c.Tx, it.ID, p, nil, at)
 			if err != nil {
 				return nil, err
 			}
@@ -586,7 +586,7 @@ func registerRetryRejected(x *command.Executor) error {
 			}
 			at := c.Now()
 			from := it.Proposal.Sweep
-			w, err := items.SetProposal(c.Tx, it.ID, *asRetried(it, at).Proposal, at)
+			w, err := items.SetProposal(c.Tx, it.ID, *asRetried(it, at).Proposal, nil, at)
 			if err != nil {
 				return nil, err
 			}

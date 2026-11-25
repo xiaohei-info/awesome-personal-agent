@@ -24,7 +24,7 @@ func (e *env) oldBuild(from, to string, evs []string) {
 		p := *it.Proposal
 		p.Sources = slices.DeleteFunc(slices.Clone(p.Sources), func(s string) bool { return slices.Contains(evs, s) })
 		p.Merges = slices.DeleteFunc(slices.Clone(p.Merges), func(m domain.ProposalMerge) bool { return slices.Contains(evs, m.Event) })
-		w, err := items.SetProposal(tx, id, p, e.now)
+		w, err := items.SetProposal(tx, id, p, nil, e.now)
 		if err != nil {
 			return err
 		}

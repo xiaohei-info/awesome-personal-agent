@@ -1,10 +1,12 @@
 package inbound
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
@@ -301,6 +303,56 @@ func TestPlatformUpdatesAreListedOnTheProposal(t *testing.T) {
 		if x.Item != ps[0].ID || x.Disposition != domain.DispositionAttached || x.AttachState != "processed" {
 			t.Fatalf("update stays an attached message: %+v", x)
 		}
+	}
+	e.verify()
+}
+
+// ACT-PRH-02 的补充：并入已有建议时把新事件带来的统一时间字段补到事项上（§9.2、§9.3）。
+// 只补缺的字段：已有值（含本人改过的）不覆盖；补上的字段记 source_* 溯源，跟随来源改期；
+// 补进来的截止在建议被接受时按它排上截止 Timer（proposed 阶段按设计不计时，§6.8）。
+func TestMergeFillsMissingTimesOnly(t *testing.T) {
+	e := mergeEnv(t)
+	key := map[string]any{"merge_key": "mk-time"}
+	e.emit("src_a", "ticket", ev("tm-a", "ticket.opened", "季度评审", key))
+	id := e.proposed()[0].ID
+	if it := e.item(id); it.Deadline != nil || it.PlannedFor != "" {
+		t.Fatalf("the first event brings no times: %+v", it)
+	}
+
+	// 第二个来源带来截止与起止：事项上还没有，补进去。
+	e.emit("src_b", "ticket", ev("tm-b", "ticket.opened", "季度评审（定时间）", map[string]any{"merge_key": "mk-time",
+		"due_at": "2026-03-20", "starts_at": "2026-03-21T09:00:00+08:00", "ends_at": "2026-03-21T10:00:00+08:00"}))
+	it := e.item(id)
+	loc := time.Local
+	deadline := time.Date(2026, 3, 20, 23, 59, 59, 0, loc)
+	start := time.Date(2026, 3, 21, 1, 0, 0, 0, time.UTC).In(loc)
+	wantPlan, wantSlot := start.Format(time.DateOnly), start.Format("15:04")+" - "+start.Add(time.Hour).Format("15:04")
+	if it.Deadline == nil || !it.Deadline.Equal(deadline) || it.PlannedFor != wantPlan || it.PlannedSlot != wantSlot {
+		t.Fatalf("times of the merged event were not filled: deadline %v plan %q %q", it.Deadline, it.PlannedFor, it.PlannedSlot)
+	}
+	var ext map[string]string
+	if err := json.Unmarshal(it.Ext, &ext); err != nil {
+		t.Fatal(err)
+	}
+	if ext["source_deadline"] != deadline.Format(time.RFC3339) || ext["source_planned_for"] != wantPlan || ext["source_planned_slot"] != wantSlot {
+		t.Fatalf("ext %+v", ext)
+	}
+
+	// 第三个来源带来别的截止：已有值不覆盖。
+	e.emit("src_c", "ticket", ev("tm-c", "ticket.opened", "季度评审（又改）", map[string]any{"merge_key": "mk-time", "due_at": "2026-04-01"}))
+	if got := e.item(id); got.Deadline == nil || !got.Deadline.Equal(deadline) {
+		t.Fatalf("an existing deadline must not be overwritten: %v", got.Deadline)
+	}
+
+	// 接受后按补进来的截止排上 Timer。
+	e.transition(id, domain.PhaseOpen)
+	var (
+		tm domain.Timer
+		ok bool
+	)
+	e.view(func(tx *store.Tx) { tm, ok, _ = clock.Get(tx, "due_"+id) })
+	if !ok || !tm.At.Equal(deadline) {
+		t.Fatalf("due timer %+v, want the filled deadline %v", tm, deadline)
 	}
 	e.verify()
 }
