@@ -1191,3 +1191,60 @@ func TestAgentAnswerPushesWhatItAnswered(t *testing.T) {
 		t.Fatalf("later edits must not push again: %+v", d)
 	}
 }
+
+// 逾期提醒只对未终结阶段：dropped 与 done 一样不推（§7.4）。
+func TestDeadlinePassedReminderSkipsDroppedItems(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	id := e.item(map[string]any{"deadline": e.now.Add(time.Minute)})
+	e.do(owner, "item.transition", map[string]any{"id": id, "to": "dropped", "reason": "不再需要"})
+	e.advance(2 * time.Minute)
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("reminded about a dropped item: %+v", d)
+	}
+}
+
+// 同一事项同一截止只推一次；截止改了是新的截止（提醒 id 含截止时间）。
+func TestOverdueReminderOncePerDeadline(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	id := e.item(map[string]any{"deadline": e.now.Add(-time.Hour)})
+	e.advance(31 * time.Second)
+	first := e.claim("channel:chan")
+	if first == nil || first.Item != id || !strings.Contains(first.Content.Title, "截止已过") {
+		t.Fatalf("no overdue reminder: %+v", first)
+	}
+	for i := 0; i < 3; i++ {
+		e.advance(time.Hour)
+		if d := e.claim("channel:chan"); d != nil && strings.HasPrefix(d.ID, "remind:due:"+id+":") {
+			t.Fatalf("same deadline reminded twice: %+v", d)
+		}
+	}
+	e.do(owner, "item.update", map[string]any{"id": id, "deadline": e.now.Add(-time.Minute)})
+	e.advance(31 * time.Second)
+	if d := e.claim("channel:chan"); d == nil || d.ID == first.ID {
+		t.Fatalf("a new deadline should be a new reminder: %+v", d)
+	}
+}
+
+// 暂存里留下的提醒在事项已终结时不放行：不依赖事件追赶先清掉它（积压、重启后的旧点）。
+func TestHeldReminderForDroppedItemIsNotReleased(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	id := e.item(map[string]any{"deadline": e.now.Add(-time.Hour)})
+	e.advance(31 * time.Second) // 先让这件事项的 created/updated 事件都被追赶过
+	e.drain("channel:chan")
+	e.do(owner, "item.transition", map[string]any{"id": id, "to": "dropped", "reason": "不再需要"})
+	e.advance(time.Second)
+	// 直接写一条旧版本留下的暂存提醒（放行时间已过）：不经 offer，它会把放行时间重置为当前。
+	e.update(func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO attention_held (id, item, class, priority, content, version, exempt, mergeable, release_at, origin)
+			VALUES (?, ?, 'reminder', 'normal', '{"title":"截止已过：旧提醒"}', 1, 0, 0, ?, '')`,
+			"remind:due:"+id+":1", id, e.now.Add(-time.Second).UnixNano())
+		return err
+	})
+	e.advance(31 * time.Second)
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("held reminder for a dropped item was released: %+v", d)
+	}
+}

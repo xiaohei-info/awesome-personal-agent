@@ -560,6 +560,26 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 	if err != nil {
 		return err
 	}
+	kept := due[:0]
+	for _, h := range due {
+		if !strings.HasPrefix(h.id, schedPrefix) && !strings.HasPrefix(h.id, "remind:") {
+			kept = append(kept, h)
+			continue
+		}
+		// 事项已终结（done、dropped）或已不存在时，到点与截止提醒一律不推；积压里留下的暂存点一并清掉（§7.4）。
+		it, err := items.Get(tx, h.item)
+		if err != nil && !isNotFound(err) {
+			return err
+		}
+		if err == nil && it.Phase != domain.PhaseDone && it.Phase != domain.PhaseDropped {
+			kept = append(kept, h)
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM attention_held WHERE id = ?`, h.id); err != nil {
+			return err
+		}
+	}
+	due = kept
 	var go_, merged, quieted, batch []held
 	for _, h := range due {
 		th := throttleOf(h.id)
