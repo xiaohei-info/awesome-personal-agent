@@ -102,7 +102,7 @@ func (l *lab) apa(home string, extra []string, want int, args ...string) baselin
 
 type server struct {
 	t    *testing.T
-	cmd  *exec.Cmd
+	p    *baseline.Proc
 	out  *syncBuf
 	done chan struct{}
 	URL  string
@@ -167,12 +167,11 @@ func (l *lab) tryServeAsIs(bin, home string, extra ...string) (*server, baseline
 	cmd.Env = cleanEnv(home, extra...)
 	out := &syncBuf{}
 	cmd.Stdout, cmd.Stderr = out, out
-	if err := cmd.Start(); err != nil {
+	p, err := baseline.StartServe(l.top, cmd) // 长期存在的进程在整个测试结束时才清理
+	if err != nil {
 		l.t.Fatalf("apa serve: %v", err)
 	}
-	s := &server{t: l.t, cmd: cmd, out: out, done: make(chan struct{}), URL: "http://127.0.0.1:" + port, Home: home}
-	go func() { _ = cmd.Wait(); close(s.done) }()
-	l.top.Cleanup(s.stop)
+	s := &server{t: l.t, p: p, out: out, done: p.Done, URL: "http://127.0.0.1:" + port, Home: home}
 	deadline := time.After(40 * time.Second)
 	for {
 		select {
@@ -200,18 +199,7 @@ func (l *lab) serve(bin, home string, extra ...string) *server {
 func (s *server) Log() string { return s.out.String() }
 
 func (s *server) stop() {
-	select {
-	case <-s.done:
-		return
-	default:
-	}
-	_ = s.cmd.Process.Signal(os.Interrupt)
-	select {
-	case <-s.done:
-	case <-time.After(15 * time.Second):
-		_ = s.cmd.Process.Kill()
-		<-s.done
-	}
+	s.p.Stop()
 }
 
 // ---- HTTP ----

@@ -96,6 +96,7 @@ func eq(t *testing.T, what string, got, want any) {
 
 var (
 	srcOnce sync.Once
+	stubDir string
 	srcPath string
 	srcErr  error
 )
@@ -107,6 +108,7 @@ func buildSrcStub() (string, error) {
 			srcErr = err
 			return
 		}
+		stubDir = dir
 		srcPath = filepath.Join(dir, "src-stub")
 		cmd := exec.Command("go", "build", "-o", srcPath, "./tests/doubles/srcstub/cmd/src-stub")
 		cmd.Dir = repoRoot()

@@ -482,8 +482,9 @@ func (k *kit) serveHome(bin, home string) (string, func()) {
 	out, _ := cmd.StdoutPipe()
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
-	k.must(cmd.Start())
-	stop := func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }
+	p, err := baseline.StartServe(k.t, cmd)
+	k.must(err)
+	stop := p.Kill
 	k.t.Cleanup(stop)
 	ready := make(chan string, 1)
 	go func() { line, _ := bufio.NewReader(out).ReadString('\n'); ready <- line }()

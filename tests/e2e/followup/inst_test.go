@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
 // inst 是在一份账本夹具副本上运行的 `apa serve`（旧版本或待测版本）。它只做升级类流程需要的最少接线：
@@ -24,8 +26,7 @@ type inst struct {
 	bin     string
 	home    string
 	URL     string
-	cmd     *exec.Cmd
-	done    chan struct{}
+	p       *baseline.Proc
 	logs    bytes.Buffer
 	session string
 	csrf    string
@@ -54,16 +55,15 @@ func startInst(t *testing.T, bin, home, extra string) *inst {
 	lines = append([]string{"listen: " + addr}, lines...)
 	writeFile(t, cfg, strings.Join(lines, "\n")+"\n"+extra)
 	i := &inst{t: t, bin: bin, home: home, URL: "http://" + addr}
-	i.cmd = exec.Command(bin, "serve")
-	i.cmd.Env = append(os.Environ(), "APA_HOME="+home)
-	out, _ := i.cmd.StdoutPipe()
-	i.cmd.Stderr = &i.logs
-	if err := i.cmd.Start(); err != nil {
+	cmd := exec.Command(bin, "serve")
+	cmd.Env = append(os.Environ(), "APA_HOME="+home)
+	out, _ := cmd.StdoutPipe()
+	cmd.Stderr = &i.logs
+	p, err := baseline.StartServe(t, cmd)
+	if err != nil {
 		t.Fatal(err)
 	}
-	i.done = make(chan struct{})
-	go func() { _ = i.cmd.Wait(); close(i.done) }()
-	t.Cleanup(i.stop)
+	i.p = p
 	ready := make(chan string, 1)
 	go func() { line, _ := bufio.NewReader(out).ReadString('\n'); ready <- line }()
 	select {
@@ -78,17 +78,7 @@ func startInst(t *testing.T, bin, home, extra string) *inst {
 }
 
 func (i *inst) stop() {
-	if i.cmd == nil || i.cmd.Process == nil {
-		return
-	}
-	_ = i.cmd.Process.Signal(os.Interrupt)
-	select {
-	case <-i.done:
-	case <-time.After(10 * time.Second):
-		_ = i.cmd.Process.Kill()
-		<-i.done
-	}
-	i.cmd = nil
+	i.p.Stop()
 }
 
 // req 发一次请求；cookie、csrf 为 Web 会话，token 非空则带 Bearer。

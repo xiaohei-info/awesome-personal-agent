@@ -51,8 +51,7 @@ func (e *Env) KillKernel() {
 	if e.srv == nil || e.srv.Process == nil {
 		return
 	}
-	_ = e.srv.Process.Kill()
-	<-e.srvDone
+	e.proc.Kill()
 	e.srv = nil
 }
 
