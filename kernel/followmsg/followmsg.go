@@ -347,6 +347,7 @@ func (s *Service) wake(ctx context.Context, item string, ev domain.SourceEvent) 
 
 // refresh 用同一来源对象的新事件刷新它建出的事项：只写对象自己的规范化字段（标题、摘要、正文文本）里非空的，
 // 都为空时不写。关于对象的消息（评论、评审）由规则声明 on_update: attach，走 echo，不到这里（§9.4）。
+// 时间字段只在“仍等于上次来源给的值”时刷新（溯源标记为 source），本人改过的不覆盖（方案 A，§9.3）。
 // 这些事项没有执行者，写入以本人登记该来源为依据，代本人执行（同入站规则的自动接受）。
 func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEvent) error {
 	patch := map[string]string{"id": item, "reason": "source object updated by " + ev.Type + " " + ev.ID}
@@ -355,6 +356,9 @@ func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEven
 			patch[k] = v
 		}
 	}
+	if err := s.refreshTimes(ctx, item, ev, patch); err != nil {
+		return err
+	}
 	if len(patch) == 2 {
 		return nil
 	}
@@ -362,6 +366,43 @@ func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEven
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: s.onBehalf(), Command: "item.update", Input: in, IdemKey: "followmsg:update:" + ev.ID,
 		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Owner: s.o.Owner})
 	return err
+}
+
+// refreshTimes 把来源事件的新结构化时间写进 patch：截止与计划日期各自判断，只在当前值仍是上次来源给的值时改写，
+// 并同步记下来源这次给的值；没有来源溯源标记的（模型推断、本人手改）不改（§9.2、§9.3）。
+func (s *Service) refreshTimes(ctx context.Context, item string, ev domain.SourceEvent, patch map[string]string) error {
+	st := ev.Schedule(time.Local)
+	if len(st.From) == 0 {
+		return nil
+	}
+	var it domain.Item
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, item); return err }); err != nil {
+		return err
+	}
+	ext := map[string]string{}
+	if len(it.Ext) > 0 {
+		_ = json.Unmarshal(it.Ext, &ext) // 不是平铺字符串时按没有溯源标记处理，只补来源给的时间
+	}
+	changed := false
+	if st.Deadline != nil {
+		went := st.Deadline.In(time.Local).Format(time.RFC3339)
+		if cur := it.Deadline; cur != nil && ext["source_deadline"] != "" && cur.In(time.Local).Format(time.RFC3339) == ext["source_deadline"] {
+			patch["deadline"] = went
+			ext["source_deadline"], changed = went, true
+		}
+	}
+	if st.PlannedFor != "" && ext["source_planned_for"] != "" && it.PlannedFor == ext["source_planned_for"] && it.PlannedSlot == ext["source_planned_slot"] {
+		patch["planned_for"], patch["planned_slot"] = st.PlannedFor, st.Slot
+		ext["source_planned_for"], ext["source_planned_slot"], changed = st.PlannedFor, st.Slot, true
+	}
+	if changed {
+		b, err := json.Marshal(ext)
+		if err != nil {
+			return err
+		}
+		patch["ext"] = string(b)
+	}
+	return nil
 }
 
 type attachIn struct {

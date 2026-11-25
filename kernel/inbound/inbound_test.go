@@ -1146,3 +1146,58 @@ func draftOf(payload json.RawMessage) *Draft {
 	_ = json.Unmarshal(payload, &p)
 	return p.Draft
 }
+
+// 统一时间字段在规则直出（then: proposed）时直接写成事项的截止、计划日期与时段，并在 ext 记下来源给的原值（§9.2、§9.3）。
+// 这条用例不按来源类型写任何分支：来源类型是随便起的，事件只带统一字段。
+func TestStructuredTimesBecomeItemSchedule(t *testing.T) {
+	e := newEnv(t, false)
+	e.emit("src_t", "ticket", ev("t1", "ticket.opened", "交材料", map[string]any{
+		"due_at": "2026-12-02", "starts_at": "2026-12-03T09:00:00+08:00", "ends_at": "2026-12-03T10:30:00+08:00"}))
+	d := e.events("src_t")[0]
+	if d.Disposition != domain.DispositionProposed || d.Item == "" {
+		t.Fatalf("event %+v", d)
+	}
+	it := e.item(d.Item)
+	// 只到日的截止按主机的时区落成当天 23:59:59；时段按同一时区折算（这里按本机时区算期望值）。
+	loc := time.Local
+	if it.Deadline == nil || !it.Deadline.Equal(time.Date(2026, 12, 2, 23, 59, 59, 0, loc)) {
+		t.Fatalf("deadline %v", it.Deadline)
+	}
+	start := time.Date(2026, 12, 3, 1, 0, 0, 0, time.UTC).In(loc)
+	wantPlan := start.Format(time.DateOnly)
+	wantSlot := start.Format("15:04") + " - " + start.Add(90*time.Minute).Format("15:04")
+	if it.PlannedFor != wantPlan || it.PlannedSlot != wantSlot {
+		t.Fatalf("plan %q %q, want %q %q", it.PlannedFor, it.PlannedSlot, wantPlan, wantSlot)
+	}
+	var ext map[string]string
+	if err := json.Unmarshal(it.Ext, &ext); err != nil {
+		t.Fatal(err)
+	}
+	if ext["source_event"] != d.ID || ext["source_deadline"] != time.Date(2026, 12, 2, 23, 59, 59, 0, loc).Format(time.RFC3339) ||
+		ext["source_planned_for"] != wantPlan || ext["source_planned_slot"] != wantSlot {
+		t.Fatalf("ext %+v", ext)
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("rule exit must not call the model: %d", n)
+	}
+}
+
+// 结构化字段优先于起草：来源给了截止时，模型抽出的截止不覆盖它；来源没给的字段才用模型的（§9.3）。
+func TestStructuredTimesBeatDraft(t *testing.T) {
+	e := newEnv(t, true)
+	e.screen(0.9)
+	e.draft(`{"title":"审阅季度报告","summary":"对方请你周五前审阅","kind":"task","deadline":"2026-03-13","planned_for":"2026-03-12","planned_slot":"09:00 - 10:00","recommend":"accept"}`)
+	e.emit("src_x", "other", ev("h1", "thing.happened", "请在周五前审阅季度报告", map[string]any{"due_at": "2026-03-20"}))
+	it := e.item(e.events("src_x")[0].Item)
+	if it.Deadline == nil || it.Deadline.Format(time.DateOnly) != "2026-03-20" {
+		t.Fatalf("source deadline should win: %v", it.Deadline)
+	}
+	if it.PlannedFor != "2026-03-12" || it.PlannedSlot != "09:00 - 10:00" {
+		t.Fatalf("draft plan should stay when the source has none: %q %q", it.PlannedFor, it.PlannedSlot)
+	}
+	var ext map[string]string
+	_ = json.Unmarshal(it.Ext, &ext)
+	if ext["source_deadline"] == "" || ext["model_deadline"] != "" || ext["model_planned_for"] != "2026-03-12" {
+		t.Fatalf("ext %+v", ext)
+	}
+}

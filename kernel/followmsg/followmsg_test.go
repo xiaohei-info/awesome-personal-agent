@@ -1041,3 +1041,36 @@ func TestRefreshWritesAtMost4000CharsOfTheBody(t *testing.T) {
 		t.Fatalf("短正文被改动：%q", got)
 	}
 }
+
+// 来源对象更新带来的新时间只在“仍等于上次来源给的值”时写回；本人改过的日期不覆盖（§9.2、§9.3 取舍 4）。
+func TestSourceUpdateRefreshesTimesUnlessChangedByHand(t *testing.T) {
+	e := newEnv(t)
+	ev := func(id, start, end, due string) map[string]any {
+		m := comment(id, "obj#sched")
+		m["starts_at"], m["ends_at"], m["due_at"] = start, end, due
+		return m
+	}
+	e.emit(ev("t1", "2026-12-02T09:00:00+08:00", "2026-12-02T10:00:00+08:00", "2026-12-05"))
+	item := e.msg("t1").Item
+	e.must(owner, "item.transition", map[string]any{"id": item, "to": "open", "reason": "接受"})
+	it := e.item(item)
+	if it.PlannedFor != "2026-12-02" || it.PlannedSlot != "09:00 - 10:00" || it.Deadline == nil || it.Deadline.Day() != 5 {
+		t.Fatalf("first write %+v", it)
+	}
+
+	// 来源改期：还等于上次来源给的值，照常跟上。
+	e.emit(ev("t2", "2026-12-03T14:00:00+08:00", "2026-12-03T15:30:00+08:00", "2026-12-08"))
+	it = e.item(item)
+	if it.PlannedFor != "2026-12-03" || it.PlannedSlot != "14:00 - 15:30" || it.Deadline == nil || it.Deadline.Day() != 8 {
+		t.Fatalf("source reschedule %+v", it)
+	}
+
+	// 本人改过排期与截止之后，来源再改不覆盖。
+	e.must(owner, "item.update", map[string]any{"id": item, "planned_for": "2027-01-01", "planned_slot": "08:00 - 08:30",
+		"deadline": "2027-01-02T18:00:00+08:00"})
+	e.emit(ev("t3", "2026-12-04T09:00:00+08:00", "2026-12-04T10:00:00+08:00", "2026-12-09"))
+	it = e.item(item)
+	if it.PlannedFor != "2027-01-01" || it.PlannedSlot != "08:00 - 08:30" || it.Deadline == nil || it.Deadline.Format(time.DateOnly) != "2027-01-02" {
+		t.Fatalf("hand edit must win %+v", it)
+	}
+}

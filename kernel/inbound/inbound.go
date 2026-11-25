@@ -1488,8 +1488,10 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 		ref = ev.ID
 	}
 	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": budget.ProposalBody(orElse(p.body, ev.Detail), ev.ID), "project": project,
-		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason,
-		"ext": map[string]string{"source_event": ev.ID}}
+		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason}
+	ext := map[string]string{"source_event": ev.ID}
+	s.applyEventTime(&p, ev, ext) // 结构化时间优先，缺的字段才用起草的结果（§9.3）
+	in["ext"] = ext
 	if p.deadline != nil {
 		in["deadline"] = p.deadline
 	}
@@ -1511,6 +1513,31 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 	}
 	err = json.Unmarshal(res.Value, &item)
 	return item.ID, err
+}
+
+// applyEventTime 把来源事件的结构化时间写进提议，并记下每个时间字段的来历：ext 的 source_* 是来源给出的值，
+// model_* 是起草抽出的值（§9.2、§9.3）。结构化字段优先，缺的字段才用起草的结果；建议页与来源刷新据此判断。
+func (s *Service) applyEventTime(p *proposal, ev domain.SourceEvent, ext map[string]string) {
+	loc := time.Local // 主机时区（§6.3）：与 followmsg 的刷新判断同一口径
+	st := ev.Schedule(loc)
+	if st.Deadline != nil {
+		p.deadline = st.Deadline
+		ext["source_deadline"] = st.Deadline.In(loc).Format(time.RFC3339)
+	} else if p.deadline != nil {
+		ext["model_deadline"] = p.deadline.In(loc).Format(time.RFC3339)
+	}
+	if st.PlannedFor != "" {
+		p.plannedFor, p.slot = st.PlannedFor, st.Slot
+		ext["source_planned_for"] = st.PlannedFor
+		if st.Slot != "" {
+			ext["source_planned_slot"] = st.Slot
+		}
+	} else if p.plannedFor != "" {
+		ext["model_planned_for"] = p.plannedFor
+		if p.slot != "" {
+			ext["model_planned_slot"] = p.slot
+		}
+	}
 }
 
 // finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。
