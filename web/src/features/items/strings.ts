@@ -162,6 +162,7 @@ const zh = {
   delReason: (where: string) => `在${where}删除（移到已放弃）`,
   detailWhere: "事项页",
   rowMore: "更多",
+  rowMoreFor: (title: string) => `更多操作：${title}`,
   hiddenDropped: (n: number) => `已隐藏 ${n} 件已放弃的事项；在「阶段」筛选里选「已放弃」可查看、找回`,
 };
 
@@ -323,6 +324,7 @@ const en: typeof zh = {
   delReason: (where) => `deleted on ${where} (moved to Dropped)`,
   detailWhere: "the item page",
   rowMore: "More",
+  rowMoreFor: (title) => `More actions: ${title}`,
   hiddenDropped: (n) => `${n} dropped item(s) hidden; pick Dropped under Phase to see or restore them`,
 };
 

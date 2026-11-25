@@ -509,6 +509,23 @@ for (const p of %s) {
   const off = await page.evaluate(() => [...document.querySelectorAll("main button, main input, main select, main textarea, main a")].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > 361 || r.left < -1); }).length);
   if (off > 0) out.empty.push(p + "(" + off + " 个控件超出视口)");
 }
+// 360px 窄屏行内「更多」菜单：打开后菜单与菜单项不超出视口、不撑宽页面，Esc 关闭。
+await page.goto(base + "/items");
+await page.waitForSelector("main section:first-of-type li:first-child .row-more button", { state: "visible" });
+out.rowButtons = await page.evaluate(() => [...document.querySelectorAll("main section:first-of-type li:first-child .act-row .actions button")].map((b) => ({ text: b.textContent, w: Math.round(b.getBoundingClientRect().width), h: Math.round(b.getBoundingClientRect().height) })));
+await page.click("main section:first-of-type li:first-child .row-more button");
+await page.waitForSelector(".act-row [role='menu']", { state: "visible" });
+out.moreOpen = await page.evaluate(() => {
+  const m = document.querySelector(".act-row [role='menu']");
+  const r = m.getBoundingClientRect();
+  const items = [...m.querySelectorAll("[role='menuitem']")].map((x) => {
+    const ir = x.getBoundingClientRect();
+    return { text: x.textContent, left: Math.round(ir.left), right: Math.round(ir.right), h: Math.round(ir.height) };
+  });
+  return { scrollWidth: document.scrollingElement.scrollWidth, left: Math.round(r.left), right: Math.round(r.right), items };
+});
+await page.keyboard.press("Escape");
+await page.waitForSelector(".act-row [role='menu']", { state: "detached" });
 `, TMRW, wbD, pagesJSON))
 		// 今天页的分组标题（界面设计 §5.3）：计划今天或更早与今天到期合成「今天的事（n）」；久未推进收在折叠的 details 里，不是分组标题。
 		groups := fmt.Sprint(r["groups"])
@@ -529,6 +546,14 @@ for (const p of %s) {
 		if e := r["empty"].([]any); len(e) > 0 {
 			t.Errorf("这些页面在 360 宽度下有控件超出视口: %v", e)
 		}
+		moreOpen := r["moreOpen"].(map[string]any)
+		if sw := moreOpen["scrollWidth"].(float64); sw > 360 {
+			t.Errorf("展开行内「更多」菜单后 scrollWidth = %v，超出 360", sw)
+		}
+		if left, right := moreOpen["left"].(float64), moreOpen["right"].(float64); left < 0 || right > 360 {
+			t.Errorf("行内「更多」菜单超出 360 视口: left=%v right=%v", left, right)
+		}
+		t.Logf("360px scrollWidths=%v rowButtons=%v moreOpen=%v", r["widths"], r["rowButtons"], moreOpen)
 		// ② 的结果
 		mob := k.findItem("WB-MOB 交房租")
 		eq(t, "WB-MOB planned_for", k.planned(mob), TMRW)

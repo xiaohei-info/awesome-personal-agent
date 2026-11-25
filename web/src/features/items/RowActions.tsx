@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { ErrorNote } from "../../app/errors";
 import { useT } from "../../app/i18n";
 import { HANDOFF_TAG } from "../../app/ids";
 import { useSession } from "../../app/session";
+import { useNarrow } from "../../app/Shell";
 import { AgentBlock } from "./HandOff";
 import { DeleteItem } from "./DeleteItem";
 import type { Item } from "./ItemsPage";
@@ -15,6 +16,7 @@ export type RowAct = "done" | "plan" | "progress" | "edit" | "drop";
 import { strings } from "./strings";
 
 // 列表行上的快捷操作，放在 .act-row 里：按钮与标题同一行，展开的表单与 Agent 处理区（.row-panel）换到下一行占满整行（界面设计 §5.2、§9.3）：对应工作台任务行的「排时间、交给助手、完成」，另加「记进展」，今天页与事项列表共用。
+// 窄屏（<= 820px）下只直接展示主操作（排时间、完成），其余次要动作（交给 Agent、记进展、删除…）收进「更多」弹出菜单，避免横向溢出。
 // 写入走事项详情同样的接口（PATCH 带 If-Match、transition）；写完只重读这一件（GET /items/{id}）交给 onChange 原位替换，
 // 不重读整页、不丢滚动位置。失败时显示服务端原因，并同样重读这一件，不留本地假状态。
 // 「交给 Agent」就是事项详情的 Agent 处理区（AgentBlock）：加上交给 Agent 的标记后在行下展开同一块，选 Agent、看前提、现在开始都在那里。
@@ -24,11 +26,42 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export function RowActions({ item, where, onChange }: { item: Item; where: string; onChange: (it: Item, what: RowAct) => void }) {
   const t = useT(strings);
   const { api } = useSession();
-  const [open, setOpen] = useState<"plan" | "agent" | "progress" | "more" | null>(null);
+  const narrow = useNarrow();
+  const [open, setOpen] = useState<"plan" | "agent" | "progress" | "more" | "delete" | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const menuId = useId();
+  const moreWrapRef = useRef<HTMLSpanElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const agentPanelRef = useRef<HTMLDivElement>(null);
+  const focusEdgeRef = useRef<"first" | "last">("first");
+  const focusAgentRef = useRef(false);
   const path = "/items/" + encodeURIComponent(item.id);
   const ifMatch = { "If-Match": String(item.version) };
+
+  useEffect(() => {
+    if (!narrow) setMenuOpen(false);
+  }, [narrow]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const btns = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    (focusEdgeRef.current === "last" ? btns[btns.length - 1] : btns[0])?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!moreWrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (open === "agent" && focusAgentRef.current) {
+      focusAgentRef.current = false;
+      agentPanelRef.current?.focus();
+    }
+  }, [open]);
 
   /** 写一次，再重读这一件；返回是否成功。what 告诉页面这次做了什么（今天页据此刷新计数、说明为什么离开了列表）。 */
   const write = async (fn: () => Promise<unknown>, what: RowAct = "edit"): Promise<boolean> => {
@@ -55,22 +88,96 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
     if (await tagWrite([...(item.tags ?? []), HANDOFF_TAG])) setOpen("agent");
   };
 
+  const openMenu = (edge: "first" | "last") => {
+    focusEdgeRef.current = edge;
+    setMenuOpen(true);
+  };
+  const onTriggerKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      openMenu("first");
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      openMenu("last");
+    } else if (e.key === "Escape" && menuOpen) {
+      e.preventDefault();
+      setMenuOpen(false);
+    }
+  };
+  const onMenuKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const btns = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    const idx = btns.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setMenuOpen(false);
+      moreBtnRef.current?.focus();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (btns.length) btns[(idx + 1) % btns.length]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (btns.length) btns[(idx - 1 + btns.length) % btns.length]?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      btns[0]?.focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      btns[btns.length - 1]?.focus();
+    } else if (e.key === "Tab") {
+      setMenuOpen(false);
+    }
+  };
+
   return (
     <>
       <span className="actions" role="group" aria-label={t.rowActions(item.title)}>
-        <button type="button" aria-expanded={open === "plan"} onClick={() => setOpen(open === "plan" ? null : "plan")}>{t.rowPlan}</button>
+        <button type="button" aria-expanded={open === "plan"} onClick={() => { setMenuOpen(false); setOpen(open === "plan" ? null : "plan"); }}>{t.rowPlan}</button>
         {/* 交给 Agent 只对任务（交给 Agent 的规则只认任务，§13.6）。 */}
-        {item.kind === "task" && <button type="button" aria-expanded={open === "agent"} disabled={busy} onClick={() => void handoff()}>{handed ? t.rowAgent : t.rowHandoff}</button>}
+        {!narrow && item.kind === "task" && <button type="button" aria-expanded={open === "agent"} disabled={busy} onClick={() => void handoff()}>{handed ? t.rowAgent : t.rowHandoff}</button>}
         {/* 委派完成要带证据（§6.14），去详情填；其余一键完成。 */}
-        {item.kind !== "delegation" && <button type="button" disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done")}>{t.done}</button>}
-        <button type="button" aria-expanded={open === "progress"} onClick={() => setOpen(open === "progress" ? null : "progress")}>{t.rowProgress}</button>
-        <button type="button" aria-expanded={open === "more"} onClick={() => setOpen(open === "more" ? null : "more")}>{t.rowMore}</button>
+        {item.kind !== "delegation" && <button type="button" disabled={busy} onClick={() => { setMenuOpen(false); void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done"); }}>{t.done}</button>}
+        {!narrow && <button type="button" aria-expanded={open === "progress"} onClick={() => setOpen(open === "progress" ? null : "progress")}>{t.rowProgress}</button>}
+        {!narrow ? (
+          <button type="button" aria-expanded={open === "more"} onClick={() => setOpen(open === "more" ? null : "more")}>{t.rowMore}</button>
+        ) : (
+          <span className="row-more" ref={moreWrapRef}>
+            <button
+              ref={moreBtnRef}
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-controls={menuOpen ? menuId : undefined}
+              onClick={() => (menuOpen ? setMenuOpen(false) : openMenu("first"))}
+              onKeyDown={onTriggerKeyDown}
+            >
+              {t.rowMore}
+            </button>
+            {menuOpen && (
+              <div id={menuId} ref={menuRef} className="row-more-menu" role="menu" aria-label={t.rowMoreFor(item.title)} onKeyDown={onMenuKeyDown}>
+                {item.kind === "task" && (
+                  <button type="button" role="menuitem" disabled={busy} onClick={() => { setMenuOpen(false); focusAgentRef.current = true; void handoff(); }}>
+                    {handed ? t.rowAgent : t.rowHandoff}
+                  </button>
+                )}
+                <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setOpen(open === "progress" ? null : "progress"); }}>
+                  {t.rowProgress}
+                </button>
+                <button type="button" role="menuitem" disabled={busy} onClick={() => { setMenuOpen(false); setOpen(open === "delete" ? null : "delete"); }}>
+                  {t.del}
+                </button>
+              </div>
+            )}
+          </span>
+        )}
       </span>
       {err != null && <div className="row-panel"><ErrorNote error={err} /></div>}
       {open === "more" && (
         <div className="row-panel">
           <DeleteItem title={item.title} busy={busy} onConfirm={() => void write(() => api.post(path + "/transition", { to: "dropped", reason: t.delReason(where) }, ifMatch), "drop")} />
         </div>
+      )}
+      {open === "delete" && (
+        <DeleteItem initialAsking onCancel={() => setOpen(null)} title={item.title} busy={busy} onConfirm={() => void write(() => api.post(path + "/transition", { to: "dropped", reason: t.delReason(where) }, ifMatch), "drop")} />
       )}
       {open === "plan" && <PlanForm item={item} onCancel={() => setOpen(null)} onSubmit={async (b) => {
         if (await write(() => api.patch(path, { ...b, reason: t.rowPlanReason(where) }, ifMatch), "plan")) setOpen(null);
@@ -85,7 +192,7 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
         </div>
       )}
       {open === "agent" && item.kind === "task" && (
-        <div className="row-panel" aria-label={t.rowAgentFor(item.title)} role="group">
+        <div ref={agentPanelRef} tabIndex={-1} className="row-panel" aria-label={t.rowAgentFor(item.title)} role="group">
           <AgentBlock key={"h" + item.version} item={item} onSave={(tags) => void tagWrite(tags)}
             onAgent={(aid) => void write(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} />
         </div>

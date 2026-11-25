@@ -173,4 +173,75 @@ describe("事项列表（对齐工作台任务库）", () => {
     expect(screen.getByRole("link", { name: "乙" })).toBeInTheDocument();
     expect(screen.getByText(/已隐藏 1 件已放弃/)).toBeInTheDocument();
   });
+
+  it("窄屏（ACT-WBN-16）：行上只露出主操作与「更多」菜单，次要动作收进菜单且支持键盘导航、Esc、点外部关闭", async () => {
+    const mm = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q === "(max-width: 820px)", media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    try {
+      const s = server([
+        mk("a", { project: "p-work", version: 2, title: "甲" }),
+        mk("d", { project: "p-work", kind: "delegation", title: "委派件" }),
+      ]);
+      mount(s.impl);
+      const user = userEvent.setup();
+      const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
+      expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "完成", "更多"]);
+
+      const delegationRow = screen.getByRole("link", { name: "委派件" }).closest("li")!;
+      expect(within(delegationRow).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "更多"]);
+
+      const more = within(row).getByRole("button", { name: "更多" });
+      expect(more).toHaveAttribute("aria-haspopup", "menu");
+      expect(more).toHaveAttribute("aria-expanded", "false");
+
+      await user.click(more);
+      expect(more).toHaveAttribute("aria-expanded", "true");
+      const menu = within(row).getByRole("menu", { name: "更多操作：甲" });
+      const items = within(menu).getAllByRole("menuitem");
+      expect(items.map((x) => x.textContent)).toEqual(["交给 Agent", "记进展", "删除…"]);
+      expect(items[0]).toHaveFocus();
+
+      await user.keyboard("{ArrowDown}");
+      expect(items[1]).toHaveFocus();
+      await user.keyboard("{End}");
+      expect(items[2]).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(items[0]).toHaveFocus();
+      await user.keyboard("{ArrowUp}");
+      expect(items[2]).toHaveFocus();
+      await user.keyboard("{Home}");
+      expect(items[0]).toHaveFocus();
+
+      await user.keyboard("{Escape}");
+      expect(within(row).queryByRole("menu")).toBeNull();
+      expect(more).toHaveAttribute("aria-expanded", "false");
+      expect(more).toHaveFocus();
+
+      await user.keyboard("{ArrowUp}");
+      const menu2 = within(row).getByRole("menu", { name: "更多操作：甲" });
+      expect(within(menu2).getAllByRole("menuitem")[2]).toHaveFocus();
+
+      await user.click(screen.getByRole("heading", { name: "工作（2）" }));
+      expect(within(row).queryByRole("menu")).toBeNull();
+
+      await user.click(more);
+      await user.click(within(within(row).getByRole("menu")).getByRole("menuitem", { name: "记进展" }));
+      expect(within(row).queryByRole("menu")).toBeNull();
+      const prog = within(row).getByRole("group", { name: "记进展：甲" });
+      expect(within(prog).getByLabelText("进展")).toHaveFocus();
+      await user.type(within(prog).getByLabelText("进展"), "窄屏进度");
+      await user.click(within(prog).getByRole("button", { name: "保存" }));
+      await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/progress", body: { text: "窄屏进度" }, ifMatch: undefined }]));
+
+      await user.click(more);
+      await user.click(within(within(row).getByRole("menu")).getByRole("menuitem", { name: "删除…" }));
+      const ask = within(row).getByRole("group", { name: "删除：甲" });
+      expect(ask).toHaveFocus();
+      await user.click(within(ask).getByRole("button", { name: "取消" }));
+      expect(within(row).queryByRole("group", { name: "删除：甲" })).toBeNull();
+      expect(writes(s)).toHaveLength(1);
+    } finally {
+      window.matchMedia = mm;
+    }
+  });
 });
