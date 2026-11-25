@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -103,7 +104,9 @@ func readerContent(res proc.Result) (string, bool, error) {
 
 // triggerAgentsMD 把来源落账的 repo.agents_md_changed 事件路由到 agentsmd.Trigger（§12.5）。
 // 读取要等外呼进程，所以放到后台做，不占提交后的回调；失败只能记录，下次文件再变化会重新触发。
+// 仓库没绑到任何项目不算故障：来源照常报变化，只是没有项目要检查，按进程只提醒一次（方案 B）。
 func triggerAgentsMD(svc *agentsmd.Service, wg *sync.WaitGroup) func(command.Commit) {
+	var unboundOnce sync.Once
 	return func(c command.Commit) {
 		if c.Command != runner.CmdRunResult && c.Command != runner.CmdIngest {
 			return
@@ -125,7 +128,13 @@ func triggerAgentsMD(svc *agentsmd.Service, wg *sync.WaitGroup) func(command.Com
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := svc.Trigger(context.Background(), repo, []string{agentsmd.FileName}); err != nil {
+				_, err := svc.Trigger(context.Background(), repo, []string{agentsmd.FileName})
+				var de *domain.Error
+				switch {
+				case err == nil:
+				case errors.As(err, &de) && de.Code == domain.CodeNotFound:
+					unboundOnce.Do(func() { slog.Warn("agents-md trigger skipped: repo is not bound to any project", "repo", repo) })
+				default:
 					slog.Error("agents-md trigger", "repo", repo, "err", err)
 				}
 			}()

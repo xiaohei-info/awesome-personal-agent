@@ -49,12 +49,18 @@ func (k *kernel) changedEvent(t *testing.T, id string) {
 func agentsKernel(t *testing.T) *kernel { return agentsKernelFor(t, agmRepo) }
 
 func agentsKernelFor(t *testing.T, remote string) *kernel {
-	k := assembled(t)
-	k.do(t, command.Chain{}, "source.register_script", map[string]any{"id": "src_gh", "name": "仓库", "type": "script", "source_type": "repo",
-		"command": "/bin/true", "schedule": "1h", "timeout": 10, "dedupe_domain": "gh"})
+	k := agentsSource(t)
 	var p struct{ ID string }
 	_ = json.Unmarshal(k.do(t, command.Chain{}, "project.create", map[string]any{"name": "widgets"}), &p)
 	k.do(t, command.Chain{}, "project.repo.add", map[string]any{"id": p.ID, "remote": remote})
+	return k
+}
+
+// agentsSource 只登记仓库来源，不把仓库绑到任何项目。
+func agentsSource(t *testing.T) *kernel {
+	k := assembled(t)
+	k.do(t, command.Chain{}, "source.register_script", map[string]any{"id": "src_gh", "name": "仓库", "type": "script", "source_type": "repo",
+		"command": "/bin/true", "schedule": "1h", "timeout": 10, "dedupe_domain": "gh"})
 	return k
 }
 
@@ -88,6 +94,29 @@ func TestAgentsMDChangedEventMatchesRepoRegisteredByFullURL(t *testing.T) {
 	}
 	if in, _ := os.ReadFile(stdinLog); !strings.Contains(string(in), `"repo":"`+remote+`"`) {
 		t.Fatalf("reader must get the registered remote: %s", in)
+	}
+}
+
+// 仓库没绑到任何项目：不算故障，不打 ERROR；同一进程里事件再来也不重复提醒（只 Warn 一次）。
+func TestAgentsMDChangedEventForUnboundRepoWarnsOnceAndLogsNoError(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(prev)
+	fakeReader(t, `{"commit":"abc123","branch":"main","path":"AGENTS.md","origin":"remote","content":"hand written\n"}`, 0)
+	k := agentsSource(t)
+	k.changedEvent(t, "e5")
+	k.changedEvent(t, "e6")
+
+	got := logs.String()
+	if n := strings.Count(got, "level=WARN"); n != 1 {
+		t.Fatalf("未绑定仓库只应 Warn 一次，实际 %d 次：%s", n, got)
+	}
+	if strings.Contains(got, "level=ERROR") {
+		t.Fatalf("未绑定仓库不应打 ERROR：%s", got)
+	}
+	if !strings.Contains(got, "not bound") || !strings.Contains(got, agmRepo) {
+		t.Fatalf("Warn 要说清是哪个仓库没绑项目：%s", got)
 	}
 }
 
