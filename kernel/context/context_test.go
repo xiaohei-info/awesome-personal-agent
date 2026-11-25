@@ -490,7 +490,7 @@ func TestContextEmptyScopeIncludesInboxAndItemlessDeliveries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := e.build(t, Request{Session: "s-main", Scope: projects.Scope{Cwd: "/Users/demo", Host: "h"}})
+	r := e.build(t, Request{Session: "s-main", Scope: projects.Scope{Cwd: "/srv/demo", Host: "h"}})
 	if r.Project != nil {
 		t.Fatalf("empty cwd scope must keep Project=nil, got %+v", r.Project)
 	}

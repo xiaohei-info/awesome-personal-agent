@@ -206,7 +206,7 @@ func TestCaptureInboxExtractClassifiesConcreteProjectOrFallsBack(t *testing.T) {
 	}
 	e.screen(0.95)
 	e.draft(`{"candidates":[{"title":"修 web 登录超时","kind":"task","project":"` + e.web + `"},{"title":"周末买咖啡豆","kind":"task","project":""}]}`)
-	out, err := e.capture(caller(authz.LevelWorker, "s-main"), map[string]any{"text": "帮我记两件事：修 web 登录超时，另外周末买咖啡豆", "path": "/Users/demo", "host": "h"})
+	out, err := e.capture(caller(authz.LevelWorker, "s-main"), map[string]any{"text": "帮我记两件事：修 web 登录超时，另外周末买咖啡豆", "path": "/srv/demo", "host": "h"})
 	if err != nil || !out.Captured || out.Project != inboxID {
 		t.Fatalf("out %+v err %v", out, err)
 	}

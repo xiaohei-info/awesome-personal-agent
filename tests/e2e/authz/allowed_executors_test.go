@@ -141,10 +141,11 @@ func TestFlowAllowedExecutors(t *testing.T) {
 
 	k.step("ACT-ALW-06 不能先建后移入项目", func(t *testing.T) {
 		free := k.addItem("", otherHost)
+		origProj := k.item(free)["project"]
 		before := k.version(free)
 		k.expect("移入 acc-work", k.Apa(k.DEL, "", "item", "update", free, "--project", work, "--reason", "move"), exitNotAllow)
-		if p, ok := k.item(free)["project"]; ok || k.version(free) != before {
-			t.Errorf("project 应不变，实际 %v", p)
+		if p := k.item(free)["project"]; p != origProj || k.version(free) != before {
+			t.Errorf("project 应保持不变 (%v)，实际 %v", origProj, p)
 		}
 	})
 
