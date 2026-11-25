@@ -139,6 +139,13 @@ CREATE TABLE sources_runner_tombstone (
 	event_id TEXT NOT NULL,
 	PRIMARY KEY (dedupe_domain, event_id)
 ) WITHOUT ROWID;`,
+}, {
+	// 账本结构版本 10（§9.2）：统一时间字段（due_at、starts_at、ends_at、all_day）。只增列，已有事件为空。
+	Version: 9, Ledger: 10, Name: "ledger-v10-event-times",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN due_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN starts_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN ends_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0;`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -750,7 +757,7 @@ func nextAttempt(at time.Time, schedule string, failures int) time.Time {
 func AppendInternal(tx *store.Tx, src domain.Source, ev domain.SourceEvent) error {
 	return insertEvent(tx, src, "", parsedEvent{ID: ev.ID, Type: ev.Type, Subject: ev.Subject, Summary: ev.Summary,
 		Detail: ev.Detail, Link: ev.Link, OccurredAt: ev.OccurredAt, CorrelationKeys: ev.CorrelationKeys,
-		Sender: ev.Sender, SenderVerified: ev.SenderVerified}, ev.OccurredAt) // 内核自产事件的发生时刻就是落盘时刻
+		Sender: ev.Sender, SenderVerified: ev.SenderVerified, DueAt: ev.DueAt, StartsAt: ev.StartsAt, EndsAt: ev.EndsAt, AllDay: ev.AllDay}, ev.OccurredAt) // 内核自产事件的发生时刻就是落盘时刻
 }
 
 // jsonOrEmpty 把可选字段存成 JSON；没有时存空串，与迁移的列缺省一致。
@@ -793,12 +800,17 @@ func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent, 
 	}
 	// 原文各部分与事件行同一事务落盘；行里的 detail 只是正文的预览，messages 列不再写（新事件的消息在原文表，读取先看原文表）。
 	id := "sev_" + hex.EncodeToString(rnd[:])
+	allDay := 0
+	if ev.AllDay {
+		allDay = 1
+	}
 	n, err := tx.Exec(`INSERT OR IGNORE INTO sources_runner_event
 		(dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at, correlation_keys, sender, sender_verified,
-		 metrics, merge_key, prev_metrics, content_state, ingested_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 metrics, merge_key, prev_metrics, content_state, ingested_at, due_at, starts_at, ends_at, all_day)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		key.Domain, key.EventID, id, src.ID, runID, ev.Type, ev.Subject, ev.Summary, previewOf(ev.Detail),
-		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, prev, StateFull, at.UnixNano())
+		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, prev, StateFull, at.UnixNano(),
+		ev.DueAt, ev.StartsAt, ev.EndsAt, allDay)
 	if err != nil || n == 0 { // 重复事件被忽略：它不是这个序列的新样本，不动上一次取值，也不改写已存的原文
 		return err
 	}
@@ -882,7 +894,7 @@ const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summar
 	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges,
 	metrics, merge_key, items, judgment,
 	COALESCE((SELECT CAST(content AS TEXT) FROM sources_runner_event_part p WHERE p.event_id = sources_runner_event.id AND p.part = 'messages'), messages),
-	prev_metrics`
+	prev_metrics, due_at, starts_at, ends_at, all_day`
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
@@ -1287,14 +1299,17 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 		var (
 			a                      Attachment
 			at, verified, rejudges int64
+			allDay                 int64
 			keys, disp             string
 			x                      extraCols
 		)
 		e := &a.SourceEvent
 		if err := rows.Scan(&a.Seq, &e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev,
+			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay); err != nil {
 			return nil, err
 		}
+		e.AllDay = allDay != 0
 		if err := x.fill(e); err != nil {
 			return nil, err
 		}
@@ -1349,13 +1364,16 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 		var (
 			e                      domain.SourceEvent
 			at, verified, rejudges int64
+			allDay                 int64
 			keys, disp             string
 			x                      extraCols
 		)
 		if err := rows.Scan(&e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev,
+			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay); err != nil {
 			return nil, err
 		}
+		e.AllDay = allDay != 0
 		if err := x.fill(&e); err != nil {
 			return nil, err
 		}

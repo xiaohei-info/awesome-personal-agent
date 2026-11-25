@@ -193,7 +193,7 @@ type ItemInput struct {
 	Origin      *Origin         `json:"origin,omitempty"`
 	Proposal    *Proposal       `json:"proposal,omitempty"` // 建议信息，由入站流水线写入（§6.3）
 	Spec        json.RawMessage `json:"spec,omitempty"`
-	Ext         json.RawMessage `json:"ext,omitempty"` // 内核永不读取
+	Ext         json.RawMessage `json:"ext,omitempty"` // 集成命名空间的自由 JSON；内核只读来源时间的溯源键（source_*、model_*，§9.3），不解释其他键
 }
 
 // Proposal 是 proposed 事项上的建议信息（§6.3、附录 B.2）：起草给出的推荐处置、是否把握低、来自哪些来源事件。

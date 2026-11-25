@@ -25,6 +25,11 @@ type parsedEvent struct {
 	CorrelationKeys []string  `json:"correlation_keys,omitempty"`
 	Sender          string    `json:"sender,omitempty"`
 	SenderVerified  bool      `json:"sender_verified,omitempty"`
+	// 统一时间字段（§9.2）：可选，写法是 YYYY-MM-DD 或 RFC3339；旧来源程序不带它们时照常入账。
+	DueAt    string `json:"due_at,omitempty"`
+	StartsAt string `json:"starts_at,omitempty"`
+	EndsAt   string `json:"ends_at,omitempty"`
+	AllDay   bool   `json:"all_day,omitempty"`
 	// 契约 v2 的三个可选字段（§9.2）；不带它们的旧来源程序照常工作，契约版本号不变。
 	Metrics  map[string]float64    `json:"metrics,omitempty"`
 	Items    []domain.EventMessage `json:"items,omitempty"`
@@ -163,5 +168,53 @@ func validateV2(ev parsedEvent) error {
 			}
 		}
 	}
+	if err := validateTimes(ev); err != nil {
+		return err
+	}
 	return validateRaw(ev)
+}
+
+// validateTimes 校验统一时间字段：只认 YYYY-MM-DD 与 RFC3339；有 ends_at 必须有 starts_at 且不早于它；
+// 标为全天时起止都只到日。格式不合的事件整行拒收，与 metrics、items 同一处置。
+func validateTimes(ev parsedEvent) error {
+	parse := func(name, s string) (domain.EventTime, error) {
+		t, ok := domain.ParseEventTime(s)
+		if !ok {
+			return t, fmt.Errorf("bad field: %s must be YYYY-MM-DD or RFC3339, got %q", name, s)
+		}
+		return t, nil
+	}
+	var due, start, end domain.EventTime
+	var hasStart, hasEnd bool
+	for _, f := range []struct {
+		name string
+		s    string
+		dst  *domain.EventTime
+	}{{"due_at", ev.DueAt, &due}, {"starts_at", ev.StartsAt, &start}, {"ends_at", ev.EndsAt, &end}} {
+		if strings.TrimSpace(f.s) == "" {
+			continue
+		}
+		t, err := parse(f.name, f.s)
+		if err != nil {
+			return err
+		}
+		*f.dst = t
+		switch f.name {
+		case "starts_at":
+			hasStart = true
+		case "ends_at":
+			hasEnd = true
+		}
+	}
+	switch {
+	case hasEnd && !hasStart:
+		return fmt.Errorf("bad field: ends_at requires starts_at")
+	case hasEnd && end.At.Before(start.At):
+		return fmt.Errorf("bad field: ends_at must not be before starts_at")
+	case ev.AllDay && !hasStart:
+		return fmt.Errorf("bad field: all_day requires starts_at")
+	case ev.AllDay && (!start.DateOnly || (hasEnd && !end.DateOnly)):
+		return fmt.Errorf("bad field: all_day requires date-only starts_at and ends_at")
+	}
+	return nil
 }

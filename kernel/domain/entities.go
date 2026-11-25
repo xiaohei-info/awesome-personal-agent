@@ -368,23 +368,29 @@ func (s Source) DedupeKeyFor(eventID string) DedupeKey {
 }
 
 type SourceEvent struct {
-	ID              string      `json:"id"`
-	SourceID        string      `json:"source_id"`
-	DedupeKey       DedupeKey   `json:"dedupe_key"`
-	Type            string      `json:"type"`
-	Subject         string      `json:"subject,omitempty"`
-	Summary         string      `json:"summary,omitempty"`
-	Detail          string      `json:"detail,omitempty"`
-	Link            string      `json:"link,omitempty"`
-	OccurredAt      time.Time   `json:"occurred_at"`
-	CorrelationKeys []string    `json:"correlation_keys,omitempty"`
-	Sender          string      `json:"sender,omitempty"`
-	SenderVerified  bool        `json:"sender_verified"`
-	Disposition     Disposition `json:"disposition"`
-	Item            string      `json:"item,omitempty"`
-	AttachState     string      `json:"attach_state,omitempty"`
-	UnjudgedReason  string      `json:"unjudged_reason,omitempty"`
-	Rejudges        int         `json:"rejudges,omitempty"`
+	ID              string    `json:"id"`
+	SourceID        string    `json:"source_id"`
+	DedupeKey       DedupeKey `json:"dedupe_key"`
+	Type            string    `json:"type"`
+	Subject         string    `json:"subject,omitempty"`
+	Summary         string    `json:"summary,omitempty"`
+	Detail          string    `json:"detail,omitempty"`
+	Link            string    `json:"link,omitempty"`
+	OccurredAt      time.Time `json:"occurred_at"`
+	CorrelationKeys []string  `json:"correlation_keys,omitempty"`
+	Sender          string    `json:"sender,omitempty"`
+	SenderVerified  bool      `json:"sender_verified"`
+	// 统一时间字段（§9.2）：来源给出它自己的到期与起止时间，入站只按它们映射事项的截止与计划日期、时段。
+	// 都可选，写法是 YYYY-MM-DD（只到日）或 RFC3339；occurred_at 仍是事件自身的发生时间，不兼任截止。
+	DueAt          string      `json:"due_at,omitempty"`
+	StartsAt       string      `json:"starts_at,omitempty"`
+	EndsAt         string      `json:"ends_at,omitempty"`
+	AllDay         bool        `json:"all_day,omitempty"`
+	Disposition    Disposition `json:"disposition"`
+	Item           string      `json:"item,omitempty"`
+	AttachState    string      `json:"attach_state,omitempty"`
+	UnjudgedReason string      `json:"unjudged_reason,omitempty"`
+	Rejudges       int         `json:"rejudges,omitempty"`
 	// v0.2.0：标准事件的可选字段与判断关联（§6.10）。Items 是挂靠或生成的事项 id；来源程序给的聚合消息在 Messages，不进 API。
 	Metrics  map[string]float64 `json:"metrics,omitempty"`
 	MergeKey string             `json:"merge_key,omitempty"`
