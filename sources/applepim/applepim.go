@@ -84,19 +84,25 @@ type Config struct {
 }
 
 type event struct {
-	ID              string         `json:"id"`
-	Type            string         `json:"type"`
-	Subject         string         `json:"subject"`
-	Summary         string         `json:"summary,omitempty"`
-	Detail          string         `json:"detail,omitempty"`
-	Link            string         `json:"link,omitempty"`
-	OccurredAt      string         `json:"occurred_at"`
-	CorrelationKeys []string       `json:"correlation_keys,omitempty"`
-	Sender          string         `json:"sender,omitempty"`
-	Original        *original      `json:"original,omitempty"`
-	Headers         map[string]any `json:"headers,omitempty"`
-	Attachments     []attachment   `json:"attachments,omitempty"`
-	Content         *declared      `json:"content,omitempty"`
+	ID              string   `json:"id"`
+	Type            string   `json:"type"`
+	Subject         string   `json:"subject"`
+	Summary         string   `json:"summary,omitempty"`
+	Detail          string   `json:"detail,omitempty"`
+	Link            string   `json:"link,omitempty"`
+	OccurredAt      string   `json:"occurred_at"`
+	CorrelationKeys []string `json:"correlation_keys,omitempty"`
+	Sender          string   `json:"sender,omitempty"`
+	// 统一时间字段（设计 §9.2）：提醒的到期时间只放 due_at，日历的起止放 starts_at、ends_at。
+	// occurred_at 仍是事件自身的发生时间，不兼任截止与日程起止。
+	DueAt       string         `json:"due_at,omitempty"`
+	StartsAt    string         `json:"starts_at,omitempty"`
+	EndsAt      string         `json:"ends_at,omitempty"`
+	AllDay      bool           `json:"all_day,omitempty"`
+	Original    *original      `json:"original,omitempty"`
+	Headers     map[string]any `json:"headers,omitempty"`
+	Attachments []attachment   `json:"attachments,omitempty"`
+	Content     *declared      `json:"content,omitempty"`
 	// 不设 sender_verified：邮件应用不给可核实的结论（§9.7）。
 }
 
@@ -376,6 +382,7 @@ type calEvent struct {
 	EndDate        string `json:"endDate"`
 	OccurrenceDate string `json:"occurrenceDate"`
 	LocalStart     string `json:"localStart"`
+	IsAllDay       bool   `json:"isAllDay"`
 	Location       string `json:"location"`
 	Notes          string `json:"notes"`
 	URL            string `json:"url"`
@@ -467,11 +474,24 @@ func pollCalendar(ctx context.Context, r Runner, cfg Config, in Input, now time.
 				summary += " @ " + e.Location
 			}
 			// 工具不给更新时间：事件 id 带内容摘要，改动后得到新 id；关联键不含摘要，更新经 §9.4 写回原事项。
-			evs = append(evs, event{
+			ev := event{
 				ID: e.ID + "|" + occ + "|" + digest(e.Status, e.Title, e.Notes, e.Location, e.StartDate, e.EndDate), Type: typ,
 				Subject: subject, Summary: strings.TrimSpace(summary), Detail: e.Notes, Link: e.URL,
 				OccurredAt: at.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{e.ID + "|" + occ}, Headers: calHeaders(e),
-			})
+				StartsAt: e.StartDate, AllDay: e.IsAllDay,
+			}
+			if e.EndDate != "" {
+				ev.EndsAt = e.EndDate
+			}
+			if e.IsAllDay { // 全天日程只到日：起止换成当地日期，时段由内核按"只给开始那天"处理（§9.2）
+				ev.StartsAt = at.In(time.Local).Format(time.DateOnly)
+				if e.EndDate != "" {
+					if end, err := time.Parse(time.RFC3339Nano, e.EndDate); err == nil {
+						ev.EndsAt = end.In(time.Local).Format(time.DateOnly)
+					}
+				}
+			}
+			evs = append(evs, ev)
 		}
 	}
 	return evs, from.Format(time.RFC3339Nano), nil
@@ -658,6 +678,11 @@ func reminderEvent(x reminder, now time.Time, undatedList bool) (event, error) {
 		var err error
 		if due, err = parseDue(x.DueDate); err != nil {
 			return ev, fail(ExitConfig, "提醒 dueDate 无法解析: %q", x.DueDate)
+		}
+		// 只到日的到期保留日期精度，带时刻的转成 RFC3339；到期只放 due_at，occurred_at 照旧（§9.2）。
+		ev.DueAt = x.DueDate
+		if _, err := time.Parse(time.DateOnly, x.DueDate); err != nil {
+			ev.DueAt = due.Format(time.RFC3339)
 		}
 	}
 	ev.Type, ev.Summary, ev.OccurredAt = "reminder.due", "到期 "+x.DueDate, due.UTC().Format(time.RFC3339Nano)

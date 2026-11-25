@@ -73,6 +73,10 @@ type event struct {
 	CorrelationKeys []string `json:"correlation_keys,omitempty"`
 	Sender          string   `json:"sender,omitempty"`
 	MergeKey        string   `json:"merge_key,omitempty"`
+	// 统一时间字段（设计 §9.2）：日程起止只放 starts_at、ends_at；全天日程给日期、标 all_day。
+	StartsAt string `json:"starts_at,omitempty"`
+	EndsAt   string `json:"ends_at,omitempty"`
+	AllDay   bool   `json:"all_day,omitempty"`
 	// Headers 是起止时间、地点、组织者、参与者与状态（附录 D.8）；描述照旧整段进 Detail，不截断。
 	Headers map[string]any `json:"headers,omitempty"`
 }
@@ -371,6 +375,13 @@ func convert(g gogEvent) (event, time.Time, error) {
 		CorrelationKeys: []string{uid + "|" + recurrence}, Sender: g.Organizer.Email, Headers: headers(g),
 		// 来源自带合并键优先于内核的 title+sender 推导（§9.3）：各重复实例各自成事项，同实例各版本合并。
 		MergeKey: uid + "|" + recurrence,
+		// 全天日程给 date，定时日程给 dateTime；全天日程只到日，时段由内核按同一规则处理（§9.2）。
+		AllDay: g.Start.Date != "",
+	}
+	if g.Start.Date != "" {
+		ev.StartsAt, ev.EndsAt = g.Start.Date, g.End.Date
+	} else {
+		ev.StartsAt, ev.EndsAt = g.Start.DateTime, g.End.DateTime
 	}
 	return ev, updated, nil // 工具不给可核实的结论，不设 sender_verified
 }

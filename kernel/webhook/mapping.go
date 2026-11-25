@@ -136,7 +136,13 @@ func mapEvent(m packs.WebhookMapping, c exprCtx, body []byte, deliveryKey string
 		return c.render(s)
 	}
 	ev := runner.IngestEvent{ID: f("id"), Type: f("type"), Subject: f("subject"), Summary: f("summary"), Detail: f("detail"),
-		Link: f("link"), Sender: f("sender"), OccurredAt: received}
+		Link: f("link"), Sender: f("sender"), OccurredAt: received,
+		// 统一时间字段（§9.2）：字段声明里有这几个键就能带上，不用写代码；格式与一致性由 ValidEvent 校验。
+		DueAt: f("due_at"), StartsAt: f("starts_at"), EndsAt: f("ends_at")}
+	switch strings.ToLower(f("all_day")) {
+	case "true", "1", "yes":
+		ev.AllDay = true
+	}
 	if ev.ID == "" {
 		ev.ID = deliveryKey
 	}

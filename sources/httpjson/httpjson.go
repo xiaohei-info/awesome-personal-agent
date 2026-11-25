@@ -64,6 +64,11 @@ type Mapping struct {
 	Link            string   `json:"link,omitempty"`
 	Sender          string   `json:"sender,omitempty"`
 	CorrelationKeys []string `json:"correlation_keys,omitempty"`
+	// 统一时间字段（设计 §9.2）：由配置里的路径映射过来，只改配置就能让外部来源带上到期与起止时间。
+	DueAt    string `json:"due_at,omitempty"`
+	StartsAt string `json:"starts_at,omitempty"`
+	EndsAt   string `json:"ends_at,omitempty"`
+	AllDay   string `json:"all_day,omitempty"`
 }
 
 type event struct {
@@ -77,6 +82,11 @@ type event struct {
 	CorrelationKeys []string  `json:"correlation_keys,omitempty"`
 	Sender          string    `json:"sender,omitempty"`
 	Original        *original `json:"original,omitempty"`
+	// 统一时间字段（设计 §9.2），写法与标准事件一致。
+	DueAt    string `json:"due_at,omitempty"`
+	StartsAt string `json:"starts_at,omitempty"`
+	EndsAt   string `json:"ends_at,omitempty"`
+	AllDay   bool   `json:"all_day,omitempty"`
 }
 
 // original 是被映射的那一条 JSON 的原样文本（设计 §9.2、附录 D.8），内核只存不解析。
@@ -298,6 +308,11 @@ func mapItem(c Config, it any) (event, time.Time, error) {
 	ev.Detail = str("detail", m.Detail, false)
 	ev.Link = str("link", m.Link, false)
 	ev.Sender = str("sender", m.Sender, false)
+	ev.DueAt = str("due_at", m.DueAt, false)
+	ev.StartsAt = str("starts_at", m.StartsAt, false)
+	ev.EndsAt = str("ends_at", m.EndsAt, false)
+	allDay := strings.ToLower(str("all_day", m.AllDay, false))
+	ev.AllDay = allDay == "true" || allDay == "1" || allDay == "yes"
 	for _, p := range m.CorrelationKeys {
 		if k := str("correlation_keys", p, false); k != "" {
 			ev.CorrelationKeys = append(ev.CorrelationKeys, k)

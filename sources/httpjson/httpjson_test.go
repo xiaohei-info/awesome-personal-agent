@@ -202,3 +202,24 @@ func TestOriginalForRootArray(t *testing.T) {
 		t.Fatalf("original=%q", ev.Original.Text)
 	}
 }
+
+// 统一时间字段（设计 §9.2）：映射里加 due_at、starts_at、ends_at、all_day 四条路径就带上时间，不用改代码。
+func TestMapsUnifiedTimeFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"key":"t-1","kind":"reminder.due","title":"交材料","ts":"2026-11-30T00:00:00Z","due":"2026-12-02","start":"2026-12-03T09:00:00+08:00","end":"2026-12-03T10:30:00+08:00","allday":false}]}`))
+	}))
+	defer srv.Close()
+	in := `{"source_id":"src_h","config":{"url":"` + srv.URL + `","items_path":"items","mapping":{"id":"key","type":"kind","subject":"title",
+		"occurred_at":"ts","due_at":"due","starts_at":"start","ends_at":"end","all_day":"allday"}}}`
+	code, out, errOut := do(t, in)
+	if code != ExitOK {
+		t.Fatalf("exit=%d %s", code, errOut)
+	}
+	var ev event
+	if err := json.Unmarshal([]byte(strings.Split(strings.TrimSpace(out), "\n")[0]), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.DueAt != "2026-12-02" || ev.StartsAt != "2026-12-03T09:00:00+08:00" || ev.EndsAt != "2026-12-03T10:30:00+08:00" || ev.AllDay {
+		t.Fatalf("event %+v", ev)
+	}
+}

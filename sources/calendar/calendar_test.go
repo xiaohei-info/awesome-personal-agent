@@ -436,3 +436,19 @@ func TestHeadersCarryStartEndLocationOrganizerAttendeesStatus(t *testing.T) {
 		t.Fatalf("描述被截断: %d != %d", len(d), len(long))
 	}
 }
+
+// 统一时间字段（设计 §9.2）：定时日程给 dateTime，全天日程给 date 并标 all_day；occurred_at 仍是开始时间。
+func TestConvertCarriesStartsEndsAndAllDay(t *testing.T) {
+	version, events := recorded(t, "0.9.0")
+	_, lines, _ := do(t, fakeTool(version, events, nil, ""), in)
+	evs := decode(t, lines)
+	if evs[0].AllDay != true || evs[0].StartsAt != "2026-03-20" || evs[0].EndsAt != "2026-03-21" {
+		t.Fatalf("全天日程: %+v", evs[0])
+	}
+	if evs[1].AllDay || evs[1].StartsAt != "2026-03-12T09:30:00+08:00" || evs[1].EndsAt != "2026-03-12T10:30:00+08:00" {
+		t.Fatalf("定时日程: %+v", evs[1])
+	}
+	if evs[1].OccurredAt != "2026-03-12T01:30:00Z" {
+		t.Fatalf("occurred_at 语义不变: %q", evs[1].OccurredAt)
+	}
+}

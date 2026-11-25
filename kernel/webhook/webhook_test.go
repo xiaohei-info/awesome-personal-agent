@@ -863,3 +863,21 @@ echo '{"id":"x-2","type":"t","subject":"fine","occurred_at":"2026-03-01T00:00:00
 		t.Fatalf("script-given original: %v", err)
 	}
 }
+
+// 统一时间字段（§9.2）：映射的 fields 里声明 due_at、starts_at、ends_at、all_day 就带上，不用写代码；
+// 格式不合仍由 ValidEvent 统一拒收。
+func TestMappingCarriesUnifiedTimeFields(t *testing.T) {
+	c := newExprCtx(nil, []byte(`{"due":"2026-12-02","start":"2026-12-03","end":"2026-12-04","allDay":"true"}`))
+	m := packs.WebhookMapping{ID: "m", Fields: map[string]any{"type": "t", "due_at": "{$.due}", "starts_at": "{$.start}", "ends_at": "{$.end}", "all_day": "{$.allDay}"}}
+	ev, err := mapEvent(m, c, []byte("{}"), "k1", t0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.DueAt != "2026-12-02" || ev.StartsAt != "2026-12-03" || ev.EndsAt != "2026-12-04" || !ev.AllDay {
+		t.Fatalf("event %+v", ev)
+	}
+	bad := packs.WebhookMapping{ID: "b", Fields: map[string]any{"type": "t", "due_at": "{$.due}", "starts_at": "{$.start}"}}
+	if _, err := mapEvent(bad, newExprCtx(nil, []byte(`{"due":"2026-12-02","start":"明天"}`)), []byte("{}"), "k2", t0, false); err == nil {
+		t.Fatal("bad starts_at must be an error")
+	}
+}

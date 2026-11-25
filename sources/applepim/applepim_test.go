@@ -348,3 +348,55 @@ func TestMailNotificationLink(t *testing.T) {
 		}
 	}
 }
+
+// 统一时间字段（设计 §9.2）：提醒的到期只放 due_at（只到日的保留日期精度，带时刻的转 RFC3339）；
+// occurred_at 仍是原来那个时间，不因新字段改变含义。
+func TestRemindersCarryDueAt(t *testing.T) {
+	var calls [][]string
+	code, lines, _ := exec1(t, replay(t, &calls), `{"config":{"kind":"reminders"}}`)
+	if code != ExitOK {
+		t.Fatalf("code=%d", code)
+	}
+	want := map[string]string{"交材料": "2026-01-10", "打电话": "2026-01-11T01:00:00Z", "已过期": "2025-12-30"}
+	seen := 0
+	for _, l := range lines {
+		subject, _ := l["subject"].(string)
+		if w, ok := want[subject]; ok {
+			if l["due_at"] != w {
+				t.Errorf("%s: due_at %v, want %s", subject, l["due_at"], w)
+			}
+			seen++
+		}
+		if subject == "带时间" {
+			if s, _ := l["due_at"].(string); !strings.HasPrefix(s, "2026-01-12T15:00:00") {
+				t.Errorf("带时刻的到期应转 RFC3339: %v", l["due_at"])
+			}
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("due_at checked for %d reminders, want %d", seen, len(want))
+	}
+}
+
+// 日历起止只放 starts_at、ends_at；全天日程给当地日期并标 all_day，定时日程原样给 RFC3339。
+func TestCalendarCarriesStartsAndEnds(t *testing.T) {
+	var calls [][]string
+	code, lines, _ := exec1(t, replay(t, &calls), `{"config":{"kind":"calendar","calendars":["Cal"],"horizon_days":10}}`)
+	if code != ExitOK || len(lines) != 4 {
+		t.Fatalf("code=%d lines=%v", code, lines)
+	}
+	if !strings.HasPrefix(lines[0]["starts_at"].(string), "2026-01-05T02:00:00") || !strings.HasPrefix(lines[0]["ends_at"].(string), "2026-01-05T03:00:00") {
+		t.Errorf("定时日程的起止: %v %v", lines[0]["starts_at"], lines[0]["ends_at"])
+	}
+	if _, ok := lines[0]["all_day"]; ok {
+		t.Errorf("定时日程不应带 all_day: %v", lines[0])
+	}
+	allDay := lines[2]
+	start, _ := time.Parse(time.RFC3339Nano, "2026-01-07T16:00:00Z")
+	if allDay["all_day"] != true || allDay["starts_at"] != start.In(time.Local).Format(time.DateOnly) {
+		t.Errorf("全天日程: %v", allDay)
+	}
+	if _, ok := allDay["ends_at"].(string); !ok {
+		t.Errorf("全天日程也应带 ends_at: %v", allDay)
+	}
+}
