@@ -3,8 +3,10 @@ package inbound
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
@@ -128,7 +130,7 @@ func TestSharedBoundedOpenItemsList(t *testing.T) {
 	e.emit("src_x", "exits", chatEvent("c1", "x.chat"))
 	var body string
 	for _, r := range e.stub.Requests() {
-		if strings.Contains(r.BodyText, "抽取可以成为建议的候选事项") {
+		if strings.Contains(r.BodyText, "确需本人后续处理或拍板的候选事项") {
 			body = r.BodyText
 		}
 	}
@@ -176,5 +178,143 @@ func TestPrescreenNoneSkipsPrescreen(t *testing.T) {
 	e.submit("cap-np 下周三前把合同发给小王")
 	if len(e.cls.Batches()) == 0 {
 		t.Fatal("conversation capture skipped the prescreen")
+	}
+}
+
+// inputOf 从生成端点的请求体里取出结构化输入（"## 结构化输入" 之后的那一段 JSON）。
+func inputOf(t *testing.T, body string) map[string]any {
+	t.Helper()
+	var req struct {
+		Messages []struct{ Role, Content string } `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("request body: %v", err)
+	}
+	const mark = "## 结构化输入\n"
+	for _, m := range req.Messages {
+		i := strings.Index(m.Content, mark)
+		if i < 0 {
+			continue
+		}
+		rest := m.Content[i+len(mark):]
+		if j := strings.Index(rest, "\n## "); j >= 0 {
+			rest = rest[:j]
+		}
+		var in map[string]any
+		if err := json.Unmarshal([]byte(rest), &in); err != nil {
+			t.Fatalf("structured input: %v", err)
+		}
+		return in
+	}
+	t.Fatalf("no structured input in request: %s", body)
+	return nil
+}
+
+// listTitles 取结构化输入里某份清单的标题（recent_done、active_proposals）。
+func listTitles(m map[string]any, key string) (out []string) {
+	xs, _ := m[key].([]any)
+	for _, x := range xs {
+		if it, ok := x.(map[string]any); ok {
+			out = append(out, fmt.Sprint(it["title"]))
+		}
+	}
+	return
+}
+
+// extractBody 是生成端点收到的抽取请求体（最后一条，含候选抽取的模板问法）。
+func extractBody(e *env) string {
+	rs := e.stub.Requests()
+	for i := len(rs) - 1; i >= 0; i-- {
+		if strings.Contains(rs[i].BodyText, "确需本人后续处理或拍板的候选事项") {
+			return rs[i].BodyText
+		}
+	}
+	return ""
+}
+
+// 抽取前的去重清单（§9.3）：最近 7 天已完成的事项与当前仍待处理的建议随预筛资料与抽取输入一起给模型；
+// 出自外发范围未选的来源的不同（§14.14）。
+func TestListsCarryRecentDoneAndActiveProposals(t *testing.T) {
+	e := newEnv(t, true)
+	e.screen(0.9)
+	e.draft(`{"candidates":[{"title":"新事","kind":"task"}]}`)
+	e.emit("src_sec", "ticket", ev("n1", "ticket.noise", "噪声", nil))
+	e.outbound("src_sec", "full", "none")
+	e.emit("src_x", "exits", chatEvent("c0", "x.chat")) // 先登记来源，再给它选外发范围
+	e.outbound("src_x", "full", "full")
+	done := e.openIn("DONE-MARK 归档旧项目", "")
+	e.must("item.transition", map[string]any{"id": done, "to": "done", "reason": "finished"})
+	var hidden struct{ ID string }
+	_ = json.Unmarshal(e.must("item.create", map[string]any{"kind": "task", "title": "OLD-DONE 范围外的", "phase": "open",
+		"origin": map[string]any{"source": "src_sec"}}), &hidden)
+	e.must("item.transition", map[string]any{"id": hidden.ID, "to": "done", "reason": "finished"})
+	e.must("item.create", map[string]any{"kind": "task", "title": "PROP-MARK 装修报价", "phase": "proposed"})
+	e.locality("external")
+	e.emit("src_x", "exits", chatEvent("c1", "x.chat"))
+	body := extractBody(e)
+	if body == "" {
+		t.Fatal("extraction was not asked")
+	}
+	in := inputOf(t, body)
+	if got := listTitles(in, "recent_done"); len(got) != 1 || got[0] != "DONE-MARK 归档旧项目" {
+		t.Fatalf("recent_done %v", got)
+	}
+	if got := listTitles(in, "active_proposals"); !slices.Contains(got, "PROP-MARK 装修报价") {
+		t.Fatalf("active_proposals %v", got)
+	}
+	batches := e.cls.Batches()
+	if len(batches) == 0 {
+		t.Fatal("prescreen was not asked")
+	}
+	last := batches[len(batches)-1].BodyText
+	for _, want := range []string{"最近 7 天已完成事项", "当前待处理建议", "DONE-MARK", "PROP-MARK"} {
+		if !strings.Contains(last, want) {
+			t.Fatalf("prescreen material lacks %s: %s", want, last)
+		}
+	}
+}
+
+// 去重清单有上限：最近已完成至多 30 条、待处理建议至多 50 条，同项目的排在前面。
+func TestListsBoundRecentDoneAndActiveProposals(t *testing.T) {
+	e := newEnv(t, true)
+	e.screen(0.9)
+	e.draft(`{"candidates":[{"title":"新事","kind":"task"}]}`)
+	e.emit("src_x", "exits", chatEvent("c0", "x.chat"))
+	for i := range 35 {
+		id := e.openIn(fmt.Sprintf("DONE-%d", i), "")
+		e.must("item.transition", map[string]any{"id": id, "to": "done", "reason": "finished"})
+	}
+	for i := range 55 {
+		e.must("item.create", map[string]any{"kind": "task", "title": fmt.Sprintf("PROP-%d", i), "phase": "proposed"})
+	}
+	e.emit("src_x", "exits", chatEvent("c1", "x.chat"))
+	body := extractBody(e)
+	if body == "" {
+		t.Fatal("extraction was not asked")
+	}
+	in := inputOf(t, body)
+	if done := listTitles(in, "recent_done"); len(done) != 30 {
+		t.Fatalf("recent_done was not bounded to 30: %d", len(done))
+	}
+	if props := listTitles(in, "active_proposals"); len(props) != 50 {
+		t.Fatalf("active_proposals was not bounded to 50: %d", len(props))
+	}
+}
+
+// 截断时同项目的排前，其余按时间新到旧。
+func TestPickRecentPrefersTheSameProject(t *testing.T) {
+	base := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	list := []recentItem{
+		{ID: "new-other", Project: "p2", at: base.Add(3 * time.Hour)},
+		{ID: "mine-old", Project: "p1", at: base},
+		{ID: "mid-other", Project: "p2", at: base.Add(2 * time.Hour)},
+	}
+	var sn snapshot
+	got := sn.pickRecent(list, "p1", "", 2)
+	if len(got) != 2 || got[0].ID != "mine-old" || got[1].ID != "new-other" {
+		t.Fatalf("same-project first, then newest: %v", got)
+	}
+	if got := sn.pickRecent(list, "", "", 3); len(got) != 3 || got[0].ID != "new-other" || got[2].ID != "mine-old" {
+		t.Fatalf("newest first without a project: %v", got)
 	}
 }

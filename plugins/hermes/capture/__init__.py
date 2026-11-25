@@ -2,6 +2,13 @@
 No decisions here: whether capture is on for the project, run-identity suppression and candidate extraction
 all belong to the kernel (it answers 200 `captured: false` otherwise).
 
+What this plugin does decide is which turns are an external person's own words: a turn is sent only when it can be
+positively attributed to the person at the keyboard (`capture_schema: 1` with `speaker_role: human`,
+`origin_type: external_chat`). Scheduled-job sessions, background skill curators, cron echoes, background-process
+notices, async delegation reports and pure assistant output are dropped here and never reach the kernel; a turn that
+cannot be attributed is dropped too (fail-closed). Recognising them is harness-specific, so it lives here, never in
+the kernel. Only the category goes to the plugin-local log (never text, user names or credentials).
+
 `on_session_end` carries no transcript, so `post_llm_call` buffers each finished turn per session and the
 end hook flushes that buffer (the per-session cursor: a turn is sent once). The POST runs in a detached
 helper process (`python capture/__init__.py`, JSON on stdin), prints nothing and never uses forced
@@ -34,7 +41,60 @@ TIMEOUT_SECS = 10
 
 HARNESS = "hermes"
 
+# 契约版本与标注（内核 §9.3、附录 B.2）：只有能确认是外部人发起的轮次才带上这一组字段。
+SCHEMA = 1
+HUMAN, EXTERNAL_CHAT = "human", "external_chat"
+
+# 定时任务会话头 / 后台技能整理器：整个会话都不是外部人的对话，只看首轮就能定。
+SESSION_HEADS = (("[IMPORTANT: You are running as a scheduled cron job", "cron_echo"),
+                 ("Hermes' background skill CURATOR", "background_internal"))
+# 单轮的系统包装：只丢这一轮，会话里其他人类轮次照旧。
+TURN_HEADS = (("[Cronjob \"", "cron_echo"),
+              ("[IMPORTANT: Background process ", "system_notice"),
+              ("[ASYNC DELEGATION BATCH COMPLETE", "system_notice"),
+              ("[INTERNAL NOTIFICATION", "system_notice"))
+# 用户发图或发附件时 Hermes 在轮次开头插入的说明，后面往往还有本人的话：算外部人输入。
+ATTACHMENT = "[The user sent "
+
 _pending = {}  # session id -> [turn text, ...] not yet sent
+_internal = {}  # session id -> 整个会话都不发的类别（定时任务会话、后台内部会话）
+_seen = set()  # 已经过了首轮的会话：会话级判定只看首轮
+
+
+def _human_text(text):
+    """去掉方括号里的系统头后还剩人写的字：只剩系统头说明这是拿不准来源的包装消息。"""
+    depth, rest = 0, []
+    for ch in text:
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            rest.append(ch)
+    return "".join(rest).strip()
+
+
+def _classify(session_id, user_message):
+    """(None, category) 表示这一轮不能发；("human", "external_chat") 表示确认是外部人的输入。
+    先定会话级（首轮命中定时任务会话头或后台整理器，整个会话都不发），再定单轮。"""
+    if not isinstance(user_message, str) or not user_message.strip():
+        return None, "assistant_output"
+    sid, text = str(session_id), user_message.strip()
+    if sid in _internal:
+        return None, _internal[sid]
+    if sid not in _seen:
+        for head, cat in SESSION_HEADS:
+            if head in text:
+                _internal[sid] = cat
+                return None, cat
+    for head, cat in TURN_HEADS:
+        if text.startswith(head):
+            return None, cat
+    if text.startswith(ATTACHMENT):
+        return HUMAN, EXTERNAL_CHAT
+    if not _human_text(text):
+        return None, "unknown"
+    return HUMAN, EXTERNAL_CHAT
 
 
 def _turn_text(user_message, assistant_response):
@@ -103,9 +163,16 @@ def _has_kept():
 
 def post_llm_call(session_id="", user_message=None, assistant_response=None, **_):
     try:
-        text = _turn_text(user_message, assistant_response)
-        if session_id and text:
-            _pending.setdefault(str(session_id), []).append(text)
+        sid = str(session_id)
+        role, why = _classify(sid, user_message)
+        _seen.add(sid)
+        if role is None:
+            if user_message:  # 纯助手输出（没有用户消息）不是异常，不记为跳过
+                _log(os.environ, "skipped turn: " + why)
+        elif sid:
+            text = _turn_text(user_message, assistant_response)
+            if text:
+                _pending.setdefault(sid, []).append(text)
         if _has_kept():
             _spawn(None)
     except Exception:
@@ -114,14 +181,17 @@ def post_llm_call(session_id="", user_message=None, assistant_response=None, **_
 
 def on_session_end(session_id="", **_):
     try:
-        turns = _pending.pop(str(session_id), None)
+        sid = str(session_id)
+        turns = _pending.pop(sid, None)
+        _internal.pop(sid, None)  # 会话结束就清掉内部会话标记，防止内存泄漏
+        _seen.discard(sid)
         if not turns:
             if _has_kept():
                 _spawn(None)
             return
         text = "\n\n".join(turns)[-TEXT_MAX:]
-        _spawn({"text": text, "session": str(session_id), "path": run_context.session_cwd() or "", "host": socket.gethostname(),
-                "context": run_context.context_file()})
+        _spawn({"text": text, "session": sid, "capture_schema": SCHEMA, "speaker_role": HUMAN, "origin_type": EXTERNAL_CHAT,
+                "path": run_context.session_cwd() or "", "host": socket.gethostname(), "context": run_context.context_file()})
     except ValueError as e:  # a run without its context: nothing goes out under the gateway's credential
         _fail(os.environ, "no_credentials", str(e).splitlines()[0])
     except Exception:

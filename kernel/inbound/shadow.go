@@ -120,7 +120,7 @@ func (s *Service) BacklogScore(ctx context.Context, req command.Request, source 
 			}
 			evs = append(evs, ev)
 		}
-		return sn.loadFacts(tx)
+		return sn.loadFacts(tx, s.o.Now())
 	})
 	if err != nil {
 		return ScoreResult{}, err

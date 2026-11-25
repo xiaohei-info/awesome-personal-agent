@@ -375,6 +375,10 @@ type snapshot struct {
 	policy  int
 	locs    []string   // 入站初筛与起草实际会调用的端点的位置：外发范围按它们取
 	open    []openItem // 未关闭的事项：预筛、起草、抽取共用清单的来源（§9.3）
+	// recentDone 与 activeProposals 是抽取前的去重清单（§9.3）：最近 7 天已完成的事项、当前仍待处理的建议。
+	// 模型看不到它们就会把刚做完、刚抽过的事再抽一遍。
+	recentDone      []recentItem
+	activeProposals []recentItem
 }
 
 func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
@@ -382,13 +386,13 @@ func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
 		if sn.events, err = runner.Pending(tx); err != nil || len(sn.events) == 0 {
 			return err
 		}
-		return sn.loadFacts(tx)
+		return sn.loadFacts(tx, s.o.Now())
 	})
 	return sn, err
 }
 
 // loadFacts 读事件之外的账本事实。
-func (sn *snapshot) loadFacts(tx *store.Tx) error {
+func (sn *snapshot) loadFacts(tx *store.Tx, now time.Time) error {
 	srcs, err := registry.List(tx)
 	if err != nil {
 		return err
@@ -419,6 +423,7 @@ func (sn *snapshot) loadFacts(tx *store.Tx) error {
 	if err != nil {
 		return err
 	}
+	cutoff := now.Add(-recentDoneWindow)
 	sn.made = map[string]string{}
 	for _, it := range its {
 		if it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting || it.Phase == domain.PhaseNeedsInput {
@@ -430,6 +435,15 @@ func (sn *snapshot) loadFacts(tx *store.Tx) error {
 				c.waitingOn, c.external = it.WaitingOn.Ref, it.WaitingOn.Kind == domain.WaitingExternal
 			}
 			sn.open = append(sn.open, c)
+		}
+		// 去重清单不看 brief 与 routine：它们不进建议流，列上只是占预算。
+		if it.Kind != domain.KindBrief && it.Kind != "routine" {
+			switch {
+			case it.Phase == domain.PhaseDone && it.UpdatedAt.After(cutoff):
+				sn.recentDone = append(sn.recentDone, recentItem{ID: it.ID, Title: it.Title, Project: it.Project, source: originOf(it), at: it.UpdatedAt})
+			case it.Phase == domain.PhaseProposed:
+				sn.activeProposals = append(sn.activeProposals, recentItem{ID: it.ID, Title: it.Title, Project: it.Project, source: originOf(it), at: it.CreatedAt})
+			}
 		}
 		var x struct {
 			SourceEvent string `json:"source_event"`
@@ -1185,18 +1199,43 @@ type listItem struct {
 // maxOpenItems 是清单里未关闭事项的上限（§9.3）。
 const maxOpenItems = 100
 
-// lists 是预筛、起草、抽取共用的清单：活动项目，以及按相关度排序、至多 maxOpenItems 条的未关闭事项。
+// 去重清单的上限与时间范围（§9.3）：最近 7 天已完成的事项至多 30 条，当前仍待处理的建议至多 50 条。
+const (
+	recentDoneWindow = 7 * 24 * time.Hour
+	maxRecentDone    = 30
+	maxActiveProps   = 50
+)
+
+// recentItem 是去重清单里的一条事项：id、标题、项目、出自的来源与用于排序的时刻（完成时间或建立时间）。
+type recentItem struct {
+	ID, Title, Project, source string
+	at                         time.Time
+}
+
+// originOf 是事项出自的来源 id；本人或 Agent 直接提的没有来源。
+func originOf(it domain.Item) string {
+	if it.Origin != nil {
+		return it.Origin.Source
+	}
+	return ""
+}
+
+// lists 是预筛、起草、抽取共用的清单：活动项目，以及按相关度排序、至多 maxOpenItems 条的未关闭事项，
+// 还有抽取前的去重清单（最近已完成的事项与当前仍待处理的建议）。
 // Total 是过滤后的事项总数，被截掉时才写进输入。
 type lists struct {
-	Projects  []map[string]string
-	OpenItems []listItem
-	Total     int
+	Projects        []map[string]string
+	OpenItems       []listItem
+	Total           int
+	RecentDone      []listItem
+	ActiveProposals []listItem
 }
 
 // lists 组出送往 locality 位置端点的清单。事项标题是工作现场的内容（§14.14）：出自外发范围未选择或为 none 的来源的事项不进清单。
 // 相关度：同项目、同发送者、标题相近、正在等外部回音的排前，其余按更新时间。
+// 去重清单同一把尺子：范围外的不同，同项目的排前，再按时间新到旧截到上限。
 func (sn *snapshot) lists(ev domain.SourceEvent, project, locality string) lists {
-	l := lists{Projects: []map[string]string{}}
+	l := lists{Projects: []map[string]string{}, RecentDone: []listItem{}, ActiveProposals: []listItem{}}
 	for _, pr := range sn.projs {
 		if pr.Status == domain.ProjectActive && !pr.IsInbox() {
 			l.Projects = append(l.Projects, map[string]string{"id": pr.ID, "name": pr.Name})
@@ -1204,10 +1243,8 @@ func (sn *snapshot) lists(ev domain.SourceEvent, project, locality string) lists
 	}
 	var open []openItem
 	for _, c := range sn.open {
-		if src, err := sn.source(c.source); err == nil { // 不在登记表里的（手动建的、内部来源）不受来源范围约束
-			if sc := registry.ScopeFor(src.Outbound, locality); sc == "" || sc == registry.ScopeNone {
-				continue
-			}
+		if !sn.inScope(c.source, locality) {
+			continue
 		}
 		c.score = similarity(c.Title, ev.Subject)
 		if project != "" && c.Project == project {
@@ -1231,10 +1268,46 @@ func (sn *snapshot) lists(ev domain.SourceEvent, project, locality string) lists
 	for _, c := range open[:min(len(open), maxOpenItems)] {
 		l.OpenItems = append(l.OpenItems, listItem{ID: c.ID, Title: c.Title, Project: c.Project, WaitingOn: c.waitingOn})
 	}
+	l.RecentDone = sn.pickRecent(sn.recentDone, project, locality, maxRecentDone)
+	l.ActiveProposals = sn.pickRecent(sn.activeProposals, project, locality, maxActiveProps)
 	return l
 }
 
-// section 是预筛资料正文后附的"未关闭事项"一节。
+// inScope 报告出自 source 的事项能否随这次调用外发：不在登记表里的（手动建的、内部来源）不受来源范围约束。
+func (sn *snapshot) inScope(source, locality string) bool {
+	src, err := sn.source(source)
+	if err != nil {
+		return true
+	}
+	sc := registry.ScopeFor(src.Outbound, locality)
+	return sc != "" && sc != registry.ScopeNone
+}
+
+// pickRecent 取去重清单：先按外发范围过滤，同项目的排前，再按时间新到旧，最后截到 limit 条。
+func (sn *snapshot) pickRecent(list []recentItem, project, locality string, limit int) []listItem {
+	var xs []recentItem
+	for _, x := range list {
+		if sn.inScope(x.source, locality) {
+			xs = append(xs, x)
+		}
+	}
+	slices.SortStableFunc(xs, func(a, b recentItem) int {
+		same := func(x recentItem) int {
+			if project != "" && x.Project == project {
+				return 1
+			}
+			return 0
+		}
+		return cmp.Or(cmp.Compare(same(b), same(a)), b.at.Compare(a.at))
+	})
+	out := make([]listItem, 0, min(len(xs), limit))
+	for _, x := range xs[:min(len(xs), limit)] {
+		out = append(out, listItem{ID: x.ID, Title: x.Title, Project: x.Project})
+	}
+	return out
+}
+
+// section 是预筛资料正文后附的三节：未关闭事项，以及抽取前去重的两份清单（§9.3）。
 func (l lists) section() string {
 	var b strings.Builder
 	b.WriteString("未关闭事项")
@@ -1242,18 +1315,27 @@ func (l lists) section() string {
 		fmt.Fprintf(&b, "（共 %d 条，只列前 %d 条）", l.Total, len(l.OpenItems))
 	}
 	b.WriteString("：")
-	if len(l.OpenItems) == 0 {
+	sectionItems(&b, l.OpenItems)
+	b.WriteString("\n\n最近 7 天已完成事项（同类不重抽）：")
+	sectionItems(&b, l.RecentDone)
+	b.WriteString("\n\n当前待处理建议（同类不重抽）：")
+	sectionItems(&b, l.ActiveProposals)
+	return b.String()
+}
+
+func sectionItems(b *strings.Builder, items []listItem) {
+	if len(items) == 0 {
 		b.WriteString("无")
 	}
-	for _, c := range l.OpenItems {
-		fmt.Fprintf(&b, "\n- %s %s", c.ID, c.Title)
+	for _, c := range items {
+		fmt.Fprintf(b, "\n- %s %s", c.ID, c.Title)
 	}
-	return b.String()
 }
 
 // listInput 是起草与抽取的结构化输入里的清单与日期；模板不能改它们的形状（C.7）。
 func (s *Service) listInput(l lists) map[string]any {
-	in := map[string]any{"projects": l.Projects, "open_items": l.OpenItems, "today": s.o.Now().Format(time.DateOnly)}
+	in := map[string]any{"projects": l.Projects, "open_items": l.OpenItems, "recent_done": l.RecentDone, "active_proposals": l.ActiveProposals,
+		"today": s.o.Now().Format(time.DateOnly)}
 	if l.Total > len(l.OpenItems) {
 		in["open_items_total"] = l.Total
 	}

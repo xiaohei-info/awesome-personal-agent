@@ -221,20 +221,20 @@ describe("建议流：推荐、理由、来源数与把握低（ACT-PROP-10、AC
     const r = await screen.findByRole("article", { name: "建议 r" });
     expect(within(r).getByText(/推荐：忽略/)).toBeInTheDocument();
     expect(within(r).getByText(/群发通知，与你无关/)).toBeInTheDocument();
-    expect(within(r).getByText("1 条消息")).toBeInTheDocument();
+    expect(within(r).queryByText(/合并自/), "单条不显合并徽章").toBeNull();
     expect(within(r).queryByText("把握低")).toBeNull();
     const u = screen.getByRole("article", { name: "建议 u" });
     expect(within(u).getByText("把握低")).toBeInTheDocument();
-    expect(within(u).getByText("2 条消息")).toBeInTheDocument();
+    expect(within(u).getByText("合并自 2 条")).toBeInTheDocument();
     expect(within(u).queryByText(/推荐：/)).toBeNull();
     expect(within(screen.getByRole("article", { name: "建议 d" })).queryByText(/推荐：/)).toBeNull();
   });
 
-  it("ACT-PROP-10：每条有接受、补到已有事项、忽略三个操作，列表顶部有「按推荐处理」", async () => {
+  it("ACT-PROP-10：每条有接受、忽略、补到已有事项三个操作，页顶不再有「按推荐处理」", async () => {
     mount(server([prop("d")]).impl);
     const d = await screen.findByRole("article", { name: "建议 d" });
-    for (const n of ["接受", "补到已有事项", "忽略"]) expect(within(d).getByRole("button", { name: n })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ })).toBeInTheDocument();
+    for (const n of ["接受", "忽略", "补到已有事项"]) expect(within(d).getByRole("button", { name: n })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /按推荐处理/ })).toBeNull();
   });
 });
 
@@ -316,83 +316,6 @@ describe("补到已有事项（ACT-PRH-10）", () => {
   });
 });
 
-describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
-  const rec = (recommend: string) => ({ proposal: { recommend, low_confidence: false, sources: ["e"] } });
-
-  it("按推荐处理前先看到条数与各处置的分布；没有推荐的不计入", async () => {
-    mount(server([prop("a1", rec("accept")), prop("a2", rec("accept")), prop("d1", rec("dismiss")), prop("n1")]).impl);
-    await screen.findByText("建议 a1");
-    await userEvent.click(screen.getByRole("button", { name: "按推荐处理 3 条" }));
-    expect(screen.getByText("接受 2 条 · 忽略 1 条")).toBeInTheDocument();
-  });
-
-  it("ACT-PRH-13：按来源与项目筛选后一次点击，确认后 POST batch {mode:recommended, filter}；filter 是筛选加上眼前可见且带推荐的建议 id，不逐条列动作", async () => {
-    const s = server([
-      prop("b1", { origin: { source: "PRH_A" }, project: "acc-open", ...rec("accept") }),
-      prop("b4", { origin: { source: "PRH_A" }, project: "acc-open" }),
-      prop("x", { origin: { source: "OTHER" }, project: "other", ...rec("accept") }),
-    ]);
-    mount(s.impl);
-    await screen.findByText("建议 b1");
-    await userEvent.selectOptions(screen.getByLabelText("来源"), "PRH_A");
-    await userEvent.selectOptions(screen.getByLabelText("项目"), "acc-open");
-    expect(screen.queryByText("建议 x")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ }));
-    expect(s.calls.some((c) => c.path === "/v1/proposals/batch")).toBe(false); // 先确认
-    await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
-    await waitFor(() => expect(s.calls.some((c) => c.path === "/v1/proposals/batch")).toBe(true));
-    const b = s.calls.find((c) => c.path === "/v1/proposals/batch")!;
-    expect(b.body).toEqual({ mode: "recommended", filter: { source: "PRH_A", project: "acc-open", ids: ["b1"] } });
-    expect(b.csrf).toBe("tok-1");
-  });
-
-  it("来源按名字称呼（§9.1）：卡片的「来自」与来源筛选都显示名字，对话捕获显示「对话捕获 · 项目」；不出现 src_", async () => {
-    mount(server([prop("m", { origin: { source: "src_mail_qq" } }), prop("c", { origin: { source: "capture:acc-open" } })]).impl);
-    await screen.findByText("建议 m");
-    await waitFor(() => expect(document.querySelector("main")!.textContent).toContain("QQ 邮箱"));
-    expect(document.querySelector("main")!.textContent).toContain("对话捕获 · acc-open");
-    const pick = screen.getByLabelText("来源");
-    expect(within(pick).getByRole("option", { name: "QQ 邮箱" })).toHaveValue("src_mail_qq");
-    expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
-  });
-
-  it("ACT-PRH-14：目标已关闭的那条跳过并说明原因，成功的计数，列表以服务端为准刷新", async () => {
-    const s = server(
-      [prop("s1", { title: "建议 skip-1", ...rec("attach") }), prop("s2", { title: "建议 skip-2", ...rec("accept") })],
-      (u) =>
-        u === "/v1/proposals/batch"
-          ? json(200, { results: [{ id: "s1", do: "attach", ok: false, code: "conflict", why: "the target item is closed" }, { id: "s2", do: "accept", ok: true }] })
-          : undefined,
-    );
-    mount(s.impl);
-    await screen.findByText("建议 skip-1");
-    await userEvent.click(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ }));
-    await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
-    const res = await screen.findByRole("status", { name: "批量处理结果" });
-    expect(res).toHaveTextContent("已处理 1 条");
-    expect(res).toHaveTextContent("跳过 1 条");
-    expect(res).toHaveTextContent("建议 skip-1");
-    expect(res).toHaveTextContent("建议 skip-1：状态已经变了，没有处理");
-    expect(within(res).getByRole("listitem")).toHaveAttribute("title", "the target item is closed"); // 悬停看服务端原文
-    expect(s.calls.filter((c) => c.path === "/v1/items?phase=proposed").length).toBeGreaterThan(1);
-  });
-
-  it("整批被拒（如缺依据）：显示服务端原因，不报告成功", async () => {
-    const s = server([prop("a", rec("accept"))], (u) => (u === "/v1/proposals/batch" ? json(403, { code: "permission_denied", why: "batch needs the owner's own words", next: "use the web session" }) : undefined));
-    mount(s.impl);
-    await screen.findByText("建议 a");
-    await userEvent.click(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ }));
-    await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("batch needs the owner's own words");
-    expect(screen.queryByRole("status", { name: "批量处理结果" })).toBeNull();
-  });
-
-  it("范围内没有任何带推荐的建议时，「按推荐处理」不可点", async () => {
-    mount(server([prop("d")]).impl);
-    await screen.findByText("建议 d");
-    expect(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ })).toBeDisabled();
-  });
-});
 
 // 主流程路径一（界面设计 §7）：建议卡上直接「接受并交给 Agent」。
 describe("接受并交给 Agent", () => {
@@ -451,7 +374,7 @@ describe("跨来源合并：展开看来源与依据，一键拆分（§9.3）",
     }) as unknown as typeof fetch;
     mount(impl);
     const card = await screen.findByRole("article", { name: "建议 m" });
-    await userEvent.click(within(card).getByText("2 条消息 → 这一条"));
+    await userEvent.click(within(card).getByText("合并自 2 条"));
     const wx = await within(card).findByRole("listitem", { name: "微信" });
     expect(wx).toHaveTextContent("打分模型判断为同一件事，自动合并 · 标题相似度 0.72 · 合并于");
     expect(within(card).getByRole("listitem", { name: "QQ 邮箱" })).toHaveTextContent("最先到，建出这条");
@@ -490,7 +413,7 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
     const s = withMerge();
     mount(s.impl);
     const card = await screen.findByRole("article", { name: "建议 m" });
-    await userEvent.click(within(card).getByText("2 条消息 → 这一条"));
+    await userEvent.click(within(card).getByText("合并自 2 条"));
     // 批量归类折进来的那条（f1）整组列出：组头写它连同几条消息并进这条、哪一批、谁判断、相似度与理由，组里是它带来的消息。
     const fold = await within(card).findByRole("listitem", { name: "「AgentSafe 资产确认」并进来的几条" });
     expect(fold).toHaveTextContent("「AgentSafe 资产确认」连同 1 条消息 → 这条");
@@ -518,38 +441,20 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
     }) as unknown as typeof fetch;
     mount(impl);
     const card = await screen.findByRole("article", { name: "建议 t" });
-    await userEvent.click(within(card).getByText("从 2 条建议合来"));
+    await userEvent.click(within(card).getByText("合并自 3 条"));
     const v = within(card).getByRole("listitem", { name: "整理报销单据（清单）" });
     expect(v).toHaveTextContent("agent:vault-migrate");
     expect(v).toHaveTextContent("建于 " + new Date("2030-01-01T00:00:00Z").toLocaleString());
-    expect(v).toHaveTextContent("判定重复 · 合并于 " + new Date("2030-01-02T00:00:00Z").toLocaleString());
+    expect(v).toHaveTextContent("判定重复");
     const g = within(card).getByRole("listitem", { name: "fix: 报销导出" });
     expect(g).toHaveTextContent("QQ 邮箱");
     expect(within(g).getByRole("link", { name: "链接" })).toHaveAttribute("href", "https://git.example/org/web/pull/7");
     await userEvent.click(within(v).getByRole("button", { name: "撤销合并" }));
     await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/itm_v/unmerge")).toMatchObject({ method: "POST", csrf: "tok-1" }));
     await waitFor(() => expect(within(screen.getByRole("article", { name: "建议 t" })).queryByText("整理报销单据（清单）")).toBeNull());
-    expect(screen.getByRole("article", { name: "建议 t" })).toHaveTextContent("从 1 条建议合来");
+    expect(screen.getByRole("article", { name: "建议 t" })).toHaveTextContent("合并自 2 条");
   });
 
-  it("最近自动归类：写明每批几条、几次模型调用、送出多少字，每条的去处与理由；折叠掉的可撤销，留着的不给撤销", async () => {
-    mount(withMerge().impl);
-    const panel = await screen.findByRole("group", { name: "最近自动归类" }).catch(() => null) ?? (await screen.findByText(/最近 7 天自动归类/)).closest("details")!;
-    expect(panel).toHaveTextContent("合成一条建议 1 条、判定重复 1 条、留着 1 条 · 模型调用 1 次，送出约 4200 字 · 还有 3 条等着成批");
-    await userEvent.click(within(panel as HTMLElement).getByText(/最近 7 天自动归类/));
-    expect(panel).toHaveTextContent("同批 3 条，一次模型调用，送出约 4200 字");
-    expect(within(panel as HTMLElement).getByText(/同批 3 条/)).not.toHaveTextContent("砍半");
-    expect(panel, "超出资料上限砍半的那批写明留到下一轮的条数").toHaveTextContent("同批 20 条，一次模型调用，送出约 5900 字；资料超出上限，这批砍半，9 条留到下一轮");
-    // 折叠掉的按去处收成「N 条 → 「去处」」，组里逐条写结论、判断方与理由。
-    expect(within(panel as HTMLElement).getByRole("listitem", { name: "合进「周报模板改版 W47」" })).toHaveTextContent("1 条建议（1 条消息）→ 「周报模板改版 W47」");
-    const dup = within(panel as HTMLElement).getByRole("listitem", { name: "周报模板改版" });
-    expect(dup).toHaveTextContent("周报模板改版 · 大象 · 1 条消息判定重复 · 写作模型判断");
-    expect(dup).toHaveTextContent("理由：本人忽略过的同一件事");
-    expect(within(dup).getByRole("button", { name: "撤销合并" })).toBeInTheDocument();
-    expect(within(panel as HTMLElement).queryByRole("listitem", { name: "导出报表加一列" }), "规则比过留着的只记条数").toBeNull();
-    expect(panel).toHaveTextContent("另有 1 条规则比过没有相似的，留着");
-    expect(document.querySelector("main")!.textContent, "界面不出现来源 id").not.toMatch(/src_|mb_|run_/);
-  });
 });
 
 describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 PR #227 那批的形状）", () => {
@@ -586,7 +491,7 @@ describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 
       sev_6: ev("sev_6", "src_github", "feat(desktop): 卡片移到最上方", 0, key),
     });
     const card = await screen.findByRole("article", { name: "审阅 PR #227" });
-    await userEvent.click(within(card).getByText("6 条消息 → 这一条"));
+    await userEvent.click(within(card).getByText("合并自 6 条"));
     expect(await within(card).findByText("iCloud 邮件 2 条 · 邮件 3 条 · GitHub 1 条")).toBeInTheDocument();
     const [first, second] = within(card).getAllByRole("listitem", { name: "iCloud 邮件" });
     expect(first).toHaveTextContent("最先到，建出这条 · 原文 · 链接");
@@ -619,7 +524,7 @@ describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 
       "/v1/items/itm_w": { item: { id: "itm_w", phase: "dropped", title: "feat(desktop): 卡片", proposal: { low_confidence: false, sources: ["sev_w1"] } } },
     });
     const card = await screen.findByRole("article", { name: "审阅 PR #227" });
-    await userEvent.click(within(card).getByText("6 条消息 → 这一条"));
+    await userEvent.click(within(card).getByText("合并自 6 条"));
     const x = await within(card).findByRole("listitem", { name: "「评审 PR #227」并进来的几条" });
     expect(x).toHaveTextContent("「评审 PR #227」连同 4 条消息 → 这条");
     expect(x).toHaveTextContent("那批自动归类 · 写作模型判断为同一件事，自动合并（与生成事项和建议相同） · 标题相似度 0.93");
@@ -639,7 +544,7 @@ describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 
     expect(await screen.findByText(/已撤销合并，它回到了建议里/)).toBeInTheDocument();
   });
 
-  it("修复后：折叠时被折那条名下的消息全部搬过来——平台上 PR 的 3 条更新随 pr.opened 一起进组，按到达先后列；卡片与最近自动归类的条数都是搬完后的", async () => {
+  it("修复后：折叠时被折那条名下的消息全部搬过来——平台上 PR 的 3 条更新随 pr.opened 一起进组，按到达先后列", async () => {
     const sweep = (event: string, source: string, item: string, score: number, why: string) => ({ event, source, title: "x", by: "generate", score, why, batch: "mb_1", item, at: at(57) });
     const ws = ["sev_w1", "sev_w2", "sev_w3", "sev_w4"];
     const y = prop("itm_y", { title: "审阅 PR #227", origin: { source: "src_mail_icloud" }, proposal: { low_confidence: false,
@@ -662,7 +567,7 @@ describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 
       "/v1/items/itm_w": { item: { id: "itm_w", phase: "dropped", title: "feat(desktop): 卡片", proposal: { low_confidence: false, sources: ["sev_w1"] } } },
     });
     const card = await screen.findByRole("article", { name: "审阅 PR #227" });
-    await userEvent.click(within(card).getByText("9 条消息 → 这一条"));
+    await userEvent.click(within(card).getByText("合并自 9 条"));
     expect(await within(card).findByText("iCloud 邮件 2 条 · 邮件 3 条 · GitHub 4 条")).toBeInTheDocument();
     const w = within(card).getByRole("listitem", { name: "「feat(desktop): 卡片」并进来的几条" });
     expect(w).toHaveTextContent("「feat(desktop): 卡片」连同 4 条消息 → 这条");
@@ -677,22 +582,6 @@ describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 
     noIds();
   });
 
-  it("最近自动归类：同一批里折进同一条的写成「2 条建议（5 条消息）→ 「审阅 PR #227」」，逐条可撤销", async () => {
-    const activity = { days: 7, pending: 0, model_calls: 1, chars: 2239, batches: [{ batch: "mb_1", at: at(57), size: 6, run: "run_1", chars: 2239, decisions: [
-      { item: "itm_x", title: "评审 PR #227", source: "src_mail_icloud", sources: 4, action: "merge", target: "itm_y", target_title: "审阅 PR #227", why: "都是 PR #227 的评审请求", by: "generate" },
-      { item: "itm_w", title: "feat(desktop): 卡片", source: "src_github", sources: 1, action: "merge", target: "itm_y", target_title: "审阅 PR #227", why: "同一个 PR", by: "generate" },
-      { item: "itm_y", title: "审阅 PR #227", source: "src_mail_icloud", sources: 6, action: "keep", why: "编号不同，不是同一个 PR", by: "generate" }] }] };
-    const s = mountWith([], {}, { "/v1/merge/activity?days=7": activity });
-    const panel = (await screen.findByText(/最近 7 天自动归类/)).closest("details")!;
-    await userEvent.click(within(panel).getByText(/最近 7 天自动归类/));
-    const into = within(panel).getByRole("listitem", { name: "合进「审阅 PR #227」" });
-    expect(into).toHaveTextContent("2 条建议（5 条消息）→ 「审阅 PR #227」");
-    expect(within(into).getByRole("listitem", { name: "评审 PR #227" })).toHaveTextContent("评审 PR #227 · iCloud 邮件 · 4 条消息合成一条建议 · 写作模型判断理由：都是 PR #227 的评审请求");
-    expect(within(panel).getAllByRole("listitem", { name: "审阅 PR #227" }).at(-1)).toHaveTextContent("留着 · 写作模型判断");
-    noIds();
-    await userEvent.click(within(within(into).getByRole("listitem", { name: "feat(desktop): 卡片" })).getByRole("button", { name: "撤销合并" }));
-    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/itm_w/unmerge")).toMatchObject({ method: "POST", csrf: "tok-1" }));
-  });
 });
 
 // 降噪（主文档 §7.2）：需要拍板的置顶不折叠；代码托管通知默认收起、一键展开、同一对象合组；批量忽略二次确认、带幂等键、可撤销。
@@ -908,27 +797,6 @@ describe("建议页按主题分组：组头、折叠、按组与跨组批量", (
     expect(posts(s.calls)[0].body).toEqual({ mode: "ended", filter: { ids: ["gh7", "ml7"] } });
   });
 
-  it("按推荐处理只管看得见的：收起的组不进条数与请求，展开后才算", async () => {
-    const recItems = items.map((i) => (["c1", "m1", "dec"].includes(i.id) ? { ...i, proposal: { ...(i.proposal ?? {}), recommend: "accept", low_confidence: false } } : i));
-    const calls: { path: string; body?: any }[] = [];
-    const impl = (async (url: string, init: RequestInit = {}) => {
-      calls.push({ path: url, body: init.body ? JSON.parse(init.body as string) : undefined });
-      if (url === "/v1/projects") return json(200, { projects: [] });
-      if (url === "/v1/sources") return json(200, { sources: [] });
-      if (url === "/v1/items?phase=proposed") return json(200, { items: recItems, last_rejections: {}, origins, groups });
-      if (url === "/v1/proposals/batch") return json(200, { results: [] });
-      return json(404, { code: "not_found", why: url, next: "x" });
-    }) as unknown as typeof fetch;
-    mount(impl);
-    const ci = await box("CI 失败通知");
-    expect(screen.getByRole("button", { name: "按推荐处理 2 条" })).toBeInTheDocument(); // dec（置顶）+ m1（其余）
-    await userEvent.click(ci.querySelector("summary")!);
-    await userEvent.click(screen.getByRole("button", { name: "按推荐处理 3 条" }));
-    await userEvent.click(ci.querySelector("summary")!); // 确认框打开后又收起：c1 不再算
-    await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
-    await waitFor(() => expect(calls.find((c) => c.path === "/v1/proposals/batch")).toBeTruthy());
-    expect(calls.find((c) => c.path === "/v1/proposals/batch")!.body).toEqual({ mode: "recommended", filter: { ids: ["dec", "m1"] } });
-  });
 
   it("已忽略：按批列出，按批撤销要二次确认；撤销后回到原来的组与折叠", async () => {
     const when = "2030-01-03T08:00:00Z";
@@ -967,16 +835,14 @@ describe("整合出来的那条能看到从哪几条合来（§9.3）", () => {
     ];
     mount(server(items).impl);
     const card = await screen.findByRole("article", { name: "aiteam PR #220 评审请求" });
-    expect(card).toHaveTextContent("· 整合");
-    await userEvent.click(within(card).getByText("由 2 条建议整合而成"));
+    await userEvent.click(within(card).getByText("合并自 2 条"));
     const row = within(card).getByRole("listitem", { name: "审阅 PR #220：企业端技能" });
-    expect(row).toHaveTextContent("原摘要：BflyT 请你审阅 PR #220");
     expect(within(row).getByRole("link", { name: "看原消息（2）" })).toHaveAttribute("href", "/sources/events/sev_a");
     expect(within(row).getByRole("link", { name: "审阅 PR #220：企业端技能" })).toHaveAttribute("href", "/items/x220");
     expect(within(row).getByRole("button", { name: "撤销合并" })).toHaveAttribute("title", expect.stringContaining("整组还原"));
   });
 
-  it("建议卡片展示目标项目标签；改选项目发送 PATCH /v1/items/{id} 带 If-Match 并刷新后再接受", async () => {
+  it("建议卡片展示归属项目；改选项目发送 PATCH /v1/items/{id} 带 If-Match 并刷新后再接受", async () => {
     const patches: { path: string; body: any; ifMatch: string | null }[] = [];
     let items: (P & { version: number })[] = [{ ...prop("p1", { title: "整理文档", project: "prj_inbox" }), version: 3 }];
     const base = server([]);
@@ -1004,13 +870,85 @@ describe("整合出来的那条能看到从哪几条合来（§9.3）", () => {
     }) as unknown as typeof fetch;
     mount(impl);
     const card = (await screen.findByText("整理文档")).closest("article")!;
-    expect(within(card).getByText("目标项目：Inbox")).toBeInTheDocument();
     const pick = within(card).getByLabelText("修改「整理文档」的归属项目");
     expect(pick).toHaveValue("prj_inbox");
     await userEvent.selectOptions(pick, "prj_apa");
     await waitFor(() => expect(patches).toEqual([{ path: "/v1/items/p1", body: { project: "prj_apa", reason: "在建议页调整归属项目" }, ifMatch: "3" }]));
-    await waitFor(() => expect(within(card).getByText("目标项目：APA")).toBeInTheDocument());
     await userEvent.click(within(card).getByRole("button", { name: "接受" }));
     expect(await screen.findByText("建议都处理完了")).toBeInTheDocument();
+  });
+});
+
+describe("建议页瘦身：单一「合并自 N 条」与 360px 窄屏（主文档 §7.2）", () => {
+  const at = "2030-01-01T00:00:00Z";
+  const absorbed = [
+    { item: "itm_a", title: "修复清理脚本并验证", source: "src_mail_qq", ref: "https://git.example/org/web/pull/9", created_at: at, action: "merge", at },
+    { item: "itm_b", title: "手动验证清理结果", events: ["sev_b"], source: "src_mail_qq", created_at: at, action: "merge", at },
+  ];
+  const items = [
+    prop("m", { title: "建议 m", origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, absorb: undefined, absorbed } as any }),
+    prop("a", { title: "建议 a", origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sources: ["e1"] } }),
+  ];
+  const mountCards = () => mount(server(items).impl);
+
+  it("合并过的卡片只有一个「合并自 N 条」折叠块：点开原地列源建议，再点收起；单条的建议不显示徽章", async () => {
+    mountCards();
+    const m = await screen.findByRole("article", { name: "建议 m" });
+    const folds = m.querySelectorAll("details");
+    expect(folds).toHaveLength(1); // 不再同时出现「从 N 条建议合来」与「N 条消息 → 这一条」两个块
+    const fold = m.querySelector("details")!;
+    expect(within(fold).getByText("合并自 3 条")).toBeInTheDocument(); // 载体自己 + 2 条被折叠的
+    expect(fold.open).toBe(false);
+    await userEvent.click(within(fold).getByText("合并自 3 条"));
+    expect(fold.open).toBe(true);
+    expect(within(m).getByRole("listitem", { name: "修复清理脚本并验证" })).toHaveTextContent("QQ 邮箱 · 建于");
+    expect(within(m).getByRole("listitem", { name: "手动验证清理结果" })).toHaveTextContent("看原消息（1）");
+    await userEvent.click(within(fold).getByText("合并自 3 条"));
+    expect(fold.open).toBe(false);
+    const a = screen.getByRole("article", { name: "建议 a" });
+    expect(within(a).queryByText(/合并自/)).toBeNull();
+  });
+
+  it("360px：卡上只并排接受、忽略、更多三个按钮；次要动作进「更多」菜单，方向键进出、Esc 归还焦点", async () => {
+    const mm = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    try {
+      const s = server(items);
+      const base = s.impl;
+      const impl = (async (url: string, init: RequestInit = {}) => {
+        if (url === "/v1/projects") return json(200, { projects: [{ id: "prj_apa", name: "APA" }] });
+        return base(url, init);
+      }) as unknown as typeof fetch;
+      mount(impl);
+      const card = await screen.findByRole("article", { name: "建议 m" });
+      const actions = card.querySelector(".actions")!;
+      expect(within(actions as HTMLElement).getAllByRole("button").map((b) => b.textContent)).toEqual(["接受", "忽略", "更多"]);
+      // 展开「合并自 N 条」时也不横向溢出：每一行都是 act-row > div（把长标题与链接限制在卡片宽度内）
+      expect(actions).toHaveClass("card-actions");
+      await userEvent.click(within(card).getByText("合并自 3 条"));
+      for (const li of within(card).getAllByRole("listitem")) expect(li.querySelector(":scope > div")).not.toBeNull();
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(360);
+      const more = within(actions as HTMLElement).getByRole("button", { name: "更多" });
+      more.focus();
+      await userEvent.keyboard("{ArrowDown}");
+      const menu = await screen.findByRole("menu", { name: "「建议 m」的更多操作" });
+      const first = within(menu).getByRole("menuitem", { name: "接受并交给 Agent" });
+      expect(document.activeElement).toBe(first);
+      await userEvent.keyboard("{ArrowDown}");
+      expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "补到已有事项" }));
+      await userEvent.keyboard("{End}");
+      expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "目标项目" }));
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(document.activeElement).toBe(more);
+      // 选「目标项目」后展开就地选择器（自动聚焦），不换页
+      await userEvent.click(more);
+      await userEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "目标项目" }));
+      const pick = within(card).getByLabelText("修改「建议 m」的归属项目");
+      expect(pick).toHaveValue("");
+      expect(document.activeElement).toBe(pick);
+    } finally {
+      window.matchMedia = mm;
+    }
   });
 });

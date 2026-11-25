@@ -291,3 +291,43 @@ func TestCaptureByDelegateNeedsNoWords(t *testing.T) {
 	}
 	t.Fatalf("no candidate proposed: %+v", e.events())
 }
+
+// 来源标注（附录 B.2、B.6）：外部人发起的轮次照常捕获；不是的过滤为 200 captured:false（不是错误），
+// 不合法或未知的标注是 400。标注字段原样透传到内核。
+func TestCaptureEndpointFiltersNonExternalOrigins(t *testing.T) {
+	e := setup(t)
+	worker := e.token(auth.Worker, "")
+	m := e.body(e.post(worker, `{"project":"`+e.proj+`","text":"用户：记一下周五之前把发布脚本补上","capture_schema":1,
+		"speaker_role":"human","origin_type":"external_chat"}`), 200)
+	if m["captured"] != true || m["project"] != e.proj {
+		t.Fatalf("external human turn: %v", m)
+	}
+	for _, c := range []struct{ body, reason string }{
+		{`{"project":"` + e.proj + `","text":"[Cronjob] 输出","capture_schema":1,"speaker_role":"system","origin_type":"cron_echo"}`, inbound.ReasonNonExternalOrigin},
+		{`{"project":"` + e.proj + `","text":"后台回执","capture_schema":1,"speaker_role":"system","origin_type":"system_notice"}`, inbound.ReasonNonExternalOrigin},
+		{`{"project":"` + e.proj + `","text":"已经答复完了","capture_schema":1,"speaker_role":"human","origin_type":"external_chat","status_hint":"resolved"}`, inbound.ReasonAlreadyResolved},
+	} {
+		m := e.body(e.post(worker, c.body), 200)
+		if m["captured"] != false || m["reason"] != c.reason || m["project"] != e.proj {
+			t.Fatalf("filtered turn: %v", m)
+		}
+	}
+	for _, body := range []string{
+		`{"project":"` + e.proj + `","text":"x","capture_schema":3}`,
+		`{"project":"` + e.proj + `","text":"x","capture_schema":1,"speaker_role":"human"}`,
+		`{"project":"` + e.proj + `","text":"x","speaker_role":"robot","origin_type":"external_chat"}`,
+	} {
+		rec := e.post(worker, body)
+		var de domain.Error
+		if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &de) != nil || de.Code != domain.CodeInvalidRequest {
+			t.Errorf("status %d body %s", rec.Code, rec.Body)
+		}
+	}
+	// 放行的这一条异步走完流水线再结束，免得测试关账本时它还在写。
+	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		if evs := e.events(); len(evs) == 1 && evs[0].Disposition != domain.DispositionPending {
+			return
+		}
+	}
+	t.Fatalf("the external human turn must become exactly one source event: %+v", e.events())
+}

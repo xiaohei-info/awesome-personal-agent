@@ -727,3 +727,38 @@ func TestMergeBatchIncompleteRetriesThenHalves(t *testing.T) {
 	}
 	e.verify()
 }
+
+// 内置 Inbox 与没有项目一样算"未指定具体业务项目"（§9.3）：与具体项目里的同一件事允许合并，载体留在具体项目；
+// 两个不同的具体业务项目之间仍然拦。
+func TestInboxIsNotAConcreteProjectForMerging(t *testing.T) {
+	const inbox, work = "prj_inbox", "prj_work"
+	item := func(project string) domain.Item { return domain.Item{ID: "itm_" + project, Project: project} }
+	for _, c := range []struct{ a, b, want string }{
+		{inbox, work, ""},
+		{work, inbox, ""},
+		{"", inbox, ""},
+		{inbox, inbox, ""},
+		{work, work, ""},
+		{"prj_a", "prj_b", domain.RejectCrossProject},
+	} {
+		if code, _ := veto(inbox, item(c.a), item(c.b)); code != c.want {
+			t.Errorf("%q vs %q: %q, want %q", c.a, c.b, code, c.want)
+		}
+	}
+	// 载体优先落在具体业务项目：合并后不把已归类的建议吸回 Inbox。
+	later := domain.Item{ID: "itm_work", Project: work, ItemKernelState: domain.ItemKernelState{CreatedAt: t0.Add(time.Hour)}}
+	set := []*sweepRec{{it: item(inbox), held: []domain.SourceEvent{{}, {}, {}}}, {it: later}}
+	if got := carrierOf(inbox, set); got.it.ID != later.ID {
+		t.Fatalf("carrier must stay in the concrete project, got %s", got.it.ID)
+	}
+	// 建议页的分组用同一把尺子：同一条合并键的 Inbox 建议与具体项目建议算一份，接受时合成一个事项。
+	mk := func(project string) domain.Item {
+		return domain.Item{ID: "itm_" + project, Project: project, Phase: domain.PhaseProposed, Proposal: &domain.Proposal{MergeKey: "link:x"}}
+	}
+	if n := len(bundles(inbox, []domain.Item{mk(inbox), mk(work)})); n != 1 {
+		t.Fatalf("Inbox and the concrete project must bundle together, got %d", n)
+	}
+	if n := len(bundles(inbox, []domain.Item{mk("prj_a"), mk("prj_b")})); n != 0 {
+		t.Fatalf("two concrete projects must not bundle, got %d", n)
+	}
+}

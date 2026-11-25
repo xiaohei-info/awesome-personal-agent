@@ -171,7 +171,7 @@ func TestFlowOutcallQueue(t *testing.T) {
 	t.Run("ACT-OUT-02 长时运行占满时来源拉取与模型调用照常", func(t *testing.T) {
 		f.ModelStub.Reset()
 		f.ModelStub.Judge(modelstub.ChatJudge{Answer: "yes"}) // 对话捕获先预筛（是非题），再抽取
-		f.ModelStub.When("抽取可以成为建议的候选事项", reply(`{"candidates":[{"title":"OUT02 候选","kind":"task"}]}`))
+		f.ModelStub.When("确需本人后续处理或拍板的候选事项", reply(`{"candidates":[{"title":"OUT02 候选","kind":"task"}]}`))
 		f.addScriptSource("src_acc_tick", f.script("tick.sh", "cat >/dev/null\necho '{\"cursor\":\"c\"}'\n"), "1s")
 		f.capture("acc-open", "OUT02 长时运行占满时的判断", "s1")
 		f.waitFor("来源拉取在短任务队列执行", 15*time.Second, func() bool {

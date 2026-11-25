@@ -133,13 +133,13 @@ func units(props []domain.Item) [][]domain.Item {
 }
 
 // bundles 是一个合并键单元里接受时合成一个事项的几份（至少两条的，见 split）。
-func bundles(unit []domain.Item) [][]domain.Item {
-	return slices.DeleteFunc(split(unit), func(p []domain.Item) bool { return len(p) < 2 })
+func bundles(inbox string, unit []domain.Item) [][]domain.Item {
+	return slices.DeleteFunc(split(inbox, unit), func(p []domain.Item) bool { return len(p) < 2 })
 }
 
 // Groups 把建议分组：合并键相同的连成一个单元整体归组；单元里有需要拍板的归置顶，迁移来的归历史清单，
 // 其次取单元里最早一条认得出的标题类别，再次多于一条的自成一组（同一对象），属于上游对象的归代码托管通知，其余逐条。
-func Groups(props []domain.Item, origins map[string]Origin) []Group {
+func Groups(props []domain.Item, origins map[string]Origin, inbox string) []Group {
 	type acc struct {
 		g   Group
 		its []domain.Item
@@ -159,7 +159,7 @@ func Groups(props []domain.Item, origins map[string]Origin) []Group {
 		if kind == GroupPinned {
 			return
 		}
-		for _, b := range bundles(unit) {
+		for _, b := range bundles(inbox, unit) {
 			ids := make([]string, len(b))
 			for i, it := range b {
 				ids[i] = it.ID

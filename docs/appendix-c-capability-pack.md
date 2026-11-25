@@ -248,13 +248,17 @@ criteria: 涉及真实资金、对外承诺、不可逆操作或权限变更的�
 
 `instruction_path` 的文件由任务型在拉起时写进这次运行的运行目录（文件名 `instruction.txt`，权限 0600），不进提示词正文；包的 `instance_params` 没有字符串参数 `instruction` 时，用了这个占位符的包加载时拒绝；实例没有任务说明时：模板声明了 `default_instruction` 就写它；没有声明则不拉起，规则建的这一份转 `dropped` 并记带 `task_refused` 的告警（`SPIKE-ROUTINE`，主文档 §8.7、§13.5）。实例参数 `instruction` 不超过 2000 字，超过时建实例与改实例都被拒绝。
 
-**入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，起草与抽取带内核组出的两份清单，预筛只带未结事项清单（以文本段附在资料后，不带项目清单）；模板不必声明，也不能改它们的形状：
+**入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，起草与抽取带内核组出的四份清单，预筛把未关闭事项与两份去重清单以文本段附在资料后（不带项目清单）；模板不必声明，也不能改它们的形状：
 
 | 输入键 | 内容 |
 |---|---|
 | `projects` | 活动项目：`[{id, name}]` |
 | `open_items` | 未关闭事项，至多 100 条，按相关度排序：`[{id, title, project, waiting_on?}]`；被截掉时另有 `open_items_total` |
+| `recent_done` | 最近 7 天已完成的事项（不含 `brief`、`routine`），至多 30 条，同项目优先、其余按最近更新倒序：`[{id, title, project?}]`；空时为 `[]` |
+| `active_proposals` | 当前仍待处理的建议（`proposed`），至多 50 条，同样排序：`[{id, title, project?}]`；空时为 `[]` |
 | `today` | 当天日期（本机时区），供识别"明天""周五"一类说法 |
+
+`open_items`、`recent_done`、`active_proposals` 三份清单都按外发范围过滤：出自外发范围未选择或为 `none` 的来源的事项不进送往该端点的清单（主文档 §14.14）。
 
 起草的 `output_schema` 与抽取里每条候选的 schema 是同一组字段。用户包覆盖这两个模板时，输出字段只能是下表的子集，多出的字段被忽略：
 
@@ -459,6 +463,6 @@ default_instruction: |-
 | `background-run` | `start_background_run` 的状态规则样例（`trigger: state`，每件事自动只开工一次），初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |
-| `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`reminder-open`（没有到期日的提醒事项 `reminder.open`，`proposed`；只在来源配了 `undated_lists` 时才有这类事件）、`reminder-status`（离开未完成集合的提醒：核实已完成的 `reminder.completed`，与只是移出拉取范围或读不到的 `reminder.out_of_view`；`ignore`，`on_update: attach`：挂到这条提醒建出的事项上，不关闭它，附录 D.2）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠，并刷新它建出的事项）、`pr-discussion`（PR 上的评论与评审，`ignore`，`on_update: attach`）、`issue-comment`（issue 上的评论，`screen`，`on_update: attach`）；评论与评审挂到已有事项时只记为挂靠消息，不改事项的标题、正文与摘要；issue 更新没有规则，交初筛。webhook 校验方案与字段映射（`github-issues`，以及评论与评审的 `github-issue-comments`、`github-pr-reviews`、`github-pr-review-comments`）。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"；问"有没有需要记下的事，或与所列未关闭事项有关的进展"）；跨来源合并的批量归类 `merge-batch`（生成型，一批一次调用，超时 300s；先输出 `groups[]`：`group`、`topic`、`members[]`；再输出 `decisions[]`：`new`、`group`、`step`（1 并入事项、2 批内整合、3 保留）、`action`（`attach`/`merge`/`duplicate`/`keep`）、`target`、`reason`、`confident`；第 2 步的整合在 `combined[]`：`merge`、`group`、`members[]`、`title`、`summary`；正文即设置 › 跨来源合并里的内置默认提示词，本人改的只换正文、不换输出结构，主文档 §9.3）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置、`urgent`）与 `triage-extract`（一段内容抽出零到多条候选，每条与起草同一组字段并带 `refs`）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
+| `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`reminder-open`（没有到期日的提醒事项 `reminder.open`，`proposed`；只在来源配了 `undated_lists` 时才有这类事件）、`reminder-status`（离开未完成集合的提醒：核实已完成的 `reminder.completed`，与只是移出拉取范围或读不到的 `reminder.out_of_view`；`ignore`，`on_update: attach`：挂到这条提醒建出的事项上，不关闭它，附录 D.2）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠，并刷新它建出的事项）、`pr-discussion`（PR 上的评论与评审，`ignore`，`on_update: attach`）、`issue-comment`（issue 上的评论，`screen`，`on_update: attach`）；评论与评审挂到已有事项时只记为挂靠消息，不改事项的标题、正文与摘要；issue 更新没有规则，交初筛。webhook 校验方案与字段映射（`github-issues`，以及评论与评审的 `github-issue-comments`、`github-pr-reviews`、`github-pr-review-comments`）。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"；问"这一轮有没有尚未完成、未与所列清单重复的新事项，或与未关闭事项有关的新进展"，判据写明闲聊、本轮已修好/验证/上线/答复/本人否决的事、当场已派发的即时任务、纯助手汇报与顺口附带的建议、与三份清单重复的同一件事都不抽）；跨来源合并的批量归类 `merge-batch`（生成型，一批一次调用，超时 300s；先输出 `groups[]`：`group`、`topic`、`members[]`；再输出 `decisions[]`：`new`、`group`、`step`（1 并入事项、2 批内整合、3 保留）、`action`（`attach`/`merge`/`duplicate`/`keep`）、`target`、`reason`、`confident`；第 2 步的整合在 `combined[]`：`merge`、`group`、`members[]`、`title`、`summary`；正文即设置 › 跨来源合并里的内置默认提示词，本人改的只换正文、不换输出结构，主文档 §9.3）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置、`urgent`）与 `triage-extract`（一段内容抽出零到多条候选，每条与起草同一组字段并带 `refs`；正文列出四类不抽的内容并收紧 `decision` 的用法，不再"宁可多抽"）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型提示词 `delegation-screen`（是非题"这份回执需要本人核实吗"，下限 0.20，未定取"是"）。命中后在父事项上生成决策请求交本人；拉起任务型用工具查证不在本版（主文档 §20.5） |
 | `routine` | kind `routine`（`spec.result`）；实例参数（`schedule`、`mode`、`title`、`instruction`、`access`、`output`；归属项目是实例自己的字段，见 C.10）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型；`mode: create_item` 时 `call_agent` 不执行）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`）；列表与卡片视图 |

@@ -299,3 +299,72 @@ def test_failures_are_noted_by_class_and_reported_with_the_next_accepted_request
     turn(hooks, "s", "third", "turn")
     hooks["on_session_end"](session_id="s")
     assert "failures" not in posts(kernel, 3)[2]["body"]
+
+
+# 来源标注（附录 A、内核 §9.3）：确认是外部人的轮次才发，带 capture_schema 1 与角色、来源。
+# 这几个信号都是 Hermes 专属的，只在插件里识别，内核只认标注字段。
+HUMAN_TURN = "把季度报表发给财务，周五前"
+
+
+def test_human_turn_is_sent_with_the_role_annotation(hooks, kernel):
+    turn(hooks, "s", HUMAN_TURN, "好，我记下了")
+    hooks["on_session_end"](session_id="s")
+    (r,) = posts(kernel, 1)
+    assert r["body"]["capture_schema"] == 1
+    assert r["body"]["speaker_role"] == "human" and r["body"]["origin_type"] == "external_chat"
+    assert HUMAN_TURN in r["body"]["text"]
+
+
+def test_scheduled_job_session_is_dropped_whole_and_logged_without_text(hooks, kernel, tmp_path):
+    head = "[IMPORTANT: You are running as a scheduled cron job] morning check"
+    turn(hooks, "cron", head, "早上好，今天的提醒如下")
+    turn(hooks, "cron", HUMAN_TURN, "不用管这条")  # 同一会话的后续轮次也不再发
+    hooks["on_session_end"](session_id="cron")
+    assert posts(kernel, 1, wait=1) == []
+    log = log_text(tmp_path)
+    assert "cron_echo" in log and HUMAN_TURN not in log and "早上好" not in log
+
+
+def test_background_curator_session_is_dropped_whole(hooks, kernel, tmp_path):
+    turn(hooks, "cur", "You are running as Hermes' background skill CURATOR. Consolidate the skills.", "merged")
+    hooks["on_session_end"](session_id="cur")
+    assert posts(kernel, 1, wait=1) == []
+    assert "background_internal" in log_text(tmp_path)
+
+
+def test_only_the_human_turn_of_a_mixed_session_is_sent(hooks, kernel, tmp_path):
+    turn(hooks, "m", '[Cronjob "财务提醒-11月月度两项" completed]', "提醒已发出")
+    turn(hooks, "m", "[IMPORTANT: Background process disk-slim completed normally]", "清理完成，exit 0")
+    turn(hooks, "m", "[ASYNC DELEGATION BATCH COMPLETE] 3 tasks", "都做完了")
+    turn(hooks, "m", HUMAN_TURN, "好")
+    hooks["on_session_end"](session_id="m")
+    (r,) = posts(kernel, 1)
+    assert HUMAN_TURN in r["body"]["text"]
+    for dropped in ("Cronjob", "Background process", "ASYNC DELEGATION", "清理完成"):
+        assert dropped not in r["body"]["text"]
+    assert len(kernel["log"]) == 1
+    log = log_text(tmp_path)
+    for why in ("cron_echo", "system_notice"):
+        assert why in log
+
+
+def test_unattributable_wrapper_only_turn_is_dropped(hooks, kernel, tmp_path):
+    turn(hooks, "w", "[IMPORTANT: Something new happened]", "ok")
+    hooks["on_session_end"](session_id="w")
+    assert posts(kernel, 1, wait=1) == []
+    assert "unknown" in log_text(tmp_path)
+
+
+def test_empty_or_missing_user_message_is_not_sent(hooks, kernel, tmp_path):
+    turn(hooks, "e", None, "只有助手在说话")
+    turn(hooks, "e", "   ", "还是只有助手")
+    hooks["on_session_end"](session_id="e")
+    assert posts(kernel, 1, wait=1) == []
+    assert list((state(tmp_path) / "pending").glob("*")) == []
+
+
+def test_attachment_turn_with_the_person_text_is_kept(hooks, kernel):
+    turn(hooks, "i", "[The user sent an image: a whiteboard photo]\n下周三前把这三个点整理成方案", "收到")
+    hooks["on_session_end"](session_id="i")
+    (r,) = posts(kernel, 1)
+    assert r["body"]["capture_schema"] == 1 and "下周三前" in r["body"]["text"]

@@ -105,9 +105,9 @@ func notSame(a, b domain.Item) bool {
 
 // veto 是第 6 层校验的禁止性规则：it 折叠到 t（或与 t 整合成一条）被禁止时返回拒绝码与原因，空为放行。
 // 模型答完后（askBatch）与落账时（inbound.sweep）共用这一处；检索阶段不拦。结论与去处阶段相配另由调用方判（答完时看 stepOne，落账时看 fits）。
-func veto(it, t domain.Item) (code, why string) {
+func veto(inbox string, it, t domain.Item) (code, why string) {
 	switch {
-	case !sameOwner(it, t):
+	case !sameOwner(inbox, it, t):
 		return domain.RejectCrossProject, "去处属于另一个项目，跨项目不合并"
 	case otherChange(changeRef(it), changeRef(t)):
 		return domain.RejectOtherChange, "去处是同一仓库的另一个 PR，不合并"
@@ -239,9 +239,11 @@ func ruleKeep(pol policy.Policy, it domain.Item) (sweepIn, bool) {
 	return sweepIn{}, false
 }
 
-// sameOwner 是合并护栏：只拦跨项目——两边都有项目且不是同一个。一边或两边没有项目放行（建议不带项目是常态，§9.3）。阶段相配另由 fits 判。
-func sameOwner(a, b domain.Item) bool {
-	return a.Project == "" || b.Project == "" || a.Project == b.Project
+// sameOwner 是合并护栏：只拦跨项目——两边分属两个不同的具体业务项目才拦。没有项目与内置 Inbox 都算"没有指定具体业务项目"
+// （建议不带项目是常态，主会话捕获兜底进 Inbox 也是常态，§9.3），一边是它们时放行。阶段相配另由 fits 判。
+func sameOwner(inbox string, a, b domain.Item) bool {
+	unowned := func(project string) bool { return project == "" || (inbox != "" && project == inbox) }
+	return unowned(a.Project) || unowned(b.Project) || a.Project == b.Project
 }
 
 // batchGroup 是模型给的一个组：主题与成员。
@@ -287,6 +289,7 @@ func (bc *batchCombined) lack(prefix, where string, facts []fact) {
 // groups、combined 由 askBatch 在模型答完后填上。
 type batchPlan struct {
 	id       string
+	inboxID  string // 内置 Inbox 的项目 id：它不算具体业务项目（§9.3）
 	size     int
 	members  []*sweepRec
 	settle   []sweepIn   // 规则直接留着的（外发范围不许送）
@@ -339,6 +342,11 @@ func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain
 		}
 	}
 	p := &batchPlan{id: "mb_" + hex.EncodeToString(h.Sum(nil))[:12], size: len(batch), srcs: srcs, topics: recentTopics(all)}
+	for _, pr := range projs {
+		if pr.IsInbox() {
+			p.inboxID = pr.ID
+		}
+	}
 
 	// 已有事项：进行中与已完成的（§9.3 判定优先级第 1 步）。建议（含已归类的）、被忽略的不作去处；批内合并只在成员之间。
 	inBatch := map[string]bool{}
@@ -762,7 +770,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 				t, ok := byRef[ref]
 				if !ok || t.member || !slices.ContainsFunc(m.cands, func(c sweepCand) bool { return c.rec == t }) {
 					reject(domain.RejectNotCandidate, "模型给的去处不在这一条的候选里")
-				} else if code, why := veto(m.it, t.it); code != "" {
+				} else if code, why := veto(p.inboxID, m.it, t.it); code != "" {
 					reject(code, why)
 				} else if d.Action != stepOne(t.it) {
 					reject(domain.RejectActionMismatch, "结论与去处的状态不相配（"+d.Action+" 落到"+sweepStatus(t.it)+"的事项）")
@@ -796,12 +804,12 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 		delete(merging, c.Merge) // 同号只认第一项
 		bc := &batchCombined{ref: c.Merge, title: strings.TrimSpace(c.Title), summary: strings.TrimSpace(c.Summary), body: strings.TrimSpace(c.Body), topic: p.groups[groupOf[set[0]]].topic}
 		p.combined = append(p.combined, bc)
-		bc.code, bc.why = combineProblem(set, groupOf, bc)
+		bc.code, bc.why = combineProblem(p.inboxID, set, groupOf, bc)
 		if bc.code == "" {
 			// 落到载体上的正文 = 模型的要点清单 + 内核逐字附上的各成员原文（超长按额度截断并标注）。
 			// 标题摘要里的关键事实要在整合后的标题摘要与要点清单里都有；原文里的关键事实要在整合后的整段正文里有（被截掉的只能靠要点清单带上）。
 			list := bc.body
-			bc.body = integratedBody(list, set, carrierOf(set), p.srcs, pol.Merge.BodyMax())
+			bc.body = integratedBody(list, set, carrierOf(p.inboxID, set), p.srcs, pol.Merge.BodyMax())
 			bc.checkFacts(set, list)
 			if len(bc.missing) > 0 {
 				bc.code, bc.why = domain.RejectFactsMissing, "整合后的文本或正文缺少成员必须保留的事实（"+strings.Join(bc.lacks, "；")+"），不合并"
@@ -814,7 +822,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 			}
 			continue
 		}
-		bc.carrier = carrierOf(set)
+		bc.carrier = carrierOf(p.inboxID, set)
 		ids := make([]string, len(set))
 		for i, m := range set {
 			ids[i] = m.it.ID
@@ -839,7 +847,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, p *batchPlan)
 }
 
 // combineProblem 是一项整合不能落成的拒绝码与原因（空为可以）：不足两条、跨组、文本或正文为空（combine_invalid），成员两两之间被 veto 拦下。
-func combineProblem(set []*sweepRec, groupOf map[*sweepRec]int, bc *batchCombined) (string, string) {
+func combineProblem(inbox string, set []*sweepRec, groupOf map[*sweepRec]int, bc *batchCombined) (string, string) {
 	switch {
 	case len(set) < 2:
 		return domain.RejectCombine, "合并只剩一条"
@@ -853,7 +861,7 @@ func combineProblem(set []*sweepRec, groupOf map[*sweepRec]int, bc *batchCombine
 	}
 	for i, a := range set {
 		for _, b := range set[i+1:] {
-			if code, why := veto(a.it, b.it); code != "" {
+			if code, why := veto(inbox, a.it, b.it); code != "" {
 				return code, "合并的几条之间：" + why
 			}
 		}
@@ -861,11 +869,22 @@ func combineProblem(set []*sweepRec, groupOf map[*sweepRec]int, bc *batchCombine
 	return "", ""
 }
 
-// carrierOf 是整合的载体：名下来源事件最多的一条，同数取建立最早的。
-func carrierOf(set []*sweepRec) *sweepRec {
+// carrierOf 是整合的载体：属于具体业务项目的优先（不然合并会把已归类的建议吸回 Inbox），
+// 其次名下来源事件最多的一条，同数取建立最早的。
+func carrierOf(inbox string, set []*sweepRec) *sweepRec {
+	owned := func(m *sweepRec) bool { return m.it.Project != "" && m.it.Project != inbox }
 	best := set[0]
 	for _, m := range set[1:] {
-		if len(m.held) > len(best.held) || (len(m.held) == len(best.held) && m.it.CreatedAt.Before(best.it.CreatedAt)) {
+		switch {
+		case owned(m) != owned(best):
+			if owned(m) {
+				best = m
+			}
+		case len(m.held) != len(best.held):
+			if len(m.held) > len(best.held) {
+				best = m
+			}
+		case m.it.CreatedAt.Before(best.it.CreatedAt):
 			best = m
 		}
 	}
@@ -1054,7 +1073,11 @@ func registerSweep(x *command.Executor) error {
 				case v.Into && (t.Proposal == nil || t.Proposal.Integrated == nil || t.Proposal.Integrated.Batch != v.Batch || !slices.Contains(t.Proposal.Integrated.Members, it.ID)):
 					code, why = domain.RejectNotLanded, "整合没有落成"
 				default:
-					code, why = veto(it, t)
+					inbox, _, err := projects.InboxID(c.Tx)
+					if err != nil {
+						return nil, err
+					}
+					code, why = veto(inbox, it, t)
 				}
 				if code != "" {
 					v.Action, v.Target, v.Rejected, v.Why = domain.SweepKeep, "", code, why+"，留着："+v.Why
@@ -1155,6 +1178,10 @@ func integrable(tx *store.Tx, carrier domain.Item, members []string) (string, st
 	if !slices.Contains(members, carrier.ID) || len(members) < 2 {
 		return domain.RejectNotLanded, "成员不全"
 	}
+	inbox, _, err := projects.InboxID(tx)
+	if err != nil {
+		return "", "读不到内置 Inbox：" + err.Error()
+	}
 	for _, id := range members {
 		if id == carrier.ID {
 			continue
@@ -1163,7 +1190,7 @@ func integrable(tx *store.Tx, carrier domain.Item, members []string) (string, st
 		if err != nil || !pending(m) {
 			return domain.RejectNotLanded, "有成员已不在待归类"
 		}
-		if code, why := veto(carrier, m); code != "" {
+		if code, why := veto(inbox, carrier, m); code != "" {
 			return code, "有成员与它：" + why
 		}
 	}

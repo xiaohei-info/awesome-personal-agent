@@ -178,7 +178,7 @@ func TestBatchSelectedAcceptRespectsNotSame(t *testing.T) {
 	if !slices.Contains(e.item(a).Proposal.NotSame, b) || e.item(b).Phase != domain.PhaseProposed {
 		t.Fatalf("fixture: not_same %+v", e.item(a).Proposal)
 	}
-	g := Groups([]domain.Item{e.item(a), e.item(b)}, map[string]Origin{})
+	g := Groups([]domain.Item{e.item(a), e.item(b)}, map[string]Origin{}, "")
 	if len(g) != 1 || len(g[0].Items) != 2 || len(g[0].Bundles) != 0 {
 		t.Fatalf("same merge key must be one group, but no bundle when split: %+v", g)
 	}

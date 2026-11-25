@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -38,6 +39,37 @@ const (
 const (
 	ReasonRunIdentity     = "run_identity"
 	ReasonCaptureDisabled = "capture_disabled"
+	// ReasonNonExternalOrigin 与 ReasonAlreadyResolved 是通用准入闸门的预期过滤（§9.3）：不是外部人发起的轮次，
+	// 或本轮只是确认已完成、已答复。两者都不算失败，不记 EvCaptureFailed。
+	ReasonNonExternalOrigin = "non_external_origin"
+	ReasonAlreadyResolved   = "already_resolved"
+)
+
+// 捕获增量的来源标注（§9.3）。契约版本 1 由插件标注发言者角色与来源类型，内核据此判定只有外部人的输入进入候选抽取；
+// 怎么识别属于各 harness 的插件，内核只认这几个取值。
+const (
+	// CaptureSchemaLegacy 是没有标注的旧调用方，本版仍放行；CaptureSchemaRoles 是带角色与来源的标注。
+	CaptureSchemaLegacy = 0
+	CaptureSchemaRoles  = 1
+
+	SpeakerHuman     = "human"
+	SpeakerAssistant = "assistant"
+	SpeakerSystem    = "system"
+
+	OriginExternalChat       = "external_chat"
+	OriginAssistantOutput    = "assistant_output"
+	OriginSystemNotice       = "system_notice"
+	OriginCronEcho           = "cron_echo"
+	OriginBackgroundInternal = "background_internal"
+
+	StatusOpen     = "open"
+	StatusResolved = "resolved"
+)
+
+var (
+	speakerRoles = map[string]bool{SpeakerHuman: true, SpeakerAssistant: true, SpeakerSystem: true}
+	originTypes  = map[string]bool{OriginExternalChat: true, OriginAssistantOutput: true, OriginSystemNotice: true, OriginCronEcho: true, OriginBackgroundInternal: true}
+	statusHints  = map[string]bool{StatusOpen: true, StatusResolved: true}
 )
 
 // 没能捕获的原因类别（EvCaptureFailed 的 class）。第一类内核自己判定；其余由插件在下一次成功连上内核时补报，
@@ -65,6 +97,51 @@ type captureIn struct {
 	Host     string            `json:"host,omitempty"`
 	Text     string            `json:"text"`
 	Failures []reportedFailure `json:"failures,omitempty"`
+	// 来源标注（§9.3）：capture_schema 是契约版本，speaker_role 与 origin_type 是这一段增量的发起者与来源，
+	// status_hint 为 resolved 表示本轮只是确认已完成或已答复。schema 为 1 时前两项必填。
+	CaptureSchema int    `json:"capture_schema,omitempty"`
+	SpeakerRole   string `json:"speaker_role,omitempty"`
+	OriginType    string `json:"origin_type,omitempty"`
+	StatusHint    string `json:"status_hint,omitempty"`
+}
+
+// annotated 报告这次请求是否带了来源标注（schema 1，或任意一个标注字段非空）。
+func (in captureIn) annotated() bool {
+	return in.CaptureSchema == CaptureSchemaRoles || in.SpeakerRole != "" || in.OriginType != "" || in.StatusHint != ""
+}
+
+// check 校验标注本身：不认识的契约版本、不在枚举里的取值都是请求错误，不静默放行（暴露插件实现缺陷）。
+func (in captureIn) check() error {
+	if in.CaptureSchema < 0 || in.CaptureSchema > CaptureSchemaRoles {
+		return invalid(fmt.Sprintf("unknown capture_schema %d", in.CaptureSchema))
+	}
+	if !in.annotated() {
+		return nil
+	}
+	switch {
+	case !speakerRoles[in.SpeakerRole]:
+		return invalid("speaker_role must be one of human, assistant, system")
+	case !originTypes[in.OriginType]:
+		return invalid("origin_type must be one of external_chat, assistant_output, system_notice, cron_echo, background_internal")
+	case in.StatusHint != "" && !statusHints[in.StatusHint]:
+		return invalid("status_hint must be open or resolved when given")
+	}
+	return nil
+}
+
+// admission 是通用准入：只有外部人发起、且不是已确认完成的轮次进入候选抽取。
+// 放行时 reason 为空；旧调用方没有标注，照旧放行（本版保持兼容，附录 B.6 记退场路径）。
+func (in captureIn) admission() (ok bool, reason string) {
+	if !in.annotated() {
+		return true, ""
+	}
+	if in.StatusHint == StatusResolved {
+		return false, ReasonAlreadyResolved
+	}
+	if in.SpeakerRole != SpeakerHuman || in.OriginType != OriginExternalChat {
+		return false, ReasonNonExternalOrigin
+	}
+	return true, ""
 }
 
 // failed 记一次没能捕获：只有类别与时间。at 为零取当前时刻。
@@ -111,6 +188,9 @@ func (s *Service) registerCapture(x *command.Executor) error {
 			if strings.TrimSpace(in.Text) == "" {
 				return nil, invalid("text is required")
 			}
+			if err := in.check(); err != nil {
+				return nil, err
+			}
 			if c.Caller.Level == authz.LevelObserver || c.Caller.Kind == auth.Observer {
 				return nil, domain.NewError(domain.CodePermissionDenied, "credential level does not allow this action", "use a worker or higher credential")
 			}
@@ -140,6 +220,10 @@ func (s *Service) registerCapture(x *command.Executor) error {
 			if !p.Capture {
 				return CaptureOut{Reason: ReasonCaptureDisabled, Project: id}, failed(c, FailDisabled, id, time.Time{})
 			}
+			// 通用准入闸门（§9.3）：不是外部人发起的轮次、或本轮只是确认已完成，属预期过滤，不入账也不记失败。
+			if ok, reason := in.admission(); !ok {
+				return CaptureOut{Reason: reason, Project: id}, nil
+			}
 			// 事件 id 由内容决定：同一会话重复提交同一段增量不产生第二条来源事件。
 			sum := sha256.Sum256([]byte(id + "\x00" + c.Caller.Actor.Session + "\x00" + in.Text))
 			evID := "cap_" + hex.EncodeToString(sum[:12])
@@ -147,7 +231,9 @@ func (s *Service) registerCapture(x *command.Executor) error {
 			if err := runner.AppendInternal(c.Tx, captureSource(capturePrefix+id), ev); err != nil {
 				return nil, err
 			}
-			pl, _ := json.Marshal(map[string]string{"event": evID, "project": id})
+			// 审计带上这次的来源标注；旧调用方记 legacy，便于观测还有没有没升级的插件。
+			pl, _ := json.Marshal(map[string]any{"event": evID, "project": id, "capture_schema": in.CaptureSchema,
+				"speaker_role": in.SpeakerRole, "origin_type": in.OriginType, "legacy": !in.annotated()})
 			if _, err := c.Emit(domain.Event{Type: EvCaptured, Object: evID, Reason: "conversation delta captured", Payload: pl}); err != nil {
 				return nil, err
 			}

@@ -46,7 +46,7 @@ func TestGroupsPartition(t *testing.T) {
 		"sec": mail, "fin1": mail, "fin2": mail, "al": chat, "sub": mail, "chatsub": chat, "prtitle": pr, "remind": {Type: "reminder.due"},
 		"obj1": mail, "obj2": pr, "hosted": pr, "pin": chat, "pinmk": mail, "pinmk2": mail}
 
-	gs := Groups(props, origins)
+	gs := Groups(props, origins, "")
 	where := map[string]string{}
 	for _, g := range gs {
 		for _, id := range g.Items {

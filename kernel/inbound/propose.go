@@ -94,7 +94,7 @@ func (s *Service) draftProposal(ctx context.Context, id command.Identity, event 
 		if ev, err = runner.Event(tx, event); err != nil {
 			return err
 		}
-		return sn.loadFacts(tx)
+		return sn.loadFacts(tx, s.o.Now())
 	})
 	if err != nil {
 		return "", mergeFields{}, err

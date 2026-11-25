@@ -421,8 +421,15 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 			k.draft(subject, d)
 			evs = append(evs, map[string]any{"id": "wb-" + strings.ToLower(subject), "type": "acc.wb", "subject": subject})
 		}
+		// 同一链接的两条事件当场合成一条建议（合并键取链接）：建议卡上因此有一处「合并自 2 条」，360px 走查要用它。
+		mergedDraft := map[string]any{"title": "起草：WB-L", "summary": "同一件事的两条消息", "kind": "task", "reason": "一句话理由", "recommend": "dismiss"}
+		k.draft("WB-L", mergedDraft)
+		evs = append(evs,
+			map[string]any{"id": "wb-l1", "type": "acc.wb", "subject": "WB-L", "link": "https://example.test/wb/merged"},
+			map[string]any{"id": "wb-l2", "type": "acc.wb", "subject": "WB-L", "link": "https://example.test/wb/merged"})
 		src.emit(k, evs...)
-		proposals = k.waitEvents("src_wb", 12)
+		allEvents := k.waitEvents("src_wb", 14)
+		proposals = allEvents[:12]
 		for _, e := range proposals {
 			if e.Disposition != "proposed" || e.Item == "" {
 				t.Fatalf("事件 %s 应为 proposed 且有事项: %+v", e.Subject, e)
@@ -438,6 +445,23 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 			return true
 		}) {
 			t.Fatal("12 条建议没有都带上推荐")
+		}
+		var mergedOne map[string]any
+		for _, e := range allEvents {
+			if e.Subject == "WB-L" && e.Item != "" {
+				mergedOne = k.item(e.Item)
+				break
+			}
+		}
+		if mergedOne == nil {
+			t.Fatal("WB-L 的两条事件没有合成一条建议")
+		}
+		if pr, _ := mergedOne["proposal"].(map[string]any); pr != nil {
+			if srcs, _ := pr["sources"].([]any); len(srcs) != 2 {
+				t.Fatalf("WB-L 应合成一条带 2 个来源的建议，实际 %v", pr)
+			}
+		} else {
+			t.Fatalf("WB-L 合成的事项没有建议信息: %v", mergedOne)
 		}
 		// 停掉全部替身：之后的页面操作若还需要模型就会失败。STUB_HARNESS 在本流程里从未启动，进程表里本来就没有。
 		k.Cls.Close()
@@ -487,14 +511,31 @@ await page.waitForSelector("loc=role:button[name='写进展']", { state: "visibl
 await fillSafe("loc=role:textbox[name*='进展']", "已交照片");
 await page.click("loc=role:button[name='写进展']");
 await page.waitForFunction(() => document.body.textContent.includes("已交照片"));
-// ④ 按推荐处理
+// ④ 建议页：页顶没有「按推荐处理」；窄屏卡上只有接受、忽略、更多三个按钮，更多菜单不出视口，「合并自 N 条」展开也不撑宽
 await page.goto(base + "/proposals");
-// 按钮的可访问名里带条数（「按推荐处理 12 条」），只能按子串找。
-await page.waitForSelector("loc=role:button[name*='按推荐处理']", { state: "visible" });
-await page.click("loc=role:button[name*='按推荐处理']");
-await page.click("loc=role:button[name='确认按推荐处理']");
-await page.waitForFunction(() => /已处理 \d+ 条/.test(document.body.textContent), undefined, { timeout: 30000 });
-out.outcome = await page.evaluate(() => (document.body.textContent.match(/已处理 \d+ 条[^。]*/) || [""])[0]);
+await page.waitForSelector("main article", { state: "visible" });
+out.proposals = await page.evaluate(() => {
+  const cards = [...document.querySelectorAll("main article")];
+  const first = cards[0];
+  return { cards: cards.length, batchButton: [...document.querySelectorAll("main button")].some((b) => /按推荐处理/.test(b.textContent)),
+    buttons: [...first.querySelectorAll(":scope > .actions button")].map((b) => b.textContent),
+    merged: [...document.querySelectorAll("main article details > summary")].filter((x) => /^合并自 \d+ 条$/.test(x.textContent)).length,
+    width: document.scrollingElement.scrollWidth };
+});
+await page.evaluate(() => document.querySelector("main article .card-actions .row-more > button").click());
+await page.waitForSelector(".card-actions [role='menu']", { state: "visible" });
+out.menu = await page.evaluate(() => {
+  const m = document.querySelector(".card-actions [role='menu']");
+  const r = m.getBoundingClientRect();
+  return { items: [...m.querySelectorAll("[role='menuitem']")].map((x) => x.textContent), left: Math.round(r.left), right: Math.round(r.right),
+    width: document.scrollingElement.scrollWidth };
+});
+await page.keyboard.press("Escape");
+await page.waitForSelector(".card-actions [role='menu']", { state: "detached" });
+if (out.proposals.merged > 0) {
+  await page.evaluate(() => [...document.querySelectorAll("main article details > summary")].find((x) => /^合并自 \d+ 条$/.test(x.textContent)).click());
+  out.expandedWidth = await page.evaluate(() => document.scrollingElement.scrollWidth);
+}
 // 逐页走查
 out.widths = {};
 out.empty = [];
@@ -540,6 +581,27 @@ await page.waitForSelector(".act-row [role='menu']", { state: "detached" });
 				t.Errorf("页面 %s 的 scrollWidth = %v，超出 360", p, w)
 			}
 		}
+		prop := r["proposals"].(map[string]any)
+		if prop["cards"].(float64) == 0 {
+			t.Error("建议页一张卡都没有，走查无从谈起")
+		}
+		if prop["batchButton"] == true {
+			t.Error("建议页不应再有「按推荐处理」")
+		}
+		if got := fmt.Sprint(prop["buttons"]); got != "[接受 忽略 更多]" {
+			t.Errorf("360px 下建议卡的操作按钮 = %s，期望只有接受、忽略、更多", got)
+		}
+		menu := r["menu"].(map[string]any)
+		if sw := menu["width"].(float64); sw > 360 {
+			t.Errorf("展开建议卡「更多」菜单后 scrollWidth = %v，超出 360", sw)
+		}
+		if left, right := menu["left"].(float64), menu["right"].(float64); left < 0 || right > 360 {
+			t.Errorf("建议卡「更多」菜单超出 360 视口: left=%v right=%v", left, right)
+		}
+		if w, ok := r["expandedWidth"].(float64); ok && w > 360 {
+			t.Errorf("展开「合并自 N 条」后 scrollWidth = %v，超出 360", w)
+		}
+		t.Logf("360px 建议页 cards=%v merged=%v menu=%v expandedWidth=%v", prop["cards"], prop["merged"], menu["items"], r["expandedWidth"])
 		if w := r["wide"]; w != nil {
 			t.Logf("宽于视口的元素（不含导航）: %v", w)
 		}
@@ -565,7 +627,9 @@ await page.waitForSelector(".act-row [role='menu']", { state: "detached" });
 		if !wrote {
 			t.Error("WB-D 没有进展\"已交照片\"")
 		}
-		// ④ 12 条建议各有一条 Event；其中 2 条 proposal.attached，成为 WB-C、WB-D 的挂靠消息
+		// ④ 建议页的「按推荐处理」入口已下线（决定 93），走查之后按 API 一次处理这批，页面只管摆放与按钮；
+		// 12 条建议各有一条 Event；其中 2 条 proposal.attached，成为 WB-C、WB-D 的挂靠消息。
+		k.webOK("POST", "/proposals/batch", `{"mode":"recommended","filter":{"source":"src_wb"}}`, 200)
 		for _, e := range proposals {
 			var mine []event
 			for _, ev := range k.events(e.Item, "") {

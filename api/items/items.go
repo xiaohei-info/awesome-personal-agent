@@ -28,6 +28,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -97,15 +98,16 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		}
 	}
 	var (
-		its    []domain.Item
-		prog   map[string]string
-		rejs   = map[string]Rejection{}
-		done   map[string]time.Time
-		undone map[string]bool
-		within map[string][]domain.Progress
-		origin map[string]inbound.Origin
-		dis    map[string]inbound.Dismissal
-		scopes map[string]string
+		its     []domain.Item
+		prog    map[string]string
+		rejs    = map[string]Rejection{}
+		done    map[string]time.Time
+		undone  map[string]bool
+		within  map[string][]domain.Progress
+		origin  map[string]inbound.Origin
+		dis     map[string]inbound.Dismissal
+		inboxID string
+		scopes  map[string]string
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if its, err = kitems.List(tx, f); err != nil {
@@ -146,6 +148,9 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		switch f.Phase {
 		case domain.PhaseProposed:
 			origin, err = inbound.Origins(tx, its)
+			if err == nil {
+				inboxID, _, err = projects.InboxID(tx)
+			}
 		case domain.PhaseDropped:
 			dis, err = inbound.Dismissals(tx, its)
 		}
@@ -188,7 +193,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			}
 		}
 		out["origins"] = at
-		out["groups"] = inbound.Groups(its, at)
+		out["groups"] = inbound.Groups(its, at, inboxID)
 	}
 	if dis != nil { // 只读已放弃时给出忽略记录（批次、理由、时刻），建议页的「已忽略」据此按批列出与撤销（附录 B.2）
 		at := map[string]inbound.Dismissal{}

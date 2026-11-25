@@ -103,6 +103,19 @@ kbd {
   .act-row > .actions > button,
   .act-row > .actions > .row-more > button { padding-left: 6px; padding-right: 6px; white-space: nowrap; }
 }
+/* 建议卡的操作行：窄屏只并排接受、忽略、更多三个，其余收进「更多」菜单（与事项行同一套 .row-more）。 */
+@media (max-width: 820px) {
+  .card-actions { flex-wrap: nowrap; gap: 6px; }
+  .card-actions > button, .card-actions > .row-more { flex: 1 1 auto; }
+  .card-actions > .row-more > button { width: 100%; }
+  .card-actions > button, .card-actions > .row-more > button { padding-left: 6px; padding-right: 6px; white-space: nowrap; min-height: 44px; }
+}
+/* 合并自 N 条：展开区的长标题、长链接换行，不撑宽卡片。 */
+.merged > summary { cursor: pointer; }
+.merged-list > li { min-width: 0; }
+.merged-list > li > div { min-width: 0; }
+.merged-list > li a, .merged-list > li .sub { overflow-wrap: anywhere; }
+.merged-lead { display: grid; gap: 2px; padding: 6px 0; min-width: 0; overflow-wrap: anywhere; }
 .row-more { position: relative; display: inline-flex; }
 .row-more-menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 15;

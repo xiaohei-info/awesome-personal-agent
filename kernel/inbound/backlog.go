@@ -161,7 +161,7 @@ func (s *Service) requeueOutboundChosen(ctx context.Context, since time.Time) []
 			return err
 		}
 		sn := snapshot{}
-		if err := sn.loadFacts(tx); err != nil {
+		if err := sn.loadFacts(tx, s.o.Now()); err != nil {
 			return err
 		}
 		for _, ev := range unset {
@@ -369,7 +369,7 @@ func (s *Service) BacklogRules(ctx context.Context, req command.Request, source 
 			}
 			evs = append(evs, ev)
 		}
-		return sn.loadFacts(tx)
+		return sn.loadFacts(tx, s.o.Now())
 	})
 	if err != nil {
 		return RulesResult{}, err

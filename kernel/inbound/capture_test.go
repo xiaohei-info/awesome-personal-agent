@@ -62,7 +62,7 @@ func (e *env) submit(text string) domain.SourceEvent {
 
 func (e *env) extractReqs() (n int) {
 	for _, r := range e.stub.Requests() {
-		if strings.Contains(r.BodyText, "抽取可以成为建议的候选事项") {
+		if strings.Contains(r.BodyText, "确需本人后续处理或拍板的候选事项") {
 			n++
 		}
 	}
@@ -332,5 +332,114 @@ func TestRejectedCaptureRecordsHealthAlert(t *testing.T) {
 	_ = json.Unmarshal(alerts[0].Payload, &p)
 	if p.Kind != command.ReceiptKind || p.Exit != domain.ExitPermissionDenied {
 		t.Fatalf("payload %+v", p)
+	}
+}
+
+// 来源标注（§9.3）：外部人发起的轮次放行，等它走完流水线；审计载荷里带上这次的标注。
+func TestCaptureAdmitsExternalHumanTurn(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	e.screen(0.90)
+	e.draft(`{"candidates":[{"title":"cap-human 交季度报表","kind":"task"}]}`)
+	out, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"project": e.web, "text": "cap-human 下周一交季度报表",
+		"capture_schema": 1, "speaker_role": "human", "origin_type": "external_chat"})
+	if err != nil || !out.Captured || out.Event == "" {
+		t.Fatalf("out %+v err %v", out, err)
+	}
+	var got map[string]any
+	for _, en := range e.eventsOf(out.Event) {
+		if en.Type == EvCaptured {
+			if err := json.Unmarshal(en.Payload, &got); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got["capture_schema"] != float64(CaptureSchemaRoles) || got["speaker_role"] != SpeakerHuman || got["origin_type"] != OriginExternalChat || got["legacy"] != false {
+		t.Fatalf("audit payload %+v", got)
+	}
+}
+
+// 旧调用方没有标注：本版照旧放行，审计里记 legacy 便于观测。
+func TestCaptureLegacyRequestIsAdmittedAndAuditedAsLegacy(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	e.screen(0.90)
+	e.draft(`{"candidates":[{"title":"cap-legacy 续签护照","kind":"task"}]}`)
+	out, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"project": e.web, "text": "cap-legacy 记得续签护照"})
+	if err != nil || !out.Captured {
+		t.Fatalf("out %+v err %v", out, err)
+	}
+	var got map[string]any
+	for _, en := range e.eventsOf(out.Event) {
+		if en.Type == EvCaptured {
+			if err := json.Unmarshal(en.Payload, &got); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got["legacy"] != true || got["speaker_role"] != "" || got["origin_type"] != "" {
+		t.Fatalf("audit payload %+v", got)
+	}
+}
+
+// 非外部人发起的轮次（助手输出、系统通知、定时任务回声、后台内部会话）一律不入账：不建来源事件、不记失败、不调模型。
+func TestCaptureFiltersNonExternalOrigins(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	for _, c := range []struct {
+		speaker, origin, status, reason string
+	}{
+		{SpeakerAssistant, OriginAssistantOutput, "", ReasonNonExternalOrigin},
+		{SpeakerAssistant, OriginExternalChat, "", ReasonNonExternalOrigin},
+		{SpeakerSystem, OriginSystemNotice, "", ReasonNonExternalOrigin},
+		{SpeakerSystem, OriginCronEcho, "", ReasonNonExternalOrigin},
+		{SpeakerSystem, OriginBackgroundInternal, "", ReasonNonExternalOrigin},
+		{SpeakerSystem, OriginSystemNotice, StatusOpen, ReasonNonExternalOrigin},
+		{SpeakerHuman, OriginExternalChat, StatusResolved, ReasonAlreadyResolved},
+	} {
+		in := map[string]any{"project": e.web, "text": "cap-filter " + c.origin, "capture_schema": 1,
+			"speaker_role": c.speaker, "origin_type": c.origin}
+		if c.status != "" {
+			in["status_hint"] = c.status
+		}
+		out, err := e.capture(caller(authz.LevelWorker, "s1"), in)
+		if err != nil || out.Captured || out.Reason != c.reason || out.Project != e.web {
+			t.Fatalf("%s/%s/%s: out %+v err %v", c.speaker, c.origin, c.status, out, err)
+		}
+	}
+	if n := len(e.events("capture:" + e.web)); n != 0 {
+		t.Fatalf("filtered turns must leave no source event, got %d", n)
+	}
+	if n := len(e.failures()); n != 0 {
+		t.Fatalf("filtered turns are expected, not failures: %+v", e.failures())
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("filtered turns must not call the model, got %d", n)
+	}
+}
+
+// 标注本身不合法（未知的契约版本、缺字段、不在枚举里的取值）是请求错误：不猜、不静默放行。
+func TestCaptureRejectsMalformedAnnotations(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	ok := func(m map[string]any) map[string]any {
+		m["project"], m["text"] = e.web, "cap-bad"
+		return m
+	}
+	for _, in := range []map[string]any{
+		ok(map[string]any{"capture_schema": 2, "speaker_role": SpeakerHuman, "origin_type": OriginExternalChat}),
+		ok(map[string]any{"capture_schema": 1, "origin_type": OriginExternalChat}),
+		ok(map[string]any{"capture_schema": 1, "speaker_role": SpeakerHuman}),
+		ok(map[string]any{"capture_schema": 1, "speaker_role": "robot", "origin_type": OriginExternalChat}),
+		ok(map[string]any{"capture_schema": 1, "speaker_role": SpeakerHuman, "origin_type": "webhook"}),
+		ok(map[string]any{"capture_schema": 1, "speaker_role": SpeakerHuman, "origin_type": OriginExternalChat, "status_hint": "done"}),
+		ok(map[string]any{"speaker_role": SpeakerHuman}), // 只带一个标注字段也按标注校验
+	} {
+		if _, err := e.capture(caller(authz.LevelWorker, "s1"), in); err == nil {
+			t.Fatalf("%v must be rejected", in)
+		}
+	}
+	if n := len(e.events("capture:" + e.web)); n != 0 {
+		t.Fatalf("rejected requests must not capture, got %d events", n)
 	}
 }

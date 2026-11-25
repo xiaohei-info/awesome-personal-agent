@@ -236,7 +236,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	e.queue = delivery.New(delivery.Options{Now: e.Now})
 	e.att = attention.New(attention.Options{Queue: e.queue, Now: e.Now})
 	e.svc, err = New(Options{Store: st, Exec: e.x, Packs: e.loadr, Judge: judge, Owner: "owner", OnError: func(err error) { e.errs <- err },
-		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: e.att}})
+		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: e.att}, Now: e.Now})
 	if err != nil {
 		t.Fatal(err)
 	}

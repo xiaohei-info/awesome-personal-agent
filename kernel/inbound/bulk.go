@@ -15,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -78,7 +79,11 @@ func mergeTarget(tx *store.Tx, v mergeIn) (it, t domain.Item, err error) {
 	case t.Phase != domain.PhaseProposed:
 		return it, t, domain.NewError(domain.CodeConflict, "target "+v.Into+" is not a pending proposal", "re-read the target")
 	}
-	if code, _ := veto(it, t); code != "" {
+	inbox, _, err := projects.InboxID(tx)
+	if err != nil {
+		return it, t, err
+	}
+	if code, _ := veto(inbox, it, t); code != "" {
 		return it, t, domain.NewError(domain.CodeConflict, "these two proposals may not be merged: "+code, "accept them one by one")
 	}
 	return it, t, nil
@@ -297,8 +302,12 @@ func selected(ctx context.Context, x *command.Executor, st *store.Store, req com
 			}
 			return nil
 		}
+		inbox, _, err := projects.InboxID(tx)
+		if err != nil {
+			return err
+		}
 		for _, u := range units(live) {
-			parts = append(parts, split(u)...)
+			parts = append(parts, split(inbox, u)...)
 		}
 		return nil
 	}); err != nil {
@@ -423,11 +432,11 @@ func selected(ctx context.Context, x *command.Executor, st *store.Store, req com
 
 // split 把一个合并键单元拆成接受时各成一个事项的几份（含只有一条的）：每一条进第一份与其中每条都不被 veto 拦下
 // （本人拆开过、跨项目、同仓库不同 PR）的，没有就另起一份。每份按建立先后，首条是留下的那条。
-func split(unit []domain.Item) [][]domain.Item {
+func split(inbox string, unit []domain.Item) [][]domain.Item {
 	var parts [][]domain.Item
 	for _, it := range unit {
 		i := slices.IndexFunc(parts, func(p []domain.Item) bool {
-			return !slices.ContainsFunc(p, func(x domain.Item) bool { c, _ := veto(it, x); return c != "" })
+			return !slices.ContainsFunc(p, func(x domain.Item) bool { c, _ := veto(inbox, it, x); return c != "" })
 		})
 		if i < 0 {
 			parts = append(parts, []domain.Item{it})

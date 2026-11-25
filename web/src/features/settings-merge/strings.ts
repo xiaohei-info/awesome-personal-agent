@@ -41,7 +41,6 @@ const zh = {
   costTitle: "最近 7 天",
   cost: (batches: number, calls: number, chars: number, pending: number) =>
     `跑了 ${batches} 批，模型调用 ${calls} 次，送出约 ${chars} 字${pending ? `；还有 ${pending} 条等着成批` : ""}`,
-  costSee: "在建议页看每一批的去向",
   save: "保存",
 };
 
@@ -85,7 +84,6 @@ const en: typeof zh = {
   defaultLoading: "Loading the built-in default…",
   costTitle: "Last 7 days",
   cost: (batches, calls, chars, pending) => `${batches} batches, ${calls} model calls, about ${chars} characters sent${pending ? `; ${pending} waiting for a batch` : ""}`,
-  costSee: "See where each batch went on the proposals page",
   save: "Save",
 };
 

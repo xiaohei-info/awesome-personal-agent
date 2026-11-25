@@ -93,7 +93,7 @@ export function useNames(kind: NameKind): (id?: string | null) => string {
 }
 
 /** 选一个对象：显示名字，提交 id。当前值不在名单里时仍保留为一个选项，不丢。 */
-export function EntityPick({ kind, value, onChange, label, empty, disabled }: {
+export function EntityPick({ kind, value, onChange, label, empty, disabled, autoFocus }: {
   kind: NameKind;
   value: string;
   onChange: (id: string) => void;
@@ -101,11 +101,12 @@ export function EntityPick({ kind, value, onChange, label, empty, disabled }: {
   /** 空选项的文字；省略则没有空选项。 */
   empty?: string;
   disabled?: boolean;
+  autoFocus?: boolean;
 }) {
   const list = useNamed(kind);
   const opts = value && !list.some((x) => x.id === value) ? [...list, { id: value, name: value }] : list;
   return (
-    <select aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+    <select aria-label={label} value={value} disabled={disabled} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)}>
       {empty !== undefined && <option value="">{empty}</option>}
       {opts.map((x) => (
         <option key={x.id} value={x.id}>{x.name}</option>

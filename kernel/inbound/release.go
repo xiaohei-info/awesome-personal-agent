@@ -263,7 +263,7 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 		return
 	}
 	var sn snapshot
-	if err := s.o.Store.View(ctx, sn.loadFacts); err != nil {
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) error { return sn.loadFacts(tx, s.o.Now()) }); err != nil {
 		return
 	}
 	var calls []direct.JudgeCall

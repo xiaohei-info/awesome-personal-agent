@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText, useT } from "../../app/i18n";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
@@ -210,7 +209,6 @@ function Cost() {
     <section className="panel" aria-label={t.costTitle}>
       <h2>{t.costTitle}</h2>
       <p>{t.cost(a.batches.length, a.model_calls, a.chars, a.pending)}</p>
-      <p className="sub"><Link to="/proposals">{t.costSee}</Link></p>
     </section>
   );
 }

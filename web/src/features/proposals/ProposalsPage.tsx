@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { PageReminder, ProposalsMin } from "../settings-notify/Reminder";
 import { ApiError, type ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
+import { useNarrow } from "../../app/Shell";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
 import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
 import { useT } from "../../app/i18n";
@@ -159,20 +160,82 @@ function ProposalTime({ item, onSaved }: { item: Proposal; onSaved: () => Promis
 
 function Card({ item, failure, rejection, candidates, onAct, onSaved, ready, checked, onCheck }: { item: Proposal; failure?: unknown; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void>; onSaved: () => Promise<void>; ready: boolean; checked?: boolean; onCheck?: (on: boolean) => void }) {
   const t = useT(strings);
-  const [mode, setMode] = useState<"dismiss" | "attach" | null>(null);
+  const narrow = useNarrow();
+  const [mode, setMode] = useState<"dismiss" | "attach" | "project" | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [targets, setTargets] = useState<Proposal[] | null>(null);
   const [target, setTarget] = useState("");
   const [busy, setBusy] = useState(false);
+  const menuId = useId();
+  const moreWrapRef = useRef<HTMLSpanElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const focusEdgeRef = useRef<"first" | "last">("first");
 
-  const act = async (action: Action, body: object) => {
+  // 窄屏把次要动作收进「更多」弹出菜单（与事项行同一个 .row-more 模式与键盘操作）。
+  useEffect(() => {
+    if (!narrow) setMenuOpen(false);
+  }, [narrow]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const btns = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    (focusEdgeRef.current === "last" ? btns[btns.length - 1] : btns[0])?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!moreWrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+  const openMenu = (edge: "first" | "last") => {
+    focusEdgeRef.current = edge;
+    setMenuOpen(true);
+  };
+  const onTriggerKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      openMenu("first");
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      openMenu("last");
+    } else if (e.key === "Escape" && menuOpen) {
+      e.preventDefault();
+      setMenuOpen(false);
+    }
+  };
+  const onMenuKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const btns = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    const idx = btns.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setMenuOpen(false);
+      moreBtnRef.current?.focus();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (btns.length) btns[(idx + 1) % btns.length]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (btns.length) btns[(idx - 1 + btns.length) % btns.length]?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      btns[0]?.focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      btns[btns.length - 1]?.focus();
+    } else if (e.key === "Tab") {
+      setMenuOpen(false);
+    }
+  };
+
+  const actOn = async (id: string, action: Action, body: object) => {
     setBusy(true);
     try {
-      await onAct(item.id, action, body);
+      await onAct(id, action, body);
     } finally {
       setBusy(false);
     }
   };
+  const act = (action: Action, body: object) => actOn(item.id, action, body);
   const openAttach = async () => {
     setMode("attach");
     const list = await candidates();
@@ -188,6 +251,22 @@ function Card({ item, failure, rejection, candidates, onAct, onSaved, ready, che
   const from = item.origin && t.from(item.origin.actor ? credential(item.origin.actor) : sourceName(item.origin.source));
   const targetProjectName = item.project ? project(item.project) : t.noProject;
   const pri = item.priority && item.priority !== "normal" ? item.priority : "";
+  // 推荐行瘦身：推荐接受且不是把握低的不再占一行；补到已有事项、忽略与把握低各留一句提示。
+  const hint = p && (p.recommend !== "accept" || p.low_confidence);
+  const projectPick = projects.length > 0 && (
+    <label className="sub">
+      {t.targetProjectField}{" "}
+      <EntityPick
+        kind="project"
+        label={t.changeProject(item.title)}
+        value={item.project ?? ""}
+        empty={item.project ? undefined : t.noProject}
+        disabled={busy}
+        autoFocus={narrow}
+        onChange={(pid) => pid && pid !== item.project && void act("project", { project: pid })}
+      />
+    </label>
+  );
 
   return (
     <article aria-label={item.title}>
@@ -196,54 +275,63 @@ function Card({ item, failure, rejection, candidates, onAct, onSaved, ready, che
           <input type="checkbox" checked={!!checked} onChange={(e) => onCheck(e.target.checked)} aria-label={t.select(item.title)} /> {t.selectLabel}
         </label>
       )}
-      <h3>{item.title}{p?.integrated && <> <span className="sub" title={t.integratedWhy}>· {t.integrated}</span></>}</h3>
+      <h3>{item.title}</h3>
       <div className="meta">
-        <span className="badge plain">{t.targetProject(targetProjectName)}</span>
-        {from && <span>{from}</span>}
+        <span>{targetProjectName}</span>
+        {from && <span> · {from}</span>}
+        {item.created_at && <span className="sub"> · {when(item.created_at)}</span>}
         <Val k="priority" id={pri} />
       </div>
-      {item.summary && <p>{item.summary}</p>}
+      {item.summary && <p>{p?.integrated ? t.integratedLead(item.summary) : item.summary}</p>}
       <ProposalTime item={item} onSaved={onSaved} />
-      {p && (
+      {hint && (
         <p className="meta">
-          {p.recommend && (
+          {p.recommend && p.recommend !== "accept" && (
             <span>
               {t.recommend(t.do[p.recommend] ?? p.recommend)}
               {p.reason ? ` — ${p.reason}` : ""}
             </span>
           )}
-          {p.recommend && " · "}
-          {p.sources?.length ? (
-            <Link to={p.sources.length === 1 ? "/sources/events/" + encodeURIComponent(p.sources[0]) : "/items/" + encodeURIComponent(item.id)}>{t.sources(p.sources.length)}</Link>
-          ) : (
-            <span>{t.sources(0)}</span>
-          )}
-          {p.low_confidence && <> · <strong title={t.lowConfidenceWhy}>{t.lowConfidence}</strong> <span className="sub">{t.lowConfidenceWhy}</span></>}
+          {p.recommend && p.recommend !== "accept" && p.low_confidence && " · "}
+          {p.low_confidence && <><strong title={t.lowConfidenceWhy}>{t.lowConfidence}</strong> <span className="sub">{t.lowConfidenceWhy}</span></>}
         </p>
       )}
       {p && <Similar p={p} />}
-      {p?.absorbed?.length ? <AbsorbedFrom list={p.absorbed} integrated={p.integrated} onUnmerge={(member) => onAct(member, "unmerge", {})} /> : null}
-      {p?.sources && p.sources.length > 1 && <Sources item={item} onSplit={(event) => onAct(item.id, "split", { event })} onUnmerge={(member) => onAct(member, "unmerge", {})} />}
+      {p && <MergedSources item={item} onSplit={(event) => act("split", { event })} onUnmerge={(member) => actOn(member, "unmerge", {})} />}
       <RejectionNote rejection={rejection} what="handle" />
-      <div className="actions">
-        <button disabled={busy} className={ready ? "primary" : undefined} onClick={() => act("handoff", {})}>{t.acceptHandoff}</button>
+      <div className="actions card-actions">
         <button disabled={busy} onClick={() => act("accept", {})}>{t.do.accept}</button>
-        <button disabled={busy} onClick={openAttach}>{t.do.attach}</button>
-        <button disabled={busy} onClick={() => setMode("dismiss")}>{t.do.dismiss}</button>
-        {projects.length > 0 && (
-          <label className="sub">
-            {t.targetProjectField}{" "}
-            <EntityPick
-              kind="project"
-              label={t.changeProject(item.title)}
-              value={item.project ?? ""}
-              empty={item.project ? undefined : t.noProject}
-              disabled={busy}
-              onChange={(pid) => pid && pid !== item.project && void act("project", { project: pid })}
-            />
-          </label>
+        <button disabled={busy} onClick={() => setMode(mode === "dismiss" ? null : "dismiss")}>{t.do.dismiss}</button>
+        {narrow ? (
+          <span className="row-more" ref={moreWrapRef}>
+            <button
+              ref={moreBtnRef}
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-controls={menuOpen ? menuId : undefined}
+              onClick={() => (menuOpen ? setMenuOpen(false) : openMenu("first"))}
+              onKeyDown={onTriggerKeyDown}
+            >
+              {t.more}
+            </button>
+            {menuOpen && (
+              <div id={menuId} ref={menuRef} className="row-more-menu" role="menu" aria-label={t.moreFor(item.title)} onKeyDown={onMenuKeyDown}>
+                <button type="button" role="menuitem" disabled={busy} className={ready ? "primary" : undefined} onClick={() => { setMenuOpen(false); void act("handoff", {}); }}>{t.acceptHandoff}</button>
+                <button type="button" role="menuitem" disabled={busy} onClick={() => { setMenuOpen(false); void openAttach(); }}>{t.do.attach}</button>
+                {projects.length > 0 && <button type="button" role="menuitem" disabled={busy} onClick={() => { setMenuOpen(false); setMode("project"); }}>{t.targetProjectField}</button>}
+              </div>
+            )}
+          </span>
+        ) : (
+          <>
+            <button disabled={busy} className={ready ? "primary" : undefined} onClick={() => act("handoff", {})}>{t.acceptHandoff}</button>
+            <button disabled={busy} onClick={openAttach}>{t.do.attach}</button>
+            {projectPick}
+          </>
         )}
       </div>
+      {mode === "project" && <div className="actions">{projectPick}</div>}
       {mode === "dismiss" && (
         <div>
           <label>
@@ -296,34 +384,34 @@ function ItemName({ id, say }: { id: string; say: (title: string) => string }) {
   return <>{say(title || "…")}</>;
 }
 
-/** 这一条从哪几条建议合来：逐条列原始标题、来源、建立时间、怎么合的与合并时间，可逐条撤销。名下没有消息的（迁移来的）也在这里。 */
-function AbsorbedFrom({ list, integrated, onUnmerge }: { list: Absorbed[]; integrated?: Integrated; onUnmerge: (member: string) => Promise<void> }) {
+/** 合并进来的源建议：逐条列原始标题、来源、建立时间、原文链接与撤销合并；整合过的另有载体整合前的那一行。 */
+function AbsorbedList({ list, integrated, onUnmerge }: { list: Absorbed[]; integrated?: Integrated; onUnmerge: (member: string) => Promise<void> }) {
   const t = useT(strings);
   const sourceName = useNames("source");
   const [busy, setBusy] = useState(false);
-  const head = integrated ? t.integratedHead(integrated.members.length) : t.absorbedHead(list.length);
   const whole = (a: Absorbed) => !!integrated?.members.includes(a.item);
   return (
-    <details aria-label={head}>
-      <summary>{head}</summary>
-      {integrated && <p className="sub">{t.integratedWhy}</p>}
-      <ul className="rows">
-        {list.map((a) => (
-          <li key={a.item} className="act-row" aria-label={a.title} title={a.ref || a.item}>
-            <div>
-              <span>
-                <Link to={"/items/" + encodeURIComponent(a.item)}>{a.title}</Link>
-                {a.ref && /^https?:\/\//.test(a.ref) && <> · <a href={a.ref} target="_blank" rel="noreferrer" title={a.ref}>{t.link}</a></>}
-              </span>
-              <span className="sub">{[a.source ? sourceName(a.source) : "", a.created_at ? t.createdAt(when(a.created_at)) : "", t.sweepAction[a.action] ?? a.action, t.mergedAt(when(a.at))].filter(Boolean).join(" · ")}</span>
-              {a.summary && <span className="sub">{t.originalSummary(a.summary)}</span>}
-              {a.events?.length ? <span className="sub"><Link to={"/sources/events/" + encodeURIComponent(a.events[0])}>{t.seeMessage(a.events.length)}</Link></span> : null}
-            </div>
-            <button type="button" title={whole(a) ? t.unmergeIntegratedWhy : t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(a.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
-          </li>
-        ))}
-      </ul>
-    </details>
+    <ul className="rows merged-list">
+      {list.map((a) => (
+        <li key={a.item} className="act-row" aria-label={a.title} title={a.ref || a.item}>
+          <div>
+            <span>
+              <Link to={"/items/" + encodeURIComponent(a.item)}>{a.title}</Link>
+              {a.ref && /^https?:\/\//.test(a.ref) && <> · <a href={a.ref} target="_blank" rel="noreferrer" title={a.ref}>{t.link}</a></>}
+            </span>
+            <span className="sub">{[a.source ? sourceName(a.source) : "", a.created_at ? t.createdAt(when(a.created_at)) : "", t.sweepAction[a.action] ?? a.action].filter(Boolean).join(" · ")}</span>
+            {a.events?.length ? <span className="sub"><Link to={"/sources/events/" + encodeURIComponent(a.events[0])}>{t.seeMessage(a.events.length)}</Link></span> : null}
+          </div>
+          <button type="button" title={whole(a) ? t.unmergeIntegratedWhy : t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(a.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
+        </li>
+      ))}
+      {integrated && (
+        <li className="merged-lead" aria-label={t.integratedLeadLine(integrated.title)}>
+          <span>{integrated.title}</span>
+          <span className="sub">{[t.integratedLeadTag, when(integrated.at)].filter(Boolean).join(" · ")}</span>
+        </li>
+      )}
+    </ul>
   );
 }
 
@@ -336,9 +424,9 @@ const when = (s?: string) => (s ? new Date(s).toLocaleString() : "");
 // 页面只摆前若干个字，悬停看全文：理由常是一整段。
 const clip = (s: string, n = 60) => ([...s].length > n ? [...s].slice(0, n).join("") + "…" : s);
 
-/** 合成这一条用了几条消息、各自怎么进来的：「N 条消息 → 这一条」，逐条列来源、时间、原话、链接、相似度与判定理由。
- *  被别的批次折叠进来的建议整组列在它下面，连同它此前自己合进来的几条（取它本身的留痕），跨批也是一串，不用人去翻两跳。 */
-function Sources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event: string) => Promise<void>; onUnmerge: (member: string) => Promise<void> }) {
+/** 合并进来的那几条：卡上只有一个「合并自 N 条」展开区，点开原地列出来。
+ *  有 absorbed（归类折叠进来的建议）时列那些建议，可逐条撤销合并；只有多条来源消息时按到达先后列出，可拆出来。 */
+function MergedSources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event: string) => Promise<void>; onUnmerge: (member: string) => Promise<void> }) {
   const t = useT(strings);
   const { api } = useSession();
   const sourceName = useNames("source");
@@ -346,6 +434,8 @@ function Sources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event
   const [folded, setFolded] = useState<Record<string, Folded>>({});
   const [busy, setBusy] = useState(false);
   const p = item.proposal!;
+  const absorbed = p.absorbed ?? [];
+  const n = absorbed.length ? absorbed.length + 1 : (p.sources?.length ?? 0);
   const merges = new Map((p.merges ?? []).map((m) => [m.event, m]));
   const load = () => {
     if (rows) return;
@@ -395,10 +485,11 @@ function Sources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event
     const n = sourceName(merges.get(ev.id)?.source || ev.source_id);
     return { ...a, [n]: (a[n] ?? 0) + 1 };
   }, {})).map(([n, k]) => t.partCount(n, k)).join(" · ");
+  if (!absorbed.length && !(p.sources && p.sources.length > 1)) return null;
   return (
-    <details onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && load()}>
-      <summary>{t.sourcesHead(p.sources!.length)}</summary>
-      {!rows ? <p role="status">{t.loadingSources}</p> : (
+    <details className="merged" onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && !absorbed.length && load()}>
+      <summary>{t.mergedFrom(n)}</summary>
+      {absorbed.length ? <AbsorbedList list={absorbed} integrated={p.integrated} onUnmerge={onUnmerge} /> : !rows ? <p role="status">{t.loadingSources}</p> : (
         <>
           <p className="sub">{tally}</p>
           <ul className="rows">
@@ -428,82 +519,6 @@ function Sources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event
           </ul>
         </>
       )}
-    </details>
-  );
-}
-
-interface Decision { item: string; title: string; source?: string; sources?: number; action: string; target?: string; target_title?: string; why?: string; by: string }
-interface Activity {
-  days: number; pending: number; model_calls: number; chars: number;
-  batches: { batch: string; at: string; size: number; run?: string; chars: number; deferred?: number; decisions: Decision[] }[];
-}
-
-// 规则比过、没有相似记录而留着的不逐条列，只记条数；折叠掉的按去处收成「N 条 → 这一条」排前面，其次是模型看过的。
-const quiet = (d: { action: string; by: string }) => d.action === "keep" && d.by === "rule";
-const isFold = (d: { action: string }) => d.action === "attach" || d.action === "merge" || d.action === "duplicate";
-
-/** 最近自动归类（§9.3）：每一批归了几条、调了几次模型、送出多少字；折叠掉的按去处写成「N 条 → 「去处」」，逐条写明理由，可以一键撤销。 */
-function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => Promise<void>; reload: number }) {
-  const t = useT(strings);
-  const { api } = useSession();
-  const sourceName = useNames("source");
-  const [a, setA] = useState<Activity | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api.get<Activity>("/merge/activity?days=7").then(setA, () => setA(null));
-  }, [api, reload]);
-  if (!a || (a.batches.length === 0 && a.pending === 0)) return null;
-  const all = a.batches.flatMap((b) => b.decisions);
-  const n = (k: string) => all.filter((d) => d.action === k).length;
-  const parts = (["attach", "merge", "duplicate", "keep", "undone"] as const).filter((k) => n(k) > 0).map((k) => t.actionCount(t.sweepAction[k], n(k)));
-  const row = (d: Decision, fold: boolean) => (
-    <li key={d.item} className="act-row" aria-label={d.title} title={d.item}>
-      <div>
-        <span>
-          <Link to={"/items/" + encodeURIComponent(d.item)}>{d.title}</Link>
-          {(d.source || (fold && d.sources)) && <span className="sub"> · {[d.source ? sourceName(d.source) : "", fold && d.sources ? t.sources(d.sources) : ""].filter(Boolean).join(" · ")}</span>}
-        </span>
-        <span className="sub">
-          {t.sweepAction[d.action] ?? d.action}
-          {!fold && d.target && <> → <Link to={"/items/" + encodeURIComponent(d.target)}>「{d.target_title || "…"}」</Link></>}
-          {" · "}{t.sweepBy[d.by] ?? d.by}
-        </span>
-        {d.why && <span className="sub" title={d.why}>{t.reasonIs(clip(d.why))}</span>}
-      </div>
-      {fold && (
-        <button type="button" title={t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(d.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
-      )}
-    </li>
-  );
-  return (
-    <details className="panel" aria-label={t.activityHead}>
-      <summary>{t.activitySummary(a.days, parts.join("、") || t.nothingYet, a.model_calls, a.chars, a.pending)}</summary>
-      {a.batches.map((b) => {
-        const into = new Map<string, Decision[]>();
-        for (const d of b.decisions.filter(isFold)) into.set(d.target ?? "", [...(into.get(d.target ?? "") ?? []), d]);
-        return (
-          <section key={b.batch} aria-label={t.batchHead(when(b.at))}>
-            <h3>{t.batchHead(when(b.at))}</h3>
-            <p className="sub">{t.batchCost(b.size, !!b.run, b.chars)}{b.deferred ? t.batchDeferred(b.deferred) : ""}</p>
-            <ul className="rows">
-              {[...into].map(([target, ds]) => (
-                <li key={"into-" + target} className="act-row" aria-label={t.intoLabel(ds[0].target_title || "…")} title={target}>
-                  <div>
-                    <span>
-                      {t.manyInto(ds.length, ds.reduce((k, d) => k + (d.sources ?? 0), 0))}
-                      <Link to={"/items/" + encodeURIComponent(target)}>「{ds[0].target_title || "…"}」</Link>
-                    </span>
-                    <ul className="rows">{ds.map((d) => row(d, true))}</ul>
-                  </div>
-                </li>
-              ))}
-              {b.decisions.filter((d) => !quiet(d) && !isFold(d)).map((d) => row(d, false))}
-            </ul>
-            {b.decisions.some(quiet) && <p className="sub">{t.ruleKept(b.decisions.filter(quiet).length)}</p>}
-          </section>
-        );
-      })}
-      <p className="sub"><Link to="/settings/merge">{t.mergeSettings}</Link></p>
     </details>
   );
 }
@@ -600,11 +615,8 @@ export function ProposalsPage() {
   const [failure, setFailure] = useState<{ id: string; error: unknown } | null>(null);
   const [source, setSource] = useState("");
   const [project, setProject] = useState("");
-  const [confirming, setConfirming] = useState(false);
-  const [batching, setBatching] = useState(false);
   const [outcome, setOutcome] = useState<{ done: number; skipped: { title: string; why: string; full?: string }[] } | null>(null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [activityTick, setActivityTick] = useState(0);
   const [note, setNote] = useState("");
   const it = useT(itemStrings);
   const handoff = useHandoff();
@@ -660,7 +672,6 @@ export function ProposalsPage() {
       } else if (action === "unmerge") {
         await api.post(path + "/unmerge", {});
         setReceipts((x) => [...x, { id, title: item?.title ?? t.foldedOne, text: t.unmergeDone, to: path }]);
-        setActivityTick((n) => n + 1);
       } else if (action === "split") {
         const r = await api.post<{ item: string }>("/source-events/" + encodeURIComponent((body as { event: string }).event) + "/split", { from: id });
         setReceipts((x) => [...x, { id, title, text: t.splitDone, to: "/items/" + encodeURIComponent(r.item) }]);
@@ -688,17 +699,8 @@ export function ProposalsPage() {
     .map((g) => ({ ...g, its: g.items.map((id) => byId.get(id)).filter(keep) as Proposal[] }))
     .filter((g) => g.its.length > 0);
   const bundles = shown.flatMap((g) => g.bundles ?? []);
-  const isOpen = (g: Group) => g.kind === "pinned" || g.kind === "rest" || !!opened[g.key];
-  // 按推荐处理只管眼前看得见的：收起的组先展开才算，没展开的不进批量，也不进条数与分布。
-  const visible = shown.filter(isOpen).flatMap((g) => g.its);
-  const recommended = visible.filter((i) => i.proposal?.recommend).length;
   const projectName = useNames("project");
   const sourceName = useNames("source");
-  const plan = (["accept", "attach", "dismiss"] as const)
-    .map((a) => [a, visible.filter((i) => i.proposal?.recommend === a).length] as const)
-    .filter(([, n]) => n > 0)
-    .map(([a, n]) => t.planPart(t.do[a], n))
-    .join(" · ");
   const titleOf = (id: string) => byId.get(id)?.title ?? t.goneOne;
   const why = (x: BatchResult) => (x.skip ? t.skipWhy[x.skip] : undefined) ?? (x.code ? t.codeWhy[x.code] : undefined) ?? t.notHandled;
   const report = (rs: BatchResult[], ended = false) =>
@@ -706,27 +708,6 @@ export function ProposalsPage() {
       done: rs.filter((x) => x.ok).length,
       skipped: rs.filter((x) => !x.ok).map((x) => ({ title: titleOf(x.id), why: ended && x.code === "conflict" ? t.notEnded : why(x), full: x.why })),
     });
-
-  const batch = async () => {
-    const ids = visible.filter((i) => i.proposal?.recommend).map((i) => i.id);
-    if (ids.length === 0) return; // 没有可见的推荐就不发请求：服务端也拒绝缺范围的请求
-    setConfirming(false);
-    setBatching(true);
-    setError(null);
-    setOutcome(null);
-    try {
-      const filter = { ...(source && { source }), ...(project && { project }), ids };
-      const r = await api.post<{ results: BatchResult[] }>("/proposals/batch", { mode: "recommended", filter });
-      report(r.results);
-      remember(r.results);
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBatching(false);
-    }
-    await load();
-    window.dispatchEvent(new Event(COUNTS_EVENT));
-  };
 
   // 一次批量的回执里留撤销入口：有接受的，只在撤销截止前给；只有忽略的不限时（「已忽略」里也能按批撤销）。
   const remember = (rs: BatchResult[]) => {
@@ -864,7 +845,6 @@ export function ProposalsPage() {
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
       <PageReminder row="new_proposals"><ProposalsMin /></PageReminder>
-      <MergeActivity onUnmerge={(member) => act(member, "unmerge", {})} reload={activityTick} />
       {orphan != null && <ErrorNote error={orphan} reveal />}
       {error != null && (
         <div>
@@ -946,15 +926,6 @@ export function ProposalsPage() {
                 ))}
               </select>
             </label>
-            {confirming ? (
-              <>
-                <span>{recommended === 0 ? t.batchNoneVisible : plan}</span>
-                <button disabled={batching || recommended === 0} onClick={batch}>{t.confirmBatch}</button>
-                <button onClick={() => setConfirming(false)}>{t.cancel}</button>
-              </>
-            ) : (
-              <button disabled={batching || recommended === 0} onClick={() => setConfirming(true)}>{t.batch(recommended)}</button>
-            )}
           </div>
           {chosenShown.length > 0 && (
             <div className="panel" role="region" aria-label={t.selectedHead}>
