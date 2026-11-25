@@ -350,6 +350,13 @@ func (a *Attention) drop(tx *store.Tx, id string) error {
 
 // ---- 截止已过再提醒 ----
 
+// overdueAtLastChange 报告这条截止在事项最后一次改动时就已经过去，且事项来自来源建议（Proposal 接受后仍保留）。
+// 那是「接受一条在 proposed 阶段就已过期的建议」，不是逾期：接受那一刻补一条「截止已过」没有意义，不再推。
+// 真正逾期后仍未处理的事项 updated_at 停在截止之前，照常提醒；本人手建的事项没有 proposal，也照常提醒。
+func overdueAtLastChange(it domain.Item, d time.Time) bool {
+	return it.Proposal != nil && !d.After(it.UpdatedAt)
+}
+
 // remindOverdue：事项截止或决策 ask.deadline 已过仍未处理，且策略开启再提醒，则产出一条提醒。
 // 内核不会替本人决定：决策保持 needs_input，问题永不超时代答。
 // 提醒 id 含截止时间，每个截止只提醒一次；截止被改后是新的截止。
@@ -364,7 +371,7 @@ func (a *Attention) remindOverdue(tx *store.Tx, pol policy.Policy) error {
 			return err
 		}
 		for _, it := range list {
-			if d := it.Deadline; d != nil && !d.After(now) {
+			if d := it.Deadline; d != nil && !d.After(now) && !overdueAtLastChange(it, *d) {
 				if err := a.remind(tx, pol, it, "due", *d, "截止已过："+it.Title, "事项截止时间 "+d.UTC().Format(time.RFC3339)+" 已过"); err != nil {
 					return err
 				}

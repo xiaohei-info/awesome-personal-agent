@@ -1227,6 +1227,40 @@ func TestOverdueReminderOncePerDeadline(t *testing.T) {
 	}
 }
 
+// proposedItem 建一条带建议信息、给定截止的 proposed 事项（proposal 只由入站流水线写，所以用内核身份）。
+func (e *env) proposedItem(deadline time.Time) string {
+	e.t.Helper()
+	sys := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:inbound", Via: domain.ViaSource, OnBehalfOf: "owner"}, Level: authz.LevelWorker}
+	var out struct{ ID string }
+	_ = json.Unmarshal(e.do(sys, "item.create", map[string]any{"title": "来源建议", "kind": "task", "phase": "proposed",
+		"deadline": deadline, "proposal": map[string]any{"recommend": "accept", "sources": []string{"sev_1"}}}), &out)
+	return out.ID
+}
+
+// 接受一条在 proposed 阶段就已过期的建议，不补推「截止已过」：那条截止在接受前就过去了，不是逾期。
+func TestOverdueReminderSkipsProposalAcceptedAfterDeadline(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	id := e.proposedItem(e.now.Add(-time.Hour))
+	e.do(owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "接受建议"})
+	e.advance(31 * time.Second)
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("a deadline that passed before the accept must not be re-pushed: %+v", d)
+	}
+}
+
+// 接受时还没到期、之后才逾期的事项照常提醒（不接受后一律不推）。
+func TestOverdueReminderFiresWhenDeadlinePassesAfterAccept(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	id := e.proposedItem(e.now.Add(10 * time.Minute))
+	e.do(owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "接受建议"})
+	e.advance(11 * time.Minute)
+	if d := e.claim("channel:chan"); d == nil || d.Item != id || !strings.Contains(d.Content.Title, "截止已过") {
+		t.Fatalf("want the overdue reminder for an item accepted before its deadline: %+v", d)
+	}
+}
+
 // 暂存里留下的提醒在事项已终结时不放行：不依赖事件追赶先清掉它（积压、重启后的旧点）。
 func TestHeldReminderForDroppedItemIsNotReleased(t *testing.T) {
 	e := setup(t)
