@@ -167,6 +167,17 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	var inboxID string
+	if !req.All && project == "" {
+		if id, ok, err := projects.InboxID(tx); err != nil {
+			return res, err
+		} else if ok {
+			inboxID = id
+		}
+	}
+	inScope := func(p string) bool {
+		return req.All || p == project || (project == "" && inboxID != "" && p == inboxID)
+	}
 	// 游标按（会话, 作用域）保存：同一会话换作用域不会漏掉新作用域里更早的变更。
 	key := req.Session + "\x00" + project
 	if req.All {
@@ -195,7 +206,7 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			}
 			return res, err
 		}
-		if !req.All && it.Project != project {
+		if !inScope(it.Project) {
 			continue
 		}
 		e, _, err := entry(tx, it, pol, req.Reader)
@@ -225,7 +236,7 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			}
 			return res, err
 		}
-		if req.All || m.Project == project || m.Project == "" { // 全局规范对每个作用域都有效
+		if inScope(m.Project) || m.Project == "" { // 全局规范对每个作用域都有效
 			sum := mc.reason
 			if mc.rev != "" {
 				if v, err := materials.GetRevision(tx, mc.rev); err == nil && v.Summary != "" {
@@ -237,7 +248,7 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			res.Materials = append(res.Materials, MaterialEntry{ID: m.ID, Title: m.Title, Kind: m.Kind, Path: m.Location, Summary: sum})
 		}
 	}
-	if res.Deliveries, err = injected(tx, req, project, pol); err != nil {
+	if res.Deliveries, err = injected(tx, req, project, inboxID, pol); err != nil {
 		return res, err
 	}
 
@@ -365,7 +376,7 @@ func instruction(req Request) Instruction {
 
 // injected 返回作用域内待注入的投递。带 Session 时每条只给该会话一次，并记 injected_to_session；
 // 不带 Session（运行者读取）给全部且不记录。投递的事项不在账本里（如合并摘要）时只在无项目作用域出现。
-func injected(tx *store.Tx, req Request, project string, pol policy.Policy) ([]DeliveryEntry, error) {
+func injected(tx *store.Tx, req Request, project, inboxID string, pol policy.Policy) ([]DeliveryEntry, error) {
 	q := delivery.New(delivery.Options{})
 	ds, err := q.Injectable(tx)
 	if err != nil {
@@ -380,7 +391,7 @@ func injected(tx *store.Tx, req Request, project string, pol policy.Policy) ([]D
 		it, err := items.Get(tx, d.Item)
 		switch {
 		case err == nil:
-			if !req.All && it.Project != project {
+			if !req.All && it.Project != project && !(project == "" && inboxID != "" && it.Project == inboxID) {
 				continue
 			}
 			e.Action = action(it)

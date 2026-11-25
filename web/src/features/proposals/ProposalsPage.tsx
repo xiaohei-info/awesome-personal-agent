@@ -8,7 +8,7 @@ import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
-import { useItemTitle, useNames } from "../../app/names";
+import { EntityPick, useItemTitle, useNamed, useNames } from "../../app/names";
 import { Val } from "../../app/values";
 import { HANDOFF_TAG } from "../../app/ids";
 import { Prereqs } from "../../app/Prereqs";
@@ -42,7 +42,7 @@ interface Integrated { title: string; summary?: string; members: string[]; at: s
 interface Sweep { state: string; action?: string; target?: string; why?: string; by?: string; at?: string; group?: string; topic?: string }
 interface SourceRead { event: { id: string; source_id: string; subject: string; summary?: string; occurred_at: string; link?: string; disposition?: string; merge_key?: string } }
 
-type Action = "accept" | "dismiss" | "attach" | "handoff" | "split" | "unmerge";
+type Action = "accept" | "dismiss" | "attach" | "handoff" | "split" | "unmerge" | "project";
 /** 处理完的一行回执：说清结果，并给去处（界面设计 §5.2、§7 路径一）。 */
 interface Receipt { id: string; title: string; text: string; to?: string; missing?: boolean }
 /** POST /proposals/batch 的一条结果；skip 是事先或执行中判定不处理的原因码，merge 的 into 是合进的那一条，undo_until 是接受的撤销截止。 */
@@ -76,6 +76,7 @@ function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: {
     if (rec && list.some((t) => t.id === rec)) setTarget(rec);
   };
   const project = useNames("project");
+  const projects = useNamed("project");
   const credential = useNames("credential");
   const sourceName = useNames("source");
   const p = item.proposal;
@@ -125,6 +126,18 @@ function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: {
         <button disabled={busy} onClick={() => act("accept", {})}>{t.do.accept}</button>
         <button disabled={busy} onClick={openAttach}>{t.do.attach}</button>
         <button disabled={busy} onClick={() => setMode("dismiss")}>{t.do.dismiss}</button>
+        {projects.length > 0 && (
+          <label className="sub">
+            {t.project}{" "}
+            <EntityPick
+              kind="project"
+              label={t.changeProject(item.title)}
+              value={item.project ?? ""}
+              empty={item.project ? undefined : t.noProject}
+              onChange={(pid) => pid && pid !== item.project && void act("project", { project: pid })}
+            />
+          </label>
+        )}
       </div>
       {mode === "dismiss" && (
         <div>
@@ -539,6 +552,9 @@ export function ProposalsPage() {
       } else if (action === "split") {
         const r = await api.post<{ item: string }>("/source-events/" + encodeURIComponent((body as { event: string }).event) + "/split", { from: id });
         setReceipts((x) => [...x, { id, title, text: t.splitDone, to: "/items/" + encodeURIComponent(r.item) }]);
+      } else if (action === "project") {
+        const pid = (body as { project: string }).project;
+        await api.patch(path, { project: pid, reason: t.moveProjectReason }, item?.version ? { "If-Match": String(item.version) } : undefined);
       } else {
         await api.post(path + "/" + action, body);
         const target = action === "attach" ? (body as { to: string }).to : id;

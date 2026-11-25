@@ -15,6 +15,9 @@ const (
 	ProjectActive   ProjectStatus = "active"
 	ProjectPaused   ProjectStatus = "paused"
 	ProjectArchived ProjectStatus = "archived"
+
+	// ProjectRoleInbox 标识内置收件箱项目（§6.5）：所有未归属事项与主会话捕获的统一兜底。
+	ProjectRoleInbox = "inbox"
 )
 
 // Checkout 是 repo 的一个本地检出；Host 必须等于该机主机名。
@@ -43,7 +46,12 @@ type Project struct {
 	Capture              bool            `json:"capture,omitempty"`
 	// CaptureOutbound 是对话增量送外部端点的范围（full、excerpt、meta、none）；nil 未选择，没有缺省值（§6.5、§14.14）。
 	CaptureOutbound *string `json:"capture_outbound"`
+	// SystemRole 是内核维护的系统角色标记（目前仅 "inbox"）；外部不可写入（§6.5）。
+	SystemRole string `json:"system_role,omitempty"`
 }
+
+// IsInbox 报告该项目是否为内置 Inbox。
+func (p Project) IsInbox() bool { return p.SystemRole == ProjectRoleInbox }
 
 // LocalCheckout 返回项目在 host 上的第一个检出（§12.6：Host 等于该机主机名才算本机有检出）；没有时返回 nil。
 func (p Project) LocalCheckout(host string) *Checkout {

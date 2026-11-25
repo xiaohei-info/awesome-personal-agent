@@ -9,6 +9,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -50,19 +51,42 @@ func TestCaptureOnByDefaultForNewProject(t *testing.T) {
 	}
 }
 
-// 会话没有对应项目：不捕获，也不静默丢掉：不写来源事件，但记一条 no_project（内容不进账本）。
-func TestCaptureWithoutProjectIsRecordedNotSilent(t *testing.T) {
+// 会话没有对应项目时兜底进入内置 Inbox；显式指定不存在的项目则直接报错 404，不静默兜底。
+func TestCaptureWithoutProjectFallsBackToInbox(t *testing.T) {
 	e := newEnv(t, true)
-	const secret = "不应出现在失败记录里的正文"
-	out, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"text": secret, "path": "/nowhere/else", "host": "h"})
-	if err != nil || out.Captured || out.Reason != ReasonNoProject {
+	inboxID, err := projects.EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.screen(0.03)
+	out, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"text": "主会话杂项讨论", "path": "/nowhere/else", "host": "h"})
+	if err != nil || !out.Captured || out.Project != inboxID {
 		t.Fatalf("out %+v err %v", out, err)
 	}
-	if got := e.failures(); len(got) != 1 || got[0].Class != FailNoProject || got[0].Project != "" {
+	e.waitDisposed("capture:" + inboxID)
+	if got := e.failures(); len(got) != 0 {
+		t.Fatalf("fallback to inbox is not a failure: %+v", got)
+	}
+	// 显式指定了不存在的项目：必须报 not_found，不能兜底到 Inbox。
+	if _, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"project": "prj_missing", "text": "x"}); err == nil {
+		t.Fatal("explicit unknown project must fail, not fall back to inbox")
+	}
+}
+
+// 项目捕获被显式关闭：不写来源事件，记一条 capture_disabled（内容不进账本）。
+func TestCaptureDisabledIsRecordedNotSilent(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, false)
+	const secret = "不应出现在失败记录里的正文"
+	out, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"project": e.web, "text": secret})
+	if err != nil || out.Captured || out.Reason != ReasonCaptureDisabled || out.Project != e.web {
+		t.Fatalf("out %+v err %v", out, err)
+	}
+	if got := e.failures(); len(got) != 1 || got[0].Class != FailDisabled || got[0].Project != e.web {
 		t.Fatalf("failures %+v", got)
 	}
 	if len(e.events("capture:"+e.web)) != 0 || len(e.stub.Requests()) != 0 || len(e.allItems()) != 0 {
-		t.Fatal("no project: no source event, model call or item")
+		t.Fatal("disabled capture: no source event, model call or item")
 	}
 	var raw string
 	_ = e.st.View(bg, func(tx *store.Tx) error {

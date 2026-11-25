@@ -48,7 +48,7 @@ type Signal struct {
 	Captures []CaptureRow `json:"captures,omitempty"`
 }
 
-// CaptureRow 是 capture_failures 的一类原因：class 取 no_project、capture_disabled、kernel_unreachable、no_credentials、
+// CaptureRow 是 capture_failures 的一类原因：class 取 capture_disabled、kernel_unreachable、no_credentials、
 // kernel_refused、plugin_error；last_at 是最近一次失败的时间。
 type CaptureRow struct {
 	Class   string    `json:"class"`
@@ -253,8 +253,8 @@ func build(v khealth.View, rejudgeDays int) Report {
 			"delegations page: nudge, reassign or delegate again", ids(v.StalledDelegations, func(d khealth.StalledDelegation) string { return d.Item }))),
 		warn(sig("clock_lag", len(v.ClockLags), "a timer fired 5 minutes or more after its scheduled time (including timers missed while the kernel was down); clears after an hour without lateness",
 			"health page; if it keeps happening, check host sleep and load", ids(v.ClockLags, func(l khealth.ClockLag) string { return l.Timer }))),
-		warn(sig("capture_failures", len(v.CaptureFailures), "a conversation delta was not captured in the last 24 hours: the session is in no project, the project's capture is off, or the plugin could not deliver it (kernel unreachable or refused, no credentials); counted by reason class, never with the text or credentials; clears when 24 hours pass without a new one",
-			"projects page: register the checkout for the session's directory; for plugin failures check the kernel address and credential the plugin uses", func() []string {
+		warn(sig("capture_failures", len(v.CaptureFailures), "a conversation delta was not captured in the last 24 hours: the project's capture is off, or the plugin could not deliver it (kernel unreachable or refused, no credentials); counted by reason class, never with the text or credentials; clears when 24 hours pass without a new one",
+			"projects page to check capture status; for plugin failures check the kernel address and credential the plugin uses", func() []string {
 				cs := make([]string, 0, len(v.CaptureFailures))
 				for _, f := range v.CaptureFailures {
 					cs = append(cs, f.Class)

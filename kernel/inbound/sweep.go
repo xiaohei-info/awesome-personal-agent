@@ -22,6 +22,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -304,10 +305,28 @@ type batchPlan struct {
 // 按分数取前 merge.candidates 条作候选——只排序，不设下限、不拦（禁止性规则全在第 6 层 veto）；资料打包与超预算砍半。
 func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain.Item, srcs map[string]domain.Source, batch []domain.Item) (*batchPlan, error) {
 	locality := policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
+	var (
+		projs []domain.Project
+		helds = make([][]domain.SourceEvent, len(batch))
+	)
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+		var err error
+		if projs, err = projects.List(tx); err != nil {
+			return err
+		}
+		for i, it := range batch {
+			if helds[i], err = runner.Held(tx, it.ID, it.Proposal.Sources); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	canSend := func(it domain.Item) bool {
 		id := originSource(it)
-		if strings.HasPrefix(id, "capture:") {
-			return false // 对话原文：范围在项目上，这里不读项目，保守不送
+		if proj, ok := captureProject(id); ok {
+			return sendable(captureOutbound(projs, proj), locality)
 		}
 		x, ok := srcs[id]
 		return !ok || sendable(x.Outbound, locality) // 没登记的（本人建的、旧伪来源、例行任务）与模型调用的外发闸口同一取舍
@@ -337,18 +356,8 @@ func (s *Service) planBatch(ctx context.Context, pol policy.Policy, all []domain
 		pool = append(pool, &sweepRec{it: it, change: changeRef(it)})
 	}
 	p.members = make([]*sweepRec, len(batch))
-	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
-		for i, it := range batch {
-			held, err := runner.Held(tx, it.ID, it.Proposal.Sources)
-			if err != nil {
-				return err
-			}
-			p.members[i] = &sweepRec{it: it, member: true, change: changeRef(it), held: held}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	for i, it := range batch {
+		p.members[i] = &sweepRec{it: it, member: true, change: changeRef(it), held: helds[i]}
 	}
 	var ask []*sweepRec
 	for _, m := range p.members {

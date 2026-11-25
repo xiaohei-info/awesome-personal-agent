@@ -783,7 +783,7 @@ func captureFailures(tx *store.Tx, now time.Time) ([]CaptureFailure, error) {
 			var p struct {
 				Class, Project, At string
 			}
-			if en.Tombstone || json.Unmarshal(en.Event.Payload, &p) != nil || p.Class == "" {
+			if en.Tombstone || json.Unmarshal(en.Event.Payload, &p) != nil || p.Class == "" || p.Class == "no_project" {
 				continue
 			}
 			at, err := time.Parse(time.RFC3339, p.At)

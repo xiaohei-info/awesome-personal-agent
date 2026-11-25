@@ -125,7 +125,7 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
     const gen = row(/写作模型还没配置/);
     expect(gen).toHaveTextContent("建议和简报暂时写不出来");
     expect(within(gen).getByRole("link", { name: "去配置" })).toHaveAttribute("href", "/settings/models");
-    expect(within(row(/3 条消息在等你选发给模型多少内容/)).getByRole("link", { name: "去选" })).toHaveAttribute("href", "/sources");
+    expect(within(row(/3 条消息在等你选发给模型多少内容/)).getByRole("link", { name: "去选" })).toHaveAttribute("href", "/settings/models#endpoint-sources");
     expect(within(row(/2 条找回的消息等你放进建议/)).getByRole("link", { name: "去放开" })).toHaveAttribute("href", "/sources");
     expect(within(row(/已退回试运行/)).getByRole("link", { name: "去重新打开" })).toHaveAttribute("href", "/settings/rules#rule-p%2Fevent_rules%2Frule-1");
     const rc = row(/交回的结果被拒了 2 次/);
@@ -314,11 +314,11 @@ describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () =
     expect(main().queryByText(/其他告警/)).toBeNull();
   });
 
-  // 聊天没记下也看得见：没有对应项目是常态（仅供知晓、给去登记目录的入口）；插件或内核的问题要你处理。逐类写次数与最近时间，不含正文与凭据。
-  it("聊天没记下：没有项目归仅供知晓，插件送不出去归要你处理；各写次数与最近时间", async () => {
+  // 聊天没记下：无项目已兜底进内置 Inbox，此处保留的捕获被关掉与插件送不出去均归「要你处理」；各写次数与最近时间，不含正文与凭据。
+  it("聊天没记下：捕获被关掉与插件送不出去均归要你处理；各写次数与最近时间", async () => {
     const bad = {
-      capture_failures: { ok: false, count: 2, severity: "warning", why: "x", detail: ["no_project", "kernel_unreachable"], captures: [
-        { class: "no_project", count: 3, last_at: "2030-01-02T03:04:05Z" },
+      capture_failures: { ok: false, count: 2, severity: "warning", why: "x", detail: ["capture_disabled", "kernel_unreachable"], captures: [
+        { class: "capture_disabled", count: 2, last_at: "2030-01-02T03:04:05Z", project: "prj_a" },
         { class: "kernel_unreachable", count: 1, last_at: "2030-01-02T01:00:00Z" },
       ] },
     };
@@ -326,9 +326,8 @@ describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () =
     const down = (await screen.findByText(/插件连不上 APA，聊天没送出去/)).closest("li")!;
     expect(down).toHaveTextContent("近 24 小时 1 次");
     expect(within(down).getByRole("link", { name: "去看项目" })).toHaveAttribute("href", "/projects");
-    const none = within(main().getByRole("region", { name: "仅供知晓" })).getByText(/聊天所在目录不属于任何项目，没有记下/).closest("li")!;
-    expect(none).toHaveTextContent("近 24 小时 3 次");
-    expect(within(none).getByRole("link", { name: "去登记项目目录" })).toHaveAttribute("href", "/projects");
-    expect(act().queryByText(/聊天所在目录不属于任何项目/)).toBeNull();
+    const off = act().getByText(/项目的聊天记录被关掉了，没有记下/).closest("li")!;
+    expect(off).toHaveTextContent("近 24 小时 2 次");
+    expect(within(off).getByRole("link", { name: "去看项目" })).toHaveAttribute("href", "/projects");
   });
 });

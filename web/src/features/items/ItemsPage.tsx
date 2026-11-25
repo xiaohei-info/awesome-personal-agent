@@ -294,6 +294,7 @@ function ItemDetail() {
   const [loadErr, setLoadErr] = useState<unknown>(null);
   const [actErr, setActErr] = useState<unknown>(null);
   const projectName = useNames("project");
+  const projects = useNamed("project");
   const credential = useNames("credential");
   const [editing, setEditing] = useState(false);
   const post = useAnswer(setActErr);
@@ -358,6 +359,18 @@ function ItemDetail() {
       <p className="lede">
         {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.planned_for && t.planAt(item.planned_for, item.planned_slot), item.deadline && t.due(deadlineText(item.deadline, offset))].filter(Boolean).join(" · ")}
       </p>
+      {item.kind !== "delegation" && projects.length > 0 && (
+        <label className="sub">
+          {t.projectField}{" "}
+          <EntityPick
+            kind="project"
+            label={t.projectField}
+            value={item.project ?? ""}
+            empty={item.project ? undefined : t.noProject}
+            onChange={(pid) => pid && pid !== item.project && void act(() => api.patch(path, { project: pid, reason: t.projectReason }, ifMatch))}
+          />
+        </label>
+      )}
       {actErr != null && <ErrorNote error={actErr} />}
       {item.phase === "needs_input" && item.ask && !item.ask.resolution ? (
         <QuestionCard item={item as DecisionItem} rejection={d.rejection} onAnswer={answer} inItem />
@@ -571,7 +584,7 @@ function NewItem() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const pre = useMemo(() => readPrefill(params), [params]);
-  const [projects, setProjects] = useState<{ id: string; name?: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name?: string; system_role?: string }[]>([]);
   const [vaults, setVaults] = useState<Vault[]>([]);
   // null：本人还没动过项目选择，显示预填认出的那个。
   const [picked, setPicked] = useState<string | null>(null);
@@ -589,12 +602,13 @@ function NewItem() {
   const idem = useRef(crypto.randomUUID());
   const slotV = slotValue(plannedFor, slot);
   const badSlot = slotV.bad;
-  useEffect(() => void api.get<{ projects: { id: string; name?: string }[] }>("/projects").then((r) => setProjects(r.projects), () => {}), [api]);
+  useEffect(() => void api.get<{ projects: { id: string; name?: string; system_role?: string }[] }>("/projects").then((r) => setProjects(r.projects), () => {}), [api]);
   useEffect(() => void api.get<{ vaults: Vault[] }>("/note-vaults").then((r) => setVaults(r.vaults ?? []), () => {}), [api]);
 
-  // project 可以是 id 或名字，认不出就留空。
+  // project 可以是 id 或名字，认不出时默认选中内置 Inbox（没有 Inbox 时留空）。
   const known = projects.find((p) => p.id === pre.project) ?? projects.find((p) => p.name === pre.project);
-  const project = picked ?? known?.id ?? "";
+  const inbox = projects.find((p) => p.system_role === "inbox");
+  const project = picked ?? known?.id ?? inbox?.id ?? "";
 
   const create = async (c: Content) => {
     if (badSlot) return;

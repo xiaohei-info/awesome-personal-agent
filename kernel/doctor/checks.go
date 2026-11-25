@@ -135,14 +135,24 @@ func sources(f Facts, e Env) Check {
 	for _, s := range f.Sources {
 		c.Add(SourceDetail(s, external, e.exists))
 	}
-	if len(f.Sources) == 0 {
+	if external && f.Inbox != nil && f.Inbox.Capture && f.Inbox.CaptureOutbound == nil {
+		c.Add(Detail{
+			Subject: "capture:" + f.Inbox.ID,
+			Status:  Warning,
+			Code:    CodeSourceOutboundUnset,
+			Why:     "the external outbound scope for Inbox chat capture is not chosen; captured conversations are held as outbound_unset until you choose",
+			Next:    "choose the external outbound scope for Inbox in Web settings (Models)",
+			Data:    map[string]any{"type": "capture", "outbound": map[string]any{"local": registry.ScopeFull, "external": "unset"}},
+		})
+	}
+	if len(f.Sources) == 0 && len(c.Details) == 0 {
 		c.Code, c.Why, c.Next = CodeSourcesNone, "no source is registered (optional)", "register sources in Web or in sources.json when you want events to flow in"
 		return c
 	}
 	if c.Status == OK {
 		c.Code, c.Why, c.Next = CodeSourcesOK, fmt.Sprintf("%d sources: commands exist and the outbound scope fits the endpoints", len(f.Sources)), "nothing to do"
 	} else {
-		c.Code, c.Why, c.Next = CodeSourcesAttention, "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
+		c.Code, c.Why, c.Next = CodeSourcesAttention, "some sources need attention; see details", "fix the registration or choose the outbound scope in Web settings (Models)"
 	}
 	return c
 }

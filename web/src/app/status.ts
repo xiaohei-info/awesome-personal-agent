@@ -116,7 +116,7 @@ export function rowsOf(s: Signal): Row[] {
     }
     case "unjudged_backlog":
       return [
-        ...(num(d, "outbound_unset") ? [row("waitScope", true, num(d, "outbound_unset"), "/sources")] : []),
+        ...(num(d, "outbound_unset") ? [row("waitScope", true, num(d, "outbound_unset"), "/settings/models#endpoint-sources")] : []),
         ...(num(d, "restored") ? [row("restored", true, num(d, "restored"), "/sources")] : []),
         ...(num(d, "model_unavailable") + num(d, "undecided") ? [row("waitModel", false, num(d, "model_unavailable") + num(d, "undecided"))] : []),
         ...(num(d, "models_paused") ? [row("waitPaused", false, num(d, "models_paused"), "/sources")] : []),
@@ -149,8 +149,8 @@ export function rowsOf(s: Signal): Row[] {
     case "clock_lag":
       return [row("lag", false, s.count)];
     case "capture_failures":
-      // 没有对应项目是常态（有些聊天本来就不属于哪个项目）：仅供知晓，给去登记目录的入口；其余是插件或内核的问题，要你处理。
-      return (s.captures ?? []).map((x) => ({ ...row("capture", x.class !== "no_project", x.count, "/projects"), code: x.class, params: { at: x.last_at } }));
+      // 无项目归属已统一兜底进入内置 Inbox；此处保留的均为捕获被关闭或插件/内核故障，都要你处理。
+      return (s.captures ?? []).map((x) => ({ ...row("capture", true, x.count, "/projects"), code: x.class, params: { at: x.last_at } }));
     default:
       return [row("unknown:" + s.id, true, s.count)];
   }

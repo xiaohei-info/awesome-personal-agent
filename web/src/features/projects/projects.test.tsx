@@ -10,12 +10,13 @@ import { feature } from "./index";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the input" });
 
-interface P { id: string; name: string; intro?: string; tags?: string[]; status: string; repos?: { remote: string; checkouts?: { host: string; path: string }[] }[]; allowed_executors: string[] | null; capture?: boolean; capture_outbound?: string | null }
+interface P { id: string; name: string; intro?: string; tags?: string[]; status: string; system_role?: string; repos?: { remote: string; checkouts?: { host: string; path: string }[] }[]; allowed_executors: string[] | null; capture?: boolean; capture_outbound?: string | null }
 
-function server(opts: { putDenied?: boolean } = {}) {
+function server(opts: { putDenied?: boolean; withInbox?: boolean } = {}) {
   const projects: P[] = [
     { id: "p_work", name: "acc-work", intro: "工作", tags: ["work"], status: "active", allowed_executors: ["work-host.cli"], repos: [{ remote: "git@h:a/b.git", checkouts: [{ host: "m1", path: "/src/b" }] }] },
     { id: "p_open", name: "acc-open", status: "active", allowed_executors: null },
+    ...(opts.withInbox ? [{ id: "prj_inbox", name: "Inbox", status: "active", system_role: "inbox", allowed_executors: null }] : []),
   ];
   const calls: { method: string; path: string; body?: any; csrf: string | null }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
@@ -222,5 +223,22 @@ describe("项目页", () => {
     unmount();
     mount(s.impl, "/projects/nope");
     expect(await screen.findByRole("alert")).toHaveTextContent("project not found");
+  });
+
+  it("内置 Inbox 在项目列表置顶并带内置徽章；详情隐藏仓库并锁定活跃状态", async () => {
+    const s = server({ withInbox: true });
+    const u = userEvent.setup();
+    const { unmount } = mount(s.impl, "/projects");
+    const items = await within(await screen.findByRole("list", { name: "项目列表" })).findAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("Inbox");
+    expect(items[0]).toHaveTextContent("内置");
+    unmount();
+
+    mount(s.impl, "/projects/prj_inbox");
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(/Inbox.*内置/);
+    expect(screen.queryByRole("region", { name: "仓库" })).not.toBeInTheDocument();
+    await u.click(screen.getByText("项目设置：名称、执行者"));
+    expect(screen.getByText(/内置 Inbox 始终保持活跃/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("状态")).not.toBeInTheDocument();
   });
 });

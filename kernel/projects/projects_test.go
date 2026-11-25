@@ -607,3 +607,99 @@ func TestSeedCaptureEnablesOnceAndIsIdempotent(t *testing.T) {
 		t.Fatal("the migration is one-time")
 	}
 }
+
+// 内置 Inbox：新库创建 prj_inbox，幂等且事件折叠一致；列表永远置顶。
+func TestEnsureInboxCreatesFreshAndVerifiesFold(t *testing.T) {
+	e := setup(t)
+	var other struct{ ID string }
+	_ = json.Unmarshal(e.must(t, owner, "project.create", map[string]any{"name": "AAA"}).Value, &other)
+
+	id, err := EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil || id != InboxDefaultID {
+		t.Fatalf("EnsureInbox: id=%q err=%v", id, err)
+	}
+	p := e.get(t, id)
+	if !p.IsInbox() || p.Name != InboxDefaultName || p.Status != domain.ProjectActive || !p.Capture {
+		t.Fatalf("unexpected inbox: %+v", p)
+	}
+	before := len(e.events(t))
+	id2, err := EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil || id2 != id || len(e.events(t)) != before {
+		t.Fatalf("EnsureInbox not idempotent: id2=%q err=%v events %d->%d", id2, err, before, len(e.events(t)))
+	}
+	if err := e.st.View(bg, Verify); err != nil {
+		t.Fatalf("projects.Verify failed: %v", err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		ps, err := List(tx)
+		if err != nil {
+			return err
+		}
+		if len(ps) < 2 || !ps[0].IsInbox() {
+			t.Fatalf("Inbox must sort first in List: %+v", ps)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 内置 Inbox：老库已有无仓库活跃「收件箱」时原地认领，保留原 ID、统一显示名为 Inbox，折叠一致。
+func TestEnsureInboxClaimsExistingAndVerifiesFold(t *testing.T) {
+	e := setup(t)
+	var old struct{ ID string }
+	_ = json.Unmarshal(e.must(t, owner, "project.create", map[string]any{"name": "收件箱"}).Value, &old)
+
+	id, err := EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil || id != old.ID {
+		t.Fatalf("want claimed id %s, got %q err %v", old.ID, id, err)
+	}
+	p := e.get(t, old.ID)
+	if !p.IsInbox() || p.Name != InboxDefaultName || !p.Capture {
+		t.Fatalf("claimed inbox: %+v", p)
+	}
+	if err := e.st.View(bg, Verify); err != nil {
+		t.Fatalf("projects.Verify failed after claim: %v", err)
+	}
+}
+
+// 内置 Inbox 保护边界与 ResolveOrInbox：禁止暂停/归档、绑仓库/检出、外部写 system_role；显式不存在项目仍报 404。
+func TestInboxProtectionsAndResolveOrInbox(t *testing.T) {
+	e := setup(t)
+	inboxID, err := EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []string{"paused", "archived"} {
+		if _, err := e.do(t, owner, "project.update", map[string]any{"id": inboxID, "status": st}); exit(err) != domain.ExitUsage {
+			t.Fatalf("inbox status=%s must be rejected with exit 2, got %v", st, err)
+		}
+	}
+	if _, err := e.do(t, owner, "project.repo.add", map[string]any{"id": inboxID, "remote": "https://git.example/a/b"}); exit(err) != domain.ExitUsage {
+		t.Fatalf("inbox repo.add must be rejected with exit 2, got %v", err)
+	}
+	if _, err := e.do(t, owner, "project.checkout.set", map[string]any{"id": inboxID, "remote": "https://git.example/a/b", "host": "h", "path": "/tmp/a"}); exit(err) != domain.ExitUsage {
+		t.Fatalf("inbox checkout.set must be rejected with exit 2, got %v", err)
+	}
+	if _, err := e.do(t, owner, "project.update", map[string]any{"id": inboxID, "system_role": ""}); exit(err) != domain.ExitUsage {
+		t.Fatalf("writing system_role externally must be rejected with exit 2, got %v", err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		// Resolve 保持纯粹，不匹配返回空串
+		if got, err := Resolve(tx, Scope{Cwd: "/tmp/no-repo", Host: "h"}); err != nil || got != "" {
+			t.Fatalf("Resolve should stay pure: got %q err %v", got, err)
+		}
+		// ResolveOrInbox 无匹配兜底 Inbox
+		got, fb, err := ResolveOrInbox(tx, Scope{Cwd: "/tmp/no-repo", Host: "h"})
+		if err != nil || !fb || got != inboxID {
+			t.Fatalf("ResolveOrInbox fallback: got %q fb %v err %v", got, fb, err)
+		}
+		// 显式指定不存在的项目：仍报 not_found，绝不兜底
+		if _, _, err := ResolveOrInbox(tx, Scope{Flag: "prj_nope"}); err == nil {
+			t.Fatal("explicit unknown project must return error")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -461,3 +461,47 @@ func TestImportedEventsStayOutOfTheDelta(t *testing.T) {
 		t.Fatalf("control: live change must appear in the delta: %v", ids(r))
 	}
 }
+
+// 主会话无项目目录（Resolve 返回空）：上下文包含内置 Inbox 事项与无事项投递，不包含其他具体项目的事项，Project 字段保持 nil。
+func TestContextEmptyScopeIncludesInboxAndItemlessDeliveries(t *testing.T) {
+	e := setup(t)
+	inboxID, err := projects.EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherProj := e.project(t, "other", "https://git.example/org/other", "h", "/repo/other")
+	inboxItem := e.item(t, map[string]any{"title": "inbox task", "project": inboxID})
+	otherItem := e.item(t, map[string]any{"title": "other task", "project": otherProj})
+
+	// 塞一条无事项投递（如合并摘要）与一条 Inbox 事项投递、一条其他项目投递
+	q := delivery.New(delivery.Options{})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for _, d := range []domain.Delivery{
+			{ID: "dlv_none", Item: "itm_missing_summary", Class: domain.DeliveryBrief, Route: delivery.RouteInject, Version: 1, Content: domain.DeliveryContent{Title: "summary"}},
+			{ID: "dlv_inbox", Item: inboxItem, Class: domain.DeliveryReminder, Route: delivery.RouteInject, Version: 1, Content: domain.DeliveryContent{Title: "inbox rem"}},
+			{ID: "dlv_other", Item: otherItem, Class: domain.DeliveryReminder, Route: delivery.RouteInject, Version: 1, Content: domain.DeliveryContent{Title: "other rem"}},
+		} {
+			if _, _, err := q.Create(tx, d); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := e.build(t, Request{Session: "s-main", Scope: projects.Scope{Cwd: "/Users/demo", Host: "h"}})
+	if r.Project != nil {
+		t.Fatalf("empty cwd scope must keep Project=nil, got %+v", r.Project)
+	}
+	if !eq(ids(r), []string{inboxItem}) {
+		t.Fatalf("want only inbox item %s, got %v", inboxItem, ids(r))
+	}
+	got := map[string]bool{}
+	for _, d := range r.Deliveries {
+		got[d.ID] = true
+	}
+	if len(got) != 2 || !got["dlv_none"] || !got["dlv_inbox"] {
+		t.Fatalf("want itemless + inbox deliveries, got %+v", r.Deliveries)
+	}
+}

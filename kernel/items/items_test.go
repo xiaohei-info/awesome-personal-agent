@@ -1215,3 +1215,45 @@ func TestDeleteIsTransitionToDropped(t *testing.T) {
 	}
 	e.verify(t)
 }
+
+// 决策 3：存在内置 Inbox 时，未指定项目的非系统事项自动落入 Inbox，brief/routine 保持无项目；
+// BackfillInbox 只迁移存量未终结的非系统无项目事项，done/dropped 不动，且幂等。
+func TestItemCreateDefaultsToInboxAndBackfillMigratesActiveOnly(t *testing.T) {
+	e := setup(t)
+	// 先在未初始化 Inbox 时造存量无项目事项（模拟升级前的账本）
+	propID := e.create(t, owner, map[string]any{"phase": "proposed", "title": "old proposed"})
+	openID := e.create(t, owner, map[string]any{"phase": "open", "title": "old open"})
+	doneID := e.create(t, owner, map[string]any{"phase": "open", "title": "old done"})
+	e.must(t, owner, "item.transition", map[string]any{"id": doneID, "to": "done", "reason": "done"})
+	briefID := e.create(t, owner, map[string]any{"kind": "brief", "phase": "open", "title": "daily brief"})
+
+	inboxID, err := projects.EnsureInbox(bg, e.x, e.st, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := BackfillInbox(bg, e.x, e.st, "owner")
+	if err != nil || n != 2 {
+		t.Fatalf("BackfillInbox: n=%d err=%v", n, err)
+	}
+	if e.get(t, propID).Project != inboxID || e.get(t, openID).Project != inboxID {
+		t.Fatalf("active unassigned items must move to inbox: prop=%q open=%q", e.get(t, propID).Project, e.get(t, openID).Project)
+	}
+	if e.get(t, doneID).Project != "" || e.get(t, briefID).Project != "" {
+		t.Fatalf("ended/system items must stay unassigned: done=%q brief=%q", e.get(t, doneID).Project, e.get(t, briefID).Project)
+	}
+	// 幂等重跑
+	if n2, err := BackfillInbox(bg, e.x, e.st, "owner"); err != nil || n2 != 0 {
+		t.Fatalf("second BackfillInbox should be 0, got %d %v", n2, err)
+	}
+
+	// 增量创建：普通事项默认进 Inbox，brief 仍保持无项目
+	newTask := e.create(t, owner, map[string]any{"phase": "open", "title": "new task"})
+	newBrief := e.create(t, owner, map[string]any{"kind": "brief", "phase": "open", "title": "new brief"})
+	if e.get(t, newTask).Project != inboxID {
+		t.Fatalf("new unassigned task should default to inbox %s, got %q", inboxID, e.get(t, newTask).Project)
+	}
+	if e.get(t, newBrief).Project != "" {
+		t.Fatalf("new brief should stay unassigned, got %q", e.get(t, newBrief).Project)
+	}
+	e.verify(t)
+}

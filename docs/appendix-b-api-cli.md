@@ -493,12 +493,14 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `apa version` 与 `GET /version` 返回同一份内容：
 
 ```json
-{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 9}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
+{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 10}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
-`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 9（版本 7 新增连接与凭据保管的三张表，已冻结）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。工作台能力迭代的全部结构变更收在一次迁移里，已合入，主干为 8（主文档 §16.5）；结构版本 8 在第一次被真实账本应用后冻结。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
+`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 10（版本 7 新增连接与凭据保管的三张表，版本 8 收齐工作台结构变更，版本 9 新增 Agent 实例表与钥匙的 `agent_id`，版本 10 新增 `projects.system_role` 与内置 Inbox 唯一索引，均已按版号递增）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
+
+账本结构版本 10（内置 Inbox 与会话捕获归属，2026-11-25，主文档决定 92）：`projects` 表新增 `system_role TEXT NOT NULL DEFAULT ''` 与部分唯一索引 `UNIQUE(system_role) WHERE system_role = 'inbox'`；`Project` 响应增可选只读字段 `system_role`（外部写入返回 400 / 退出码 2）。启动时由系统内部命令 `project.inbox.ensure` 幂等确保唯一内置 Inbox（新账本建 `prj_inbox` 名称 `Inbox`，已有部署若存在待认领项目则原地补标 `system_role = "inbox"` 并统一名称为 `Inbox`），随后 `BackfillInbox` 一次性将存量未终结（`proposed`/`open`/`waiting`/`needs_input`）且非 `brief`/`routine` 的无项目事项迁入 Inbox（已终结与全局材料不动）。`POST /v1/capture` 在未传 `project` 且路径未命中仓库时兜底进入内置 Inbox（`capture:<inbox_id>`），不再返回 `reason: "no_project"`；`GET /v1/health` 的 `capture_failures` 读取时忽略历史 `no_project` 事件；`GET /v1/projects/resolve` 在无匹配路径时仍返回 `null`；`apa context --scope cwd` 无匹配目录时纳入内置 Inbox 事项与投递（仍保留全局材料）。跨来源合并批处理将 `capture:*` 来源的外发判定改为按该项目 `capture_outbound` 与模型位置判定（本机模型默认放行，外部模型受项目 `capture_outbound` 约束）。**升级与回滚**：账本从 v9 升到 v10 不可原地降级；回滚须同时恢复旧二进制与升级前备份的账本快照（会丢失升级后新写入的事件）。
 
 账本结构版本 9 新增 Agent 实例表与钥匙的 `agent_id`。升级时每份已确认声明呈现一张 `legacy:<harness>` 兼容卡。旧 Run、Event、授权和默认设置保留原值。本人首次同时保存 `default_agent_id`、`main_agent_id` 与 `version` 后，即使清空角色也按未设置处理。旧客户端再写 `default_harness` 返回冲突。新增卡按 ID 匹配钥匙、授权与权限上限。
 

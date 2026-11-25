@@ -11,6 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -27,6 +28,7 @@ type ExtKey struct {
 type Facts struct {
 	Policy       policy.Policy
 	Sources      []domain.Source
+	Inbox        *domain.Project // 内置 Inbox 项目（用于外部端点下检查对话捕获外发范围，§14.14）
 	Declarations []executors.Record // 生效的声明
 	ExtKeys      []ExtKey
 	Seen         map[string]time.Time // 见 Seen：subject → 最近一次见到
@@ -50,6 +52,13 @@ func ReadFacts(ctx context.Context, st *store.Store) (f Facts, err error) {
 		}
 		if f.Sources, err = registry.List(tx); err != nil {
 			return err
+		}
+		if cols, err := columns(tx, "projects"); err != nil {
+			return err
+		} else if cols["system_role"] {
+			if p, err := projects.Inbox(tx); err == nil {
+				f.Inbox = &p
+			}
 		}
 		if f.Declarations, err = executors.Records(tx, executors.StateActive); err != nil {
 			return err

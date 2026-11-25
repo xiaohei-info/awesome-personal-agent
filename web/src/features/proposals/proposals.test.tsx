@@ -875,4 +875,31 @@ describe("整合出来的那条能看到从哪几条合来（§9.3）", () => {
     expect(within(row).getByRole("link", { name: "审阅 PR #220：企业端技能" })).toHaveAttribute("href", "/items/x220");
     expect(within(row).getByRole("button", { name: "撤销合并" })).toHaveAttribute("title", expect.stringContaining("整组还原"));
   });
+
+  it("建议卡片可直接修改归属项目，发送 PATCH /v1/items/{id} 带 If-Match 并刷新", async () => {
+    const patches: { path: string; body: any; ifMatch: string | null }[] = [];
+    let currentProject = "prj_inbox";
+    const base = server([]);
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? "GET";
+      if (url === "/v1/projects") {
+        return json(200, { projects: [{ id: "prj_inbox", name: "Inbox", system_role: "inbox" }, { id: "prj_apa", name: "APA" }] });
+      }
+      if (url === "/v1/items?phase=proposed") {
+        return json(200, { items: [{ ...prop("p1", { title: "整理文档", project: currentProject }), version: 3 }], last_rejections: {} });
+      }
+      if (url === "/v1/items/p1" && method === "PATCH") {
+        const body = JSON.parse(init.body as string);
+        patches.push({ path: url, body, ifMatch: (init.headers as Record<string, string> | undefined)?.["If-Match"] ?? null });
+        currentProject = body.project;
+        return json(200, { id: "p1", version: 4 });
+      }
+      return base.impl(url, init);
+    }) as unknown as typeof fetch;
+    mount(impl);
+    const pick = await screen.findByLabelText("修改「整理文档」的归属项目");
+    expect(pick).toHaveValue("prj_inbox");
+    await userEvent.selectOptions(pick, "prj_apa");
+    await waitFor(() => expect(patches).toEqual([{ path: "/v1/items/p1", body: { project: "prj_apa", reason: "在建议页调整归属项目" }, ifMatch: "3" }]));
+  });
 });

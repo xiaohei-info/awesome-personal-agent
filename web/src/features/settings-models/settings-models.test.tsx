@@ -371,4 +371,26 @@ describe("设置 › 模型", () => {
     await screen.findByRole("region", { name: "还没有配置模型端点" });
     expect(screen.queryByRole("switch")).toBeNull();
   });
+
+  it("模型端点能收哪些来源：有内置 Inbox 时置顶带徽章，其他无仓库项目默认折叠", async () => {
+    const base = server();
+    const impl = (async (url: string, init?: RequestInit) => {
+      if (url === "/v1/projects") {
+        return json(200, {
+          projects: [
+            { id: "p_repo", name: "绑定仓库项目", capture: true, capture_outbound: null, repos: [{ remote: "git@h:a/b.git" }] },
+            { id: "p_misc", name: "零散无仓项目", capture: true, capture_outbound: null, repos: [] },
+            { id: "prj_inbox", name: "Inbox", system_role: "inbox", capture: true, capture_outbound: null, repos: [] },
+          ],
+        });
+      }
+      return base.impl(url, init);
+    }) as unknown as typeof fetch;
+    mount(impl);
+    const sec = await card("模型端点能收哪些来源");
+    const inboxRow = await sec.findByRole("listitem", { name: "Inbox" });
+    expect(inboxRow).toHaveTextContent("内置");
+    expect(sec.getByRole("listitem", { name: "绑定仓库项目" })).toBeInTheDocument();
+    expect(sec.getByText("其他未绑定仓库的项目（1）")).toBeInTheDocument();
+  });
 });
