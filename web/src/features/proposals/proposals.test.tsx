@@ -85,6 +85,37 @@ describe("建议流页（flow-proposal-triage）", () => {
     expect(w.csrf).toBe("tok-1");
   });
 
+  it("单条操作失败：提示出现在这张卡片里并获得焦点（403/404/409），确认框还在、可以重试", async () => {
+    for (const [status, code] of [[403, "permission_denied"], [404, "not_found"], [409, "conflict"]] as const) {
+      let fail = true;
+      const s = server([prop("a"), prop("b")], () => (fail ? json(status, { code, why: "refused " + status, next: "x" }) : undefined));
+      const { unmount } = mount(s.impl);
+      const card = (await screen.findByText("建议 a")).closest("article")!;
+      await userEvent.click(within(card).getByRole("button", { name: "忽略" }));
+      await userEvent.click(within(card).getByRole("button", { name: "确认忽略" }));
+      const alert = await within(card).findByRole("alert");
+      expect(alert).toHaveTextContent("refused " + status);
+      expect(alert).toHaveFocus();
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+      fail = false;
+      await userEvent.click(within(card).getByRole("button", { name: "确认忽略" }));
+      await waitFor(() => expect(screen.queryByText("建议 a")).not.toBeInTheDocument());
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("失败后这条已被别处处理掉、卡片没了：提示改在页面顶部", async () => {
+    const list = [prop("a"), prop("b")];
+    const s = server(list, () => (list.splice(0, 1), json(409, { code: "conflict", why: "already handled", next: "x" })));
+    // 服务端列表与 list 同一个数组：失败后重新加载就看不到 a 了
+    mount(s.impl);
+    const card = (await screen.findByText("建议 a")).closest("article")!;
+    await userEvent.click(within(card).getByRole("button", { name: "接受" }));
+    await waitFor(() => expect(screen.queryByText("建议 a")).not.toBeInTheDocument());
+    expect(screen.getByRole("alert")).toHaveTextContent("already handled");
+  });
+
   it("ACT-PROP-04：忽略的理由选填；有理由时随 dismiss 提交，离开建议流", async () => {
     const s = server([prop("a"), prop("b")]);
     mount(s.impl);

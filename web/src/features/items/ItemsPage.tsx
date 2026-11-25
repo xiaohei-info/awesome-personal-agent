@@ -371,7 +371,7 @@ function ItemDetail() {
           />
         </label>
       )}
-      {actErr != null && <ErrorNote error={actErr} />}
+      {actErr != null && <ErrorNote error={actErr} reveal />}
       {item.phase === "needs_input" && item.ask && !item.ask.resolution ? (
         <QuestionCard item={item as DecisionItem} rejection={d.rejection} onAnswer={answer} inItem />
       ) : (

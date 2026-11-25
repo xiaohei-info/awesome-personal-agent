@@ -284,7 +284,7 @@ export function DecisionsPage() {
       )}
       {error != null && (
         <div>
-          <ErrorNote error={error} />
+          <ErrorNote error={error} reveal />
           <button
             onClick={() => {
               setError(null);

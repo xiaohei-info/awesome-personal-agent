@@ -52,7 +52,7 @@ interface Dismissal { batch?: string; reason?: string; at: string }
 
 
 
-function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: { item: Proposal; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void>; ready: boolean; checked?: boolean; onCheck?: (on: boolean) => void }) {
+function Card({ item, failure, rejection, candidates, onAct, ready, checked, onCheck }: { item: Proposal; failure?: unknown; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void>; ready: boolean; checked?: boolean; onCheck?: (on: boolean) => void }) {
   const t = useT(strings);
   const [mode, setMode] = useState<"dismiss" | "attach" | null>(null);
   const [reason, setReason] = useState("");
@@ -164,6 +164,7 @@ function Card({ item, rejection, candidates, onAct, ready, checked, onCheck }: {
           <button disabled={busy || !target} onClick={() => act("attach", { to: target })}>{t.confirmAttach}</button>
         </div>
       )}
+      {failure != null && <ErrorNote error={failure} reveal />}
     </article>
   );
 }
@@ -489,6 +490,8 @@ export function ProposalsPage() {
   const [ignoredTick, setIgnoredTick] = useState(0);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
   const [error, setError] = useState<unknown>(null);
+  // 单条操作的失败挂在发起它的那张卡上。
+  const [failure, setFailure] = useState<{ id: string; error: unknown } | null>(null);
   const [source, setSource] = useState("");
   const [project, setProject] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -523,11 +526,11 @@ export function ProposalsPage() {
 
   // 候选 = open 事项；失败时抛给调用方展示，不静默给空列表。
   const candidates = useCallback(
-    () =>
+    (at: string) =>
       api.get<{ items: Proposal[] }>("/items?phase=open").then(
         (r) => r.items,
         (e) => {
-          setError(e);
+          setFailure({ id: at, error: e });
           return [] as Proposal[];
         },
       ),
@@ -536,8 +539,9 @@ export function ProposalsPage() {
 
   // 处理完收成一行回执。「接受并交给 Agent」先给这条建议加上「交给 Agent」再接受：事项进入进行中时带着标记，规则得以触发；
   // 前提没满足时只接受、不交出，回执写明，下面列出还差的几步（只是两个现有接口，判定都在服务端）。
-  const act = async (id: string, action: Action, body: object) => {
+  const act = async (id: string, action: Action, body: object, at = id) => {
     setError(null);
+    setFailure(null);
     const item = (items ?? []).find((i) => i.id === id);
     const title = item?.title ?? id;
     const path = "/items/" + encodeURIComponent(id);
@@ -563,7 +567,7 @@ export function ProposalsPage() {
         setReceipts((r) => [...r, { id, title, text: t.did[action], to: action === "dismiss" ? undefined : "/items/" + encodeURIComponent(target) }]);
       }
     } catch (e) {
-      setError(e); // 含 409：已有人先处理 / 目标已终结，刷新后以服务端为准
+      setFailure({ id: at, error: e }); // 含 409：已有人先处理 / 目标已终结，刷新后以服务端为准
     }
     await load();
     window.dispatchEvent(new Event(COUNTS_EVENT));
@@ -668,7 +672,8 @@ export function ProposalsPage() {
 
   const pick = (id: string) => (on: boolean) => setChosen((c) => (on ? [...c.filter((x) => x !== id), id] : c.filter((x) => x !== id)));
   const card = (i: Proposal, selectable = true) => (
-    <Card key={i.id} item={i} rejection={rejections[i.id]} candidates={candidates} onAct={act} ready={ready}
+    <Card key={i.id} item={i} failure={failure?.id === i.id ? failure.error : undefined} rejection={rejections[i.id]} candidates={() => candidates(i.id)}
+      onAct={(id, action, body) => act(id, action, body, i.id)} ready={ready}
       checked={chosen.includes(i.id)} onCheck={selectable ? pick(i.id) : undefined} />
   );
   const stamp = (s: string) => (s ? new Date(s).toLocaleString() : "");
@@ -746,14 +751,18 @@ export function ProposalsPage() {
     );
   };
 
+  // 发起操作的卡片已经不在眼前（别处先处理掉了、被筛掉，或操作来自归类记录）：失败改在页面顶部显示。
+  const orphan = failure && !(view === "pending" && keep(byId.get(failure.id))) ? failure.error : null;
+
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
       <PageReminder row="new_proposals"><ProposalsMin /></PageReminder>
       <MergeActivity onUnmerge={(member) => act(member, "unmerge", {})} reload={activityTick} />
+      {orphan != null && <ErrorNote error={orphan} reveal />}
       {error != null && (
         <div>
-          <ErrorNote error={error} />
+          <ErrorNote error={error} reveal />
           <button
             onClick={() => {
               setError(null);

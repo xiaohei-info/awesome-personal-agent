@@ -129,7 +129,7 @@ export function TodayPage() {
   return (
     <main>
       <PageHead>{t.title}</PageHead>
-      {error != null && <ErrorNote error={error} />}
+      {error != null && <ErrorNote error={error} reveal />}
       {top.length > 0 && (
         <section aria-label={t.blocks.top} className="panel">
           <h2>{t.blocks.top}</h2>
@@ -277,7 +277,7 @@ function Reminders({ list }: { list: Reminder[] }) {
   return (
     <section aria-label={t.blocks.reminders} id="reminders">
       <h2>{t.count(t.blocks.reminders, list.length)}</h2>
-      {error != null && <ErrorNote error={error} />}
+      {error != null && <ErrorNote error={error} reveal />}
       <ul className="rows">
         {list.map((d) => (
           <li key={d.id} className="act-row" aria-label={d.content.title}>

@@ -151,7 +151,7 @@ export function MaterialsPage() {
   return (
     <main>
       <PageHead>{t.title}</PageHead>
-      {error != null && <ErrorNote error={error} />}
+      {error != null && <ErrorNote error={error} reveal />}
       {notice && <div role="status">{notice}</div>}
       <div className="filters">
         <label>
