@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"testing"
 	"time"
 
@@ -143,8 +144,13 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 	defer st.Close()
 	ctx := context.Background()
 	now := time.Now()
-	agent := domain.Actor{Type: domain.ActorAgent, Principal: "cred_h", Via: domain.ViaCLI}
+	agent := domain.Actor{Type: domain.ActorAgent, Via: domain.ViaCLI}
 	if err := st.Update(ctx, func(tx *store.Tx) error {
+		key, _, err := auth.New(nil).Issue(tx, auth.Spec{Kind: auth.Delegate, Harness: "hermes"}) // 没绑 Agent 的宿主钥匙
+		if err != nil {
+			return err
+		}
+		agent.Principal = key.ID
 		doc, _ := policy.Sections(policy.Default())
 		delete(doc, "agent_cards")
 		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"legacy:hermes":{"tier":"rules"}}}`)
@@ -155,6 +161,8 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 		}
 		for _, ev := range []domain.Event{
 			{Type: domain.EvDecisionResolved, Object: "itm_1", Basis: &domain.Basis{Agent: "legacy:hermes"}},
+			// 旧事件没记依据：按发起的钥匙归到 legacy:hermes，接受建议照旧生效。
+			{Type: domain.EvItemPhaseChanged, Object: "itm_4", Payload: json.RawMessage(`{"before":{"phase":"proposed"}}`)},
 			{Type: domain.EvCommandRejected, Object: "itm_2", Payload: json.RawMessage(`{"action":"answer_decision","tier":"decide","code":"tier_closed","agent":"legacy:hermes"}`)},
 			{Type: domain.EvCommandRejected, Object: "source.register", Payload: json.RawMessage(`{"action":"manage_source","tier":"power","code":"web_only","agent":"legacy:hermes"}`)},
 			{Type: domain.EvCommandRejected, Object: "itm_3", Payload: json.RawMessage(`{"action":"change_settings","tier":"rules","code":"tier_closed","agent":"agent_a"}`)},
@@ -180,7 +188,7 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 		a.Tool != policy.PermRead || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupSourceEvents, now) {
 		t.Fatalf("cards: %+v", pv.Plan.Cards)
 	}
-	if pv.Rejudge["unchanged"] != 3 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
+	if pv.Rejudge["unchanged"] != 4 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
 		t.Fatalf("rejudge: %v %+v", pv.Rejudge, pv.Details)
 	}
 	if err := st.View(ctx, func(tx *store.Tx) error {

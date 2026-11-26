@@ -139,7 +139,11 @@ func RunPreview(ctx context.Context, home string, days int, now time.Time) (Prev
 			}
 			return pol.Card(agent)
 		}
-		if err := rejudge(tx, &pv, card, now.Add(-time.Duration(days)*24*time.Hour), now); err != nil {
+		owners, err := keyOwners(tx)
+		if err != nil {
+			return err
+		}
+		if err := rejudge(tx, &pv, card, owners, now.Add(-time.Duration(days)*24*time.Hour), now); err != nil {
 			return err
 		}
 		return inventory(tx, &pv, card)
@@ -149,7 +153,8 @@ func RunPreview(ctx context.Context, home string, days int, now time.Time) (Prev
 
 // rejudge：最近的 Agent 事件按事件类型还原成命令与组，在所属 Agent 换算后的权限卡下重判，与当时的结局比较。
 // 旧事件没有记命令名，这是近似：同一类型对应的命令组相同时才算准，不同时按载荷细分（建为建议与否、离开哪个阶段）。
-func rejudge(tx *store.Tx, pv *Preview, card func(string) policy.Card, since, now time.Time) error {
+// owners 是钥匙 id 到所属 Agent（与 command.Caller.Agent 同口径），用于旧事件没记 Agent 时按发起的钥匙归属。
+func rejudge(tx *store.Tx, pv *Preview, card func(string) policy.Card, owners map[string]string, since, now time.Time) error {
 	var after int64
 	for {
 		es, err := eventlog.Read(tx, after, 1000)
@@ -168,6 +173,9 @@ func rejudge(tx *store.Tx, pv *Preview, card func(string) policy.Card, since, no
 			cmd, group, agent, note := commandOf(ev)
 			if cmd == "" {
 				continue
+			}
+			if agent == "" {
+				agent = owners[ev.Actor.Principal]
 			}
 			before := "effective"
 			if ev.Type == domain.EvCommandRejected {
@@ -252,6 +260,22 @@ func commandOf(ev domain.Event) (cmd, group, agent, note string) {
 		return "rejected:" + p.Action, g, agent, "old code " + p.Code + " on " + ev.Object
 	}
 	return "", "", "", ""
+}
+
+func keyOwners(tx *store.Tx) (map[string]string, error) {
+	creds, err := auth.New(nil).List(tx)
+	if err != nil {
+		return nil, err
+	}
+	owners := map[string]string{}
+	for _, k := range creds {
+		if k.AgentID == "" && k.Harness != "" {
+			owners[k.ID] = "legacy:" + k.Harness
+		} else {
+			owners[k.ID] = k.AgentID
+		}
+	}
+	return owners, nil
 }
 
 func inventory(tx *store.Tx, pv *Preview, card func(string) policy.Card) error {

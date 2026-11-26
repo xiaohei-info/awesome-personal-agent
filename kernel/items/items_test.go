@@ -1258,6 +1258,26 @@ func TestItemCreateDefaultsToInboxAndBackfillMigratesActiveOnly(t *testing.T) {
 	e.verify(t)
 }
 
+// 旧档位"替我拍板"且没限项目的 Agent，换算后在任意项目都能接受建议；没绑 Agent 的宿主钥匙走 legacy:<宿主> 的兼容卡。
+func TestLegacyDecideWithoutProjectsAcceptsAnywhere(t *testing.T) {
+	e := setup(t)
+	card, err := policy.CardFromTier("decide", nil, policy.PermRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.setTier(t, "legacy:hermes", card)
+	key := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "cred_h", Via: domain.ViaCLI}, Level: authz.LevelDelegate, CredentialHarness: "hermes"}
+	for _, p := range []string{e.project(t, nil), e.project(t, nil)} {
+		prop := e.create(t, owner, map[string]any{"phase": "proposed", "project": p})
+		if _, err := e.do(key, "item.transition", map[string]any{"id": prop, "to": "open", "reason": "accept"}); err != nil {
+			t.Fatalf("accept in %s: %v", p, err)
+		}
+		if e.get(t, prop).Phase != domain.PhaseOpen {
+			t.Fatalf("proposal in %s not accepted", p)
+		}
+	}
+}
+
 func withProjects(c policy.Card, projects ...string) policy.Card {
 	c.DecideProjects = projects
 	return c
