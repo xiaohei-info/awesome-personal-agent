@@ -464,6 +464,7 @@ func TestHostedMaterial(t *testing.T) {
 	if r := e.do("dlg", "GET", content, ""); r.Code != 200 {
 		t.Fatalf("delegate reads hosted content: %d %s", r.Code, r.Body)
 	}
+	want(t, e.do("ext", "GET", content, ""), 403, "permission_denied") // 外部受众的非导出 ext 读不到托管正文
 	var got map[string]any
 	deadline := time.Now().Add(20 * time.Second)
 	for {

@@ -187,7 +187,7 @@
 | | `POST /projects/{id}/repos` | repos 属性：本机检出是一档，远程地址是 3b | worker；远程地址只有 Web 登录 |
 | | `GET /projects/resolve?path&host` | 当前目录到项目的映射 | observer |
 | 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料；单个材料带与事项的类型化关系 `relations` | observer 读，worker 写；导出 ext 密钥可 `GET` |
-| | `GET /materials/{id}/content` | 托管型正文，异步读取 | 只有 Web 登录 |
+| | `GET /materials/{id}/content` | 托管型正文，异步读取 | observer 及以上与运行凭据；导出 ext 密钥须对这份材料有全文档位；webhook 与其他 ext 密钥不可（403） |
 | | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate 与运行凭据；worker 须带自己范围内的 `parent` |
 | | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
 | | `POST /materials/{id}/revert` | 回退一次 `direct` 修订（3a） | Web 登录；Agent 按权限卡 |
