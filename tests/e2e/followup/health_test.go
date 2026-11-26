@@ -49,6 +49,12 @@ func (f *fx) kernelNow() time.Time {
 	return time.Now().Add(time.Duration(off) * time.Second)
 }
 
+// waitUnjudged 等未判定积压在场：拨过测试时钟后内核会重判积压（§9.3），重判中的事件短暂回到 pending，模型仍故障时随即落回。
+func (f *fx) waitUnjudged() {
+	f.t.Helper()
+	f.waitFor("未判定积压在健康视图里", 60*time.Second, func() bool { return !f.health().sig("unjudged_backlog").OK })
+}
+
 // ---- 全流程 ----
 
 // TestFlowHealth 对应 flow-health（ACT-HLT-01..07）：十三类信号一次全造出，Web、CLI、HTTP 三处一致，只报不修；
@@ -165,9 +171,18 @@ event_rules:
 	})
 
 	step(t, "造出：外呼超时", func(t *testing.T) {
+		// 任务型运行的时限取策略 background_run_timeout_sec（模板 timeout 不再生效）：临时调到下限 15 分钟再拨测试时钟，
+		// 之后改回默认值，免得下一步的长时占用在后续拨时钟时跟着超时。
+		f.webOK("PUT", "/settings/policy", `{"background_run_timeout_sec":900}`, http.StatusOK)
 		f.auto("run-hang")
 		f.task("HLT 超时", "acc-hang")
-		f.waitFor("外呼超时进入健康视图", 60*time.Second, func() bool { return !f.health().sig("outcall").OK })
+		f.waitFor("挂起的运行在跑", 30*time.Second, func() bool { return f.health().sig("outcall").outcall(t).Long.Running == 1 })
+		f.TCAdvance(901)
+		f.waitFor("外呼超时进入健康视图", 60*time.Second, func() bool {
+			s := f.health().sig("outcall")
+			return !s.OK && len(s.outcall(t).Timeouts) > 0
+		})
+		f.webOK("PUT", "/settings/policy", `{"background_run_timeout_sec":14400}`, http.StatusOK)
 	})
 
 	step(t, "造出：长时运行与短任务各自排队", func(t *testing.T) {
@@ -207,6 +222,7 @@ event_rules:
 
 	var cli healthView
 	step(t, "ACT-HLT-01 十四类信号都显示，三处一致，每类有修复入口", func(t *testing.T) {
+		f.waitUnjudged()
 		cli = f.health()
 		web := f.webHealth()
 		http := decode[healthView](t, f.APIRaw("GET", "/v1/health", "", f.OBS).Body)
@@ -298,6 +314,7 @@ event_rules:
 				t.Errorf("安静期间出现修复类 Event: seq=%d type=%s object=%s actor=%+v", e.Seq, e.Type, e.Object, e.Actor)
 			}
 		}
+		f.waitUnjudged()
 		// 十三类问题仍在：没有任何一类被自动修好。
 		for _, id := range allSignalIDs {
 			if f.health().sig(id).OK {
@@ -413,13 +430,22 @@ func TestFlowHealthWarnings(t *testing.T) {
 	})
 
 	step(t, "ACT-HLT-06 时钟迟到在连续一小时没有迟到后清除", func(t *testing.T) {
+		parent := f.t
+		t.Cleanup(func() {
+			if t.Failed() || parent.Failed() {
+				t.Logf("内核此刻 %s\nhealth.alert 审计记录: %s", f.kernelNow().UTC().Format(time.RFC3339),
+					f.webOK("GET", "/audit/events?limit=500&type=health.alert", "", http.StatusOK))
+			}
+		})
 		// 65 分钟：期间每 10 分钟给一条事项设 1 分钟后到期；时钟每步 ≤ 4 分钟，使这些定时都准时触发，不再制造新的迟到。
 		for round := 0; round < 7; round++ {
 			id := f.task("HL-tick-"+string(rune('0'+round)), "x-plain")
 			f.webOK("PATCH", "/items/"+id, `{"deadline":"`+f.kernelNow().Add(time.Minute).UTC().Format(time.RFC3339)+`"}`, http.StatusOK)
 			for left := 10 * 60; left > 0; left -= 240 {
 				f.TCAdvance(int64(min(left, 240)))
-				time.Sleep(300 * time.Millisecond)
+				// 每步要长过内核时钟循环 1 秒的 tick：拨表通知只有一个接收者（可能被保留期清理取走），
+				// 步子太密时几次拨表合并成一次扫描，又记下迟到。
+				time.Sleep(1500 * time.Millisecond)
 			}
 			if round < 5 && f.health().sig("clock_lag").OK {
 				t.Fatalf("第 %d 轮（%d 分钟）时不应已清除：迟到只在连续一小时没有新迟到后才清除", round, (round+1)*10)

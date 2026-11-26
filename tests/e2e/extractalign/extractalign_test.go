@@ -27,6 +27,9 @@ source_rules:
   - {id: chat-np, match: {source_type: chat-np, event_type: [chat.message]}, then: extract, prescreen: none, project_by: draft}
 `
 
+// prescreenAsk 是 capture-prescreen 模板问句的开头，用来认出预筛请求。
+const prescreenAsk = "有没有需要记下"
+
 // writePack 重写 acc-wb 包目录：pack.yaml 与 extra（相对路径 → 内容）。
 func (f *fx) writePack(yaml string, extra ...map[string]string) {
 	f.t.Helper()
@@ -253,7 +256,7 @@ func TestFlowExtractAlign(t *testing.T) {
 		if p["recommend"] != nil || p["attach_to"] != nil {
 			t.Errorf("清单外目标：推荐应作废，实际 %v", p)
 		}
-		if pr := str(it, "project"); pr != "" {
+		if pr := str(it, "project"); pr != "prj_inbox" { // 丢弃后未指定项目的事项落内置 Inbox（§6.5）
 			t.Errorf("清单外项目应丢弃，实际 %q", pr)
 		}
 	})
@@ -289,7 +292,7 @@ func TestFlowExtractAlign(t *testing.T) {
 			}
 		}
 		for _, r := range f.ModelStub.Requests() {
-			if strings.Contains(r.BodyText, "src_accchatnp") && strings.Contains(r.BodyText, "有没有需要记下的事") {
+			if strings.Contains(r.BodyText, "src_accchatnp") && strings.Contains(r.BodyText, prescreenAsk) {
 				t.Error("生成端点不应收到 chat-np 的预筛请求")
 			}
 		}
@@ -302,7 +305,7 @@ func TestFlowExtractAlign(t *testing.T) {
 		f.webOK("PATCH", "/projects/"+f.Projects["acc-open"], `{"capture":true}`, 200)
 		n := 0
 		for _, b := range f.Cls.Batches() {
-			if strings.Contains(b.BodyText, "有没有需要记下的事") {
+			if strings.Contains(b.BodyText, prescreenAsk) {
 				n++
 			}
 		}
@@ -318,7 +321,7 @@ func TestFlowExtractAlign(t *testing.T) {
 		f.until("对话增量触发预筛请求", func() bool {
 			m := 0
 			for _, b := range f.Cls.Batches() {
-				if strings.Contains(b.BodyText, "有没有需要记下的事") {
+				if strings.Contains(b.BodyText, prescreenAsk) {
 					m++
 				}
 			}

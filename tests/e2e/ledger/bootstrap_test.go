@@ -164,7 +164,7 @@ func TestFlowBootstrap(t *testing.T) {
 			r.Body.Close()
 			js.Write(b)
 		}
-		for _, title := range []string{"决策待办", "建议流", "事项", "项目", "我来拍板"} {
+		for _, title := range []string{"等你决定", "建议", "事项", "项目", "我来拍板"} {
 			if !strings.Contains(js.String(), title) {
 				t.Errorf("Web 包里没有页面 %q", title)
 			}
@@ -196,7 +196,8 @@ func TestFlowBootstrap(t *testing.T) {
 
 	step("ACT-BOOT-05 agent 经 CLI 自助上手", func(t *testing.T) {
 		// 账本里先有一条带标记的事项。
-		r := e.Apa(del, "", "item", "add", "--kind", "task", "--title", marker, "--phase", "open")
+		// 没归属 Agent 的钥匙只能整理（§14.3）：建待确认事项，直接建 open 是拍板。
+		r := e.Apa(del, "", "item", "add", "--kind", "task", "--title", marker, "--phase", "proposed")
 		var it struct {
 			ID string `json:"id"`
 		}
