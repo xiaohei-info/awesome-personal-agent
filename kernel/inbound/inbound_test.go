@@ -43,20 +43,14 @@ var (
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
-// accPackYAML 是只有规则、不带模板的自定义包：省略 screen、draft、prescreen、extract，取内置包 inbound-triage 的模板（C.5）。
+// accPackYAML 是只有规则、不带模板的自定义包：固定使用内置包 inbound-triage/triage-screen（C.5）。
 const accPackYAML = `name: acc-pack
 version: 1.0.0
 description: custom pack that relies on builtin templates
 source_rules:
-  - id: acc-screen-rule
-    match: {source_type: accsrc, event_type: acc.screen}
-    then: screen
-  - id: acc-judge-rule
-    match: {source_type: accsrc, event_type: acc.judge}
-    then: judge
-  - id: acc-extract-rule
-    match: {source_type: accsrc, event_type: acc.extract}
-    then: extract
+  - id: acc-process-rule
+    match: {source_type: accsrc, event_type: acc.process}
+    then: process
 `
 
 const (
@@ -75,7 +69,7 @@ source_rules:
   - id: mail-in
     match: {source_type: inbox, event_type: mail.received}
     project_by: "fixed:p_mail"
-    then: judge
+    then: process
   - id: auto-pr
     match: {source_type: review, event_type: pr.opened}
     kind: task
@@ -103,26 +97,9 @@ source_rules:
   - id: x-none
     match: {source_type: exits, event_type: x.none}
     project_by: none
-  - id: x-tpl
-    match: {source_type: exits, event_type: x.tpl}
-    then: screen
-    screen: acc-screen
   - id: x-chat
     match: {source_type: exits, event_type: x.chat}
-    then: extract
-  - id: x-chat-np
-    match: {source_type: exits, event_type: x.chat_np}
-    then: extract
-    prescreen: none
-  - id: x-urgent
-    match: {source_type: exits, event_type: x.urgent}
-    then: screen
-    notify_urgent: true
-  - id: x-urgent-ex
-    match: {source_type: exits, event_type: x.urgent_ex}
-    then: extract
-    prescreen: none
-    notify_urgent: true
+    then: process
   - id: x-alert
     match: {source_type: exits, event_type: x.metric}
     where: [{field: metrics.value, op: crosses_above, value: 90}]
@@ -213,9 +190,6 @@ func newEnv(t *testing.T, configured bool) *env {
 			t.Fatal(err)
 		}
 		fs["inbound-triage/prompts/"+name+".md"] = &fstest.MapFile{Data: b}
-		if name == "triage-screen" {
-			fs["inbound-triage/prompts/acc-screen.md"] = &fstest.MapFile{Data: b}
-		}
 	}
 	e.loadr = packs.New(packs.Options{Builtin: fs, Kinds: kinds})
 	if rej, err := e.loadr.Load(); err != nil || len(rej) != 0 {
@@ -675,9 +649,6 @@ type passJudge struct{ J Judge }
 
 func (p passJudge) Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error) {
 	return p.J.Judge(ctx, c)
-}
-func (p passJudge) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
-	return p.J.Do(ctx, c)
 }
 
 type failingJudge struct {

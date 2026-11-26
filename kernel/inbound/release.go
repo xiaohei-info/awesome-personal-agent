@@ -276,12 +276,8 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 		if err != nil {
 			continue
 		}
-		var custom string
-		if m != nil {
-			if rules.Exit(m.rule) != rules.ExitProcess {
-				continue
-			}
-			custom = m.rule.Screen
+		if m != nil && rules.Exit(m.rule) != rules.ExitProcess {
+			continue
 		}
 		if s.o.Attaches != nil {
 			onUpdate := ""
@@ -292,12 +288,11 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 				continue
 			}
 		}
-		pack, screen := m.tmpl(custom, Template)
 		o, pol, err := s.freshOutbound(ctx, src)
 		if err != nil || outboundGate(o, pol, src) != "" {
 			continue
 		}
-		q1, q2 := s.judgeCalls(src, ev, pack, screen, "", o, pol)
+		q1, q2 := s.judgeCalls(src, ev, "", o, pol)
 		calls = append(calls, q1, q2)
 	}
 	if len(calls) > 0 {

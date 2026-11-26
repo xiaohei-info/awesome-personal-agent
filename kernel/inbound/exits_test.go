@@ -87,27 +87,22 @@ func TestWhereNumericBounds(t *testing.T) {
 	}
 }
 
-// ACT-IRL-06/19：旧名 judge 等同 screen；规则的 screen 字段覆盖初筛模板名。
-func TestScreenTemplateOverrideAndJudgeAlias(t *testing.T) {
+// FIX-4：统一 judge 固定使用内置包 inbound-triage/triage-screen，不同来源和自定义包共用同一份模板。
+func TestUnifiedJudgeAlwaysUsesBuiltinTriageScreen(t *testing.T) {
 	e := newEnv(t, true)
 	e.judge(`{"choice":"ignore","confidence":0.95}`)
-	var templates []string
-	for _, src := range []struct{ kind, typ string }{{"exits", "x.tpl"}, {"inbox", "mail.received"}} {
-		if got := e.screenTemplate(src.kind, src.typ); got != "" {
-			templates = append(templates, got)
+	var calls []string
+	e.svc.o.Judge = recorder{inner: e.svc.o.Judge, on: func(pack, tmpl string) { calls = append(calls, pack+"/"+tmpl) }}
+	e.emit("src_acc", "accsrc", ev("t-acc", "acc.process", "s", nil))
+	e.emit("src_inbox", "inbox", ev("t-mail", "mail.received", "s", nil))
+	if len(calls) < 2 {
+		t.Fatalf("expected judge calls, got %v", calls)
+	}
+	for _, got := range calls {
+		if got != DefaultPack+"/"+Template {
+			t.Fatalf("judge call used %q, want %s/%s", got, DefaultPack, Template)
 		}
 	}
-	if len(templates) != 2 || templates[0] != "acc-screen" || templates[1] != "triage-screen" {
-		t.Fatalf("templates %v", templates)
-	}
-}
-
-// screenTemplate 发出一条事件，返回交给判断型的模板名。
-func (e *env) screenTemplate(kind, typ string) string {
-	var got string
-	e.svc.o.Judge = recorder{inner: e.svc.o.Judge, on: func(tmpl string) { got = tmpl }}
-	e.emit("src_"+kind, kind, ev("t-"+typ, typ, "s", nil))
-	return got
 }
 
 // ACT-IRL-16/17、CAL-10：project_by fixed 取固定项目；none 取来源默认项目，默认项目清空后不归项目。
@@ -135,8 +130,8 @@ func TestProjectByFixedNoneAndSourceDefault(t *testing.T) {
 	}
 }
 
-// 旧名 then: extract 与 process 同义，统一走 judge 与队列，不调用生成端点抽取。
-func TestExtractExitNormalizesToProcess(t *testing.T) {
+// then: process 统一走 judge 与队列，不调用生成端点抽取。
+func TestProcessExitRunsUnifiedJudgeAndQueues(t *testing.T) {
 	e := newEnv(t, true)
 	e.screen(0.9)
 	e.emit("src_x", "exits", ev("c1", "x.chat", "群聊", nil))
@@ -170,16 +165,12 @@ func TestExitWithoutHandlerFailsLoudly(t *testing.T) {
 
 type recorder struct {
 	inner Judge
-	on    func(template string)
+	on    func(pack, template string)
 }
 
 func (r recorder) Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error) {
-	r.on(c.Template)
+	r.on(c.Pack, c.Template)
 	return r.inner.Judge(ctx, c)
-}
-
-func (r recorder) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
-	return r.inner.Do(ctx, c)
 }
 
 func questions(e *env) (n int) {
@@ -228,23 +219,17 @@ func TestDigestEventCanBeProposedOneByOne(t *testing.T) {
 	}
 }
 
-// ACT-IRL-04/06/07/18：自定义包里省略 screen、draft、prescreen、extract 的规则取内置包的内置模板，事件不卡在 pending。
-func TestCustomPackRuleFallsBackToBuiltinTemplates(t *testing.T) {
+// ACT-IRL-04/06/07/18：自定义包里的 then: process 规则固定取内置包 inbound-triage/triage-screen，事件进队列不调用生成端点。
+func TestCustomPackRuleUsesBuiltinJudgeTemplate(t *testing.T) {
 	e := newEnv(t, true)
-	e.judge(`{"choice":"yes","confidence":0.95}`)
-	e.draft(`{"candidates":[{"title":"回电话","kind":"task"}],"title":"回电话","summary":"s","kind":"task"}`)
+	e.screen(0.9)
 	var seen []string
-	e.svc.o.Judge = recorder{inner: e.svc.o.Judge, on: func(tmpl string) { seen = append(seen, tmpl) }}
-	e.emit("src_acc", "accsrc", ev("a1", "acc.screen", "s", nil), ev("a2", "acc.judge", "j", nil), ev("a3", "acc.extract", "x", nil))
-	for _, id := range []string{"a1", "a2"} {
-		if d := e.disposition("src_acc", id); d.Disposition != domain.DispositionProposed {
-			t.Errorf("%s: %+v", id, d)
-		}
+	e.svc.o.Judge = recorder{inner: e.svc.o.Judge, on: func(pack, tmpl string) { seen = append(seen, pack+"/"+tmpl) }}
+	e.emit("src_acc", "accsrc", ev("a1", "acc.process", "s", nil))
+	if d := e.disposition("src_acc", "a1"); d.Disposition != domain.DispositionProposed || d.Queue != runner.QueueDone {
+		t.Errorf("a1 should be processed via unified judge: %+v", d)
 	}
-	if d := e.disposition("src_acc", "a3"); d.Disposition == domain.DispositionPending {
-		t.Errorf("extract event stuck pending: %+v", d)
-	}
-	if len(seen) == 0 || seen[0] != "triage-screen" {
+	if len(seen) == 0 || seen[0] != DefaultPack+"/"+Template {
 		t.Fatalf("templates %v", seen)
 	}
 }
@@ -255,7 +240,7 @@ func TestInboundScreenSubmitsInBatches(t *testing.T) {
 	e.judge(`{"choice":"ignore","confidence":0.95}`)
 	var evs []map[string]any
 	for i := 0; i < 40; i++ {
-		evs = append(evs, ev(fmt.Sprintf("b%02d", i), "acc.screen", fmt.Sprintf("subject %d", i), nil))
+		evs = append(evs, ev(fmt.Sprintf("b%02d", i), "acc.process", fmt.Sprintf("subject %d", i), nil))
 	}
 	e.emit("src_acc", "accsrc", evs...)
 	var got []int

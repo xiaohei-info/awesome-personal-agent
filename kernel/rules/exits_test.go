@@ -15,7 +15,7 @@ func (p prev) Previous(_ domain.SourceEvent, m string) (float64, bool, error) {
 }
 
 func TestExitNames(t *testing.T) {
-	for then, want := range map[string]string{"": ExitProposed, "judge": ExitScreen, "screen": ExitScreen, "digest": ExitDigest, "alert": ExitAlert} {
+	for then, want := range map[string]string{"": ExitProposed, "proposed": ExitProposed, "ignore": ExitIgnore, "process": ExitProcess, "digest": ExitDigest, "alert": ExitAlert} {
 		if got := Exit(packs.SourceRule{Then: then}); got != want {
 			t.Errorf("then %q → %q, want %q", then, got, want)
 		}

@@ -65,10 +65,9 @@ const (
 
 var system = command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource}, Level: authz.LevelWorker}
 
-// Judge 是专属 agent 的入口（*direct.Service 满足它）：Judge 答初筛与预筛的是非题（级联），Do 跑起草与抽取的生成型模板。
+// Judge 是统一入站判断的入口（*direct.Service 满足它）：只回答两道是非题（要不要处理、急不急）。
 type Judge interface {
 	Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error)
-	Do(ctx context.Context, c direct.Call) (direct.Outcome, error)
 }
 
 // PackSource 取已加载的能力包（packs.Loader 满足它）。
@@ -426,14 +425,6 @@ type matched struct {
 	rule packs.SourceRule
 }
 
-// tmpl 取规则声明的模板（在规则所在包里），省略时取内置默认模板（在内置包 DefaultPack 里，C.5）。
-func (m *matched) tmpl(custom, def string) (pack, name string) {
-	if m == nil || custom == "" {
-		return DefaultPack, def
-	}
-	return m.pack, custom
-}
-
 func (m *matched) key() string {
 	if m == nil {
 		return ""
@@ -540,23 +531,25 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	case rules.ExitProposed:
 		// 规则直通（日历、提醒等结构化事件）：跳过 judge 第一题（要不要处理），只问第二题（急不急），直接进队列（§9.3）。
 		return s.enqueuePassthrough(ctx, src, ev, m, hint)
-	default: // process（含旧名 screen、judge、extract）、未命中规则与对话捕获走同一段统一 judge（§9.3）
+	default: // process、未命中规则与对话捕获走同一段统一 judge（§9.3）
 		return s.judgeAndEnqueue(ctx, src, ev, m, hint)
 	}
 }
 
-func (s *Service) judgeCalls(src domain.Source, ev domain.SourceEvent, pack, tmpl, hint string, o domain.Outbound, pol policy.Policy) (q1, q2 direct.JudgeCall) {
+// judgeCalls 构造统一 judge 的两道是非题（§9.3）：固定使用内置包 inbound-triage/triage-screen，
+// 仅从来源处理设置读取可编辑判据；q1 问"要不要处理"（未定按 yes），q2 问"急不急"（未定按 no）。
+func (s *Service) judgeCalls(src domain.Source, ev domain.SourceEvent, hint string, o domain.Outbound, pol policy.Policy) (q1, q2 direct.JudgeCall) {
 	in := eventInput(src, ev, hint, nil)
 	mat := materialSource(ev, o)
 	scope := direct.Scope{Source: src.ID}
 	extra := pol.SourcePipeline.JudgePrompt
 	q1 = direct.JudgeCall{
-		Pack: pack, Template: tmpl, Input: in, MaterialSource: mat,
+		Pack: DefaultPack, Template: Template, Input: in, MaterialSource: mat,
 		Subject: ev.ID, Source: src.ID, Scope: scope,
 		UnjudgedOnUnavailable: true, CriteriaExtra: extra, OnUndecided: "yes",
 	}
 	q2 = direct.JudgeCall{
-		Pack: pack, Template: tmpl, Use: UseUrgent, Question: urgentQuestion,
+		Pack: DefaultPack, Template: Template, Use: UseUrgent, Question: urgentQuestion,
 		Input: in, MaterialSource: mat,
 		Subject: ev.ID, Source: src.ID, Scope: scope,
 		UnjudgedOnUnavailable: false, CriteriaExtra: extra, OnUndecided: "no",
@@ -573,12 +566,7 @@ func (s *Service) enqueuePassthrough(ctx context.Context, src domain.Source, ev 
 			return err
 		}
 		if outboundGate(o, pol, src) == "" {
-			var sr string
-			if m != nil {
-				sr = m.rule.Screen
-			}
-			pack, tmpl := m.tmpl(sr, Template)
-			_, q2 := s.judgeCalls(src, ev, pack, tmpl, hint, o, pol)
+			_, q2 := s.judgeCalls(src, ev, hint, o, pol)
 			v2, err := s.o.Judge.Judge(ctx, q2)
 			if err != nil {
 				if ctx.Err() != nil {
@@ -599,11 +587,6 @@ func (s *Service) enqueuePassthrough(ctx context.Context, src domain.Source, ev 
 // judgeAndEnqueue 是所有非直通来源（邮件、代码托管、即时通讯、对话捕获、webhook）共用的唯一 judge 入口（§9.3）：
 // 一次批量预取提交两道是非题（要不要处理、急不急）；不处理记 ignored，未定按处理/不急，通过的进待处理队列。
 func (s *Service) judgeAndEnqueue(ctx context.Context, src domain.Source, ev domain.SourceEvent, m *matched, hint string) error {
-	var sr string
-	if m != nil {
-		sr = m.rule.Screen
-	}
-	pack, tmpl := m.tmpl(sr, Template)
 	o, pol, err := s.freshOutbound(ctx, src)
 	if err != nil {
 		return err
@@ -614,7 +597,7 @@ func (s *Service) judgeAndEnqueue(ctx context.Context, src domain.Source, ev dom
 	if s.o.Judge == nil {
 		return s.withdraw(ctx, m, ev, proposal{}, unavailablePrefix+"no judge endpoint or chat endpoint configured")
 	}
-	q1, q2 := s.judgeCalls(src, ev, pack, tmpl, hint, o, pol)
+	q1, q2 := s.judgeCalls(src, ev, hint, o, pol)
 	if pf, ok := s.o.Judge.(Prefetcher); ok {
 		pf.Prefetch(ctx, []direct.JudgeCall{q1, q2})
 	}

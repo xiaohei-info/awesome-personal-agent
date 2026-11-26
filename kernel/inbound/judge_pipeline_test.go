@@ -232,17 +232,15 @@ func TestRulePassthroughSkipsFirstQuestion(t *testing.T) {
 	}
 }
 
-// B2 验收 3：对话捕获、聊天（含旧 chat-patrol 的 then: extract 规则）、邮件全部走同一段统一 judge 并进队列。
+// B2 验收 3：对话捕获、聊天（then: process）、邮件全部走同一段统一 judge 并进队列。
 func TestCaptureChatAndMailShareUnifiedJudge(t *testing.T) {
 	chatPatrolYAML := `name: chat-patrol
 version: 1.0.0
-description: chat patrol compatibility test
+description: chat patrol unified process rule test
 source_rules:
   - id: chat-mention
     match: {source_type: chat, event_type: [chat.mention]}
-    then: extract
-    prescreen: none
-    project_by: draft
+    then: process
   - id: chat-topic
     match: {source_type: chat, event_type: [chat.topic]}
     then: ignore

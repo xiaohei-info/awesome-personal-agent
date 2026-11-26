@@ -113,7 +113,7 @@ func Classes(src PackSource) map[string]string {
 }
 
 // ReminderProducers 返回当前已加载能力包里自带提醒的规则键（§7.4 投递矩阵的两行）：timers 是带 create_timer 动作的
-// （到期为"规则设的提醒"），alerts 是 then: alert 或 notify_urgent 的来源规则（"来源即时提醒"）。设置页据此只显示有产生方的行。
+// （到期为"规则设的提醒"），alerts 是 then: alert 的来源规则（"来源即时提醒"）。设置页据此只显示有产生方的行。
 func ReminderProducers(src PackSource) (timers, alerts []string) {
 	for _, d := range defs(src) {
 		for _, a := range d.Do {
@@ -125,7 +125,7 @@ func ReminderProducers(src PackSource) (timers, alerts []string) {
 	}
 	for _, p := range src.List() {
 		for _, r := range p.SourceRules {
-			if r.Then == "alert" || r.NotifyUrgent {
+			if r.Then == "alert" {
 				alerts = append(alerts, key(p.Name, groupSource, r.ID))
 			}
 		}
@@ -403,10 +403,10 @@ func defs(src PackSource) []ruleDef {
 				When: r.When, Do: r.Do, ByState: r.StateRule()})
 		}
 	}
-	// 只有 accept: auto、then: alert 与 notify_urgent 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。
+	// 只有 accept: auto 与 then: alert 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。
 	for _, p := range src.List() {
 		for _, r := range p.SourceRules {
-			if r.Accept != "auto" && r.Then != "alert" && !r.NotifyUrgent {
+			if r.Accept != "auto" && r.Then != "alert" {
 				continue
 			}
 			k := key(p.Name, groupSource, r.ID)

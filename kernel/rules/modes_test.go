@@ -188,27 +188,27 @@ source_rules:
     then: proposed
 `
 
-const urgentRule = `name: urg
+const alertActionRule = `name: alr
 version: 1.0.0
-description: urgent
+description: alert action
 source_rules:
-  - id: mail-urgent
+  - id: mail-alert
     match: {source_type: mail-urgent}
-    then: screen
-    notify_urgent: true
+    where: [{field: sender, op: eq, value: boss}]
+    then: alert
 `
 
-// ACT-URG-01/07：声明 notify_urgent 的来源规则是动作类，包内不写 mode 即初始 observe；规则内容变化后（本人已切到 auto）回到 observe，并记 rule.mode_changed。
-func TestNotifyUrgentRuleStartsObserveAndFallsBackOnContentChange(t *testing.T) {
-	e := newEnv(t, map[string]string{"urg/pack.yaml": urgentRule}, nil)
-	k := SourceKey("urg", "mail-urgent")
+// 声明 then: alert 的来源规则是动作类，包内不写 mode 即初始 observe；规则内容变化后（本人已切到 auto）回到 observe，并记 rule.mode_changed。
+func TestAlertSourceRuleStartsObserveAndFallsBackOnContentChange(t *testing.T) {
+	e := newEnv(t, map[string]string{"alr/pack.yaml": alertActionRule}, nil)
+	k := SourceKey("alr", "mail-alert")
 	if e.mode(k) != ModeObserve {
 		t.Fatalf("initial mode = %s", e.mode(k))
 	}
 	if err := e.setMode(owner, k, ModeAuto); err != nil || e.mode(k) != ModeAuto {
 		t.Fatalf("owner switch: %v / %s", err, e.mode(k))
 	}
-	e.pack(map[string]string{"urg/pack.yaml": strings.Replace(urgentRule, "{source_type: mail-urgent}", "{source_type: mail-urgent, sender: boss}", 1)})
+	e.pack(map[string]string{"alr/pack.yaml": strings.Replace(alertActionRule, "value: boss", "value: ceo", 1)})
 	if e.mode(k) != ModeObserve {
 		t.Fatalf("after content change mode = %s", e.mode(k))
 	}
