@@ -387,14 +387,3 @@ func (f *bg) sessionOf(item, runID string) string {
 	}
 	return ""
 }
-
-// draftRequests 是 MODEL_STUB 收到的、含 mark 的生成请求（起草）。
-func (f *bg) draftRequests(mark string) []string {
-	var out []string
-	for _, r := range f.ModelStub.Requests() {
-		if !baseline.IsJudgeRequest(r) && strings.Contains(r.BodyText, mark) {
-			out = append(out, r.BodyText)
-		}
-	}
-	return out
-}

@@ -414,7 +414,7 @@ func TestFlowJudgmentRecord(t *testing.T) {
 		f.emit("JRC-SHD")
 		shdEvent = f.eventOf("JRC-SHD")
 		var shadow *record
-		recs := f.records("subject=" + shdEvent.ID)
+		recs := f.records("subject=" + shdEvent.ID + "&use=inbound_screen")
 		for i := range recs {
 			if recs[i].Shadow {
 				shadow = &recs[i]

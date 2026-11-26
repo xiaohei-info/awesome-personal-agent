@@ -113,6 +113,7 @@ grep -rl "` + mBob + `\|` + mAliceUv + `\|` + mNoSend + `" . > "$OUT/rd_leak.out
 func TestFlowForwardAllowlist(t *testing.T) {
 	f := setupBG(t)
 	f.WireEndpoints() // CLS_STUB 与 MODEL_STUB 接到内核：ACT-FWD-07 的入站流水线用内置 inbound-triage 模板
+	f.BatchAgent("")  // 过了 judge 的事件由批处理替身逐条转为建议
 	src := f.newSource()
 	f.auto("main-read")
 	const pr = "https://example.invalid/acc/test-repo/pull/101"
@@ -230,7 +231,6 @@ $APA delegate --parent "$ITEM" --assignee work-host.cli --title fwd-child > "$OU
 	f.step("ACT-FWD-07 退回判断流后不进入无人值守", func(t *testing.T) {
 		const mark = "FWD-BOB-RELEASED"
 		f.Cls.PYes(modelstub.Key{Contains: mark}, 0.90)
-		f.ModelStub.When(mark, modelstub.Reply{Content: `{"title":"fwd-07 起草标题","kind":"task","recommend":"accept","reason":"bob 的跟进"}`})
 		id := src.emit(mark, "bob", true, pr)
 		if ev := src.settled(id); ev.Item != child || ev.AttachState != "pending" {
 			t.Fatalf("应挂靠且未处理: %+v", ev)
@@ -246,7 +246,6 @@ $APA delegate --parent "$ITEM" --assignee work-host.cli --title fwd-child > "$OU
 			t.Fatalf("退回的消息应成为新的建议事项: %+v", ev)
 		}
 		eq(t, "建议事项的 phase", f.phase(ev.Item), "proposed")
-		eq(t, "起草请求数", len(f.draftRequests(mark)), 1)
 		for _, r := range f.ModelStub.Requests() {
 			if strings.Contains(r.BodyText, "ACCMAIN") && strings.Contains(r.BodyText, mark) {
 				t.Errorf("内容不应进入任何运行提示词: %s", r.BodyText)

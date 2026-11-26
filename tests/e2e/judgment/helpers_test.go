@@ -36,6 +36,7 @@ func setup(t *testing.T) *fx {
 	t.Helper()
 	e := baseline.Setup(t)
 	e.WireEndpoints()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	f := &fx{Env: e, t: t, statTemplate: "triage-screen"}
 	f.pauseDefaults()
 	return f
@@ -219,7 +220,7 @@ func (f *fx) record(id string) record {
 	return r
 }
 
-// final 是事件的定案记录：非影子的那一条（影子记录不作为处置依据）。
+// final 是事件"要不要处理"一问的定案记录：非影子的那一条（影子记录不作为处置依据；"急不急"另记一条）。
 func (f *fx) final(subject string) record {
 	f.t.Helper()
 	var out []record
@@ -232,7 +233,7 @@ func (f *fx) final(subject string) record {
 	f.until("事件 "+subject+" 有非影子的判断记录", func() bool {
 		out = out[:0]
 		for _, r := range f.records("subject=" + subject) {
-			if !r.Shadow {
+			if !r.Shadow && r.Use == "inbound_screen" {
 				out = append(out, r)
 			}
 		}

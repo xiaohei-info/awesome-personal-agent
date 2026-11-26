@@ -170,14 +170,16 @@ func TestFlowOutcallQueue(t *testing.T) {
 
 	t.Run("ACT-OUT-02 长时运行占满时来源拉取与模型调用照常", func(t *testing.T) {
 		f.ModelStub.Reset()
-		f.ModelStub.Judge(modelstub.ChatJudge{Answer: "yes"}) // 对话捕获先预筛（是非题），再抽取
-		f.ModelStub.When("确需本人后续处理或拍板的候选事项", reply(`{"candidates":[{"title":"OUT02 候选","kind":"task"}]}`))
+		f.ModelStub.Judge(modelstub.ChatJudge{Answer: "yes"}) // 对话捕获经 judge 两道是非题
 		f.addScriptSource("src_acc_tick", f.script("tick.sh", "cat >/dev/null\necho '{\"cursor\":\"c\"}'\n"), "1s")
 		f.capture("acc-open", "OUT02 长时运行占满时的判断", "s1")
 		f.waitFor("来源拉取在短任务队列执行", 15*time.Second, func() bool {
 			return count(f.runs("--category", "source"), state("succeeded")) >= 1
 		})
-		f.waitFor("模型调用不受影响", 15*time.Second, func() bool { return len(f.proposals()) == 1 })
+		// 判断完的事件进队列；批处理是长时运行，本步没配批处理 Agent，只看模型调用照常。
+		f.waitFor("模型调用不受影响", 15*time.Second, func() bool {
+			return strings.Contains(f.APIRaw("GET", "/v1/sources/capture:"+f.Projects["acc-open"]+"/events", "", f.OBS).Body, `"queue":"queued"`)
+		})
 		// 这两件事发生时长时运行仍占满额度，否则证明不了互不挤占。
 		rs := f.taskRuns()
 		eq(t, "此时仍在运行的长时运行", count(rs, state("running")), 1)
