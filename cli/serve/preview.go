@@ -9,12 +9,12 @@ import (
 	"maps"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -28,19 +28,18 @@ func init() { client.Register("authz", authzCmd) }
 
 const authzUsage = "usage: apa authz preview [--json] [--days 30]"
 
-// Preview 是 `apa authz preview` 的结果：切换会做什么、最近 Agent 的命令在新模型下的结局、存量对象落到新模型的样子。
-// 只读：在账本的在线副本上算，数据目录不受影响。
+// Preview 是 `apa authz preview` 的结果（§16.5）：切换会写出的权限卡、最近 Agent 的命令在权限卡下结局有变的清单、
+// 存量 Agent 与钥匙落到新模型的样子。只读：在账本的在线副本上算，数据目录不受影响。
 type Preview struct {
-	Switched bool       `json:"switched"`
+	Switched bool       `json:"switched"` // 已切换到权限卡
 	Plan     SwitchPlan `json:"plan"`
 	Days     int        `json:"days"`
-	// Rejudge：按事件类型还原出的 Agent 命令，在"现有 Agent 一律只整理"下的结局。
-	Rejudge   map[string]int             `json:"rejudge"` // effective / pending_owner(23) / refused(20、4)
-	Details   []RejudgedEvent            `json:"details"` // 后两类的明细
-	Agents    []AgentRow                 `json:"agents"`
-	Keys      []KeyRow                   `json:"keys"`
-	Materials []MaterialRow              `json:"materials"`
-	Settings  map[string]json.RawMessage `json:"settings"`
+	// Rejudge：按事件类型还原出的 Agent 命令，在它所属 Agent 的权限卡下与当时相比：unchanged、now_allowed、now_refused、uncertain。
+	Rejudge  map[string]int             `json:"rejudge"`
+	Details  []RejudgedEvent            `json:"details"` // 结局有变或无法判定的明细
+	Agents   []AgentRow                 `json:"agents"`
+	Keys     []KeyRow                   `json:"keys"`
+	Settings map[string]json.RawMessage `json:"settings"`
 }
 
 type RejudgedEvent struct {
@@ -48,8 +47,10 @@ type RejudgedEvent struct {
 	At      time.Time `json:"at"`
 	Type    string    `json:"type"`
 	Actor   string    `json:"actor"`
+	Agent   string    `json:"agent"`
 	Command string    `json:"command"`
-	Tier    string    `json:"tier"`
+	Group   string    `json:"group"`
+	Before  string    `json:"before"` // effective / refused
 	Outcome string    `json:"outcome"`
 	Note    string    `json:"note,omitempty"`
 }
@@ -70,14 +71,8 @@ type KeyRow struct {
 	After   string `json:"after"`
 }
 
-type MaterialRow struct {
-	Kind   string `json:"kind"`
-	Before string `json:"before"`
-	After  string `json:"after"`
-}
-
 // previewSettings 是参与权限判定、要在切换前后对照的策略段（不含模型端点：那里有密钥）。
-var previewSettings = []string{"web_only", "screening_timeout_ms", "material_write", "agent_tier", "permission_cap", "main_session_launch",
+var previewSettings = []string{"agent_tier", "permission_cap", "agent_cards", "limits", "main_session_launch",
 	"rule_agent", "default_agent_id", "main_agent_id", "channel_answerers", "forward_allowlist"}
 
 func authzCmd(c *client.Ctx, args []string) error {
@@ -122,10 +117,10 @@ func RunPreview(ctx context.Context, home string, days int, now time.Time) (Prev
 		return Preview{}, err
 	}
 	defer st.Close()
-	pv := Preview{Days: days, Rejudge: map[string]int{"effective": 0, "pending_owner": 0, "refused": 0, "uncertain": 0}}
+	pv := Preview{Days: days, Rejudge: map[string]int{"unchanged": 0, "now_allowed": 0, "now_refused": 0, "uncertain": 0}, Details: []RejudgedEvent{}}
 	err = st.View(ctx, func(tx *store.Tx) error {
 		var err error
-		if pv.Switched, err = policy.Switched(tx); err != nil {
+		if pv.Switched, err = cardsSwitched(tx); err != nil {
 			return err
 		}
 		if pv.Plan, err = PlanSwitch(tx, now); err != nil {
@@ -134,17 +129,27 @@ func RunPreview(ctx context.Context, home string, days int, now time.Time) (Prev
 		if pv.Settings, err = policy.StoredRaw(tx, previewSettings...); err != nil {
 			return err
 		}
-		if err := rejudge(tx, &pv, now.Add(-time.Duration(days)*24*time.Hour)); err != nil {
+		_, pol, err := policy.Stored(tx)
+		if err != nil {
 			return err
 		}
-		return inventory(tx, &pv)
+		card := func(agent string) policy.Card {
+			if c, ok := pv.Plan.Cards[agent]; ok {
+				return c
+			}
+			return pol.Card(agent)
+		}
+		if err := rejudge(tx, &pv, card, now.Add(-time.Duration(days)*24*time.Hour), now); err != nil {
+			return err
+		}
+		return inventory(tx, &pv, card)
 	})
 	return pv, err
 }
 
-// rejudge：最近的 Agent 事件按事件类型还原成命令，再按新档位判（现有 Agent 切换后一律只整理，所以二档、3a 都是 23）。
-// 旧事件没有记命令名，这是近似：同一类型对应的命令档位相同时才算准，不同时按载荷细分（建为建议与否、离开哪个阶段）。
-func rejudge(tx *store.Tx, pv *Preview, since time.Time) error {
+// rejudge：最近的 Agent 事件按事件类型还原成命令与组，在所属 Agent 换算后的权限卡下重判，与当时的结局比较。
+// 旧事件没有记命令名，这是近似：同一类型对应的命令组相同时才算准，不同时按载荷细分（建为建议与否、离开哪个阶段）。
+func rejudge(tx *store.Tx, pv *Preview, card func(string) policy.Card, since, now time.Time) error {
 	var after int64
 	for {
 		es, err := eventlog.Read(tx, after, 1000)
@@ -160,154 +165,147 @@ func rejudge(tx *store.Tx, pv *Preview, since time.Time) error {
 			if ev.At.Before(since) || ev.Actor.Type != domain.ActorAgent || strings.HasPrefix(ev.Actor.Principal, "kernel") {
 				continue
 			}
-			cmd, tier, note := commandOf(ev)
+			cmd, group, agent, note := commandOf(ev)
 			if cmd == "" {
 				continue
 			}
-			outcome := "effective"
-			switch tier {
-			case "uncertain":
-				outcome = "uncertain"
-			case "decide", "rules":
-				outcome = "pending_owner"
-			case "power", "internal":
-				outcome = "refused"
+			before := "effective"
+			if ev.Type == domain.EvCommandRejected {
+				before = "refused"
+			}
+			outcome := "uncertain"
+			switch {
+			case group == "" || group == "uncertain":
+			case group == string(authz.GroupInternal) || group == string(authz.GroupOwner):
+				outcome = map[string]string{"effective": "now_refused", "refused": "unchanged"}[before]
+			default:
+				allowed := card(agent).Allows(group, now)
+				switch {
+				case allowed == (before == "effective"):
+					outcome = "unchanged"
+				case allowed:
+					outcome = "now_allowed"
+				default:
+					outcome = "now_refused"
+				}
 			}
 			pv.Rejudge[outcome]++
-			if outcome != "effective" {
-				pv.Details = append(pv.Details, RejudgedEvent{Seq: ev.Seq, At: ev.At, Type: ev.Type, Actor: ev.Actor.Principal, Command: cmd, Tier: tier, Outcome: outcome, Note: note})
+			if outcome != "unchanged" {
+				pv.Details = append(pv.Details, RejudgedEvent{Seq: ev.Seq, At: ev.At, Type: ev.Type, Actor: ev.Actor.Principal, Agent: agent,
+					Command: cmd, Group: group, Before: before, Outcome: outcome, Note: note})
 			}
 		}
 	}
 }
 
-// wordsTier 是旧"只接受本人原话"档里新建类命令（拒绝事件记在命令名下）在新模型的档。
-var wordsTier = map[string]string{"project.create": "organize", "source.register": "power", "inbound.backlog_rules": "organize",
-	"inbound.backlog_score": "organize", "inbound.backlog_rejudge": "organize", "inbound.backlog_restore": "organize", "inbound.ignore_unjudged": "organize"}
+// oldTierGroup 是旧档位到组：3b 拆到了五组和只有本人，旧记录里分不出是哪一条，按 uncertain 处理（除非对象就是命令名）。
+var oldTierGroup = map[string]string{"read": policy.GroupView, "organize": policy.GroupOrganize, "decide": policy.GroupDecide, "rules": policy.GroupRules,
+	"internal": string(authz.GroupInternal), "power": "uncertain"}
 
-// commandOf 由事件类型（必要时看载荷）还原命令与它在新模型下的档；不是 Agent 发起的命令（健康告警、运行结束）返回空。
-func commandOf(ev domain.Event) (cmd, tier, note string) {
+// powerCommands 是旧 3b 新建类命令（拒绝事件记在命令名下）在权限卡下的组。
+var powerCommands = map[string]string{"source.register": policy.GroupConnect, "source.register_script": policy.GroupConnect,
+	"connection.create": policy.GroupChannels, "executor.register": policy.GroupAgents, "credential.issue": string(authz.GroupOwner)}
+
+// commandOf 由事件类型（必要时看载荷）还原命令、组与所属 Agent；不是 Agent 发起的命令（健康告警、运行结束）返回空。
+func commandOf(ev domain.Event) (cmd, group, agent, note string) {
 	var p struct {
 		Before *domain.Item `json:"before"`
 		Item   *domain.Item `json:"item"`
 		Action string       `json:"action"`
 		Code   string       `json:"code"`
+		Tier   string       `json:"tier"`
+		Agent  string       `json:"agent"`
 	}
 	_ = json.Unmarshal(ev.Payload, &p)
+	if ev.Basis != nil {
+		agent = ev.Basis.Agent
+	}
 	switch ev.Type {
 	case domain.EvItemCreated:
 		if p.Item != nil && p.Item.Phase != domain.PhaseProposed {
-			return "item.create", "decide", "created as " + string(p.Item.Phase) + ", not as a proposal"
+			return "item.create", policy.GroupDecide, agent, "created as " + string(p.Item.Phase) + ", not as a proposal"
 		}
-		return "item.create", "organize", ""
+		return "item.create", policy.GroupOrganize, agent, ""
 	case domain.EvItemPhaseChanged:
 		if p.Before != nil && (p.Before.Phase == domain.PhaseProposed || p.Before.Phase == domain.PhaseNeedsInput) {
-			return "item.transition", "decide", "left " + string(p.Before.Phase)
+			return "item.transition", policy.GroupDecide, agent, "left " + string(p.Before.Phase)
 		}
-		return "item.transition", "organize", ""
+		return "item.transition", policy.GroupOrganize, agent, ""
 	case domain.EvItemUpdated, "item.progress_added", domain.EvDecisionRequested, domain.EvDelegationCreated, domain.EvDelegationReported,
 		domain.EvMaterialRevised, domain.EvMaterialRevisionProposed, "executor.declared":
-		return ev.Type, "organize", ""
+		return ev.Type, policy.GroupOrganize, agent, ""
 	case domain.EvDecisionResolved:
-		return "decision.answer", "decide", ""
-	case domain.EvCommandRejected: // 旧模型拒绝过的尝试：按它的授权动作重判
-		switch p.Action {
-		case "answer_decision":
-			return "rejected:" + p.Action, "decide", "old code " + p.Code
-		case "change_settings":
-			return "rejected:" + p.Action, "power", "old code " + p.Code + "; settings are 3a (23) or 3b (20)"
-		case "manage_source", "manage_project":
-			// 新建类命令的拒绝记在命令名下：能直接认出命令；否则旧事件不足以分辨是一档（改名、重放、积压）还是 3a/3b（启停、登记、密钥）。
-			if t, ok := wordsTier[ev.Object]; ok {
-				return ev.Object, t, "old code " + p.Code
+		return "decision.answer", policy.GroupDecide, agent, ""
+	case domain.EvCommandRejected:
+		agent = p.Agent
+		g, known := oldTierGroup[p.Tier]
+		switch {
+		case !known && p.Tier != "": // 切换后的记录：tier 键已是组键
+			g = p.Tier
+		case g == "uncertain":
+			if c, ok := powerCommands[ev.Object]; ok {
+				return ev.Object, c, agent, "old code " + p.Code
 			}
-			return "rejected:" + p.Action, "uncertain", "old code " + p.Code + " on " + ev.Object + "; tier 1 if it was rename/replay/backlog, 3a or 3b if it was enable/update/register/webhook"
-		default:
-			return "rejected:" + p.Action, "organize", "old code " + p.Code + "; tier 1 now goes through"
+		case p.Code == string(domain.CodePermissionDenied):
+			return "rejected:" + p.Action, "", agent, "key scope (" + p.Code + "); the card does not change it"
 		}
+		return "rejected:" + p.Action, g, agent, "old code " + p.Code + " on " + ev.Object
 	}
-	return "", "", ""
+	return "", "", "", ""
 }
 
-func inventory(tx *store.Tx, pv *Preview) error {
-	_, pol, err := policy.Stored(tx)
-	if err != nil {
-		return err
-	}
+func inventory(tx *store.Tx, pv *Preview, card func(string) policy.Card) error {
 	cards, err := executors.Cards(tx)
 	if err != nil {
 		return err
 	}
+	seen := map[string]bool{}
 	for _, c := range cards {
-		card := pol.Card(c.ID)
-		if pc, ok := pv.Plan.Cards[c.ID]; ok {
-			card = pc
+		seen[c.ID] = true
+		pv.Agents = append(pv.Agents, AgentRow{ID: c.ID, Name: c.Name, Harness: c.Harness, Enabled: c.Enabled, Card: card(c.ID)})
+	}
+	for _, id := range slices.Sorted(maps.Keys(pv.Plan.Cards)) { // 兼容卡与只在旧段里出现过的 Agent
+		if !seen[id] {
+			pv.Agents = append(pv.Agents, AgentRow{ID: id, Name: id, Card: pv.Plan.Cards[id]})
 		}
-		pv.Agents = append(pv.Agents, AgentRow{ID: c.ID, Name: c.Name, Harness: c.Harness, Enabled: c.Enabled, Card: card})
 	}
 	creds, err := auth.New(nil).List(tx)
 	if err != nil {
 		return err
 	}
 	for _, k := range creds {
-		after := "unchanged: scope by key kind; tier from its Agent"
+		after := "unchanged: scope by key kind; groups from its Agent's permission card"
 		switch {
 		case !k.RevokedAt.IsZero():
 			after = "revoked; stays revoked"
-		case k.Kind == auth.Delegate && k.AgentID == "":
-			after = "not bound to an Agent: organize only (assign it to an Agent to follow that Agent's tier)"
+		case (k.Kind == auth.Delegate || k.Kind == auth.Worker) && k.AgentID == "" && k.Harness != "":
+			after = "follows the compatibility card legacy:" + k.Harness
+		case (k.Kind == auth.Delegate || k.Kind == auth.Worker) && k.AgentID == "":
+			after = "not bound to an Agent: default card (view, organize items, handle source events)"
 		case k.Kind == auth.Delegate || k.Kind == auth.Worker:
-			after = "follows Agent " + k.AgentID + " (organize after the switch)"
+			after = "follows Agent " + k.AgentID + "'s permission card"
 		}
 		pv.Keys = append(pv.Keys, KeyRow{ID: k.ID, Kind: string(k.Kind), Label: k.Label, Harness: k.Harness, AgentID: k.AgentID, Revoked: !k.RevokedAt.IsZero(), After: after})
-	}
-	var mw struct {
-		Default string            `json:"default"`
-		Kinds   map[string]string `json:"kinds"`
-	}
-	if raw, ok := pv.Settings["material_write"]; ok {
-		_ = json.Unmarshal(raw, &mw)
-	}
-	kinds := make([]string, 0, len(mw.Kinds))
-	for k := range mw.Kinds {
-		kinds = append(kinds, k)
-	}
-	sort.Strings(kinds)
-	for _, k := range append(kinds, "(default)") {
-		before := mw.Kinds[k]
-		if k == "(default)" {
-			before = mw.Default
-		}
-		after := "new: applies at once; edit by an Agent: waits for you unless the Agent may decide; edit by you: applies at once"
-		if k == "guideline" {
-			after = "always waits for confirmation (activating a guideline is 3a)"
-		}
-		pv.Materials = append(pv.Materials, MaterialRow{Kind: k, Before: before, After: after})
 	}
 	return nil
 }
 
 func renderPreview(pv Preview) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "switched: %v\n", pv.Switched)
+	fmt.Fprintf(&b, "switched to permission cards: %v\n", pv.Switched)
 	fmt.Fprintf(&b, "switch plan: revoke %d grants, clear %d questions, drop policy sections %v, write permission cards for %d agents, %d projects with match rules\n",
 		len(pv.Plan.Grants), len(pv.Plan.Asks), pv.Plan.LegacyPolicy, len(pv.Plan.Cards), len(pv.Plan.MatchProjects))
-	for _, g := range pv.Plan.Grants {
-		fmt.Fprintf(&b, "  grant %s agent=%s actions=%v background=%v\n", g.ID, g.Grantee.Agent, g.Actions, g.Grantee.Background)
-	}
-	fmt.Fprintf(&b, "last %d days, Agent commands under the new tiers: effective %d, pending owner (23) %d, refused (20/4) %d, uncertain %d\n",
-		pv.Days, pv.Rejudge["effective"], pv.Rejudge["pending_owner"], pv.Rejudge["refused"], pv.Rejudge["uncertain"])
-	for _, d := range pv.Details {
-		fmt.Fprintf(&b, "  #%d %s %s %s → %s (%s) %s\n", d.Seq, d.At.Format(time.RFC3339), d.Actor, d.Command, d.Outcome, d.Tier, d.Note)
-	}
 	for _, a := range pv.Agents {
-		fmt.Fprintf(&b, "agent %s %q harness=%s tool=%s groups=%v decide_projects=%v\n", a.ID, a.Name, a.Harness, a.Card.Tool, slices.Sorted(maps.Keys(a.Card.Groups)), a.Card.DecideProjects)
+		fmt.Fprintf(&b, "agent %s %q harness=%s tool=%s groups=%v decide_projects=%v runs_all_messages=%v\n", a.ID, a.Name, a.Harness, a.Card.Tool,
+			slices.Sorted(maps.Keys(a.Card.Groups)), a.Card.DecideProjects, a.Card.RunsAllMessages)
+	}
+	fmt.Fprintf(&b, "last %d days, Agent commands under the permission cards: unchanged %d, now allowed %d, now refused %d, uncertain %d\n",
+		pv.Days, pv.Rejudge["unchanged"], pv.Rejudge["now_allowed"], pv.Rejudge["now_refused"], pv.Rejudge["uncertain"])
+	for _, d := range pv.Details {
+		fmt.Fprintf(&b, "  #%d %s %s agent=%s %s group=%s %s → %s %s\n", d.Seq, d.At.Format(time.RFC3339), d.Actor, d.Agent, d.Command, d.Group, d.Before, d.Outcome, d.Note)
 	}
 	for _, k := range pv.Keys {
 		fmt.Fprintf(&b, "key %s kind=%s label=%q agent=%s revoked=%v → %s\n", k.ID, k.Kind, k.Label, k.AgentID, k.Revoked, k.After)
-	}
-	for _, m := range pv.Materials {
-		fmt.Fprintf(&b, "material %s: %s → %s\n", m.Kind, m.Before, m.After)
 	}
 	return b.String()
 }

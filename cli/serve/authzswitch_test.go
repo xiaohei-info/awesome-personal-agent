@@ -128,3 +128,68 @@ func TestCardsSwitchMapsTiersOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// 预演（§16.5）：在临时数据目录上，换算出的权限卡等于映射表（含没设过档位的 Agent），最近的命令按卡重判，不写账本。
+func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	st, err := store.Open(home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := time.Now()
+	agent := domain.Actor{Type: domain.ActorAgent, Principal: "cred_h", Via: domain.ViaCLI}
+	if err := st.Update(ctx, func(tx *store.Tx) error {
+		doc, _ := policy.Sections(policy.Default())
+		delete(doc, "agent_cards")
+		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"legacy:hermes":{"tier":"rules"}}}`)
+		doc["permission_cap"] = json.RawMessage(`{"by_agent":{},"default":"read","by_harness":{"hermes":"full"}}`)
+		raw, _ := json.Marshal(doc)
+		if _, err := tx.Exec(`INSERT INTO policy_version (version, doc, at) VALUES (1, ?, ?)`, string(raw), now.UnixNano()); err != nil {
+			return err
+		}
+		for _, ev := range []domain.Event{
+			{Type: domain.EvDecisionResolved, Object: "itm_1", Basis: &domain.Basis{Agent: "legacy:hermes"}},
+			{Type: domain.EvCommandRejected, Object: "itm_2", Payload: json.RawMessage(`{"action":"answer_decision","tier":"decide","code":"tier_closed","agent":"legacy:hermes"}`)},
+			{Type: domain.EvCommandRejected, Object: "source.register", Payload: json.RawMessage(`{"action":"manage_source","tier":"power","code":"web_only","agent":"legacy:hermes"}`)},
+			{Type: domain.EvCommandRejected, Object: "itm_3", Payload: json.RawMessage(`{"action":"change_settings","tier":"rules","code":"tier_closed","agent":"agent_a"}`)},
+		} {
+			ev.Actor, ev.At = agent, now
+			if ev.Payload == nil {
+				ev.Payload = json.RawMessage(`{}`)
+			}
+			if _, err := eventlog.Append(tx, ev); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pv, err := RunPreview(ctx, home, 30, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, a := pv.Plan.Cards["legacy:hermes"], pv.Plan.Cards["agent_a"]
+	if pv.Switched || h.Tool != policy.PermFull || !h.Allows(policy.GroupRules, now) || h.Allows(policy.GroupConnect, now) ||
+		a.Tool != policy.PermRead || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupSourceEvents, now) {
+		t.Fatalf("cards: %+v", pv.Plan.Cards)
+	}
+	if pv.Rejudge["unchanged"] != 3 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
+		t.Fatalf("rejudge: %v %+v", pv.Rejudge, pv.Details)
+	}
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		done, err := cardsSwitched(tx)
+		if done {
+			t.Fatal("preview must not switch")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
