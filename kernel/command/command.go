@@ -105,6 +105,12 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	if err != nil {
 		return Caller{}, err
 	}
+	return CallerOf(c, b.Origin), nil
+}
+
+// CallerOf 是长期凭据 c 认证出的 Caller：操作者主语（绑定执行者的 worker 为执行者 id，其余为凭据 id）、
+// 信任级与所属 Agent 的依据都只在这里定；权限卡切换预演按同一函数把旧事件的操作者归到 Agent。
+func CallerOf(c auth.Credential, o auth.Origin) Caller {
 	l := authz.LevelWorker
 	switch c.Kind {
 	case auth.Observer:
@@ -112,8 +118,8 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	case auth.Delegate:
 		l = authz.LevelDelegate
 	}
-	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID, CredentialHarness: c.Harness,
-		Internal: c.Audience == auth.AudienceInternal, SourceScopes: c.SourceScopes}, nil
+	return Caller{Actor: c.Actor(o), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID, CredentialHarness: c.Harness,
+		Internal: c.Audience == auth.AudienceInternal, SourceScopes: c.SourceScopes}
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。

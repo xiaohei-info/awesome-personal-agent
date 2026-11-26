@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +153,19 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 			return err
 		}
 		agent.Principal = key.ID
+		// 绑定执行者的 worker 钥匙：认证层以执行者 id 为操作者主语（auth.Credential.Actor），旧事件里记的是 exec_w。
+		for _, w := range []auth.Spec{{Kind: auth.Worker, AgentID: "agent_w", Harness: "hx", Executor: "exec_w"},
+			{Kind: auth.Worker, AgentID: "agent_a", Harness: "hx", Executor: "exec_x"}, {Kind: auth.Worker, AgentID: "agent_w", Harness: "hx", Executor: "exec_x"}} {
+			if _, _, err := auth.New(nil).Issue(tx, w); err != nil {
+				return err
+			}
+		}
+		for _, x := range []struct{ obj, principal string }{{"itm_7", "exec_w"}, {"itm_8", "exec_x"}} {
+			if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvDecisionResolved, Object: x.obj, At: now, Payload: json.RawMessage(`{}`),
+				Actor: domain.Actor{Type: domain.ActorAgent, Principal: x.principal, Via: domain.ViaCLI}}); err != nil {
+				return err
+			}
+		}
 		run, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{AgentSnapshot: &domain.AgentSnapshot{AgentID: "agent_r", ConfigRev: 1},
 			Category: domain.RunBackground, TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, now)
 		if err != nil {
@@ -174,7 +188,7 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 		}
 		doc, _ := policy.Sections(policy.Default())
 		delete(doc, "agent_cards")
-		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"agent_r":{"tier":"decide"},"legacy:hermes":{"tier":"rules"}}}`)
+		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"agent_r":{"tier":"decide"},"agent_w":{"tier":"decide"},"legacy:hermes":{"tier":"rules"}}}`)
 		doc["permission_cap"] = json.RawMessage(`{"by_agent":{},"default":"read","by_harness":{"hermes":"full"}}`)
 		raw, _ := json.Marshal(doc)
 		if _, err := tx.Exec(`INSERT INTO policy_version (version, doc, at) VALUES (1, ?, ?)`, string(raw), now.UnixNano()); err != nil {
@@ -209,7 +223,8 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 		a.Tool != policy.PermRead || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupSourceEvents, now) {
 		t.Fatalf("cards: %+v", pv.Plan.Cards)
 	}
-	if pv.Rejudge["unchanged"] != 6 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
+	if pv.Rejudge["unchanged"] != 7 || pv.Rejudge["now_allowed"] != 1 || pv.Rejudge["uncertain"] != 1 || len(pv.Details) != 2 ||
+		!strings.Contains(pv.Details[0].Note, "share actor exec_x") || pv.Details[0].Outcome != "uncertain" || pv.Details[1].Command != "rejected:answer_decision" {
 		t.Fatalf("rejudge: %v %+v", pv.Rejudge, pv.Details)
 	}
 	if err := st.View(ctx, func(tx *store.Tx) error {

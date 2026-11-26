@@ -17,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -188,6 +189,8 @@ func rejudge(tx *store.Tx, pv *Preview, card func(string) policy.Card, owners ma
 			}
 			outcome := "uncertain"
 			switch {
+			case agent == ambiguousOwner:
+				agent, note = "", "several keys with different Agents share actor "+ev.Actor.Principal
 			case group == "" || group == "uncertain":
 			case group == string(authz.GroupInternal) || group == string(authz.GroupOwner):
 				outcome = map[string]string{"effective": "now_refused", "refused": "unchanged"}[before]
@@ -288,14 +291,18 @@ func keyOwners(tx *store.Tx) (map[string]string, error) {
 	}
 	owners := map[string]string{}
 	for _, k := range creds {
-		if k.AgentID == "" && k.Harness != "" {
-			owners[k.ID] = "legacy:" + k.Harness
-		} else {
-			owners[k.ID] = k.AgentID
+		c := command.CallerOf(k, auth.Origin{}) // 与认证层同一套：主语是执行者 id 或凭据 id
+		p, agent := c.Actor.Principal, c.Agent()
+		if prev, seen := owners[p]; seen && prev != agent {
+			agent = ambiguousOwner // 同一执行者绑了不同 Agent 的几把钥匙：旧事件分不出是哪一把
 		}
+		owners[p] = agent
 	}
 	return owners, nil
 }
+
+// ambiguousOwner 标记一个操作者主语对应多个 Agent，这类旧事件按 uncertain 报。
+const ambiguousOwner = "\x00ambiguous"
 
 func inventory(tx *store.Tx, pv *Preview, card func(string) policy.Card) error {
 	cards, err := executors.Cards(tx)
