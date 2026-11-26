@@ -1,9 +1,11 @@
 package exec
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -45,5 +47,28 @@ func TestLimitsListCardSettingsAndDenials(t *testing.T) {
 	}
 	if l.DeniedWeek != 1 || len(l.Denied) != 1 || l.Denied[0].Group != "purge" || l.Denied[0].SettingsURL != "/settings/agents/agent_a#permissions" || l.Denied[0].WebURL != "/purge" {
 		t.Fatalf("denials: %+v", l.Denied)
+	}
+}
+
+// 外部凭据（ext、webhook）读不到限制清单；本人与 Agent 自己的钥匙照常。
+func TestLimitsRouteRefusesExternalCredentials(t *testing.T) {
+	e := setup(t)
+	var hook string
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		_, hook, err = e.au.Issue(tx, auth.Spec{Kind: auth.Webhook, Scope: "src_1"})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for name, mod := range map[string]func(*http.Request){"ext": e.token(auth.Ext), "webhook": func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+hook) }} {
+		if r := e.do("GET", "/v1/agents/me/limits", "", mod); r.Code != 403 || code(t, r) != domain.CodePermissionDenied {
+			t.Errorf("%s reads limits: %d %s", name, r.Code, r.Body)
+		}
+	}
+	if r := e.do("GET", "/v1/agents/me/limits", "", e.token(auth.Delegate)); r.Code != 200 {
+		t.Errorf("delegate reads its own limits: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("GET", "/v1/agents/agent_a/limits", ""); r.Code != 200 {
+		t.Errorf("owner reads any limits: %d %s", r.Code, r.Body)
 	}
 }

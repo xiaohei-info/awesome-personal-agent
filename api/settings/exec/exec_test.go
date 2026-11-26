@@ -58,7 +58,7 @@ func setup(t *testing.T) *env {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	if e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(st, e.x)}}); err != nil {
+	if e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(st, e.x), LimitsRoutes(st, Fallback{Long: 4, Short: 2, Chain: 8})}}); err != nil {
 		t.Fatal(err)
 	}
 	rec := e.do("POST", "/v1/auth/login", `{"password":"`+ownerPW+`"}`, nil)

@@ -74,6 +74,9 @@ type Limits struct {
 func LimitsRoutes(st *store.Store, fb Fallback) core.RouteGroup {
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/agents/{agent}/limits", Handler: func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+			if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook { // 外部凭据只做声明的用途，不读设置与拒绝明细
+				return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read settings", "use an owner or agent credential")
+			}
 			agent := r.PathValue("agent")
 			if agent == "me" {
 				agent = p.Caller.Agent()
