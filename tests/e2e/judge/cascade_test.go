@@ -412,14 +412,16 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.Judge(modelstub.ChatJudge{Key: key("cas-selfconf"), Raw: `{"answer": "no", "sufficient": false, "confidence": 0.99}`})
 		e, j := f.one("cas-selfconf")
 		jr := f.judgeRequests()
-		if len(jr) != 1 {
-			t.Fatalf("判断题请求 = %d，期望 1", len(jr))
+		if len(jr) != 2 {
+			t.Fatalf("判断题请求 = %d，期望 2（要不要处理、急不急）", len(jr))
 		}
-		if strings.Contains(strings.ToLower(jr[0]), "confidence") {
-			t.Errorf("输出 schema 不应含置信度字段: %s", jr[0])
-		}
-		if !contains(jr[0], "answer", "sufficient") {
-			t.Errorf("输出 schema 应有 answer 与 sufficient: %s", jr[0])
+		for _, r := range jr {
+			if strings.Contains(strings.ToLower(r), "confidence") {
+				t.Errorf("输出 schema 不应含置信度字段: %s", r)
+			}
+			if !contains(r, "answer", "sufficient") {
+				t.Errorf("输出 schema 应有 answer 与 sufficient: %s", r)
+			}
 		}
 		lowConfidence(t, "cas-selfconf", e, j)
 		if strings.Contains(mustJSON(f.rawJudgment(j.ID)), "0.99") {
