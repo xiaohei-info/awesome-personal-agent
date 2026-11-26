@@ -130,7 +130,7 @@ func TestFlowReminderOpenRule(t *testing.T) {
 	programs(t)
 	const src = "src_rem_rule"
 	var open SrcEvent
-	k.step("ACT-REM-02 reminder.open 直接进建议流，没有调用模型", func(t *testing.T) {
+	k.step("ACT-REM-02 reminder.open 直通进队列成为建议，不问要不要处理", func(t *testing.T) {
 		k.SetToolCase("rem-undated")
 		k.applepimSource(src, "reminder", map[string]any{"kind": "reminders", "undated_lists": []string{"随手记"}})
 		k.until("RU1 入账并处置", func() bool {
@@ -158,8 +158,8 @@ func TestFlowReminderOpenRule(t *testing.T) {
 		if !found {
 			t.Errorf("事项 %s 不在建议流 %v", open.Item, k.suggestions())
 		}
-		if n := k.modelLines(); n != 0 {
-			t.Errorf("规则直接放行，模型替身不应有请求: %d", n)
+		if n := k.askedWhether(""); n != 0 {
+			t.Errorf("规则直通不应问要不要处理: %d", n)
 		}
 	})
 	k.step("ACT-REM-03 改标题、补到期日后仍是同一条事项", func(t *testing.T) {

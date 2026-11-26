@@ -20,9 +20,7 @@ description: 来源规则验收包
 source_rules:
   - {id: r-prop, match: {source_type: acc-rule, event_type: [acc.proposed]}, kind: task, then: proposed}
   - {id: r-ign, match: {source_type: acc-rule, event_type: [acc.ignore]}, then: ignore}
-  - {id: r-scr, match: {source_type: acc-rule, event_type: [acc.screen]}, then: screen}
-  - {id: r-judge, match: {source_type: acc-rule, event_type: [acc.judge]}, then: judge}
-  - {id: r-ext, match: {source_type: acc-rule, event_type: [acc.chat]}, then: extract}
+  - {id: r-proc, match: {source_type: acc-rule, event_type: [acc.screen]}, then: process}
   - {id: r-dig, match: {source_type: acc-rule, event_type: [acc.news]}, then: digest}
   - id: r-alert
     match: {source_type: acc-rule, event_type: [acc.metric]}
@@ -59,8 +57,6 @@ source_rules:
     then: proposed
   - {id: r-fixed, match: {source_type: acc-rule, event_type: [acc.fixed]}, project_by: "fixed:%s", then: proposed}
   - {id: r-none, match: {source_type: acc-rule, event_type: [acc.none]}, project_by: none, then: proposed}
-  - {id: r-draft, match: {source_type: acc-rule, event_type: [acc.draft]}, project_by: draft, then: screen}
-  - {id: r-tpl, match: {source_type: acc-rule, event_type: [acc.tpl]}, then: screen, screen: acc-screen}
 `
 
 func TestFlowInboundRules(t *testing.T) {
@@ -72,6 +68,7 @@ func TestFlowInboundRules(t *testing.T) {
 	e.StartModelStub()
 	e.WireEndpoints()
 	e.DeclareStubHarness()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	f := &fx{Env: e, t: t, w: t.TempDir()}
 	// 投递都走渠道 acc-chan 且不合并：这样"没有投递"能用 CHAN 直接观察。
 	f.webOK("PUT", "/settings/policy", `{"disturb":{"routes":{"brief":"channel:acc-chan","decision":"channel:acc-chan","health":"channel:acc-chan","reminder":"channel:acc-chan","wake":"channel:acc-chan"},"merge_window_sec":0,"remind_on_deadline":true}}`, 200)
@@ -87,11 +84,8 @@ func TestFlowInboundRules(t *testing.T) {
 	restart := func() { e.StopKernel(); e.StartKernelAgain() }
 
 	f.step("ACT-IRL-01 准备规则验收包与脚本来源", func() {
-		f.must(os.MkdirAll(filepath.Join(packDir, "prompts"), 0o755))
+		f.must(os.MkdirAll(packDir, 0o755))
 		f.must(os.WriteFile(filepath.Join(packDir, "pack.yaml"), []byte(fmt.Sprintf(accRulesYAML, e.Projects["acc-home"])), 0o644))
-		tmpl, err := os.ReadFile(filepath.Join("..", "..", "..", "packs", "inbound-triage", "prompts", "triage-screen.md"))
-		f.must(err)
-		f.must(os.WriteFile(filepath.Join(packDir, "prompts", "acc-screen.md"), tmpl, 0o644))
 		src = f.register("src_irl_src", "acc-rule", "acc-rule")
 		cal = f.register("src_irl_cal", "calendar", "irl-cal")
 		rem = f.register("src_irl_rem", "reminder", "irl-rem")
@@ -116,7 +110,7 @@ func TestFlowInboundRules(t *testing.T) {
 		}
 	})
 
-	f.step("ACT-IRL-02 proposed 出口直接成为建议，不调模型", func() {
+	f.step("ACT-IRL-02 proposed 出口直通进队列成为建议，不问要不要处理", func() {
 		before := f.proposedCount()
 		got := src.emit(ev("irl-p1", "acc.proposed", "续办证件", ""))["irl-p1"]
 		eq(t, "disposition", got.Disposition, "proposed")
@@ -125,7 +119,7 @@ func TestFlowInboundRules(t *testing.T) {
 		eq(t, "kind", it.Kind, "task")
 		eq(t, "title", it.Title, "续办证件")
 		eq(t, "建议流新增", f.proposedCount(), before+1)
-		f.noModelCalls("续办证件")
+		eq(t, "要不要处理题", f.askedWhether("续办证件"), 0)
 		noDelivery("proposed 出口")
 	})
 
@@ -138,54 +132,31 @@ func TestFlowInboundRules(t *testing.T) {
 		f.noModelCalls("状态已同步")
 	})
 
-	f.step("ACT-IRL-04 screen 出口交初筛，是则起草成建议", func() {
+	f.step("ACT-IRL-04 process 出口经 judge 判要处理后交批处理成建议", func() {
 		f.pYes("报销", 0.9)
-		f.draft("报销", map[string]any{"title": "整理报销单", "summary": "三张发票待提交", "kind": "task", "recommend": "accept"})
 		got := src.emit(ev("irl-s1", "acc.screen", "报销", `"summary":"三张发票"`))["irl-s1"]
 		eq(t, "disposition", got.Disposition, "proposed")
-		eq(t, "title", f.item(got.Item).Title, "整理报销单")
+		eq(t, "title", f.item(got.Item).Title, "报销")
 		tmpl(t, f.judgment(got), "triage-screen")
-		if f.clsMentions("报销") == 0 {
-			t.Error("CLS_LOG 应有 irl-s1 的初筛题")
+		if f.askedWhether("报销") == 0 {
+			t.Error("CLS_LOG 应有 irl-s1 的要不要处理题")
 		}
-		eq(t, "MODEL_LOG 起草请求数", f.modelMentions("报销"), 1)
+		if !strings.Contains(e.BatchPrompts(), got.ID) {
+			t.Error("批处理提示词应带 irl-s1 的事件 id")
+		}
 	})
 
-	f.step("ACT-IRL-05 没有规则命中的事件按 screen 处理", func() {
+	f.step("ACT-IRL-05 没有规则命中的事件按 process 处理", func() {
 		f.pYes("无规则的事件", 0.05)
 		before := f.proposedCount()
 		got := src.emit(ev("irl-u1", "acc.unmatched", "无规则的事件", ""))["irl-u1"]
 		eq(t, "disposition", got.Disposition, "ignored")
-		if f.clsMentions("无规则的事件") == 0 {
-			t.Error("CLS_LOG 应有 irl-u1 的初筛题")
+		if f.askedWhether("无规则的事件") == 0 {
+			t.Error("CLS_LOG 应有 irl-u1 的要不要处理题")
 		}
-		eq(t, "MODEL_LOG 起草请求", f.modelMentions("无规则的事件"), 0)
 		eq(t, "建议流", f.proposedCount(), before)
-	})
-
-	f.step("ACT-IRL-06 旧写法 then judge 被接受并等同 screen", func() {
-		f.pYes("旧规则事件", 0.9)
-		f.draft("旧规则事件", map[string]any{"title": "旧规则起草", "kind": "task"})
-		got := src.emit(ev("irl-j1", "acc.judge", "旧规则事件", ""))["irl-j1"]
-		eq(t, "disposition", got.Disposition, "proposed")
-		eq(t, "title", f.item(got.Item).Title, "旧规则起草")
-		tmpl(t, f.judgment(got), "triage-screen")
-		eq(t, "起草请求数", f.modelMentions("旧规则事件"), 1)
-		f.apa(e.OBS, 0, "pack", "validate", packDir)
-	})
-
-	f.step("ACT-IRL-07 extract 出口从一条聚合事件抽出多条候选", func() {
-		f.pYes("群聊片段", 0.9)
-		f.draft("群聊片段", map[string]any{"candidates": []map[string]any{
-			{"title": "周五前交方案", "kind": "task"}, {"title": "约李工下周对接", "kind": "task"}}})
-		before := f.proposedCount()
-		got := src.emit(ev("irl-x1", "acc.chat", "群聊片段", `"items":[{"sender":"bob","text":"方案周五前给我","at":"`+now()+`"},{"sender":"bob","text":"下周和李工对一下","at":"`+now()+`"}]`))["irl-x1"]
-		eq(t, "disposition", got.Disposition, "proposed")
-		eq(t, "items 数", len(got.Items), 2)
-		eq(t, "建议流新增", f.proposedCount(), before+2)
-		tmpl(t, f.judgment(got), "capture-prescreen")
-		if f.clsMentions("群聊片段") == 0 || f.modelMentions("群聊片段") != 1 {
-			t.Errorf("应先有 capture-prescreen 判断请求，再有一次 triage-extract 生成请求: CLS %d MODEL %d", f.clsMentions("群聊片段"), f.modelMentions("群聊片段"))
+		if strings.Contains(e.BatchPrompts(), got.ID) {
+			t.Error("不处理的事件不应进批处理")
 		}
 	})
 
@@ -200,7 +171,7 @@ func TestFlowInboundRules(t *testing.T) {
 	})
 
 	f.step("ACT-IRL-09 alert 出口的变化条件按序列上一次取值判断", func() {
-		// 条件不成立的事件不命中 r-alert，按 screen 处理；验收文档没给这三条配分类端点结果，这里配成"不值得"，使它们不建事项。
+		// 条件不成立的事件不命中 r-alert，按 process 处理；验收文档没给这三条配分类端点结果，这里配成"不值得"，使它们不建事项。
 		f.pYes("磁盘", 0.05)
 		before := f.proposedCount()
 		m := func(id string, v int) string {
@@ -227,12 +198,12 @@ func TestFlowInboundRules(t *testing.T) {
 			w("irl-w5", "acc.where-in", "carol"), w("irl-w6", "acc.where-in", "dave"))
 		for _, id := range []string{"irl-w1", "irl-w4", "irl-w5"} {
 			eq(t, id+" disposition", got[id].Disposition, "proposed")
-			eq(t, id+" 初筛请求", f.clsMentions("条件 "+id), 0)
+			eq(t, id+" 要不要处理题", f.askedWhether("条件 "+id), 0)
 		}
 		for _, id := range []string{"irl-w2", "irl-w3", "irl-w6"} {
 			eq(t, id+" disposition", got[id].Disposition, "ignored")
 			if f.clsMentions("条件 "+id) == 0 {
-				t.Errorf("%s 不命中规则，应按 screen 经初筛", id)
+				t.Errorf("%s 不命中规则，应按 process 经 judge", id)
 			}
 		}
 	})
@@ -304,9 +275,17 @@ func TestFlowInboundRules(t *testing.T) {
 		if r.Code == 0 || !strings.Contains(out(r), "op") {
 			t.Errorf("op=regex 应被拒并指出 op: %d %s", r.Code, out(r))
 		}
-		r = mutate("bad3", "event_type: [acc.ignore]}, then: ignore", "event_type: [acc.ignore]}, then: archive")
-		if r.Code == 0 || !strings.Contains(out(r), "then") {
-			t.Errorf("then=archive 应被拒并指出 then: %d %s", r.Code, out(r))
+		// 已取消（2026-11-26）的旧出口与旧字段同样整包被拒。
+		for i, c := range [][3]string{
+			{"then: ignore}", "then: archive}", "then"},
+			{"then: process}", "then: screen}", "then"},
+			{"then: process}", "then: extract}", "then"},
+			{"then: process}", "then: process, screen: acc-screen}", "screen"},
+		} {
+			r = mutate(fmt.Sprintf("bad3-%d", i), c[0], c[1])
+			if r.Code == 0 || !strings.Contains(out(r), c[2]) {
+				t.Errorf("%s 应被拒并指出 %s: %d %s", c[1], c[2], r.Code, out(r))
+			}
 		}
 	})
 
@@ -352,38 +331,6 @@ func TestFlowInboundRules(t *testing.T) {
 		eq(t, "irl-o1 事项项目不变", f.item(o1.Item).Project, e.Projects["acc-open"])
 	})
 
-	f.step("ACT-IRL-18 project_by draft 由起草从项目清单里选", func() {
-		f.pYes("项目选择 irl-r1", 0.9)
-		f.pYes("项目选择 irl-r2", 0.9)
-		f.draft("项目选择 irl-r1", map[string]any{"title": "归 acc-work", "kind": "task", "project": e.Projects["acc-work"]})
-		f.draft("项目选择 irl-r2", map[string]any{"title": "归清单外", "kind": "task", "project": "no-such-project"})
-		got := src.emit(ev("irl-r1", "acc.draft", "项目选择 irl-r1", ""), ev("irl-r2", "acc.draft", "项目选择 irl-r2", ""))
-		for _, k := range []string{"irl-r1", "irl-r2"} {
-			var body string
-			for _, r := range e.ModelStub.Requests() {
-				if strings.Contains(r.BodyText, "项目选择 "+k) && strings.Contains(r.BodyText, "起草一条建议") {
-					body = r.BodyText
-				}
-			}
-			for _, p := range []string{"acc-work", "acc-open", "acc-home"} {
-				if !strings.Contains(body, e.Projects[p]) {
-					t.Errorf("%s 的起草请求应带活动项目清单（含 %s）: %.600s", k, p, body)
-				}
-			}
-		}
-		eq(t, "irl-r1 project", f.item(got["irl-r1"].Item).Project, e.Projects["acc-work"])
-		if p := f.item(got["irl-r2"].Item).Project; p != "prj_inbox" {
-			t.Errorf("irl-r2 不得归到清单外的项目（应兜底落入内置 Inbox），实际 %q", p)
-		}
-	})
-
-	f.step("ACT-IRL-19 规则按条覆盖初筛模板名", func() {
-		f.pYes("模板覆盖", 0.05)
-		got := src.emit(ev("irl-tp1", "acc.tpl", "模板覆盖", ""))["irl-tp1"]
-		eq(t, "disposition", got.Disposition, "ignored")
-		tmpl(t, f.judgment(got), "acc-screen")
-	})
-
 	f.step("ACT-IRL-20 来源事件的新字段与新处置可经 API 读出", func() {
 		k1 := src.emit(ev("irl-k1", "acc.proposed", "带新字段", `"metrics":{"size":3},"merge_key":"mk-irl-k1"`))["irl-k1"]
 		eq(t, "irl-k1 metrics.size", k1.Metrics["size"], 3.0)
@@ -401,8 +348,6 @@ func TestFlowInboundRules(t *testing.T) {
 				t.Errorf("irl-s1 应带 score=0.9: %v", ev.Score)
 			}
 		}
-		x1, _ := src.find("irl-x1")
-		eq(t, "irl-x1 items", len(x1.Items), 2)
 		var filtered struct {
 			Events []event `json:"events"`
 		}
@@ -455,10 +400,10 @@ func TestFlowInboundRules(t *testing.T) {
 		eq(t, "disposition", got.Disposition, "proposed")
 		eq(t, "kind", f.item(got.Item).Kind, "task")
 		ruleIs(t, "命中规则", f.ruleOf(got), "calendar-event")
-		if w := f.apa(e.DEL, 0, "why", got.Item).Stdout; !strings.Contains(w, "calendar-event") {
+		if w := f.apa(e.DEL, 0, "why", got.ID).Stdout; !strings.Contains(w, "calendar-event") {
 			t.Errorf("apa why 应显示规则 id calendar-event: %s", w)
 		}
-		f.noModelCalls("体检")
+		eq(t, "要不要处理题", f.askedWhether("体检"), 0)
 	})
 
 	f.step("ACT-IRL-23 内置规则：到期的提醒事项直接成为建议", func() {
@@ -466,7 +411,7 @@ func TestFlowInboundRules(t *testing.T) {
 		eq(t, "disposition", got.Disposition, "proposed")
 		eq(t, "kind", f.item(got.Item).Kind, "task")
 		ruleIs(t, "命中规则", f.ruleOf(got), "reminder-due")
-		f.noModelCalls("交水费")
+		eq(t, "要不要处理题", f.askedWhether("交水费"), 0)
 	})
 
 	f.step("ACT-IRL-24 内置规则：PR 状态变化与规范文件变化被忽略", func() {
@@ -479,6 +424,37 @@ func TestFlowInboundRules(t *testing.T) {
 		f.noModelCalls("修复登录")
 		f.noModelCalls("AGENTS.md 变化")
 		eq(t, "建议流", f.proposedCount(), before)
+	})
+
+	f.step("ACT-IRL-25a 批处理 Agent 用运行凭据读原文，并入建议、挂到事项、忽略", func() {
+		target := f.item(src.emit(ev("irl-t0", "acc.proposed", "接缝目标建议", ""))["irl-t0"].Item).ID
+		var open struct {
+			ID string `json:"id"`
+		}
+		f.must(json.Unmarshal([]byte(f.webOK("POST", "/items", `{"kind":"task","title":"接缝进行中事项","phase":"open","project":"`+e.Projects["acc-open"]+`"}`, 201)), &open))
+		seen := filepath.Join(f.w, "agent-read.txt")
+		e.BatchAgent(fmt.Sprintf(`BODY=$("$APA" source event "$EV")
+printf '%%s\n' "$BODY" >> %q
+case "$BODY" in
+*接缝并入*) "$APA" source propose "$EV" --into %s >/dev/null ;;
+*接缝挂靠*) "$APA" source attach "$EV" --to %s >/dev/null; "$APA" item progress %s --text "接缝进展" >/dev/null ;;
+*) "$APA" source ignore "$EV" >/dev/null ;;
+esac`, seen, target, open.ID, open.ID))
+		defer e.BatchAgent("")
+		for _, s := range []string{"接缝并入", "接缝挂靠", "接缝忽略"} {
+			f.pYes(s, 0.9)
+		}
+		got := src.emit(ev("irl-g1", "acc.screen", "接缝并入", `"detail":"只有原文里才有的内容"`), ev("irl-g2", "acc.screen", "接缝挂靠", ""), ev("irl-g3", "acc.screen", "接缝忽略", ""))
+		eq(t, "并入", got["irl-g1"].Item, target)
+		eq(t, "挂靠处置", got["irl-g2"].Disposition, "attached")
+		eq(t, "挂靠事项", got["irl-g2"].Item, open.ID)
+		eq(t, "忽略处置", got["irl-g3"].Disposition, "ignored")
+		b, err := os.ReadFile(seen)
+		f.must(err)
+		if !strings.Contains(string(b), "只有原文里才有的内容") {
+			t.Errorf("运行凭据应能读到来源原文: %s", b)
+		}
+		f.until("挂靠事项记下进展", func() bool { return len(f.audit(open.ID, "item.progress_added")) == 1 })
 	})
 
 	var clsAt, modelAt int

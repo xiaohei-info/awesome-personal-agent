@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
 // 脚本来源：把收到的 stdin 存盘，输出队列目录里的事件，末行给游标（§9.2 执行契约）。
@@ -82,6 +80,7 @@ type SrcEvent struct {
 	UnjudgedReason string `json:"unjudged_reason"`
 	Item           string `json:"item"`
 	Type           string `json:"type"`
+	Queue          string `json:"queue"`
 }
 
 func (k *kit) srcEvents(src string, disposition string) []SrcEvent {
@@ -97,7 +96,7 @@ func (k *kit) srcEvents(src string, disposition string) []SrcEvent {
 	return out.Events
 }
 
-// waitEvents 等来源的事件数达到 n 且都已被处置（disposition 不再是 pending）。
+// waitEvents 等来源的事件数达到 n 且都已被处置；没配批处理 Agent（noAgent）时停在队列里等处理也算到位。
 func (k *kit) waitEvents(src string, n int) []SrcEvent {
 	k.t.Helper()
 	var evs []SrcEvent
@@ -107,7 +106,7 @@ func (k *kit) waitEvents(src string, n int) []SrcEvent {
 			return false
 		}
 		for _, e := range evs {
-			if e.Disposition == "" || e.Disposition == "pending" {
+			if e.Disposition == "" || e.Disposition == "pending" && !(k.noAgent && e.Queue == "queued") {
 				return false
 			}
 		}
@@ -116,12 +115,6 @@ func (k *kit) waitEvents(src string, n int) []SrcEvent {
 		k.t.Fatalf("来源 %s 在 60 秒内没有处置到 %d 条事件: %+v\n%s", src, n, evs, k.ServiceLog())
 	}
 	return evs
-}
-
-// draft 配置 triage-draft：请求里的来源标题为 subject 时返回给定起草结果（请求体里的输入 JSON 经转义，键用转义形态）。
-func (k *kit) draft(subject string, d map[string]any) {
-	b, _ := json.Marshal(d)
-	k.ModelStub.When(`subject\":\"`+subject+`\"`, modelstub.Reply{Content: string(b)})
 }
 
 // healthSignal 读 apa health 里某个信号（用 token 指定的实例）。

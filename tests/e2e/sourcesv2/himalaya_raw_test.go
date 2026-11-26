@@ -28,6 +28,7 @@ func setupOutputLimit(t *testing.T) *kit {
 	e.StartModelStub()
 	e.DeclareStubHarness()
 	e.WireEndpoints()
+	e.BatchAgent("")
 	e.InstallToolStub()
 	return &kit{Env: e, t: t}
 }

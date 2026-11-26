@@ -51,9 +51,8 @@ func TestFlowSourceGithub(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-GH-02 新 Issue 经初筛与起草成为建议，按仓库归项目", func(t *testing.T) {
+	k.step("ACT-GH-02 新 Issue 经 judge 与批处理成为建议，按仓库归项目", func(t *testing.T) {
 		k.clsYes("导出文件乱码", 0.9)
-		k.draft("导出文件乱码", map[string]any{"title": "修复导出乱码", "kind": "task", "recommend": "accept"})
 		k.ghAt("gh-issue-opened", hOpened)
 		ev := k.settled(src, "issue-acc-org-acc-repo#11-opened")
 		if ev.Disposition != "proposed" || ev.Item == "" || ev.Type != "issue.opened" {
@@ -61,17 +60,17 @@ func TestFlowSourceGithub(t *testing.T) {
 		}
 		accepted, acceptedEvent, acceptedJudgment = ev.Item, ev.ID, k.judgment(ev).ID
 		it := k.item(accepted)
-		if it.Title != "修复导出乱码" || it.Phase != "proposed" || it.Project != k.Projects["acc-work"] {
-			t.Errorf("建议应是\"修复导出乱码\"、proposed、按远程地址归入 acc-work: %+v", it)
+		if it.Title != "导出文件乱码" || it.Phase != "proposed" || it.Project != k.Projects["acc-work"] {
+			t.Errorf("建议应是\"导出文件乱码\"、proposed、按远程地址归入 acc-work: %+v", it)
 		}
-		if !k.ruleHit(accepted, "inbound-triage/source_rules/github-issue") {
+		if !k.eventRule(ev, "github-issue") {
 			t.Error("应命中 github-issue 规则")
 		}
 		if j := k.judgment(ev); j.Template == "" || !strings.Contains(j.Template, "triage-screen") || j.DecidedBy != "classifier" {
 			t.Errorf("应经 triage-screen 初筛、由分类端点定案: %+v", j)
 		}
-		if k.modelAbout("导出文件乱码") < 1 || !k.hasDraftRequest("导出文件乱码") {
-			t.Error("MODEL_LOG 应有这条事件的起草请求")
+		if !strings.Contains(k.BatchPrompts(), ev.ID) {
+			t.Error("批处理提示词应带这条事件的 id")
 		}
 		if n := len(k.Cls.Batches()); n == 0 {
 			t.Error("CLS_LOG 应有 triage-screen 题")
@@ -84,11 +83,10 @@ func TestFlowSourceGithub(t *testing.T) {
 	})
 
 	var low SrcEvent
-	k.step("ACT-GH-03 初筛落入不确定带且对话端点也未定时留为建议并标把握低", func(t *testing.T) {
+	k.step("ACT-GH-03 初筛落入不确定带且对话端点也未定时按处理进队列", func(t *testing.T) {
 		const subject = "登录页文案错别字"
 		k.clsYes(subject, 0.4)
 		k.chatJudge(subject, "yes", false)
-		k.draft(subject, map[string]any{"title": "修正登录页错别字", "kind": "task", "recommend": "accept"})
 		k.ghAt("gh-issue-labeled", hLabeled)
 		low = k.settledPrefix(src, "issue-acc-org-acc-repo#12-")
 		if low.Disposition != "proposed" || low.Item == "" {
@@ -100,9 +98,6 @@ func TestFlowSourceGithub(t *testing.T) {
 		j := k.judgment(low)
 		if len(j.Levels) != 2 || j.Levels[0].Backend != "classifier" || j.Levels[1].Backend != "chat" || j.DecidedBy != "default" {
 			t.Errorf("判断记录应有分类端点与对话端点两级、由保守默认定案: %+v", j)
-		}
-		if p := k.item(low.Item).Raw["proposal"].(map[string]any); p["low_confidence"] != true {
-			t.Errorf("建议应标把握低: %v", p)
 		}
 		// apa why 回放该来源事件：处置步骤展开判断记录，两级逐级列出。
 		d, ok := stepOf(k.why(low.ID), "inbound.disposed")
@@ -120,8 +115,8 @@ func TestFlowSourceGithub(t *testing.T) {
 		if ev.Disposition != "ignored" || ev.Item != "" {
 			t.Fatalf("事件应 ignored、无事项: %+v", ev)
 		}
-		if k.hasDraftRequest(subject) {
-			t.Error("MODEL_LOG 不应有起草请求")
+		if strings.Contains(k.BatchPrompts(), ev.ID) {
+			t.Error("被忽略的事件不应进批处理")
 		}
 		eq(t, "建议流条数", len(k.suggestions()), len(sug))
 		k.noDelivery()
@@ -137,7 +132,7 @@ func TestFlowSourceGithub(t *testing.T) {
 		eq(t, "ask 后阶段", k.item(accepted).Phase, "needs_input")
 		k.until("渠道 ext 把决策发到机器人替身", func() bool {
 			for _, m := range bot.Sent() {
-				if strings.Contains(m.Text, "修复导出乱码") {
+				if strings.Contains(m.Text, "导出文件乱码") {
 					return true
 				}
 			}
@@ -150,8 +145,8 @@ func TestFlowSourceGithub(t *testing.T) {
 		k.until("事项进入 done", func() bool { return k.item(accepted).Phase == "done" })
 		steps := k.why(accepted)
 		created, ok := stepOf(steps, "item.created")
-		if !ok || created.Basis.RuleID != "inbound-triage/source_rules/github-issue" {
-			t.Errorf("回放应含命中规则 github-issue 的建立步骤: %+v", created)
+		if !ok {
+			t.Errorf("回放应含建立步骤: %+v", steps)
 		}
 		item, _ := created.Payload["item"].(map[string]any)
 		ext, _ := item["ext"].(map[string]any)

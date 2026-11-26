@@ -82,7 +82,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-CAL-02 日程经确定性规则变成建议，归入来源默认项目，不调模型", func(t *testing.T) {
+	k.step("ACT-CAL-02 日程经确定性规则直通进队列成为建议，归入来源默认项目，不问要不要处理", func(t *testing.T) {
 		for _, subject := range []string{"保险到期日", "牙医复诊", "周会"} {
 			k.until(subject+" 的事件入账", func() bool { return len(bySubject(subject)) > 0 })
 		}
@@ -142,7 +142,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 			}
 		}
 		for _, subject := range []string{"保险到期日", "牙医复诊", "周会"} {
-			eq(t, "两份模型替身日志里提到「"+subject+"」的请求", k.modelAbout(subject), 0)
+			eq(t, "分类端点里要不要处理题提到「"+subject+"」的请求", k.askedWhether(subject), 0)
 		}
 	})
 
@@ -358,7 +358,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 		k.webSource(map[string]any{"id": rem, "name": rem, "type": "script", "command": filepath.Join(progDir, "apple-pim-source"), "schedule": "1s", "timeout": 20,
 			"source_type": "reminder", "dedupe_domain": "acc-pim-rem", "default_project": home,
 			"config": map[string]any{"kind": "reminders", "bin_dir": k.ToolBin}})
-		lines := k.modelLines()
+		asked := k.askedWhether("")
 		k.SetToolCase("pim-reminders")
 		k.until("四条提醒事项入账并处置", func() bool {
 			evs := k.events(rem)
@@ -381,7 +381,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 				t.Errorf("%s 应命中 reminder-due", ev.Subject)
 			}
 		}
-		eq(t, "两份模型替身日志新增行数", k.modelLines()-lines, 0)
+		eq(t, "要不要处理题新增次数", k.askedWhether("")-asked, 0)
 	})
 }
 

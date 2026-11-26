@@ -236,8 +236,6 @@ func TestFlowProposalHandling(t *testing.T) {
 	})
 
 	k.step("ACT-PRH-02 两个来源带同一链接的事件合并为一条建议", func(t *testing.T) {
-		k.draftDefault("prh 季度会议安排")
-		k.draftDefault("prh 季度会议（转发）")
 		k.emit(srcA, Ev{ID: "prh-link-a", Subject: "prh 季度会议安排", Link: "https://example.invalid/meet/1"})
 		first := k.settled(srcA, "prh-link-a")
 		k.emit(srcB, Ev{ID: "prh-link-b", Subject: "prh 季度会议（转发）", Link: "https://EXAMPLE.invalid/meet/1/"})
@@ -266,8 +264,6 @@ func TestFlowProposalHandling(t *testing.T) {
 	})
 
 	k.step("ACT-PRH-03 没有链接时按规范化标题加发送者合并", func(t *testing.T) {
-		k.draftDefault("prh 报销单待签")
-		k.draftDefault("  PRH 报销单待签 ")
 		k.emit(srcA, Ev{ID: "prh-title-a", Subject: "prh 报销单待签", Sender: "alice@example.invalid"})
 		ta := k.settled(srcA, "prh-title-a")
 		k.emit(srcB, Ev{ID: "prh-title-b", Subject: "  PRH 报销单待签 ", Sender: "alice@example.invalid"})
@@ -287,7 +283,6 @@ func TestFlowProposalHandling(t *testing.T) {
 		k.webOK("POST", "/items/"+m1+"/accept", `{}`, 200)
 		eq(t, "M1 阶段", k.phase(m1), "open")
 		msgs0, prog0 := len(k.messages(m1)), len(k.progress(m1))
-		k.draftDefault("prh 季度会议改期")
 		k.emit(srcA, Ev{ID: "prh-link-c", Subject: "prh 季度会议改期", Link: "https://example.invalid/meet/1"})
 		ev := k.settled(srcA, "prh-link-c")
 		if ev.Disposition != "proposed" || ev.Item == "" || ev.Item == m1 {
@@ -304,7 +299,6 @@ func TestFlowProposalHandling(t *testing.T) {
 	k.step("ACT-PRH-05 已丢弃的建议不再接收合并", func(t *testing.T) {
 		k.webOK("POST", "/items/"+pTitleC+"/dismiss", `{"reason":"不需要"}`, 200)
 		eq(t, "title-c 的建议", k.phase(pTitleC), "dropped")
-		k.draftDefault("prh 报销单待签")
 		k.emit(srcA, Ev{ID: "prh-title-d", Subject: "prh 报销单待签", Sender: "bob@example.invalid"})
 		td := k.settled(srcA, "prh-title-d")
 		if td.Disposition != "proposed" || td.Item == "" || td.Item == pTitleC {
@@ -316,7 +310,6 @@ func TestFlowProposalHandling(t *testing.T) {
 	})
 
 	k.step("ACT-PRH-06 超过 7 天的建议不再合并", func(t *testing.T) {
-		k.draftDefault("prh 旧事")
 		k.emit(srcA, Ev{ID: "prh-old-a", Subject: "prh 旧事", Link: "https://example.invalid/old/1"})
 		pOld = k.proposalFrom(srcA, "prh-old-a")
 		k.TCAdvance(691200) // 推进 8 天，同一 APA_HOME，不重启服务；时间不回拨，后续 action 以新时刻为准
@@ -332,25 +325,8 @@ func TestFlowProposalHandling(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-PRH-07 建议展示推荐、理由与“把握低”", func(t *testing.T) {
-		k.draft("prh-rec-dismiss", map[string]any{"title": "起草：prh-rec-dismiss", "summary": "群发", "kind": "task", "recommend": "dismiss", "reason": "群发通知，与你无关"})
-		k.draftDefault("prh-unsure")
-		k.emit(srcA, Ev{ID: "prh-rec-dismiss", Subject: "prh-rec-dismiss"})
-		k.emit(srcA, Ev{ID: "prh-unsure", Subject: "prh-unsure"})
-		r1, r2 := k.proposalFrom(srcA, "prh-rec-dismiss"), k.proposalFrom(srcA, "prh-unsure")
-		p := k.getItem(r1)["proposal"].(map[string]any)
-		eq(t, "recommend", p["recommend"], "dismiss")
-		eq(t, "reason", p["reason"], "群发通知，与你无关")
-		eq(t, "low_confidence", p["low_confidence"], false)
-		if srcs, a := k.strs(p["sources"]), k.sevID(srcA, "prh-rec-dismiss"); len(srcs) != 1 || srcs[0] != a {
-			t.Errorf("sources 应只有 prh-rec-dismiss（%s）: %v", a, srcs)
-		}
-		eq(t, "第二条 low_confidence", k.getItem(r2)["proposal"].(map[string]any)["low_confidence"], true)
-	})
-
 	k.step("ACT-PRH-08 档位放开的 Agent 把建议补到已有事项", func(t *testing.T) {
 		c0 = itoa(k.head()) // 事件游标 C0
-		k.draftDefault("prh 合同第二版意见")
 		k.emit(srcA, Ev{ID: "prh-att-1", Subject: "prh 合同第二版意见", Summary: "第二版的修改意见", Keys: []string{"prh-thread-9"}})
 		pa = k.proposalFrom(srcA, "prh-att-1")
 		t3 = k.openItem("prh 合同谈判")
@@ -412,7 +388,6 @@ func TestFlowProposalHandling(t *testing.T) {
 	})
 
 	k.step("ACT-PRH-10 本人在 Web 把建议补到已有事项", func(t *testing.T) {
-		k.draftDefault("prh 会议纪要")
 		k.emit(srcB, Ev{ID: "prh-att-3", Subject: "prh 会议纪要"})
 		pb = k.proposalFrom(srcB, "prh-att-3")
 		prog0 := len(k.progress(t3))
@@ -434,7 +409,6 @@ func TestFlowProposalHandling(t *testing.T) {
 	})
 
 	k.step("ACT-PRH-11 补到的目标不合法时被拒绝且建议不变", func(t *testing.T) {
-		k.draftDefault("prh-att-4")
 		k.emit(srcA, Ev{ID: "prh-att-4", Subject: "prh-att-4"})
 		pc = k.proposalFrom(srcA, "prh-att-4")
 		doneItem := k.openItem("prh 已终结事项")
@@ -462,87 +436,57 @@ func TestFlowProposalHandling(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-PRH-12 准备批量处理用的四条建议", func(t *testing.T) {
-		// 批量按推荐会处理范围内所有带推荐的建议。前面各步留下的建议属于其他动作，先由本人在 Web 处理掉，
-		// 让"按推荐处理"的范围只剩 B1–B4（验收文档的 S0 之后"共三条"以此为前提）。
+	// 推荐只来自合并键命中已接受事项（§9.3）：用同一链接造出"补到该事项"的推荐。
+	recommended := func(target, link string) string {
+		k.t.Helper()
+		k.emit(srcA, Ev{ID: target + "-a", Subject: "prh " + target, Link: link})
+		item := k.proposalFrom(srcA, target+"-a")
+		k.webOK("POST", "/items/"+item+"/accept", `{}`, 200)
+		k.emit(srcA, Ev{ID: target + "-b", Subject: "prh " + target + " 跟进", Link: link})
+		prop := k.proposalFrom(srcA, target+"-b")
+		eq(k.t, "推荐目标", k.proposalOf(prop)["attach_to"], item)
+		return prop
+	}
+
+	k.step("ACT-PRH-13 本人在 Web 一次点击按推荐批量处理，没有推荐的不动", func(t *testing.T) {
 		for id := range k.stream() {
 			k.webOK("POST", "/items/"+id+"/dismiss", `{"reason":"批量前清场"}`, 200)
 		}
-		eq(t, "清场后的建议流", len(k.stream()), 0)
-		k.draft("prh-b-acc", map[string]any{"title": "起草：prh-b-acc", "kind": "task", "recommend": "accept", "reason": "需要跟进"})
-		k.draft("prh-b-dis", map[string]any{"title": "起草：prh-b-dis", "kind": "task", "recommend": "dismiss", "reason": "广告"})
-		k.draft("prh-b-att", map[string]any{"title": "起草：prh-b-att", "kind": "task", "recommend": "attach", "attach_to": t3, "reason": "属于合同谈判"})
-		for _, id := range []string{"prh-b-acc", "prh-b-dis", "prh-b-att"} {
-			k.emit(srcA, Ev{ID: id, Subject: id})
-		}
-		b[1], b[2], b[3] = k.proposalFrom(srcA, "prh-b-acc"), k.proposalFrom(srcA, "prh-b-dis"), k.proposalFrom(srcA, "prh-b-att")
+		b[3] = recommended("prh-b-att", "https://example.invalid/b/1")
 		b[4] = k.idOf(k.apa(k.OBS, 0, "propose", "--kind", "task", "--title", "prh-b-none", "--project", k.Projects["acc-open"]))
-		for i, rec := range []string{"accept", "dismiss", "attach"} {
-			eq(t, "B"+itoa(int64(i+1))+" 的推荐", k.proposalOf(b[i+1])["recommend"], rec)
-		}
-		if k.proposalOf(b[4]) != nil {
-			t.Errorf("B4 不应有 proposal: %v", k.proposalOf(b[4]))
-		}
+		target, _ := k.proposalOf(b[3])["attach_to"].(string)
 		s0 = k.maxSeq()
-	})
-
-	k.step("ACT-PRH-13 本人在 Web 一次点击按推荐批量处理", func(t *testing.T) {
 		body := `{"mode":"recommended","filter":{"source":"` + srcA + `","project":"` + k.Projects["acc-open"] + `"}}`
 		res := parseResults(t, k.webOK("POST", "/proposals/batch", body, 200))
-		for _, id := range b[1:4] {
-			if !res[id].OK {
-				t.Errorf("%s 应处理成功: %+v", id, res[id])
-			}
+		if !res[b[3]].OK {
+			t.Errorf("%s 应处理成功: %+v", b[3], res[b[3]])
 		}
 		if _, ok := res[b[4]]; ok {
 			t.Errorf("没有推荐的 B4 不应被处理: %+v", res[b[4]])
 		}
-		eq(t, "B1", k.phase(b[1]), "open")
-		eq(t, "B2", k.phase(b[2]), "dropped")
-		eq(t, "B2 reason", k.last(b[2], "item.phase_changed").Reason, "广告")
 		eq(t, "B3", k.phase(b[3]), "dropped")
-		eq(t, "B3 补到 T3 的 proposal.attached", len(k.attachedEvents(t3, b[3])), 1)
+		eq(t, "B3 补到目标的 proposal.attached", len(k.attachedEvents(target, b[3])), 1)
 		eq(t, "B4", k.phase(b[4]), "proposed")
-		objs := map[string]int{}
 		for _, e := range k.disposals(s0) {
 			if e.Type == "item.phase_changed" {
-				objs[e.Object]++
 				eq(t, "操作者", e.Actor.Type, "human")
 				eq(t, "via", e.Actor.Via, "web")
 			}
 		}
-		if len(objs) != 3 || objs[b[1]] != 1 || objs[b[2]] != 1 || objs[b[3]] != 1 {
-			t.Errorf("S0 之后应对 B1、B2、B3 各有一条处置 Event（共三条）: %v", objs)
-		}
 	})
 
-	k.step("ACT-PRH-14 按推荐批量时目标已关闭的那一条跳过并说明，其余照常", func(t *testing.T) {
-		t4 := k.openItem("prh 将关闭的事项")
-		k.draft("prh-skip-1", map[string]any{"title": "起草：prh-skip-1", "kind": "task", "recommend": "attach", "attach_to": t4, "reason": "属于 T4"})
-		k.draft("prh-skip-2", map[string]any{"title": "起草：prh-skip-2", "kind": "task", "recommend": "accept", "reason": "需要跟进"})
-		k.emit(srcA, Ev{ID: "prh-skip-1", Subject: "prh-skip-1"})
-		k.emit(srcA, Ev{ID: "prh-skip-2", Subject: "prh-skip-2"})
-		s1, s2 := k.proposalFrom(srcA, "prh-skip-1"), k.proposalFrom(srcA, "prh-skip-2")
-		eq(t, "prh-skip-1 的推荐目标", k.proposalOf(s1)["attach_to"], t4)
+	k.step("ACT-PRH-14 按推荐批量时目标已关闭的那一条跳过并说明", func(t *testing.T) {
+		s1 := recommended("prh-skip", "https://example.invalid/skip/1")
+		t4, _ := k.proposalOf(s1)["attach_to"].(string)
 		k.apa(k.DEL, 0, "item", "transition", t4, "--to", "done", "--reason", "做完了")
-		res := parseResults(t, k.webOK("POST", "/proposals/batch", `{"mode":"recommended","filter":{"ids":["`+s1+`","`+s2+`"]}}`, 200))
+		res := parseResults(t, k.webOK("POST", "/proposals/batch", `{"mode":"recommended","filter":{"ids":["`+s1+`"]}}`, 200))
 		if res[s1].OK || res[s1].Why == "" {
-			t.Errorf("prh-skip-1 应失败并给出 why: %+v", res[s1])
+			t.Errorf("应失败并给出 why: %+v", res[s1])
 		}
-		if !res[s2].OK {
-			t.Errorf("prh-skip-2 应成功: %+v", res[s2])
-		}
-		eq(t, "prh-skip-1", k.phase(s1), "proposed")
-		eq(t, "prh-skip-2", k.phase(s2), "open")
-		if len(k.events(s2, "item.phase_changed")) == 0 {
-			t.Error("成功的那条应有自己的 Event")
-		}
+		eq(t, "prh-skip", k.phase(s1), "proposed")
 	})
 
 	k.step("ACT-PRH-15 delegate 用处置清单批量处理，每条各自成败", func(t *testing.T) {
-		for _, n := range []string{"prh-e-1", "prh-e-2", "prh-e-3"} {
-			k.draft(n, map[string]any{"title": "起草：" + n, "kind": "task", "recommend": "accept", "reason": "需要跟进"})
-		}
 		k.emit(srcB, Ev{ID: "prh-e-1", Subject: "prh-e-1"})
 		k.emit(srcB, Ev{ID: "prh-e-2", Subject: "prh-e-2"})
 		k.emit(srcB, Ev{ID: "prh-e-3", Subject: "prh-e-3"})
@@ -612,6 +556,7 @@ func TestFlowProposalHandling(t *testing.T) {
 
 	// 2026-11-20 改写：批量等于逐条，档位未放开的 Agent（DELO）每条都得 tier_closed，没有一条生效。
 	k.step("ACT-PRH-17 档位未放开的批量或超过上限时整批不生效", func(t *testing.T) {
+		recommended("prh-tier", "https://example.invalid/tier/1")
 		before := k.stream()
 		disposals := len(k.disposals(0))
 		r0 := k.Apa(k.DELO, "", "proposals", "apply", "--recommended", "--source", srcA)
