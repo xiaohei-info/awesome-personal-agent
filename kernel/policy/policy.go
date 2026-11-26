@@ -477,9 +477,13 @@ type Judgment struct {
 // Policy 是一个版本的完整配置。两份白名单相互独立：键是来源或渠道，值是发送者或回答人。
 type Policy struct {
 	// 旧版本文档里的 web_only、material_write、screening_timeout_ms 段已随旧权限模型取消，解码时忽略（§14.3）。
-	Disturb          Disturb          `json:"disturb"`
-	PermissionCap    PermissionCap    `json:"permission_cap"`
-	AgentTier        AgentTier        `json:"agent_tier"`
+	Disturb       Disturb       `json:"disturb"`
+	PermissionCap PermissionCap `json:"permission_cap"`
+	AgentTier     AgentTier     `json:"agent_tier"`
+	// AgentCards 是各 Agent 的权限卡（§14.5），键是 Agent 实例 id 或兼容卡 legacy:<程序>。只有本人能改。
+	AgentCards map[string]Card `json:"agent_cards"`
+	// Limits 是同时运行数与连锁层数（§14.9）；旧文档没有此键，读作全部取运行配置的初值。
+	Limits           Limits           `json:"limits"`
 	JudgeEndpoint    *JudgeEndpoint   `json:"judge_endpoint"`
 	GenerateEndpoint GenerateEndpoint `json:"generate_endpoint"`
 	Persona          string           `json:"persona"` // 只影响表达方式，不进入任何权限判定
@@ -588,12 +592,13 @@ func Default() Policy {
 			string(domain.DeliveryReminder): "inject", string(domain.DeliveryHealth): "web",
 			string(domain.DeliveryWake): "web",
 		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true, DailyCap: DefaultDailyCap, Mutes: []Mute{}}, // 合并窗口默认 30 分钟（§7.4）
-		PermissionCap:     PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
-		AgentTier:         AgentTier{ByAgent: map[string]AgentAllowance{}},
-		MainSessionLaunch: MainSessionLaunch{ByHarness: map[string]string{}, ByRule: map[string]string{}},
-		ForwardAllowlist:  map[string][]string{},
-		ChannelAnswerers:  map[string][]string{},
-		Channels:          map[string]Channel{},
+		PermissionCap:           PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
+		AgentTier:               AgentTier{ByAgent: map[string]AgentAllowance{}},
+		AgentCards:              map[string]Card{},
+		MainSessionLaunch:       MainSessionLaunch{ByHarness: map[string]string{}, ByRule: map[string]string{}},
+		ForwardAllowlist:        map[string][]string{},
+		ChannelAnswerers:        map[string][]string{},
+		Channels:                map[string]Channel{},
 		NoteVaults:              []NoteVault{},
 		Judgment:                Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
 		BackgroundRunTimeoutSec: DefaultBackgroundRunTimeoutSec,
@@ -795,6 +800,9 @@ func normalize(p Policy) (Policy, error) {
 		p.AgentTier.ByAgent[a] = v
 	}
 
+	if err := normalizeCards(&p); err != nil {
+		return p, err
+	}
 	if !oneOf(p.PermissionCap.Default, PermRead, PermEdit, PermFull) {
 		return p, invalid("permission_cap default %q", p.PermissionCap.Default)
 	}
