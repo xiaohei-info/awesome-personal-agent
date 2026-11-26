@@ -1,12 +1,12 @@
 name: inbound-triage
 version: 1.0.0
-description: 来源事件变成建议：GitHub、邮件、日历的来源规则，webhook 校验与映射，判断型与生成型提示词
+description: 来源事件处理线：代码托管、邮件、日历、提醒的来源规则，webhook 校验与映射，统一 judge 与批处理提示词
 # 邮件和日历的项目归属随用户而定（项目 id 由本机生成）：在数据目录放同名包，把 project_by 改成 "fixed:<项目 id>"。
 source_rules:
   - id: github-issue
     match: {source_type: github, event_type: [issue.opened, issue.labeled]}
     project_by: repo_remote
-    then: judge
+    then: process
   - id: calendar-event
     match: {source_type: calendar, event_type: [event.created, event.updated]}
     kind: task
@@ -15,7 +15,7 @@ source_rules:
   - id: mail-received
     match: {source_type: mail, event_type: [mail.received]}
     project_by: none
-    then: judge
+    then: process
     on_update: attach
   # 结构化规则：不调模型。PR 的合并、关闭与更新能按关联键挂靠的，已在规则之前挂靠；走到这里的没有事项登记过关联键。
   - id: reminder-due
@@ -48,7 +48,7 @@ source_rules:
     on_update: attach
   - id: issue-comment
     match: {source_type: github, event_type: [issue.commented]}
-    then: judge
+    then: process
     on_update: attach
 webhook_schemes:
   - id: hmac-sha256-header

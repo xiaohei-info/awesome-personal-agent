@@ -88,6 +88,7 @@ func (e *scoreEnv) mustRejudge(limit int) ReleaseResult {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	e.drainBatch() // 模拟批处理 Agent：放回的事件进队列后由它转成建议
 	return res
 }
 
@@ -134,8 +135,8 @@ func TestRejudgeFollowsScoreAndDailyCap(t *testing.T) {
 		}
 	}
 	for _, it := range e.allItems() {
-		if it.Title != "起草标题" || it.Proposal == nil {
-			t.Fatalf("item not drafted: %+v", it)
+		if it.Proposal == nil {
+			t.Fatalf("item missing proposal: %+v", it)
 		}
 	}
 	for _, x := range e.events("src_t") {
@@ -234,8 +235,9 @@ func TestRejudgeSubmitsScreeningInBatches(t *testing.T) {
 		}
 		total += b.Questions
 	}
-	if total != 40 || len(e.cls.Batches()) != 2 {
-		t.Fatalf("classifier saw %d questions in %d batches, want 40 in 2", total, len(e.cls.Batches()))
+	// 每条事件两道 judge 题（要不要处理 + 急不急），40 条共 80 题，每批最多 32 题，分 3 批。
+	if total != 80 || len(e.cls.Batches()) != 3 {
+		t.Fatalf("classifier saw %d questions in %d batches, want 80 in 3", total, len(e.cls.Batches()))
 	}
 }
 

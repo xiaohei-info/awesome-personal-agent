@@ -51,16 +51,14 @@ type fakeSecrets struct{ keys [][]byte }
 func (f fakeSecrets) Secrets(*store.Tx, string) ([][]byte, error) { return f.keys, nil }
 func (fakeSecrets) Keep(*store.Tx, string, string) error          { return nil }
 
-// failJudge：本测试里规则直接映射 kind，判断型不应被调用。
-type failJudge struct{ t *testing.T }
+// noopJudge：规则直通只按急不急查第二题，无模型时默认按普通入队。
+type noopJudge struct{}
 
-func (j failJudge) Judge(context.Context, direct.JudgeCall) (direct.Verdict, error) {
-	j.t.Error("judge must not be called")
-	return direct.Verdict{}, nil
+func (noopJudge) Judge(context.Context, direct.JudgeCall) (direct.Verdict, error) {
+	return direct.Verdict{Unavailable: true}, nil
 }
 
-func (j failJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
-	j.t.Error("judge must not be called")
+func (noopJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
 	return direct.Outcome{}, nil
 }
 
@@ -143,7 +141,7 @@ func newEnv(t *testing.T, mut func(*Options)) *env {
 	if err := rn.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
-	e.in, err = inbound.New(inbound.Options{Store: st, Exec: e.x, Packs: e.pk, Judge: failJudge{t}, Owner: "owner", OnError: func(err error) { e.errs <- err }})
+	e.in, err = inbound.New(inbound.Options{Store: st, Exec: e.x, Packs: e.pk, Judge: noopJudge{}, Owner: "owner", OnError: func(err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +268,8 @@ func TestSignedDeliveryIsPersistedThenReachesPipeline(t *testing.T) {
 		ev.DedupeKey.EventID != "d-1" || len(ev.CorrelationKeys) != 1 || ev.CorrelationKeys[0] != "o/r#7" || ev.Link == "" {
 		t.Fatalf("event = %+v", ev)
 	}
-	if ev.Disposition != domain.DispositionProposed || ev.Item == "" || e.itemCount() != 1 {
-		t.Fatalf("pipeline did not propose an item: %+v items=%d", ev, e.itemCount())
+	if ev.Queue != runner.QueueQueued {
+		t.Fatalf("pipeline did not enqueue the event: %+v", ev)
 	}
 }
 
@@ -287,8 +285,8 @@ func TestDeliveryIsIdempotentByIDOrPayloadHash(t *testing.T) {
 	if !strings.Contains(string(again.Body), `"duplicate":true`) || strings.Contains(string(first.Body), `"duplicate":true`) {
 		t.Fatalf("duplicate flag: first=%s again=%s", first.Body, again.Body)
 	}
-	if len(e.ingests()) != 1 || len(e.events("src_hook")) != 1 || e.itemCount() != 1 {
-		t.Fatalf("ingests=%d events=%d items=%d", len(e.ingests()), len(e.events("src_hook")), e.itemCount())
+	if len(e.ingests()) != 1 || len(e.events("src_hook")) != 1 || e.events("src_hook")[0].Queue != runner.QueueQueued {
+		t.Fatalf("ingests=%d events=%+v", len(e.ingests()), e.events("src_hook"))
 	}
 	// 无投递 id：同一 payload 重发算同一投递，不同 payload 是新投递。
 	e.post("src_hook", "", issueBody(2, "opened"), nil)
@@ -460,16 +458,16 @@ func TestReplayAfterFixingMappingDoesNotDuplicate(t *testing.T) {
 	if err := e.svc.Replay(bg, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if g = e.ingests()[0]; g.State != StateProcessed || g.Gen != 2 || len(e.events("src_hook")) != 1 || e.itemCount() != 1 {
-		t.Fatalf("after replay: %+v events=%d items=%d", g, len(e.events("src_hook")), e.itemCount())
+	if g = e.ingests()[0]; g.State != StateProcessed || g.Gen != 2 || len(e.events("src_hook")) != 1 || e.events("src_hook")[0].Queue != runner.QueueQueued {
+		t.Fatalf("after replay: %+v events=%+v", g, e.events("src_hook"))
 	}
 	for range 2 {
 		if err := e.svc.Replay(bg, g.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(e.events("src_hook")) != 1 || e.itemCount() != 1 {
-		t.Fatalf("replay duplicated: events=%d items=%d", len(e.events("src_hook")), e.itemCount())
+	if len(e.events("src_hook")) != 1 {
+		t.Fatalf("replay duplicated: events=%d", len(e.events("src_hook")))
 	}
 	if err := e.svc.Replay(bg, "ing_nope"); err == nil {
 		t.Fatal("unknown ingest must be an error")
@@ -535,8 +533,8 @@ echo '{"id":"x-2","type":"custom.created","subject":"second","occurred_at":"2026
 		t.Fatalf("webhook arrival must not be explicit: %v", got)
 	}
 	evs := e.events("src_hook")
-	if len(evs) != 2 || evs[0].Subject != "from script" || evs[0].Disposition != domain.DispositionProposed || e.itemCount() != 2 {
-		t.Fatalf("events = %+v items=%d", evs, e.itemCount())
+	if len(evs) != 2 || evs[0].Subject != "from script" || evs[0].Queue != runner.QueueQueued {
+		t.Fatalf("events = %+v", evs)
 	}
 	// 重放：脚本再跑一次，事件去重，不产生重复。
 	if err := e.svc.Replay(bg, e.ingests()[0].ID); err != nil {
@@ -545,8 +543,8 @@ echo '{"id":"x-2","type":"custom.created","subject":"second","occurred_at":"2026
 	e.waitRun()
 	e.svc.Wait()
 	e.noErr()
-	if len(e.events("src_hook")) != 2 || e.itemCount() != 2 || e.ingests()[0].Gen != 2 {
-		t.Fatalf("replay duplicated: events=%d items=%d", len(e.events("src_hook")), e.itemCount())
+	if len(e.events("src_hook")) != 2 || e.ingests()[0].Gen != 2 {
+		t.Fatalf("replay duplicated: events=%d gen=%d", len(e.events("src_hook")), e.ingests()[0].Gen)
 	}
 	if got := e.transformExplicit(); len(got) != 2 || got[0] || !got[1] {
 		t.Fatalf("only the replay run is explicit: %v", got)

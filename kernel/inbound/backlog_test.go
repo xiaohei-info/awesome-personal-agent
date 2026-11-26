@@ -55,6 +55,7 @@ func TestRejudgeAfterModelRecovers(t *testing.T) {
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
 	}
+	e.drainBatch()
 	for id, x := range e.byID("src_m") {
 		if x.Disposition != domain.DispositionProposed || x.Item == "" || e.item(x.Item).Phase != domain.PhaseProposed {
 			t.Fatalf("%s not rejudged into a proposal: %+v", id, x)
@@ -156,6 +157,7 @@ func TestLegacyUndecidedRejudgedAndExpires(t *testing.T) {
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
 	}
+	e.drainBatch()
 	got = e.byID("src_m")
 	if got["m1"].Disposition != domain.DispositionExpired {
 		t.Fatalf("old undecided must expire: %+v", got["m1"])

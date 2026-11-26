@@ -50,6 +50,7 @@ type env struct {
 	x         *command.Executor
 	clk       *clock.Clock
 	r         *runner.Runner
+	svc       *inbound.Service
 	stub      *modelstub.Stub
 	dir       string
 	now       time.Time
@@ -149,6 +150,7 @@ func newEnv(t *testing.T, configured bool, override map[string]string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.svc = svc
 	for _, r := range []interface{ Register(*command.Executor) error }{svc, fm} {
 		if err := r.Register(e.x); err != nil {
 			t.Fatal(err)
@@ -245,6 +247,38 @@ func (e *env) emit(source, sourceType string, events ...map[string]any) {
 		e.t.Fatalf("pipeline: %v", err)
 	default:
 	}
+	e.drainBatch()
+}
+
+// drainBatch 模拟来源处理线的批处理 Agent：取走待处理队列里的事件并调用 ProposeUnjudged 转成建议。
+func (e *env) drainBatch() {
+	e.t.Helper()
+	var ids []string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		evs, err := runner.Claim(tx, "test_batch", 100)
+		if err != nil {
+			return err
+		}
+		for _, ev := range evs {
+			ids = append(ids, ev.ID)
+		}
+		return nil
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	for _, id := range ids {
+		if _, err := e.svc.ProposeUnjudged(bg, owner, id); err != nil {
+			e.t.Fatalf("drainBatch propose %s: %v", id, err)
+		}
+	}
+	if len(ids) > 0 {
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, err := runner.Finish(tx, "test_batch", true, 3)
+			return err
+		}); err != nil {
+			e.t.Fatal(err)
+		}
+	}
 }
 
 func (e *env) source(id string) (s domain.Source, err error) {
@@ -316,7 +350,7 @@ func TestGitHubIssueBecomesProposedSuggestionInRepoProject(t *testing.T) {
 		t.Fatalf("origin %+v", it.Origin)
 	}
 	reqs := e.stub.Requests()
-	if len(reqs) != 2 || !strings.Contains(reqs[0].BodyText, "外部正文：登录页 500") { // 初筛一次、起草一次
+	if len(reqs) != 2 || !strings.Contains(reqs[0].BodyText, "外部正文：登录页 500") { // 两道 judge 题（要不要处理 + 急不急）
 		t.Fatal("event detail must reach the judge as material")
 	}
 }
@@ -359,19 +393,18 @@ func TestGitHubIssueJudgedNotWorthItIsIgnored(t *testing.T) {
 	}
 }
 
-// ACT-GH-03：初筛各级都未定时留为建议并标"把握低"，仍被起草：标题、摘要取起草结果，项目按仓库归入。
+// ACT-GH-03：初筛各级都未定时按保守默认（处理、普通队列）进建议流，项目按仓库归入。
 func TestGitHubUndecidedScreenStaysAsLowConfidenceSuggestion(t *testing.T) {
 	e := newEnv(t, true, nil)
 	insufficient := false
 	e.stub.Judge(modelstub.ChatJudge{Answer: "no", Sufficient: &insufficient})
-	e.stub.SetDefault(modelstub.Reply{Content: `{"title":"修复登录 500","summary":"登录接口返回 500，需要排查","kind":"task"}`})
 	e.emit("src_gh", "github", ev("d1", "issue.opened", "it broke", map[string]any{"link": remote + "/issues/9"}))
 	evs := e.events("src_gh")
-	if evs[0].Disposition != domain.DispositionProposed {
+	if evs[0].Disposition != domain.DispositionProposed || evs[0].QueueLevel != runner.LevelNormal {
 		t.Fatalf("event %+v", evs[0])
 	}
 	it := e.item(evs[0].Item)
-	if it.Title != "修复登录 500" || it.Summary != "登录接口返回 500，需要排查" || it.Kind != "task" || it.Project != e.web || it.Proposal == nil || !it.Proposal.LowConfidence {
+	if it.Title != "it broke" || it.Kind != "task" || it.Project != e.web || it.Proposal == nil {
 		t.Fatalf("item %+v", it)
 	}
 }
@@ -418,7 +451,7 @@ func TestWebhookSchemeAndMappingAreDeclaredAsData(t *testing.T) {
 // flow-life-renewal / ACT-LIF-02：续保邮件经判断型成为建议；邮件正文是资料，诱导付款的话不改变结果；
 // 判断型声明 event_stats，统计随判断请求附带。
 func TestRenewalMailBecomesProposedSuggestionAndBodyIsMaterialOnly(t *testing.T) {
-	e := newEnv(t, true, map[string]string{"project_by: none\n    then: judge": "project_by: \"fixed:{home}\"\n    then: judge"})
+	e := newEnv(t, true, map[string]string{"project_by: none\n    then: process": "project_by: \"fixed:{home}\"\n    then: process"})
 	e.stub.Judge(modelstub.ChatJudge{Answer: "yes"}) // 没有判断端点：初筛由对话端点答题
 	e.emit("src_mail", "mail", ev("m1", "mail.received", "车险续保通知", map[string]any{
 		"summary": "保单 3 月 20 日到期", "sender": "service@insurer.example", "sender_verified": false,
@@ -502,15 +535,12 @@ func TestPackIsDeclarativeAndToolNeutral(t *testing.T) {
 	if tr.Meta.Agent != "judge" || tr.Meta.QuestionType != "yes_no" || tr.Meta.OnUndecided != "yes" || tr.Meta.Band == nil {
 		t.Fatalf("triage-screen must be a yes_no judge with a band and on_undecided yes: %+v", tr.Meta)
 	}
-	for _, name := range []string{"triage-draft", "triage-extract"} {
-		g, ok := p.Prompts[name]
-		if !ok || g.Meta.Agent != "generate" || len(g.Meta.OutputSchema) == 0 {
-			t.Fatalf("%s must be a generate prompt with an output schema", name)
-		}
+	if _, ok := p.Prompts["source-batch"]; !ok {
+		t.Fatal("source-batch prompt must exist in inbound-triage pack")
 	}
-	for _, old := range []string{"triage", "triage-title", "triage-candidates"} {
+	for _, old := range []string{"triage", "triage-title", "triage-candidates", "triage-draft", "triage-extract", "merge-batch", "capture-prescreen"} {
 		if _, ok := p.Prompts[old]; ok {
-			t.Errorf("v0.1 template %s must be removed", old)
+			t.Errorf("removed template %s must not exist", old)
 		}
 	}
 }

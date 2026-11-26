@@ -32,6 +32,7 @@ export interface Vocab {
   error: Closed<typeof I.ERROR_CODE>;
   sourceType: Closed<typeof I.SOURCE_TYPE>;
   disposition: Closed<typeof I.DISPOSITION>;
+  queueStatus: Closed<typeof I.QUEUE_STATUS>;
   unjudgedReason: Closed<typeof I.UNJUDGED_REASON>;
   outboundScope: Closed<typeof I.OUTBOUND_SCOPE>;
   backlogStep: Closed<typeof I.BACKLOG_STEP>;
@@ -159,6 +160,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   },
   sourceType: { pull: { label: "定时拉取" }, script: { label: "自定义脚本" }, webhook: { label: "外部送来" } },
   disposition: { pending: { label: "处理中" }, attached: { label: "已并入事项" }, proposed: { label: "已成建议" }, ignored: { label: "已跳过" }, unjudged: { label: "还没筛" }, expired: { label: "已过期" }, digest: { label: "只进了简报" }, alerted: { label: "已直接提醒" } },
+  queueStatus: { queued: { label: "待处理" }, running: { label: "处理中" }, done: { label: "已处理" } },
   // 之后会不会自动判断随运行配置，提示由 strings.ts:rejudgeHint 给，不写死在这里。
   unjudgedReason: {
     model_unavailable: { label: "等模型恢复" },
@@ -166,6 +168,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     undecided: { label: "等模型恢复" },
     restored: { label: "已放回，等你放开" },
     models_paused: { label: "模型已暂停" },
+    process_failed: { label: "处理失败，等你处理" },
   },
   outboundScope: { full: { label: "全部内容" }, excerpt: { label: "摘要和开头" }, meta: { label: "只有标题" }, none: { label: "不发送" } },
   backlogStep: { rules: { label: "先按规则处理" }, score: { label: "试打分" }, bands: { label: "定自动处理的线" }, rejudge: { label: "放进建议" }, restore: { label: "找回被跳过的消息" } },
@@ -566,12 +569,14 @@ const en: typeof zh = {
   },
   sourceType: { pull: { label: "Scheduled pull" }, script: { label: "Custom script" }, webhook: { label: "Pushed in" } },
   disposition: { pending: { label: "In progress" }, attached: { label: "Added to an item" }, proposed: { label: "Became a proposal" }, ignored: { label: "Skipped" }, unjudged: { label: "Not judged yet" }, expired: { label: "Expired" }, digest: { label: "Brief only" }, alerted: { label: "Alerted directly" } },
+  queueStatus: { queued: { label: "Queued" }, running: { label: "Processing" }, done: { label: "Processed" } },
   unjudgedReason: {
     model_unavailable: { label: "Waiting for the model" },
     outbound_unset: { label: "Choose what may be sent" },
     undecided: { label: "Waiting for the model" },
     restored: { label: "Put back, waiting for release" },
     models_paused: { label: "Models paused" },
+    process_failed: { label: "Processing failed, waiting for you" },
   },
   outboundScope: { full: { label: "Everything" }, excerpt: { label: "Summary and opening" }, meta: { label: "Title only" }, none: { label: "Nothing" } },
   backlogStep: { rules: { label: "Apply rules first" }, score: { label: "Trial scoring" }, bands: { label: "Set the auto-handling lines" }, rejudge: { label: "Release to proposals" }, restore: { label: "Recover skipped messages" } },

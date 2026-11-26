@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +54,7 @@ func newKit(t *testing.T) *kit {
 	t.Helper()
 	e := baseline.Setup(t)
 	e.WireEndpoints()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	k := &kit{Env: e, t: t, queue: filepath.Join(e.Root, "inp-source")}
 	k.must(os.MkdirAll(filepath.Join(k.queue, "in"), 0o755))
 	k.must(os.MkdirAll(filepath.Join(k.queue, "done"), 0o755))
@@ -187,17 +187,8 @@ func (k *kit) modelAny(mark string) int {
 
 func keyOf(contains string) modelstub.Key { return modelstub.Key{Contains: contains} }
 
-func replyJSON(s string) modelstub.Reply { return modelstub.Reply{Content: s} }
-
 // screenCls 配置 triage-screen：含 mark 的题，分类端点 p_yes。
 func (k *kit) screenCls(mark string, p float64) { k.Cls.PYes(keyOf(mark), p) }
-
-// draft 配置 triage-draft：请求体含 match 时返回 content（按添加顺序首个命中；match 取事件 id 这类不会出现在别的事项里的串）。
-func (k *kit) draft(match string, content any) {
-	b, err := json.Marshal(content)
-	k.must(err)
-	k.ModelStub.When(match, replyJSON(string(b)))
-}
 
 // chatJudge 配置对话端点对含 mark 的判断题的作答。
 func (k *kit) chatJudge(mark, answer string, sufficient bool) {
@@ -448,11 +439,6 @@ func (k *kit) removePack(name string) {
 func failReply(status int) modelstub.Reply { return modelstub.Reply{Status: status} }
 
 func readFile(p string) ([]byte, error) { return os.ReadFile(p) }
-
-func repoRoot() string {
-	_, f, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(f), "..", "..", "..")
-}
 
 // ---- 账本夹具上的另一个 apa serve（ACT-INP-13、14） ----
 

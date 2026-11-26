@@ -55,7 +55,7 @@ def tools():
 def test_registers_the_apa_tools(tools):
     assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
                           "apa_report", "apa_dispatch", "apa_item_history", "apa_attach", "apa_proposals_apply", "apa_item_progress",
-                          "apa_item_list", "apa_item_show", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search"}
+                          "apa_item_list", "apa_item_show", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search", "apa_source_propose", "apa_source_ignore", "apa_source_attach"}
 
 
 def test_query_tools_map_to_read_commands(tools, apa):
@@ -124,6 +124,14 @@ def test_item_update_writes_spec_json_with_session(tools, apa):
     assert c["session"] == "s3" and c["argv"][:2] == ["item", "update"] and c["argv"][2] == "i1"
     assert json.loads(c["argv"][c["argv"].index("--spec") + 1]) == spec
     assert c["argv"][-2:] == ["--reason", "brief done"]
+
+
+def test_item_update_passes_project_and_schedule(tools, apa):
+    tools["apa_item_update"]({"id": "i1", "project": "p1", "deadline": "2026-05-01", "planned_for": "2026-04-30",
+                              "planned_slot": "09:00 - 10:00", "reason": "triage"}, session_id="s")
+    [c] = calls(apa)
+    for flag, value in (("--project", "p1"), ("--deadline", "2026-05-01"), ("--planned-for", "2026-04-30"), ("--planned-slot", "09:00 - 10:00")):
+        assert c["argv"][c["argv"].index(flag) + 1] == value
 
 
 def test_item_update_kernel_refusal_is_exposed(tools, apa, monkeypatch):

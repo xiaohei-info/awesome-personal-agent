@@ -351,6 +351,7 @@ const (
 	UnjudgedOutboundUnset    = "outbound_unset"    // 来源未选外发范围而端点都在外部：选定后自动重判
 	UnjudgedRestored         = "restored"          // 本人把旧级联忽略的事件放回积压：只经积压放开重判
 	UnjudgedModelsPaused     = "models_paused"     // 本人暂停了模型：同 model_unavailable 参与自动重判与到期，恢复本身不触发重判
+	UnjudgedProcessFailed    = "process_failed"    // 来源处理线的批处理重试到上限仍没处理完：只经积压放开重处理，或本人手动处理
 )
 
 // DedupeKey 是 (去重域, 事件 id)。
@@ -401,6 +402,10 @@ type SourceEvent struct {
 	// PrevMetrics 是入账那一刻同一序列（来源，第一个关联键，指标名）上一次的取值；序列第一次出现的指标没有条目。
 	// 变化类字段条件（changed、crosses_*）据此判断，重启、重判和重放都得到同一结果（§9.2）。
 	PrevMetrics map[string]float64 `json:"-"`
+	// Queue 是来源处理线的队列状态（§9.3）：空（不在队列）、queued（待处理）、running（处理中）、done（已处理）；
+	// QueueLevel 是进队列时的等级：urgent（立即）或 normal（攒批）。
+	Queue      string `json:"queue,omitempty"`
+	QueueLevel string `json:"queue_level,omitempty"`
 }
 
 // EventMessage 是聚合事件 items[] 里的一条消息（§9.2）。图片、文件、语音消息可以没有 Text，附件在 Attachments。

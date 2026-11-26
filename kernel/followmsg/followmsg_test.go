@@ -74,6 +74,7 @@ type env struct {
 	secret  map[string]string
 	clk     *clock.Clock
 	r       *runner.Runner
+	in      *inbound.Service
 	stub    *modelstub.Stub
 	dir     string
 	now     time.Time
@@ -137,7 +138,7 @@ func newEnv(t *testing.T) *env {
 	e.issue("DEL", auth.Spec{Kind: auth.Delegate})
 
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(packYAML)}}
-	for _, name := range []string{"triage-screen", "triage-draft"} { // 用内置包随发行的模板
+	for _, name := range []string{"triage-screen"} { // 用内置包随发行的模板
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
 			t.Fatal(err)
@@ -165,6 +166,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.in = in
 	if err := in.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
@@ -221,6 +223,23 @@ func (e *env) must(id command.Identity, cmd string, in any) json.RawMessage {
 		e.t.Fatalf("%s: %v", cmd, err)
 	}
 	return r.Value
+}
+
+// propose 模拟批处理 Agent 取批后把已入队的来源事件转为建议，返回建出的事项 id。
+func (e *env) propose(eventKey string) string {
+	e.t.Helper()
+	m := e.msg(eventKey)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := runner.Claim(tx, "run_test", 10)
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	ev, err := e.in.ProposeInto(bg, owner, m.ID, "")
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return ev.Item
 }
 
 func exitOf(err error) int {
@@ -460,8 +479,8 @@ func TestHandbackOnceReturnsMessageToTriage(t *testing.T) {
 	e.noErrs()
 
 	m := e.msg("c1")
-	if m.AttachState != runner.AttachHandedBack || m.Disposition != domain.DispositionProposed || m.Item == child {
-		t.Fatalf("after handback %+v", m) // 进判断流并建出新事项，而不是又挂回去
+	if m.AttachState != runner.AttachHandedBack || m.Queue != runner.QueueQueued {
+		t.Fatalf("after handback %+v", m) // 进判断流并入队待批处理，而不是又挂回去
 	}
 	if n := len(e.stub.Requests()); n == 0 {
 		t.Fatal("handed-back message did not reach triage")
@@ -483,7 +502,6 @@ func TestCloseReleasesUnprocessedMessages(t *testing.T) {
 	f := e.forward(child, nil)
 	e.report("WRK", child, "progress", pr1, f.Cursor) // c1 已处理
 	e.emit(comment("c2", pr1))                        // c2 未处理
-	before := e.itemCount()
 
 	e.report("WRK", child, "done", pr1, "")
 
@@ -491,11 +509,8 @@ func TestCloseReleasesUnprocessedMessages(t *testing.T) {
 		t.Fatalf("processed message moved to %s", got)
 	}
 	m := e.msg("c2")
-	if m.AttachState != runner.AttachReleased || m.Disposition != domain.DispositionProposed || m.Item == child {
+	if m.AttachState != runner.AttachReleased || m.Queue != runner.QueueQueued {
 		t.Fatalf("released message %+v", m)
-	}
-	if e.itemCount() != before+1 {
-		t.Fatalf("released message did not become a suggestion: %d -> %d", before, e.itemCount())
 	}
 }
 
@@ -509,7 +524,7 @@ func TestCloseByTransitionReleasesMessages(t *testing.T) {
 	e.must(owner, "item.transition", map[string]any{"id": child, "to": "dropped", "reason": "不做了"})
 	e.noErrs()
 
-	if got := e.msg("c1"); got.AttachState != runner.AttachReleased || got.Disposition != domain.DispositionProposed {
+	if got := e.msg("c1"); got.AttachState != runner.AttachReleased || got.Queue != runner.QueueQueued {
 		t.Fatalf("message %+v", got)
 	}
 }
@@ -519,19 +534,15 @@ func TestClosedItemIsNotGuessed(t *testing.T) {
 	e := newEnv(t)
 	child := e.delegated()
 	e.report("WRK", child, "done", pr1, "")
-	before := e.itemCount()
 
 	e.emit(comment("c1", pr1))
 
 	m := e.msg("c1")
-	if m.Disposition != domain.DispositionProposed || m.AttachState != "" || m.Item == child {
+	if m.Queue != runner.QueueQueued || m.AttachState != "" || m.Item == child {
 		t.Fatalf("message %+v", m)
 	}
 	if got := e.item(child).Phase; got != domain.PhaseDone {
 		t.Fatalf("closed item is now %s", got)
-	}
-	if e.itemCount() != before+1 {
-		t.Fatalf("expected one new suggestion, items %d -> %d", before, e.itemCount())
 	}
 	reqs := e.stub.Requests()
 	if len(reqs) == 0 || !strings.Contains(reqs[0].BodyText, "only closed items ("+child+")") {
@@ -545,16 +556,12 @@ func TestSeveralOpenItemsAreNotGuessed(t *testing.T) {
 	a, b := e.delegated(), e.delegated()
 	e.report("WRK", a, "progress", pr1, "")
 	e.report("WRK", b, "progress", pr2, "")
-	before := e.itemCount()
 
 	e.emit(comment("c1", pr1, pr2))
 
 	m := e.msg("c1")
-	if m.Disposition != domain.DispositionProposed || m.AttachState != "" || m.Item == a || m.Item == b {
+	if m.Queue != runner.QueueQueued || m.AttachState != "" || m.Item == a || m.Item == b {
 		t.Fatalf("message %+v", m)
-	}
-	if e.itemCount() != before+1 {
-		t.Fatalf("expected one new suggestion, items %d -> %d", before, e.itemCount())
 	}
 	reqs := e.stub.Requests()
 	if len(reqs) == 0 || !strings.Contains(reqs[0].BodyText, "several open items") || !strings.Contains(reqs[0].BodyText, a) || !strings.Contains(reqs[0].BodyText, b) {
@@ -568,7 +575,7 @@ func TestUncorrelatedEventGoesToTriage(t *testing.T) {
 	e.emit(comment("c1", "unknown#1"), comment("c2"))
 
 	for _, id := range []string{"c1", "c2"} {
-		if m := e.msg(id); m.Disposition != domain.DispositionProposed || m.AttachState != "" {
+		if m := e.msg(id); m.Queue != runner.QueueQueued || m.AttachState != "" {
 			t.Fatalf("%s: %+v", id, m)
 		}
 	}
@@ -633,7 +640,7 @@ func TestAttachKeepsItemChainDepth(t *testing.T) {
 func TestSourceObjectUpdateRefreshesProposedItem(t *testing.T) {
 	e := newEnv(t)
 	e.emit(comment("u1", "obj#1"))
-	item := e.msg("u1").Item
+	item := e.propose("u1")
 	before, calls := e.itemCount(), len(e.stub.Requests())
 
 	e.emit(comment("u2", "obj#1"))
@@ -657,20 +664,19 @@ func TestSourceObjectUpdateRefreshesProposedItem(t *testing.T) {
 func TestSourceObjectUpdateSkipsClosedItem(t *testing.T) {
 	e := newEnv(t)
 	e.emit(comment("u1", "obj#1"))
-	item := e.msg("u1").Item
+	item := e.propose("u1")
 	e.emit(comment("u2", "obj#1"))
 	e.must(owner, "item.transition", map[string]any{"id": item, "to": "dropped", "reason": "不要了"})
 	e.noErrs()
 	if got := e.msg("u2").AttachState; got != runner.AttachProcessed {
 		t.Fatalf("applied update moved to %s on close", got)
 	}
-	before := e.itemCount()
 
 	e.emit(comment("u3", "obj#1"))
 
 	m := e.msg("u3")
-	if m.Disposition != domain.DispositionProposed || m.AttachState != "" || m.Item == item || e.itemCount() != before+1 {
-		t.Fatalf("event after close %+v, items %d -> %d", m, before, e.itemCount())
+	if m.Queue != runner.QueueQueued || m.AttachState != "" || m.Item == item {
+		t.Fatalf("event after close %+v", m)
 	}
 	if it := e.item(item); it.Title != "review u2" || it.Phase != domain.PhaseDropped {
 		t.Fatalf("closed item touched: %+v", it)
@@ -810,7 +816,7 @@ func TestEchoReturnsWaitingItemToOpenAndCanBeReverted(t *testing.T) {
 func TestRuleAttachReplyWakesItemCreatedFromOriginalMail(t *testing.T) {
 	e := newEnv(t)
 	e.emit(reply("mid-t1", "mail.received", "thread:<mid-t1>"))
-	item := e.msg("mid-t1").Item
+	item := e.propose("mid-t1")
 	e.must(owner, "item.transition", map[string]any{"id": item, "to": "open", "reason": "接受"})
 	e.must(owner, "item.transition", map[string]any{"id": item, "to": "waiting", "reason": "等报价", "waiting_on": external()})
 	title, before := e.item(item).Title, e.itemCount()
@@ -980,17 +986,16 @@ func TestRegisteredKeyAttachesWithoutRule(t *testing.T) {
 	}
 }
 
-// ACT-MAIL-14：没有线程关联键的旧事项收到回信，不被猜测挂靠，回信成为新建议，旧事项原样。
+// ACT-MAIL-14：没有线程关联键的旧事项收到回信，不被猜测挂靠，回信进入来源处理队列，旧事项原样。
 func TestReplyWithoutRegisteredKeyIsNotGuessed(t *testing.T) {
 	e := newEnv(t)
 	item := e.own("等王经理回复报价", domain.PhaseWaiting, external())
-	before := e.itemCount()
 
 	e.emit(reply("mid-o2", "pr.comment", "thread:<mid-o1>"))
 
 	m := e.msg("mid-o2")
-	if m.Disposition == domain.DispositionAttached || m.Item == item || e.itemCount() != before+1 || e.item(item).Phase != domain.PhaseWaiting {
-		t.Fatalf("unregistered thread %+v, items %d -> %d", m, before, e.itemCount())
+	if m.Disposition == domain.DispositionAttached || m.Item == item || m.Queue != runner.QueueQueued || e.item(item).Phase != domain.PhaseWaiting {
+		t.Fatalf("unregistered thread %+v", m)
 	}
 }
 
@@ -998,7 +1003,7 @@ func TestReplyWithoutRegisteredKeyIsNotGuessed(t *testing.T) {
 func TestSourceObjectUpdateRefreshesAcceptedItem(t *testing.T) {
 	e := newEnv(t)
 	e.emit(comment("a1", "cal-uid-1"))
-	item := e.msg("a1").Item
+	item := e.propose("a1")
 	e.must(owner, "item.transition", map[string]any{"id": item, "to": "open", "reason": "接受"})
 	before, calls := e.itemCount(), len(e.stub.Requests())
 
@@ -1022,7 +1027,7 @@ func TestRefreshWritesAtMost4000CharsOfTheBody(t *testing.T) {
 		return c
 	}
 	e.emit(long("l1", "旧版开头"))
-	item := e.msg("l1").Item
+	item := e.propose("l1")
 	e.emit(long("l2", "新版开头"))
 	body := e.item(item).Body
 	if !strings.HasPrefix(body, "新版开头") || strings.Contains(body, "旧版开头") {
@@ -1036,8 +1041,9 @@ func TestRefreshWritesAtMost4000CharsOfTheBody(t *testing.T) {
 	}
 	// 短正文照旧完整写入。
 	e.emit(comment("s1", "obj#short"))
+	sItem := e.propose("s1")
 	e.emit(comment("s2", "obj#short"))
-	if got := e.item(e.msg("s1").Item).Body; got != "请改一下命名" {
+	if got := e.item(sItem).Body; got != "请改一下命名" {
 		t.Fatalf("短正文被改动：%q", got)
 	}
 }
@@ -1055,7 +1061,7 @@ func TestSourceUpdateRefreshesTimesUnlessChangedByHand(t *testing.T) {
 		return time.Date(2026, 12, day, hour, minute, 0, 0, time.Local).Format(time.RFC3339)
 	}
 	e.emit(ev("t1", at(2, 9, 0), at(2, 10, 0), "2026-12-05"))
-	item := e.msg("t1").Item
+	item := e.propose("t1")
 	e.must(owner, "item.transition", map[string]any{"id": item, "to": "open", "reason": "接受"})
 	it := e.item(item)
 	if it.PlannedFor != "2026-12-02" || it.PlannedSlot != "09:00 - 10:00" || it.Deadline == nil || it.Deadline.Day() != 5 {

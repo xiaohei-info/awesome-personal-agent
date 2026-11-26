@@ -634,7 +634,7 @@ func TestBuiltinBandStartingValues(t *testing.T) {
 		pack, tmpl string
 		low, high  float64
 	}{
-		{"inbound-triage", "triage-screen", 0.15, 0.60}, {"inbound-triage", "capture-prescreen", 0.10, 0.10},
+		{"inbound-triage", "triage-screen", 0.15, 0.60},
 		{"decision-card", "web-only-screening", 0.20, 0.20}, {"delegation-verify", "delegation-screen", 0.20, 0.20},
 	} {
 		pk, ok := ld.Get(w.pack)
@@ -646,12 +646,20 @@ func TestBuiltinBandStartingValues(t *testing.T) {
 			t.Errorf("%s/%s: %+v", w.pack, w.tmpl, m.Band)
 		}
 	}
-	// 两个推迟判断模板已取消（2026-11-23）：内置包里不再有它们。
-	for pack, tmpl := range map[string]string{"decision-card": "delivery-defer", "follow-up": "follow-up-defer"} {
-		if pk, ok := ld.Get(pack); !ok {
+	// 已取消的模板（推迟判断 2026-11-23；来源预筛/起草/抽取/批量归类 2026-11-26）：内置包里不再有它们。
+	for pack, tmpls := range map[string][]string{
+		"decision-card":  {"delivery-defer"},
+		"follow-up":      {"follow-up-defer"},
+		"inbound-triage": {"capture-prescreen", "triage-draft", "triage-extract", "merge-batch"},
+	} {
+		pk, ok := ld.Get(pack)
+		if !ok {
 			t.Fatalf("pack %s not loaded", pack)
-		} else if _, has := pk.Prompts[tmpl]; has {
-			t.Errorf("%s/%s is still shipped", pack, tmpl)
+		}
+		for _, tmpl := range tmpls {
+			if _, has := pk.Prompts[tmpl]; has {
+				t.Errorf("%s/%s is still shipped", pack, tmpl)
+			}
 		}
 	}
 }

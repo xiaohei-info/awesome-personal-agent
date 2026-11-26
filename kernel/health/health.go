@@ -324,10 +324,10 @@ func outcall(tx *store.Tx, now time.Time) (Outcall, error) {
 		current := latest[key(r.Run)] == r.Run.ID && (r.Run.FinishedAt == nil || now.Sub(*r.Run.FinishedAt) < StaleAfter)
 		switch {
 		case !current:
-		case r.Run.State == domain.RunTimeout && (r.Run.Category == domain.RunTask || r.Run.Category == domain.RunBackground):
-			// 只算 Agent 后台运行（含任务型：同一个时限，同一个说法，§13.6）；来源抓取与判断、生成调用的超时不经这里。
+		case r.Run.State == domain.RunTimeout && (r.Run.Category == domain.RunTask || r.Run.Category == domain.RunBackground || r.Run.Category == domain.RunSourceBatch):
+			// 只算 Agent 后台运行（含任务型与来源批处理：同一个时限，同一个说法，§13.6）；来源抓取与判断、生成调用的超时不经这里。
 			out.Timeouts = append(out.Timeouts, r.Run)
-		case r.Run.State == domain.RunFailed && (r.Run.Category == domain.RunTask || r.Run.Category == domain.RunBackground):
+		case r.Run.State == domain.RunFailed && (r.Run.Category == domain.RunTask || r.Run.Category == domain.RunBackground || r.Run.Category == domain.RunSourceBatch):
 			out.Failures = append(out.Failures, r.Run)
 		}
 	}
@@ -529,6 +529,11 @@ func othersOpen(tx *store.Tx, as []OtherAlert, now time.Time) ([]OtherAlert, err
 			continue
 		}
 		ok, err := handled(tx, a.Object, a.Seq)
+		if err == nil && !ok && a.Object == "source_batch" { // 批处理拉不起的告警：之后有批处理入队即已恢复
+			var q []eventlog.Entry
+			q, err = eventlog.Query(tx, eventlog.Filter{Object: a.Object, Type: domain.EvAgentQueued}, a.Seq, 1)
+			ok = len(q) > 0
+		}
 		if err != nil {
 			return nil, err
 		}

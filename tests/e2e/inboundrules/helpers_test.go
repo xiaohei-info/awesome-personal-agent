@@ -88,6 +88,7 @@ type event struct {
 	Type           string             `json:"type"`
 	Subject        string             `json:"subject"`
 	Disposition    string             `json:"disposition"`
+	Queue          string             `json:"queue"`
 	Item           string             `json:"item"`
 	Items          []string           `json:"items"`
 	Judgment       string             `json:"judgment"`
@@ -163,7 +164,7 @@ func (s *source) put(lines ...string) []string {
 	return ids
 }
 
-// wait 等 ids 都落盘且处置完毕（不再 pending）。
+// wait 等 ids 都落盘且处置完毕（不再 pending，批处理也已收尾）。
 func (s *source) wait(ids ...string) map[string]event {
 	s.f.t.Helper()
 	got := map[string]event{}
@@ -180,7 +181,7 @@ func (s *source) wait(ids ...string) map[string]event {
 	s.f.until(s.id+" 的事件 "+strings.Join(ids, ",")+" 处置完毕", func() bool {
 		for _, id := range ids {
 			e, ok := s.find(id)
-			if !ok || e.Disposition == "" || e.Disposition == "pending" {
+			if !ok || e.Disposition == "" || e.Disposition == "pending" || e.Queue == "running" {
 				return false
 			}
 			got[id] = e
@@ -291,13 +292,16 @@ func (f *fx) pYes(subject string, p float64) {
 	f.Cls.Judge(modelstub.ClsJudge{Key: modelstub.Key{Contains: `"subject":"` + subject + `"`}, PYes: &p})
 }
 
-func (f *fx) draft(subject string, reply any) {
-	b, _ := json.Marshal(reply)
-	f.ModelStub.When(subjectField(subject), modelstub.Reply{Content: string(b)})
+// askedWhether 数分类端点收到的、含 subject 的"要不要处理"题：规则直通的事件只问急不急（§9.3）。
+func (f *fx) askedWhether(subject string) int {
+	n := 0
+	for _, b := range f.Cls.Batches() {
+		if strings.Contains(b.BodyText, `"subject":"`+subject+`"`) && strings.Contains(b.BodyText, "需要本人知道或处理吗") {
+			n++
+		}
+	}
+	return n
 }
-
-// subjectField 是事件标题在请求体里的转义形态（结构化输入以转义后的 JSON 嵌在消息里）。
-func subjectField(subject string) string { return `subject\":\"` + subject + `\"` }
 
 // judgment 读事件的判断记录（GET /judgments/{id}）；模板名只在记录里，不在发给端点的内容里。
 func (f *fx) judgment(e event) map[string]any {

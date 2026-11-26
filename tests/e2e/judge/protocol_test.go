@@ -4,6 +4,7 @@ package judge
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -55,11 +56,12 @@ func TestFlowJudgeProtocol(t *testing.T) {
 				seen[q.Input["subject"].(string)] = true
 			}
 		}
-		if len(sizes) != 2 || !(sizes[0] == 32 && sizes[1] == 8 || sizes[0] == 8 && sizes[1] == 32) {
-			t.Fatalf("40 题应分成 32 与 8 两批，实际批次题数 %v", sizes)
+		sort.Ints(sizes)
+		if fmt.Sprint(sizes) != "[16 32 32]" {
+			t.Fatalf("40 条事件各两道题，应分成 32、32、16 三批，实际批次题数 %v", sizes)
 		}
 		if len(seen) != 40 {
-			t.Errorf("两批合计应覆盖 40 个不同的题，实际 %d", len(seen))
+			t.Errorf("各批合计应覆盖 40 个不同的题，实际 %d", len(seen))
 		}
 		e, j := f.judgmentOf("jdp-batch-17")
 		l := j.Levels[0]
@@ -96,12 +98,12 @@ func TestFlowJudgeProtocol(t *testing.T) {
 			f.settled(id, 60*time.Second)
 		}
 		bs := f.Cls.Batches()
-		if len(bs) != 1 || bs[0].Questions != 5 {
+		if len(bs) != 1 || bs[0].Questions != 10 {
 			sz := []int{}
 			for _, b := range bs {
 				sz = append(sz, b.Questions)
 			}
-			t.Fatalf("CLS_LOG 应只有 1 批 5 题且没有重发，实际 %d 批，题数 %v", len(bs), sz)
+			t.Fatalf("CLS_LOG 应只有 1 批 10 题且没有重发，实际 %d 批，题数 %v", len(bs), sz)
 		}
 		if n := len(f.judgeRequests()); n != 4 {
 			t.Errorf("MODEL_LOG 判断题请求 = %d，期望 4", n)
@@ -209,7 +211,7 @@ func TestFlowJudgeProtocol(t *testing.T) {
 		} {
 			f.reset()
 			f.Cls.SetFault(c.fault)
-			f.chatSays(c.name, "yes")
+			f.chatSays(c.name, "no")
 			id := f.write(ev{Subject: c.name, ID: c.name})[0]
 			_, j := f.judgmentOf(id)
 			bs := f.Cls.Batches()
@@ -228,7 +230,7 @@ func TestFlowJudgeProtocol(t *testing.T) {
 
 	f.step(t, "ACT-JDP-07 413 时对半拆批各重发一次", func(t *testing.T) {
 		f.reset()
-		f.Cls.SetFault(modelstub.ClsFault{MaxQuestion: 4})
+		f.Cls.SetFault(modelstub.ClsFault{MaxQuestion: 8})
 		f.Cls.Judge(modelstub.ClsJudge{Key: key("jdp-split-"), PYes: pf(0.05)})
 		var evs []ev
 		for i := 1; i <= 8; i++ {
@@ -242,8 +244,8 @@ func TestFlowJudgeProtocol(t *testing.T) {
 		for _, b := range f.Cls.Batches() {
 			sizes = append(sizes, b.Questions)
 		}
-		if fmt.Sprint(sizes) != "[8 4 4]" {
-			t.Fatalf("应依次是 8 题一批（413）再两批各 4 题，实际 %v", sizes)
+		if fmt.Sprint(sizes) != "[16 8 8]" {
+			t.Fatalf("应依次是 16 题一批（413）再两批各 8 题，实际 %v", sizes)
 		}
 		for _, id := range ids {
 			_, j := f.judgmentOf(id)
@@ -265,8 +267,8 @@ func TestFlowJudgeProtocol(t *testing.T) {
 		for _, b := range f.Cls.Batches() {
 			sizes = append(sizes, b.Questions)
 		}
-		if fmt.Sprint(sizes) != "[8 4 4]" {
-			t.Fatalf("一律 413 时应是 8、4、4 后不再拆，实际 %v", sizes)
+		if fmt.Sprint(sizes) != "[16 8 8]" {
+			t.Fatalf("一律 413 时应是 16、8、8 后不再拆，实际 %v", sizes)
 		}
 		if n := len(f.judgeRequests()); n != 8 {
 			t.Errorf("8 题应全部交对话端点，MODEL_LOG 判断题 = %d", n)

@@ -65,6 +65,7 @@ func setup(t *testing.T) *kit {
 	e.IssueCredentials()
 	e.CreateProjects()
 	e.WireEndpoints()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	return &kit{Env: e, t: t, stubs: map[string]string{}}
 }
 
@@ -335,7 +336,7 @@ func plain(s string) string {
 func (k *kit) generateAbout(mark string) []string {
 	var out []string
 	for _, r := range k.ModelStub.Requests()[k.modOff:] {
-		if baseline.IsJudgeRequest(r) {
+		if !baseline.IsJudgeRequest(r) { // 送资料给生成端点的只剩对话端点的判断题（摘要请求不算）
 			continue
 		}
 		if p := plain(r.BodyText); strings.Contains(p, mark) {
@@ -358,18 +359,16 @@ func (k *kit) waitGenerate(mark string) string {
 	return got
 }
 
+// escalate 让含 mark 的题落进不确定带，由对话端点重答"是"：送给生成端点的资料就是这道判断题的资料。
+func (k *kit) escalate(mark string) {
+	k.screenYes(mark, 0.4)
+	yes := true
+	k.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: mark}, Answer: "yes", Sufficient: &yes})
+}
+
 // screenYes 配置 CLS_STUB：题目含 mark 的初筛 p_yes。
 func (k *kit) screenYes(mark string, p float64) {
 	k.Cls.Judge(modelstub.ClsJudge{Key: modelstub.Key{Contains: mark}, PYes: &p})
-}
-
-// draftReply 配置 MODEL_STUB：请求体含 mark 时回 content（起草或抽取的 JSON 输出）。
-func (k *kit) draftReply(mark string, content any) {
-	b, err := json.Marshal(content)
-	if err != nil {
-		k.t.Fatal(err)
-	}
-	k.ModelStub.When(mark, modelstub.Reply{Content: string(b)})
 }
 
 func sha(s string) string {

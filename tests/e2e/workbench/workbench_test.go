@@ -21,6 +21,7 @@ func newKit(t *testing.T) *kit {
 	t.Helper()
 	e := baseline.Setup(t)
 	e.WireEndpoints()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	return &kit{Env: e, t: t}
 }
 
@@ -400,30 +401,15 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 	var proposals []SrcEvent
 	var clsLines, modelLines int
 	k.step("ACT-WBN-15 为手机走查准备建议并停掉全部替身", func(t *testing.T) {
-		// 验收文档写了 source_rule then: proposed，但规则直接成为建议不调模型、没有推荐（flow-run-tiers 的 ACT-TIER-04 正依赖这点）；
-		// 要带推荐就得走默认的初筛与起草（内置 inbound-triage 包），所以这里不写规则。
+		// 走默认的 judge 与批处理（内置 inbound-triage 包），所以这里不写规则。
 		k.Cls.SetDefaultPYes(0.99)
 		src := k.registerSource("src_wb", "acc-wb")
 		var evs []map[string]any
 		for i := 1; i <= 12; i++ {
 			subject := fmt.Sprintf("WB-P%02d", i)
-			d := map[string]any{"title": "起草：" + subject, "summary": "摘要 " + subject, "kind": "task", "reason": "一句话理由"}
-			switch {
-			case i == 1:
-				d["recommend"], d["attach_to"] = "attach", wbC
-			case i == 2:
-				d["recommend"], d["attach_to"] = "attach", wbD
-			case i <= 7:
-				d["recommend"] = "accept"
-			default:
-				d["recommend"] = "dismiss"
-			}
-			k.draft(subject, d)
 			evs = append(evs, map[string]any{"id": "wb-" + strings.ToLower(subject), "type": "acc.wb", "subject": subject})
 		}
 		// 同一链接的两条事件当场合成一条建议（合并键取链接）：建议卡上因此有一处「合并自 2 条」，360px 走查要用它。
-		mergedDraft := map[string]any{"title": "起草：WB-L", "summary": "同一件事的两条消息", "kind": "task", "reason": "一句话理由", "recommend": "dismiss"}
-		k.draft("WB-L", mergedDraft)
 		evs = append(evs,
 			map[string]any{"id": "wb-l1", "type": "acc.wb", "subject": "WB-L", "link": "https://example.test/wb/merged"},
 			map[string]any{"id": "wb-l2", "type": "acc.wb", "subject": "WB-L", "link": "https://example.test/wb/merged"})
@@ -434,17 +420,6 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 			if e.Disposition != "proposed" || e.Item == "" {
 				t.Fatalf("事件 %s 应为 proposed 且有事项: %+v", e.Subject, e)
 			}
-		}
-		if !k.WaitFor(60*time.Second, func() bool {
-			for _, e := range proposals {
-				p, _ := k.item(e.Item)["proposal"].(map[string]any)
-				if p == nil || p["recommend"] == nil || p["recommend"] == "" {
-					return false
-				}
-			}
-			return true
-		}) {
-			t.Fatal("12 条建议没有都带上推荐")
 		}
 		var mergedOne map[string]any
 		for _, e := range allEvents {
@@ -627,9 +602,20 @@ await page.waitForSelector(".act-row [role='menu']", { state: "detached" });
 		if !wrote {
 			t.Error("WB-D 没有进展\"已交照片\"")
 		}
-		// ④ 建议页的「按推荐处理」入口已下线（决定 93），走查之后按 API 一次处理这批，页面只管摆放与按钮；
-		// 12 条建议各有一条 Event；其中 2 条 proposal.attached，成为 WB-C、WB-D 的挂靠消息。
-		k.webOK("POST", "/proposals/batch", `{"mode":"recommended","filter":{"source":"src_wb"}}`, 200)
+		// ④ 走查之后经批量接口一次处理这批，页面只管摆放与按钮：两条补到 WB-C、WB-D，其余接受或忽略；12 条建议各有一条 Event。
+		var actions []map[string]any
+		for i, e := range proposals {
+			act := map[string]any{"id": e.Item, "do": "accept"}
+			switch {
+			case i < 2:
+				act["do"], act["to"] = "attach", []string{wbC, wbD}[i]
+			case i >= 7:
+				act["do"] = "dismiss"
+			}
+			actions = append(actions, act)
+		}
+		plan, _ := json.Marshal(map[string]any{"mode": "explicit", "actions": actions})
+		k.webOK("POST", "/proposals/batch", string(plan), 200)
 		for _, e := range proposals {
 			var mine []event
 			for _, ev := range k.events(e.Item, "") {

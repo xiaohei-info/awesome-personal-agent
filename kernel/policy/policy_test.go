@@ -621,32 +621,6 @@ func TestOpenURLMatchesWebPreview(t *testing.T) {
 	}
 }
 
-// 合并的资料上限（budget_tokens）：没设过取默认，默认与改动前借用的写作预算等价；0、负数、过小、过大都拒绝并给出范围，不截到边界。
-func TestMergeBudgetTokens(t *testing.T) {
-	p := Default()
-	if p.Merge.BudgetTokens != nil || p.Merge.Budget() != DefaultMergeBudgetTokens {
-		t.Fatalf("default budget: %v %d", p.Merge.BudgetTokens, p.Merge.Budget())
-	}
-	if TokensOfChars(DefaultGenerateMaxMaterialChars) != DefaultMergeBudgetTokens || TokensOfChars(DefaultGenerateMaxMaterialChars+1) != DefaultMergeBudgetTokens+1 {
-		t.Fatalf("default must equal the old %d-character budget at %.1f characters per token", DefaultGenerateMaxMaterialChars, CharsPerToken)
-	}
-	for _, n := range []int{0, -1, MinBudgetTokens - 1, MaxBudgetTokens + 1} {
-		p := Default()
-		p.Merge.BudgetTokens = &n
-		_, err := normalize(p)
-		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), fmt.Sprintf("use %d to %d", MinBudgetTokens, MaxBudgetTokens)) {
-			t.Errorf("budget %d: %v", n, err)
-		}
-	}
-	for _, n := range []int{MinBudgetTokens, MaxBudgetTokens} {
-		p := Default()
-		p.Merge.BudgetTokens = &n
-		if q, err := normalize(p); err != nil || q.Merge.Budget() != n {
-			t.Errorf("budget %d: %v", n, err)
-		}
-	}
-}
-
 // 写作的资料预算（max_material_tokens）：缺省与改动前的 24000 字逐字等价（同一份系数）；0、负数、过小、过大都拒绝并给出范围；
 // 旧文档里按字存的预算读取时换算一次，重复读与存回后再读都不会二次换算；换算回字符数与旧行为一致。
 func TestGenerateMaterialBudgetTokens(t *testing.T) {
@@ -654,9 +628,6 @@ func TestGenerateMaterialBudgetTokens(t *testing.T) {
 	if g.MaterialBudget() != DefaultGenerateBudgetTokens || TokensOfChars(DefaultGenerateMaxMaterialChars) != DefaultGenerateBudgetTokens ||
 		g.MaterialChars() != DefaultGenerateMaxMaterialChars || TokensOfChars(DefaultGenerateMaxMaterialChars+1) != DefaultGenerateBudgetTokens+1 {
 		t.Fatalf("default must equal the old %d-character budget at %.1f characters per token: %d tokens, %d chars", DefaultGenerateMaxMaterialChars, CharsPerToken, g.MaterialBudget(), g.MaterialChars())
-	}
-	if DefaultGenerateBudgetTokens != DefaultMergeBudgetTokens {
-		t.Fatalf("writing and merge defaults share one origin")
 	}
 	for _, n := range []int{0, -1, MinBudgetTokens - 1, MaxBudgetTokens + 1} {
 		p := Default()
@@ -705,26 +676,35 @@ func TestWebBudgetConstantsMatchKernel(t *testing.T) {
 	}
 }
 
-// 相似度档位已不参与判定：旧策略文档里的 similarity 照常读入、原样往返；候选条数缺省 20，范围外拒绝。
-func TestMergeCandidatesAndLegacySimilarity(t *testing.T) {
-	var m MergeSettings
-	if err := json.Unmarshal([]byte(`{"exclude_sources":null,"batch_size":0,"prompt":"","similarity":"strict"}`), &m); err != nil || m.Similarity != "strict" || m.Cands() != DefaultMergeCandidates {
-		t.Fatalf("an old document still reads: %+v %v", m, err)
+// 来源处理线设置：零值取默认、越界拒绝；旧策略文档里留下的 merge_judge 与 merge 读取时忽略，不报错。
+func TestSourcePipelineNormalizeAndLegacyMergeIgnored(t *testing.T) {
+	p := Default()
+	if p.SourcePipeline.Batch() != DefaultPipelineBatch || p.SourcePipeline.Wait() != DefaultPipelineWait*time.Minute ||
+		p.SourcePipeline.MaxBatchSize() != DefaultPipelineMaxBatch || p.SourcePipeline.Retries() != DefaultPipelineMaxRetries ||
+		p.SourcePipeline.UrgentImmediate {
+		t.Fatalf("defaults: %+v", p.SourcePipeline)
 	}
-	if out, _ := json.Marshal(MergeSettings{}); strings.Contains(string(out), "candidates") || strings.Contains(string(out), "similarity") {
-		t.Fatalf("defaults are not written: %s", out)
-	}
-	for _, c := range []int{-1, MaxMergeCandidates + 1} {
-		p := Default()
-		p.Merge.Candidates = c
-		if _, err := normalize(p); err == nil {
-			t.Errorf("candidates %d must be refused", c)
+	neg := -1
+	over := MaxPipelineRetries + 1
+	for name, mut := range map[string]func(*Policy){
+		"batch>max":      func(p *Policy) { p.SourcePipeline.BatchSize = MaxPipelineBatch + 1 },
+		"wait>max":       func(p *Policy) { p.SourcePipeline.WaitMinutes = MaxPipelineWait + 1 },
+		"max_batch>max":  func(p *Policy) { p.SourcePipeline.MaxBatch = MaxPipelineBatch + 1 },
+		"retries<0":      func(p *Policy) { p.SourcePipeline.MaxRetries = &neg },
+		"retries>max":    func(p *Policy) { p.SourcePipeline.MaxRetries = &over },
+		"daily>max":      func(p *Policy) { p.SourcePipeline.DailyBatchLimit = MaxPipelineDailyBatches + 1 },
+		"judge too long": func(p *Policy) { p.SourcePipeline.JudgePrompt = strings.Repeat("a", MaxPipelinePrompt+1) },
+		"batch too long": func(p *Policy) { p.SourcePipeline.BatchPrompt = strings.Repeat("a", MaxPipelinePrompt+1) },
+	} {
+		q := Default()
+		mut(&q)
+		if _, err := normalize(q); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: got %v, want ErrInvalid", name, err)
 		}
 	}
-	p := Default()
-	p.Merge.Candidates, p.Merge.Similarity = 30, "anything-old"
-	if _, err := normalize(p); err != nil {
-		t.Fatalf("30 candidates with a legacy tier: %v", err)
+	raw := `{"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0},"permission_cap":{"default":"read","by_harness":{}},"merge_judge":"same","merge":{"batch_size":50,"prompt":"old"}}`
+	if _, _, err := decode(raw); err != nil {
+		t.Fatalf("legacy merge fields must be ignored on read: %v", err)
 	}
 }
 
@@ -755,28 +735,6 @@ func TestCancelledDisturbSwitchesReadAndDropped(t *testing.T) {
 	docs := storedDocs(t, s)
 	if docs[0] != string(old) || strings.Contains(docs[1], "threshold_judge") || strings.Contains(docs[1], "followup_defer") || !strings.Contains(docs[1], `"daily_cap":5`) {
 		t.Fatalf("stored docs: %v", docs)
-	}
-}
-
-// 整合正文上限：缺省 32 KiB、不写出；范围外拒绝。
-func TestMergeBodyMaxBytes(t *testing.T) {
-	if (MergeSettings{}).BodyMax() != DefaultMergeBodyBytes || DefaultMergeBodyBytes != 32768 {
-		t.Fatal("default")
-	}
-	if out, _ := json.Marshal(MergeSettings{}); strings.Contains(string(out), "body_max_bytes") {
-		t.Fatalf("defaults are not written: %s", out)
-	}
-	for _, b := range []int{-1, MinMergeBodyBytes - 1, MaxMergeBodyBytes + 1} {
-		p := Default()
-		p.Merge.BodyMaxBytes = b
-		if _, err := normalize(p); err == nil {
-			t.Errorf("body_max_bytes %d must be refused", b)
-		}
-	}
-	p := Default()
-	p.Merge.BodyMaxBytes = MinMergeBodyBytes
-	if _, err := normalize(p); err != nil || p.Merge.BodyMax() != MinMergeBodyBytes {
-		t.Fatalf("%v", err)
 	}
 }
 

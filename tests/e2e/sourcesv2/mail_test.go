@@ -252,7 +252,6 @@ echo '{"cursor":"'"$cursor"'"}'
 	k.step("ACT-MAIL-10 回信与原信共用线程关联键", func(t *testing.T) {
 		const subject = "[APA-LIVE-TEST] thread root"
 		k.clsYes("thread root", 0.9)
-		k.draft(subject, map[string]any{"title": "线程根邮件", "kind": "task", "recommend": "accept"})
 		k.SetToolCase("mail-thread-1") // 先只放原信
 		rootEv = k.settled(src, "<mid-t1@example.com>")
 		if len(rootEv.CorrelationKeys) == 0 || !contains(rootEv.CorrelationKeys, "thread:<mid-t1@example.com>") {
@@ -304,8 +303,8 @@ echo '{"cursor":"'"$cursor"'"}'
 			t.Error("回信应作为挂靠消息显示在事项上")
 		}
 		eq(t, "建议流条数", len(k.suggestions()), sug)
-		if k.hasDraftRequest("Re: [APA-LIVE-TEST] thread root") {
-			t.Error("MODEL_LOG 不应有该回信的起草请求")
+		if strings.Contains(k.BatchPrompts(), reply.ID) {
+			t.Error("挂靠的回信不应进批处理")
 		}
 		_ = reqs
 
@@ -339,7 +338,6 @@ echo '{"cursor":"'"$cursor"'"}'
 			"source_type": "mail", "dedupe_domain": "acc-pim-mail", "default_project": home,
 			"config": map[string]any{"kind": "mail", "account": "acc", "bin_dir": k.ToolBin, "lookback_days": 36500}})
 		k.clsYes("报价", 0.9)
-		k.draft("报价", map[string]any{"title": "报价邮件", "kind": "task", "recommend": "accept"})
 		k.SetToolCase("pim-mail-thread-1") // 先放原信
 		orig := k.settledPrefix(pim, "")
 		if orig.Disposition != "proposed" || orig.Item == "" {
@@ -379,30 +377,16 @@ echo '{"cursor":"'"$cursor"'"}'
 	})
 
 	var old, o2Suggestion string
-	k.step("ACT-MAIL-14 没有线程关联键的旧事项收到回信时成为带补到候选的新建议", func(t *testing.T) {
+	k.step("ACT-MAIL-14 没有线程关联键的旧事项收到回信时成为新建议，旧事项不动", func(t *testing.T) {
 		old = k.idOf(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", "等王经理回复报价", "--body", "已发报价给王经理 wang@example.com，等他回复。",
 			"--phase", "open", "--project", home))
 		waitExternal(old)
 		k.clsYes("Re: 报价", 0.9)
-		k.draft("Re: 报价", map[string]any{"title": "王经理回复了报价", "kind": "task", "recommend": "attach", "attach_to": old})
 		sug := len(k.suggestions())
 		k.SetToolCase("mail-old-reply")
 		ev := k.settled(src, "<mid-o2@example.com>")
 		if ev.Disposition != "proposed" || ev.Item == "" || ev.Item == old {
 			t.Fatalf("回信应成为新建议（不挂靠、不丢弃）: %+v", ev)
-		}
-		var cand bool
-		for _, r := range k.ModelStub.Requests() {
-			if strings.Contains(r.BodyText, "起草一条建议") && strings.Contains(r.BodyText, "Re: 报价") && strings.Contains(r.BodyText, old) {
-				cand = true
-			}
-		}
-		if !cand {
-			t.Error("起草请求的候选清单应含该旧事项")
-		}
-		prop, _ := k.item(ev.Item).Raw["proposal"].(map[string]any)
-		if prop["recommend"] != "attach" || prop["attach_to"] != old {
-			t.Errorf("建议应 recommend=attach、attach_to 为旧事项: %v", prop)
 		}
 		eq(t, "旧事项阶段", k.item(old).Phase, "waiting")
 		eq(t, "建议流条数", len(k.suggestions()), sug+1)

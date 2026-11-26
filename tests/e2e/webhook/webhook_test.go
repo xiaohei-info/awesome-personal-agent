@@ -352,6 +352,7 @@ func TestFlowWebhook(t *testing.T) {
 	e.CreateProjects()
 	e.StartModelStub()
 	e.ModelStub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.95}`})
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 
 	step("ACT-HOOK-01 创建接收地址和密钥", func(t *testing.T) {
 		f.addSource(ghSource, "github", `{"scheme":"hmac-sha256-header","mappings":["github-issues"]}`, "")
@@ -395,7 +396,7 @@ func TestFlowWebhook(t *testing.T) {
 		f.waitFor("入站记录处理完成", 30*time.Second, func() bool { g, _ := f.ingestBy(ghSource, ghPayloadID); return g.State == "processed" })
 		g, _ = f.ingestBy(ghSource, ghPayloadID)
 		eq(t, "转换出的事件数", g.Events, 1)
-		f.waitFor("来源事件进入建议流", 30*time.Second, func() bool {
+		f.waitFor("来源事件进入建议流", 90*time.Second, func() bool {
 			evs := f.events(ghSource)
 			return len(evs) == 1 && evs[0].Disposition == "proposed" && evs[0].Item != ""
 		})
@@ -674,7 +675,7 @@ func TestFlowWebhook(t *testing.T) {
 			g, _ := f.ingestBy(id, key)
 			return g.State == "processed"
 		})
-		f.waitFor("转换出的事件入建议流", 30*time.Second, func() bool {
+		f.waitFor("转换出的事件入建议流", 90*time.Second, func() bool {
 			evs := f.events(id)
 			return len(evs) == 1 && evs[0].Subject == "脚本失败时的 payload" && evs[0].Disposition == "proposed"
 		})
@@ -684,7 +685,7 @@ func TestFlowWebhook(t *testing.T) {
 		if code, _ := f.post(id, ok, hdr); code/100 != 2 {
 			t.Fatalf("回 %d", code)
 		}
-		f.waitFor("第二条按转换结果入流水线", 30*time.Second, func() bool { return len(f.events(id)) == 2 })
+		f.waitFor("第二条按转换结果入流水线", 90*time.Second, func() bool { return len(f.events(id)) == 2 })
 
 		// 脚本必须在 sources/ 之下：登记到别处的绝对路径不执行，记录记 failed。
 		outside := filepath.Join(e.Root, "evil.sh")
@@ -733,7 +734,7 @@ func TestFlowWebhook(t *testing.T) {
 		f.StartKernelAgain()
 		before := len(f.items("proposed"))
 		f.apa(f.DEL, 0, "source", "replay", rec.ID)
-		f.waitFor("重放后生成事项", 30*time.Second, func() bool {
+		f.waitFor("重放后生成事项", 90*time.Second, func() bool {
 			evs := f.events(id)
 			return len(evs) == 1 && evs[0].Disposition == "proposed" && evs[0].Item != ""
 		})

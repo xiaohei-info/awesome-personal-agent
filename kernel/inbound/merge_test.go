@@ -102,6 +102,18 @@ func TestNoKeyNoMerge(t *testing.T) {
 	}
 }
 
+// 对话捕获与聚合消息不推导合并键：标题相同不代表同一件事。
+func TestConversationEventsDeriveNoKey(t *testing.T) {
+	for _, ev := range []domain.SourceEvent{
+		{SourceID: "capture:prj_x", Subject: "conversation delta"},
+		{SourceID: "src_chat", Subject: "项目群", Link: "https://chat.invalid/room/1", Messages: []domain.EventMessage{{Sender: "a"}}},
+	} {
+		if k := mergeKeyOf(ev); k != "" {
+			t.Fatalf("%s: key %q", ev.SourceID, k)
+		}
+	}
+}
+
 // 来源程序自带的合并键优先于内核推导的。
 func TestSourceMergeKeyWins(t *testing.T) {
 	e := mergeEnv(t)
@@ -261,27 +273,18 @@ func TestSamePRAcrossMailAndPlatformIsOneProposal(t *testing.T) {
 	}
 	p := all[0].Proposal
 	want := append(append(e.sev("src_mail_icloud", "i1", "i2"), e.sev("src_mail", "m1", "m2", "m3")...), e.sev("src_github", "g1", "g2")...)
-	if !slices.Equal(p.Sources, want) || p.MergeKey != "link:"+link || len(p.Merges) != 3 {
+	if !slices.Equal(p.Sources, want) || p.MergeKey != "link:"+link || len(p.Merges) != 6 {
 		t.Fatalf("proposal %+v", p)
 	}
 	for i, m := range p.Merges {
-		if m.By != "merge_key" || m.Item != "" || m.Event != []string{want[1], want[2], want[5]}[i] {
+		if m.By != "merge_key" || m.Item != "" || m.Event != want[i+1] {
 			t.Fatalf("merged by the rule at creation, not folded from another proposal: %+v", m)
 		}
 	}
 	for _, x := range append(append(e.events("src_mail_icloud"), e.events("src_mail")...), e.events("src_github")...) {
-		attached := slices.Contains([]string{"m2", "m3", "g2"}, x.DedupeKey.EventID)
-		if x.Item != all[0].ID || attached != (x.Disposition == domain.DispositionAttached) || !attached && x.MergeKey != "link:"+link {
+		if x.Item != all[0].ID || x.MergeKey != "link:"+link {
 			t.Fatalf("event %+v", x)
 		}
-	}
-	e.now = e.now.Add(31 * time.Minute)
-	if err := e.svc.Sweep(bg); err != nil {
-		t.Fatal(err)
-	}
-	all = e.allItems()
-	if len(all) != 1 || all[0].Phase != domain.PhaseProposed || all[0].Proposal.Sweep.State != "done" || all[0].Proposal.Sweep.Action != domain.SweepKeep || e.batchCalls() != 0 {
-		t.Fatalf("the sweep keeps the single proposal without a model call: %+v, calls %d", all, e.batchCalls())
 	}
 	e.verify()
 }

@@ -14,7 +14,7 @@ const GROUPS: { id: "A" | "B" | "C" | "D" | "E" | "F"; rows: string[] }[] = [
   { id: "C", rows: ["overdue", "followup", "stale", "rule_reminder"] },
   { id: "D", rows: [...TASK_ROWS.map((t) => "task_result:" + t), ...TASK_ROWS.map((t) => "task_failed:" + t)] },
   { id: "E", rows: ["source_failing", "run_failed", "health"] },
-  { id: "F", rows: ["new_proposals", "source_alert"] },
+  { id: "F", rows: ["new_proposals", "source_alert", "source_result"] },
 ];
 
 /** 这一行（含按优先级的覆盖）有没有用到 route：本人层直接指向它、指向默认渠道而默认渠道是它、或主会话唤醒不了时改送它。 */

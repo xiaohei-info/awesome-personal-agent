@@ -95,12 +95,12 @@ func dayWindow(now time.Time) (time.Time, time.Time) {
 	return start, start.AddDate(0, 0, 1)
 }
 
-// releasedToday 是今天从积压放开进入建议流的来源事件数：今天被放开重判、现在处置为 proposed 的。
+// releasedToday 是今天从积压放开进入处理线/建议流的来源事件数：今天被放开重判、已入队或已成建议的。
 func releasedToday(tx *store.Tx, now time.Time) (int, error) {
 	from, to := dayWindow(now)
 	r, err := tx.Query(`SELECT COUNT(DISTINCT e.object) FROM eventlog_event e
 		JOIN sources_runner_event r ON r.id = e.object
-		WHERE e.type = ? AND e.tombstone = 0 AND e.at >= ? AND e.at < ? AND e.payload LIKE '%"release":true%' AND r.disposition = 'proposed'`,
+		WHERE e.type = ? AND e.tombstone = 0 AND e.at >= ? AND e.at < ? AND e.payload LIKE '%"release":true%' AND (r.disposition = 'proposed' OR r.queue_state != '')`,
 		EvRequeued, from.UnixNano(), to.UnixNano())
 	if err != nil {
 		return 0, err
@@ -216,7 +216,7 @@ func (s *Service) BacklogRejudge(ctx context.Context, req command.Request, sourc
 		}
 	}
 	res.Deferred = len(rest)
-	return res, errors.Join(errs...)
+	return res, errors.Join(append(errs, s.TickQueue(ctx))...)
 }
 
 // releaseBatch 放回一批、交流水线处理，返回其中进入建议流的条数。模型不可用或处理出错时 stop 为真：不再往下放，余下的原样留在积压或 pending。
@@ -239,7 +239,7 @@ func (s *Service) releaseBatch(ctx context.Context, call func(releaseIn, string)
 			return proposed, true, append(errs, err)
 		}
 		switch {
-		case got.Disposition == domain.DispositionProposed:
+		case got.Disposition == domain.DispositionProposed || got.Queue != "":
 			proposed++
 		case got.Disposition == domain.DispositionPending: // 处理出错留在 pending：按进入建议流计，保证不超额，下一次调用接手
 			proposed++
@@ -269,19 +269,15 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 	var calls []direct.JudgeCall
 	for _, ev := range window {
 		src, err := sn.source(ev.SourceID)
-		if err != nil || IsCaptureSource(src.ID) {
+		if err != nil {
 			continue
 		}
 		m, err := s.match(src, ev)
 		if err != nil {
 			continue
 		}
-		var custom string
-		if m != nil {
-			if rules.Exit(m.rule) != rules.ExitScreen {
-				continue
-			}
-			custom = m.rule.Screen
+		if m != nil && rules.Exit(m.rule) != rules.ExitProcess {
+			continue
 		}
 		if s.o.Attaches != nil {
 			onUpdate := ""
@@ -292,13 +288,12 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 				continue
 			}
 		}
-		pack, screen := m.tmpl(custom, Template)
 		o, pol, err := s.freshOutbound(ctx, src)
 		if err != nil || outboundGate(o, pol, src) != "" {
 			continue
 		}
-		calls = append(calls, direct.JudgeCall{Pack: pack, Template: screen, Input: eventInput(src, ev, "", nil),
-			MaterialSource: materialSource(ev, o), Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
+		q1, q2 := s.judgeCalls(src, ev, "", o, pol)
+		calls = append(calls, q1, q2)
 	}
 	if len(calls) > 0 {
 		pf.Prefetch(ctx, calls)

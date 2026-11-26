@@ -33,7 +33,7 @@ echo '{"cursor":"'$n'"}'
 func newTier1(t *testing.T) *kit {
 	t.Helper()
 	e := baseline.New(t)
-	k := &kit{Env: e, t: t}
+	k := &kit{Env: e, t: t, noAgent: true}
 	e.Init()
 	// 内置 follow-up 包复制到数据目录：follow-up-interval 改 1m，stale-check 改 stale_after 3m、schedule "*/2 * * * *"。
 	k.copyFollowUpPack(func(s string) string {
@@ -148,7 +148,7 @@ func TestFlowRunTiers(t *testing.T) {
 	})
 
 	var matches, others []SrcEvent
-	k.step("ACT-TIER-04 规则能判定的进建议流，规则判不了的留在积压", func(t *testing.T) {
+	k.step("ACT-TIER-04 规则能判定的进队列等处理，规则判不了的留在积压", func(t *testing.T) {
 		var evs []SrcEvent
 		if !k.WaitFor(60*time.Second, func() bool {
 			evs = k.waitEvents("src_tier", 4) // 至少两轮、每轮两条
@@ -169,8 +169,9 @@ func TestFlowRunTiers(t *testing.T) {
 			}
 		}
 		for _, e := range matches {
-			eq(t, e.Subject+" 处置", e.Disposition, "proposed")
-			eq(t, e.Subject+" 阶段", k.phase(e.Item), "proposed")
+			// 规则直通的事件进队列；没有批处理 Agent 就停在待处理（§9.3）。
+			eq(t, e.Subject+" 处置", e.Disposition, "pending")
+			eq(t, e.Subject+" 队列", e.Queue, "queued")
 		}
 		for _, e := range others {
 			eq(t, e.Subject+" 处置", e.Disposition, "unjudged")

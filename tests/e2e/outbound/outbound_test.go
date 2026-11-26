@@ -60,7 +60,6 @@ func TestOutboundScope(t *testing.T) {
 		cls := requestsWith(k.clsLog(), "OBD-1")
 		k.contains("CLS_STUB", cls, "HEAD-MARK", "MID-MARK", "TAIL-MARK")
 		k.lacks("CLS_STUB", cls, `"material_truncated":true`)
-		k.contains("MODEL_STUB triage-draft", k.draftRequests("OBD-1"), "HEAD-MARK", "MID-MARK", "TAIL-MARK")
 		j := k.judgment(ev.Judgment)
 		if len(j.Levels) == 0 || j.Levels[0].Locality != "external" {
 			t.Fatalf("判断记录的 levels[] 应记下端点位置 external: %+v", j)
@@ -72,8 +71,8 @@ func TestOutboundScope(t *testing.T) {
 		k.clear()
 		k.emit(2)
 		k.waitEvent(obdSrc, "OBD-2", wait)
-		cls, draft := requestsWith(k.clsLog(), "OBD-2"), k.draftRequests("OBD-2")
-		for label, b := range map[string][]string{"CLS_STUB": cls, "MODEL_STUB triage-draft": draft} {
+		cls := requestsWith(k.clsLog(), "OBD-2")
+		for label, b := range map[string][]string{"CLS_STUB": cls} {
 			k.contains(label, b, "SUM-MARK", "HEAD-MARK")
 			k.lacks(label, b, "MID-MARK", "TAIL-MARK")
 		}
@@ -84,8 +83,8 @@ func TestOutboundScope(t *testing.T) {
 		k.clear()
 		k.emit(3)
 		k.waitEvent(obdSrc, "OBD-3", wait)
-		cls, draft := requestsWith(k.clsLog(), "OBD-3"), k.draftRequests("OBD-3")
-		for label, b := range map[string][]string{"CLS_STUB": cls, "MODEL_STUB triage-draft": draft} {
+		cls := requestsWith(k.clsLog(), "OBD-3")
+		for label, b := range map[string][]string{"CLS_STUB": cls} {
 			k.contains(label, b, "obd.message", "OBD-3 外发测试", sender, "occurred_at", "docs.example.org")
 			k.lacks(label, b, "/path/secret-123", "SUM-MARK", "HEAD-MARK", "MID-MARK", "TAIL-MARK")
 		}
@@ -128,9 +127,9 @@ func TestOutboundScope(t *testing.T) {
 		k.emit(5)
 		k.waitEvent(obdSrc, "OBD-5", wait)
 		k.contains("CLS_STUB（本机）", requestsWith(k.clsLog(), "OBD-5"), "HEAD-MARK", "MID-MARK", "TAIL-MARK")
-		draft := k.draftRequests("OBD-5")
-		k.contains("MODEL_STUB（外部）", draft, "OBD-5 外发测试", "docs.example.org")
-		k.lacks("MODEL_STUB（外部）", draft, "SUM-MARK", "HEAD-MARK", "MID-MARK", "TAIL-MARK")
+		screen := k.screenRequests("OBD-5")
+		k.contains("MODEL_STUB（外部）", screen, "OBD-5 外发测试", "docs.example.org")
+		k.lacks("MODEL_STUB（外部）", screen, "SUM-MARK", "HEAD-MARK", "MID-MARK", "TAIL-MARK")
 	})
 
 	k.step("ACT-OBD-08 某端点范围为 none：该端点不可用，级联交下一级", func(t *testing.T) {
@@ -248,8 +247,9 @@ func TestOutboundScope(t *testing.T) {
 				t.Fatalf("%s: unjudged_backlog 应是 warning、outbound_unset ≥ 1、next 指向来源页: %+v", name, sig)
 			}
 		}
-		if h := healthHealthy(t, k.APIRaw("GET", "/v1/health", "", k.OBS).Body); !h {
-			t.Fatalf("提醒级信号不应影响 healthy")
+		// 本环境没有渠道领取投递（批处理结论停在待发），那一项不看；其余提醒级信号不应是 error。
+		if bad := errorSignals(t, k.APIRaw("GET", "/v1/health", "", k.OBS).Body, "delivery_backlog"); len(bad) != 0 {
+			t.Fatalf("提醒级信号不应影响 healthy: %v", bad)
 		}
 		s := k.sourceShow(rssID) // 来源页读的就是这份登记：external 为空 = "未选择"并有去选的入口（PUT /settings/sources/{id}/outbound）
 		if s.Outbound.External != nil {
@@ -343,18 +343,13 @@ func TestOutboundScope(t *testing.T) {
 		k.Cls.PYes(modelstub.Key{Contains: "CAP2-"}, 0.9)
 		yes := true
 		k.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: "CAP2-"}, Answer: "yes", Sufficient: &yes})
-		k.ModelStub.When("CAP2-", modelstub.Reply{Content: `{"candidates":[{"title":"CAP2 候选","summary":"从对话抽出","kind":"task"}]}`})
 		k.clear()
 		k.capture(open(), body2000("CAP2-HEAD", "CAP2-MID", "CAP2-TAIL"))
-		if !k.WaitFor(wait, func() bool {
-			return len(requestsWith(k.clsLog(), "CAP2-HEAD")) > 0 && len(k.extractRequests("CAP2-HEAD")) > 0
-		}) {
-			t.Fatalf("预筛或抽取请求没有出现\nCLS=%d MODEL=%d\n%s", len(k.clsLog()), len(k.modelLog()), k.ServiceLog())
+		if !k.WaitFor(wait, func() bool { return len(requestsWith(k.clsLog(), "CAP2-HEAD")) > 0 }) {
+			t.Fatalf("judge 请求没有出现\nCLS=%d MODEL=%d\n%s", len(k.clsLog()), len(k.modelLog()), k.ServiceLog())
 		}
-		k.contains("capture-prescreen", requestsWith(k.clsLog(), "CAP2-"), "CAP2-HEAD")
-		k.contains("triage-extract", k.extractRequests("CAP2-"), "CAP2-HEAD")
-		k.lacks("capture-prescreen", requestsWith(k.clsLog(), "CAP2-"), "CAP2-MID", "CAP2-TAIL")
-		k.lacks("triage-extract", k.extractRequests("CAP2-"), "CAP2-MID", "CAP2-TAIL")
+		k.contains("triage-screen", requestsWith(k.clsLog(), "CAP2-"), "CAP2-HEAD")
+		k.lacks("triage-screen", requestsWith(k.clsLog(), "CAP2-"), "CAP2-MID", "CAP2-TAIL")
 	})
 
 	k.step("ACT-OBD-18 v0.1 账本升级后已有来源：外部范围未选择、默认项目为空", func(t *testing.T) {

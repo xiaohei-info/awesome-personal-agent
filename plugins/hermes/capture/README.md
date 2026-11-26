@@ -8,6 +8,7 @@ Candidate capture (design §11.2, appendix A.5): at `on_session_end` (turn level
 `post_llm_call` buffers each finished turn (`user:` / `assistant:`) per session; each turn is sent once.
 
 - On by default for every project (no per-project switch). A session whose directory matches no registered project repo falls back to the kernel's built-in Inbox project (`capture:<inbox_id>`), where extraction may still classify concrete items into a matching business project or leave them in Inbox. Under a run identity (`APA_RUN`, or the session's run context, see `tools/README.md`) the kernel never captures either, and the plugin only ever uses the run credential.
+- A turn that starts with an APA notice or wake message (`[APA ...]`, injected by `apa-wake`) is not captured (logged as `apa_notice`): it is APA talking, and capturing it would loop the result back into the source pipeline. The owner's next turn is captured as usual.
 - Asynchronous and invisible: the POST runs in a detached helper process with all output discarded.
 - No forced continuation (`inject_message`, `continue`, ...); no judgment logic; any failure is swallowed.
 

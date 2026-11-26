@@ -6,7 +6,6 @@ import (
 	"flag"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"io"
-	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -143,11 +142,6 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 	}
 	if err := k.start(ctx); err != nil {
 		return err
-	}
-	if hl, err := listenHost(l); err != nil { // 开不了不影响服务，只是 apa merge --apply 要先停服务
-		slog.Warn("host entry unavailable", "socket", hostSocket(l), "err", err)
-	} else {
-		defer serveHost(hl, k.in)()
 	}
 	ready(ln.Addr())
 

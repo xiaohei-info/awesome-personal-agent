@@ -99,8 +99,7 @@ func (p *Pusher) notice(tx *store.Tx, pol policy.Policy, e domain.Event, fresh *
 	case domain.EvRunFinished:
 		return runPush(tx, pol, e)
 	case domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged:
-		// 攒的条数按合并之后计（§7.4、§9.3）：建立时加一，被跨来源合并折叠时减一；合并开启时等这条归类完（留着）再看攒够没有，
-		// 免得成批之前就按未合并的条数推了。
+		// 攒的条数按合并之后计（§7.4、§9.3）：建立时加一，被建议合并折叠时减一；建议更新时也再看一次攒够没有。
 		r := pol.Disturb.PushRuleFor(policy.PushNewProposals)
 		var pl struct {
 			Op   string `json:"op"`
@@ -120,9 +119,6 @@ func (p *Pusher) notice(tx *store.Tx, pol policy.Policy, e domain.Event, fresh *
 		switch {
 		case e.Type == domain.EvItemCreated && pl.Item.Phase == domain.PhaseProposed:
 			*fresh++
-			if pol.MergeJudge != policy.MergeOff {
-				return attention.Notice{}, false, nil
-			}
 		case e.Type == domain.EvItemPhaseChanged && pl.Op == "merge.fold":
 			*fresh = max(*fresh-1, 0)
 			return attention.Notice{}, false, nil

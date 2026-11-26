@@ -20,7 +20,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--name N] [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
-	"rename <id> <name> | enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | event <event-id> [--part body|original|headers|attachments|messages] | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] | backlog rejudge [--source ID] [--limit N] | backlog restore --from T --to T [--source ID] [--dry-run] | auth <id>"
+	"rename <id> <name> | enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | event <event-id> [--part body|original|headers|attachments|messages] | propose <event-id> [--into ITEM] | ignore <event-id> | attach <event-id> --to ITEM [--reason R] | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] | backlog rejudge [--source ID] [--limit N] | backlog restore --from T --to T [--source ID] [--dry-run] | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -85,6 +85,16 @@ func source(c *client.Ctx, args []string) error {
 			return err
 		}
 		return call(c, "GET", path, nil)
+	case "propose":
+		return proposeEvent(c, rest)
+	case "ignore":
+		id, err := oneID(rest, "ignore")
+		if err != nil {
+			return err
+		}
+		return call(c, "POST", "/source-events/"+url.PathEscape(id)+"/ignore", nil)
+	case "attach":
+		return attachEvent(c, rest)
 	case "rejects":
 		path, err := rejectsPath(rest)
 		if err != nil {
@@ -140,6 +150,43 @@ func eventPath(args []string) (string, error) {
 		path += "?part=" + url.QueryEscape(*part)
 	}
 	return path, nil
+}
+
+// proposeEvent 解析 `propose <事件 id> [--into <建议 id>]`。
+func proposeEvent(c *client.Ctx, args []string) error {
+	if len(args) == 0 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return usage("propose takes an event id first", usageText)
+	}
+	fs := flag.NewFlagSet("source propose", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	into := fs.String("into", "", "")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+		return usage("invalid arguments for source propose", usageText)
+	}
+	var body any
+	if strings.TrimSpace(*into) != "" {
+		body = map[string]string{"into": strings.TrimSpace(*into)}
+	}
+	return call(c, "POST", "/source-events/"+url.PathEscape(args[0])+"/propose", body)
+}
+
+// attachEvent 解析 `attach <事件 id> --to <事项 id> [--reason R]`。
+func attachEvent(c *client.Ctx, args []string) error {
+	if len(args) == 0 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return usage("attach takes an event id first", usageText)
+	}
+	fs := flag.NewFlagSet("source attach", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	to := fs.String("to", "", "")
+	reason := fs.String("reason", "", "")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || strings.TrimSpace(*to) == "" {
+		return usage("attach needs <event-id> --to <item-id>", usageText)
+	}
+	body := map[string]string{"item": strings.TrimSpace(*to)}
+	if strings.TrimSpace(*reason) != "" {
+		body["reason"] = strings.TrimSpace(*reason)
+	}
+	return call(c, "POST", "/source-events/"+url.PathEscape(args[0])+"/attach", body)
 }
 
 // rejectsPath 解析 `rejects <id> [--after N] [--limit N]`；分页取值由内核校验，next_after 原样给下一次的 --after。

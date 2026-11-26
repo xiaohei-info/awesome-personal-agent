@@ -163,14 +163,11 @@ type fixtureIDs struct {
 }
 
 // 建议：三条来自 prop-src（外发范围全文）的事件，经初筛与起草成为建议；B 是把握低的。
-var proposalFixture = []struct {
-	mark, title, recommend, reason string
-	p                              float64 // 分类端点的初筛 p_yes
-	low                            bool
-}{
-	{"prop-a", "建议 A", "accept", "对方明确提出请求", 0.90, false},
-	{"prop-b", "建议 B", "dismiss", "可能无关", 0.35, true}, // 分类端点不确定、对话端点资料不足 → 保守默认 → 把握低
-	{"prop-c", "建议 C", "accept", "本周内要用", 0.90, false},
+// proposalFixture 是建议流里的三条：标题就是来源事件标题（批处理替身原样转为建议）。
+var proposalFixture = []struct{ mark, title string }{
+	{"prop-a", "prop-a 来信"},
+	{"prop-b", "prop-b 来信"},
+	{"prop-c", "prop-c 来信"},
 }
 
 type proposalOut struct {
@@ -264,15 +261,11 @@ func (f *fx) buildLedger() fixtureIDs {
 	f.addSource("src_acc_echo", "acc-echo", "echo-src", "full", []map[string]any{echo})
 	f.until("回音使事项回到 open", func() bool { return f.show(ids.echoItem).Phase == "open" })
 
-	// 建议：先配好分类端点与生成端点的作答，再让来源出事件。
+	// 建议：先配好分类端点的作答与批处理替身，再让来源出事件。
+	f.BatchAgent("")
 	var pl []map[string]any
 	for _, p := range proposalFixture {
-		f.clsPYes(p.mark, p.p, 0)
-		if p.low {
-			f.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: p.mark}, Answer: "no", Sufficient: new(bool)})
-		}
-		b, _ := json.Marshal(map[string]any{"title": p.title, "kind": "task", "recommend": p.recommend, "reason": p.reason})
-		f.ModelStub.When(p.mark, modelstub.Reply{Content: string(b)})
+		f.clsPYes(p.mark, 0.90, 0)
 		pl = append(pl, mailLine(p.mark+"-1", p.mark+" 来信", f.now().Add(-20*time.Minute), "建议正文 "+p.mark))
 	}
 	f.addSource("src_acc_prop", "acc-prop", "prop-src", "full", pl)
@@ -323,7 +316,7 @@ func TestFlowBriefMaterial(t *testing.T) {
 		if got := scheduleOf(t, am); len(got) != 0 {
 			t.Errorf("没有日历来源时日程应为空数组: %+v", got)
 		}
-		// 新增建议：3 条、pending_total 3，各带推荐、理由与把握低标记（只有 B 为真）、来源名。
+		// 新增建议：3 条、pending_total 3，各带来源名。
 		props := decode[struct {
 			Proposals []proposalOut `json:"proposals"`
 			Total     int           `json:"pending_total"`
@@ -337,8 +330,8 @@ func TestFlowBriefMaterial(t *testing.T) {
 		}
 		for _, w := range proposalFixture {
 			p, ok := got[w.title]
-			if !ok || p.Recommend != w.recommend || p.Reason != w.reason || p.LowConfidence != w.low || p.Sources != "acc-prop" {
-				t.Errorf("建议 %s = %+v，期望 recommend=%s reason=%s low=%v", w.title, p, w.recommend, w.reason, w.low)
+			if !ok || p.Sources != "acc-prop" {
+				t.Errorf("建议 %s = %+v，期望来源 acc-prop", w.title, p)
 			}
 		}
 		// 待决策：两条都列出（高风险类别取消，2026-11-20）。

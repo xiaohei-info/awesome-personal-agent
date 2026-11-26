@@ -496,11 +496,13 @@ func TestPrefetchSkipsAttachedEvents(t *testing.T) {
 	if _, err := e.do(delegate, CmdAttach, "", map[string]any{"id": pa, "to": t3}); err != nil {
 		t.Fatal(err)
 	}
+	e.cls.Reset()
+	e.judge(`{"choice":"ignore","confidence":0.95}`)
 	e.emit("src_t", "ticket",
 		ev("pf-att", "ticket.note", "同线程回音", map[string]any{"correlation_keys": []string{"thread-pf"}}),
 		ev("pf-new", "ticket.note", "全新事件", nil))
-	if bs := e.cls.Batches(); len(bs) != 1 || bs[0].Questions != 1 {
-		t.Fatalf("classifier batches %+v, want one batch with only the new event", bs)
+	if bs := e.cls.Batches(); len(bs) != 1 || bs[0].Questions != 2 || strings.Contains(string(bs[0].Body), "同线程回音") {
+		t.Fatalf("classifier batches %+v, want one batch with only the new event (2 judge questions)", bs)
 	}
 }
 

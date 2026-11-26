@@ -46,6 +46,7 @@
 | `name` | 可选。中英各一份的显示名 `{zh, en}`，界面按它称呼这个 Agent；未声明时界面称"Agent"，`harness` 只在"显示原始值"里 |
 | `headless.command` | 命令模板，占位符 `{prompt}`、`{run_dir}` |
 | `headless.output` | 结构化输出标志 |
+| `headless.final_text` | 可选。从结构化 stdout（如 `stream-json`）提取最终助手文本的字段路径（如 `$.text`、`$.result`），内核据此过滤工具事件与运行日志，只把最终助手文本交给下游通知 |
 | `instance_options` | 可选。`fields` 声明非敏感字段的双语标签、`type: enum` 与 `choices` 或 `type: string` 与整值 `pattern`。`display_as: model` 表示配置模型。`args_if_set` 将字段映射为固定标志及一个单独的 `{字段}` 参数。`env_if_set` 将字段映射到声明允许的宿主配置环境名，排除 APA 身份变量、进程加载与系统路径变量及凭据名。`cwd_choices` 可列出 `run_dir` 与 `project_checkout`。留空使用宿主默认设置。 |
 | `headless.session.assign` | 预设会话 id 的标志，与 `extract` 二选一 |
 | `headless.session.extract` | 从 stdout 取会话 id 的路径 |
@@ -71,6 +72,7 @@ name: {zh: Hermes, en: Hermes}
 headless:
   command: ["hermes", "chat", "--oneshot", "-q", "{prompt}"]
   output: ["--format", "stream-json"]
+  final_text: "$.text"
   session:
     extract: "$.session_id"
   resume: ["--resume", "{session_id}"]

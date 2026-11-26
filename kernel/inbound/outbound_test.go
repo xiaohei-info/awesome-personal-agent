@@ -32,7 +32,13 @@ func obdEvent(id, subject string) map[string]any {
 func (e *env) locality(loc string) {
 	e.t.Helper()
 	err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "locality", func(p *policy.Policy) error { p.GenerateEndpoint.Locality = loc; return nil })
+		_, err := policy.Update(tx, owner.Actor, "locality", func(p *policy.Policy) error {
+			p.GenerateEndpoint.Locality = loc
+			if p.JudgeEndpoint != nil {
+				p.JudgeEndpoint.Locality = loc
+			}
+			return nil
+		})
 		return err
 	})
 	if err != nil {
@@ -153,6 +159,7 @@ func TestUnsetScopeHoldsBackThenRejudgesWhenChosen(t *testing.T) {
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
 	}
+	e.drainBatch()
 	got = e.events(obdSrc)[0]
 	if got.Disposition != domain.DispositionProposed || got.Item == "" || got.Rejudges != 1 {
 		t.Fatalf("event not rejudged into a proposal: %+v", got)
@@ -270,7 +277,7 @@ func TestCaptureRejudgedAfterProjectScopeChosen(t *testing.T) {
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.events("capture:" + e.web)[0]; got.Disposition == domain.DispositionUnjudged || got.Disposition == domain.DispositionPending {
+	if got := e.events("capture:" + e.web)[0]; got.Disposition == domain.DispositionUnjudged || (got.Disposition == domain.DispositionPending && got.Queue == "") {
 		t.Fatalf("event %+v", got)
 	}
 	if !strings.Contains(e.sent(0), "CAP-MARK") {

@@ -37,7 +37,10 @@ export interface SourceEvent {
   summary?: string;
   occurred_at: string;
   disposition: string;
+  queue?: string;
+  queue_level?: string;
   item?: string;
+  items?: string[];
   unjudged_reason?: string;
   rejudges?: number;
   score?: number; // 影子打分的预估分数（§9.3）；没打过分时没有

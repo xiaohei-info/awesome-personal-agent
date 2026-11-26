@@ -31,7 +31,7 @@ const (
 // QueueOf 返回类别所属队列；judge、generate 走 HTTP，不起子进程，ok 为 false。
 func QueueOf(c domain.RunCategory) (q Queue, ok bool) {
 	switch c {
-	case domain.RunTask, domain.RunBackground:
+	case domain.RunTask, domain.RunBackground, domain.RunSourceBatch:
 		return QueueLong, true
 	case domain.RunSource, domain.RunTransform, domain.RunReader:
 		return QueueShort, true
@@ -146,7 +146,23 @@ func invalid(why string) error {
 // inFlightGuarded 为真的类别遵守"同一目标同时只有一个排队或运行中的 Run"：
 // 事项的任务型/后台运行（不变量 7）与来源拉取（定时到期不重复入队）。
 func inFlightGuarded(c domain.RunCategory) bool {
-	return c == domain.RunTask || c == domain.RunBackground || c == domain.RunSource
+	return c == domain.RunTask || c == domain.RunBackground || c == domain.RunSource || c == domain.RunSourceBatch
+}
+
+// CountCategorySince 统计某个运行类别自 since（含）以来入队的次数（供来源处理线每日批数上限使用）。
+func CountCategorySince(tx *store.Tx, c domain.RunCategory, since time.Time) (int, error) {
+	r, err := tx.Query(`SELECT COUNT(*) FROM outcall_run WHERE category = ? AND enqueued_at >= ?`, string(c), since.UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+	var n int64
+	if r.Next() {
+		if err := r.Scan(&n); err != nil {
+			return 0, err
+		}
+	}
+	return int(n), r.Err()
 }
 
 func newID() (string, error) {

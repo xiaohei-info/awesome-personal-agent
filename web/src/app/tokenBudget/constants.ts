@@ -1,4 +1,4 @@
-// 资料预算（token）的唯一一份网页端常量：写作（设置 › 模型）与跨来源合并（设置 › 跨来源合并）共用。
+// 资料预算（token）的唯一一份网页端常量：写作（设置 › 模型）使用。
 // 与内核 kernel/policy 同值：CharsPerToken、DefaultGenerateBudgetTokens、Min/MaxBudgetTokens；
 // 内核与网页是两种语言，各存一份，由 kernel/policy 的 TestWebBudgetConstantsMatchKernel 锁住同值。
 export const CHARS_PER_TOKEN = 1.5;

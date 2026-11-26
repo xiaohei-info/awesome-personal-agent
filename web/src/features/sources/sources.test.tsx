@@ -16,7 +16,7 @@ const err = (status: number, code: string, why: string) => json(status, { code, 
 
 interface Src { name: string; default_project?: string; outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
 interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
-interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
+interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; queue?: string; queue_level?: string; item?: string; unjudged_reason?: string }
 
 interface Models { judge?: boolean; generate?: boolean; paused?: boolean }
 function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number; rejudge_days?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
@@ -34,6 +34,7 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     const u = new URL(url, "http://x");
     if (u.pathname === "/v1/projects") return json(200, { projects: o.projects ?? [] });
+    if (u.pathname.startsWith("/v1/items/")) return json(200, { item: { id: u.pathname.slice("/v1/items/".length), title: "跟进报销审批" } });
     if (u.pathname === "/v1/health") {
       const b = o.backlog ?? { count: 0 };
       return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: b.count === 0, count: b.count, next: "", detail: { outbound_unset: b.outbound_unset ?? 0, rejudge_days: b.rejudge_days } }] });
@@ -839,5 +840,25 @@ describe("来源的显示名（§9.1）", () => {
     await userEvent.click(f.getByRole("button", { name: "登记" }));
     await row("QQ 邮箱");
     expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ id: "src_mail_qq", name: "QQ 邮箱", source_type: "calendar", command: "/opt/qq.sh" });
+  });
+
+  it("最近的消息显示队列状态（待处理 / 处理中 / 已处理）与去向链接，不显示裸 id", async () => {
+    const b = backend({
+      sources: [{ id: "src_mail_q", name: "工作邮件", type: "pull", schedule: "15m", enabled: true }],
+      events: [
+        { id: "e_q", type: "mail", subject: "待处理邮件", occurred_at: "2030-01-01T00:00:00Z", disposition: "pending", queue: "queued" },
+        { id: "e_r", type: "mail", subject: "处理中邮件", occurred_at: "2030-01-01T00:01:00Z", disposition: "pending", queue: "running" },
+        { id: "e_d", type: "mail", subject: "已处理邮件", occurred_at: "2030-01-01T00:02:00Z", disposition: "proposed", queue: "done", item: "itm_reimburse" },
+      ],
+    });
+    mount(b.impl);
+    await userEvent.click((await row("工作邮件")).getByRole("button", { name: "详情" }));
+    const recent = await screen.findByRole("list", { name: "最近的消息" });
+    expect(within(recent).getByText("待处理")).toBeInTheDocument();
+    expect(within(recent).getByText("处理中")).toBeInTheDocument();
+    expect(within(recent).getByText("已处理")).toBeInTheDocument();
+    const link = await within(recent).findByRole("link", { name: "去向：跟进报销审批" });
+    expect(link).toHaveAttribute("href", "/items/itm_reimburse");
+    expect(recent).not.toHaveTextContent("itm_reimburse");
   });
 });

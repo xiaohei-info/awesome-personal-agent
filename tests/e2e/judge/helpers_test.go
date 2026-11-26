@@ -38,6 +38,7 @@ func setup(t *testing.T) *fx {
 	t.Helper()
 	e := baseline.Setup(t)
 	e.WireEndpoints()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	f := &fx{Env: e, t: t, src: "src_acctext", events: filepath.Join(e.Root, "acc_text_events.jsonl")}
 	f.registerText()
 	return f
@@ -181,11 +182,16 @@ func (f *fx) judgmentsOf(subject string) []judgment {
 	return out.Judgments
 }
 
-// judgmentOf 等来源事件处置完毕，返回它的（最后一条）判断记录。
+// judgmentOf 等来源事件处置完毕，返回它"要不要处理"一问的（最后一条）判断记录。
 func (f *fx) judgmentOf(eventID string) (srcEvent, judgment) {
 	f.t.Helper()
 	e := f.settled(eventID, 60*time.Second)
-	js := f.judgmentsOf(e.ID)
+	var js []judgment
+	for _, j := range f.judgmentsOf(e.ID) {
+		if j.Use != "inbound_urgent" {
+			js = append(js, j)
+		}
+	}
 	if len(js) == 0 {
 		f.t.Fatalf("事件 %s 没有判断记录: %+v", eventID, e)
 	}

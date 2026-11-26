@@ -448,8 +448,8 @@ func builtinPacks(t *testing.T) *packs.Loader {
 	return ld
 }
 
-// 自检用起草建议的真实模板探测生成端点：请求带的是模板自己的结构约束（不是内置小样例），
-// 输入的项目清单为空（本人还没建项目）。端点答不了真实约束时，自检不能再报"正常"。
+// 自检用决策卡片文案的真实模板探测生成端点：请求带的是模板自己的结构约束（不是内置小样例）。
+// 端点答不了真实约束时，自检不能再报"正常"。
 func TestProbeGenerateUsesTheDraftTemplate(t *testing.T) {
 	ld := builtinPacks(t)
 	for _, c := range []struct {
@@ -457,12 +457,12 @@ func TestProbeGenerateUsesTheDraftTemplate(t *testing.T) {
 		status      Status
 		code, shape string
 	}{
-		{"valid", `{"title":"Send the report","kind":"task","recommend":"accept","reason":"asked by finance"}`, OK, CodeOK, ""},
-		{"fenced", "```json\n{\"title\":\"a\",\"kind\":\"task\"}\n```", Error, CodeDraftSchema, model.ShapeFence},
+		{"valid", `{"insufficient_info":false,"title":"选择发布时间","question":"何时正式发布？","options":[{"id":"A","label":"今晚发布","consequence":"今晚值班观察"},{"id":"B","label":"明天上午发布","consequence":"延迟一夜"}]}`, OK, CodeOK, ""},
+		{"fenced", "```json\n{\"insufficient_info\":false}\n```", Error, CodeDraftSchema, model.ShapeFence},
 		{"prose", "I could not draft this one.", Error, CodeDraftSchema, model.ShapePlainText},
 		{"empty", "", Error, CodeDraftSchema, model.ShapeEmpty},
-		{"kind outside the enum", `{"title":"a","kind":"reminder"}`, Error, CodeDraftSchema, ""},
-		{"required field missing", `{"kind":"task"}`, Error, CodeDraftSchema, ""},
+		{"wrong type", `{"insufficient_info":"no"}`, Error, CodeDraftSchema, ""},
+		{"required field missing", `{"title":"a"}`, Error, CodeDraftSchema, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			gen := modelstub.New()
@@ -473,8 +473,8 @@ func TestProbeGenerateUsesTheDraftTemplate(t *testing.T) {
 				t.Fatalf("%+v", d)
 			}
 			sent := gen.Requests()[0].BodyText
-			if !strings.Contains(sent, "commitment") || !strings.Contains(sent, "attach_to") || !strings.Contains(sent, `\"projects\":[]`) {
-				t.Fatalf("probe did not carry the draft template's constraints: %s", sent)
+			if !strings.Contains(sent, "insufficient_info") || !strings.Contains(sent, "consequence") || !strings.Contains(sent, "itm_doctor_sample") {
+				t.Fatalf("probe did not carry the template's constraints: %s", sent)
 			}
 		})
 	}

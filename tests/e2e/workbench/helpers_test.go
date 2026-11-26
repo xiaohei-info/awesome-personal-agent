@@ -20,6 +20,7 @@ const (
 )
 
 type kit struct {
+	noAgent bool // 没配批处理 Agent 的实例
 	*baseline.Env
 	t *testing.T
 }

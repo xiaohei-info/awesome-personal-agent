@@ -35,7 +35,14 @@ const homes = [...new Set(Object.values(EDITORS))] as Home[];
 describe("用当前数据（v28）渲染每个编辑页", () => {
   it.each(homes)("%s：这一页负责的每一类都有单选、当前值已选中、带预览", async (home) => {
     const s = policyServer({ v28: true });
+    s.doc.disturb.delivery.rows.source_result ??= { agent: "main", user: "off", else: "next_chat" };
+    const overview = v28Overview();
+    if (!overview.rows.some((r) => r.key === "source_result")) overview.rows.push({ key: "source_result", produced: true, events: 0, pushed: 0 });
     const impl = (async (url: string, init?: RequestInit) => {
+      if (url === "/v1/settings/notify/overview") return new Response(JSON.stringify(overview), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/v1/settings/source-pipeline") return new Response(JSON.stringify({ version: 28, source_pipeline: {} }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/v1/settings/judgment") return new Response(JSON.stringify({ version: 28, bands: [], shadow: [], spot_check: { per_brief: 5 } }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url.startsWith("/v1/agents")) return new Response(JSON.stringify({ agents: [], selected: {}, reason: "" }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/v1/items?kind=brief") return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/v1/packs") return new Response(JSON.stringify({ packs: [{ name: "brief", instance_params: {} }, { name: "review", instance_params: {} }] }), { status: 200, headers: { "Content-Type": "application/json" } });
       return s.impl(url, init);
@@ -46,7 +53,7 @@ describe("用当前数据（v28）渲染每个编辑页", () => {
         <App features={features} fetchImpl={withSession(impl)} />
       </MemoryRouter>,
     );
-    const rows = v28Overview().rows.filter((r) => r.produced && shown(r.key) && EDITORS[kindOf(r.key)] === home);
+    const rows = overview.rows.filter((r) => r.produced && shown(r.key) && EDITORS[kindOf(r.key)] === home);
     expect(rows.length, `${home} 在 v28 下应至少负责一类提醒`).toBeGreaterThan(0);
     await screen.findByRole("main");
     for (const r of rows) {

@@ -4,6 +4,7 @@
   "headless": {
     "command": ["hermes", "chat", "--oneshot", "-q", "{prompt}"],
     "output": ["--format", "stream-json"],
+    "final_text": "$.text",
     "session": {"extract": "$.session_id"},
     "resume": ["--resume", "{session_id}"],
     "access": {

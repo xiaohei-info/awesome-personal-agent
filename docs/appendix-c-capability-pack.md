@@ -59,23 +59,22 @@ kinds:
 
 能力包只声明来源事件怎样变成事项，不登记来源：来源的命令、周期、超时、`credentials_path` 都在 Source 登记里（主文档 §6.10），由内核经 stdin 交给来源进程（主文档 §9.2），能力包不能声明或改写。
 
-**source_rules**：确定性规则，能判定的不调模型。规则只处理没有被跟进消息归属挂靠的事件：同一来源对象的更新（如日程改标题）在规则之前写回它建出、仍未关闭的事项（主文档 §9.4），规则不必为更新写特例。没有任何规则命中的事件按 `then: screen` 处理。
+**source_rules**：确定性规则，能判定的不调模型。规则只处理没有被跟进消息归属挂靠的事件：同一来源对象的更新（如日程改标题）在规则之前写回它建出、仍未关闭的事项（主文档 §9.4），规则不必为更新写特例。没有任何规则命中的事件按 `then: process` 处理。
 
 | 字段 | 语义 |
 |---|---|
 | `id` | 规则 id，包内唯一。规则模式按（包，规则 id）记在账本里，改 id 等于新规则 |
 | `match` | 来源类型（Source 登记的 `source_type`，如 `mail`、`calendar`、`reminder`，不随具体工具变化）或来源 id、事件类型、发送者，平铺的相等或成员判断 |
 | `where[]` | 字段条件，逐条都成立才命中。每条 `{field, op, value}`：`field` 是标准事件的顶层字段，或 `metrics.<指标名>`；`op` 取 `eq`、`ne`、`in`、`gt`、`gte`、`lt`、`lte`、`changed`、`crosses_above`、`crosses_below`。后三种只用于 `metrics`，与同一序列的上一次取值比较（主文档 §9.2），序列第一次出现时不成立；`changed` 不带 `value`。不支持表达式、嵌套、正则 |
-| `then` | 出口：`proposed`（默认）、`ignore`、`screen`、`extract`、`digest`、`alert`（主文档 §9.3）。`judge` 是 `screen` 的旧名，仍被接受 |
-| `kind` | `proposed` 出口直接映射的 kind；`screen`、`extract` 出口由起草决定，这里给出时作为缺省 |
-| `project_by` | `repo_remote`（按仓库远程地址归项目）、`fixed:<项目>`、`draft`（由起草从活动项目清单里选，可以选"无"）、`none`（规则不指定）。规则没有给出项目时取来源登记的默认项目，再没有则不归项目 |
+| `then` | 出口：`ignore`（不用看）、`digest`（汇入简报）、`alert`（直接提醒）、`process`（交给统一 judge 与批处理队列，固定使用内置 `inbound-triage/triage-screen` 模板）、`proposed`（默认，结构化事件跳过 judge 第一题直通队列）（主文档 §9.3）。旧出口名 `screen`、`judge`、`extract` 已移除并在加载时拒绝 |
+| `kind` | 规则直通时的缺省 kind |
+| `project_by` | `repo_remote`（按仓库远程地址归项目）、`fixed:<项目>`、`none`（规则不指定）。规则没有给出项目时取来源登记的默认项目，再没有则不归项目；旧值 `draft` 兼容读取并忽略 |
 | `on_update` | 关联键命中本人名下未委派、未关闭的事项时怎样处理：`refresh`（默认，用新事件刷新原事项）或 `attach`（作为挂靠消息记在原事项上，等待中的事项回到 `open`），见主文档 §9.4 |
 | `correlation_keys` | 从事件字段得到关联键的模板；来源程序已给出时可省略。关联键标识来源对象，同一对象的各版本应得到同一个键 |
 | `merge_key` | 合并键模板；省略时内核按链接或"标题加发送者"推导（主文档 §9.3） |
-| `screen`、`draft`、`prescreen`、`extract` | 各步所用的提示词模板名，省略时依次取内置的 `triage-screen`、`triage-draft`、`capture-prescreen`、`triage-extract`。`prescreen` 另可取保留字 `none`：`extract` 出口跳过预筛，直接抽取，不产生预筛的判断记录（主文档 §9.3）；包里不能有名为 `none` 的提示词模板 |
-| `notify_urgent` | `true` 时，这条规则产生的新建议即时提醒本人，起草或抽取判为"可以等"的与没有给出判断的不提醒（主文档 §9.3）。只用于 `then: screen` 与 `then: extract`。声明它的规则是动作类，`mode` 可省略（初始 `observe`） |
+| ~~`screen`、`draft`、`prescreen`、`extract`、`notify_urgent`~~ | **已移除（2026-11-26）**：所有非直通来源固定共用内置 `inbound-triage/triage-screen`（仅从来源处理设置读取可编辑判据），起草、预筛、抽取与紧急提醒规则字段已删除，包里再声明这些字段时加载器明确拒绝 |
 | `accept` | 接受方式，默认 `manual`。声明 `auto` 的规则是动作类，`mode` 可省略（初始 `observe`） |
-| `mode` | `accept: auto`、`then: alert` 与 `notify_urgent: true` 的规则需要：它们是动作类规则，初始只能是 `off` 或 `observe`（缺省 `observe`）。`observe` 时只记录"本来会自动接受"或"本来会提醒"，在 Web 切 `auto` 后才生效。`alert` 规则必须带 `where[]` |
+| `mode` | `accept: auto` 与 `then: alert` 的规则需要：它们是动作类规则，初始只能是 `off` 或 `observe`（缺省 `observe`）。`observe` 时只记录"本来会自动接受"或"本来会提醒"，在 Web 切 `auto` 后才生效。`alert` 规则必须带 `where[]` |
 
 ```yaml
 source_rules:
@@ -89,18 +88,12 @@ source_rules:
     then: proposed
   - id: mail-received
     match: {source_type: mail, event_type: [mail.received]}
-    project_by: draft
+    project_by: none
     on_update: attach
-    then: screen
+    then: process
   - id: chat-digest
     match: {source_type: chat, event_type: [chat.window]}
-    then: extract
-  - id: chat-mention
-    match: {source_type: chat, event_type: [chat.mention]}
-    then: extract
-    prescreen: none        # 来源程序已用事件类型表达"一定要看"
-    notify_urgent: true    # 动作类规则，初始 observe
-    mode: observe
+    then: process
   - id: newsletter
     match: {source_type: mail, sender: ["news@example.com"]}
     then: digest
@@ -248,7 +241,9 @@ criteria: 涉及真实资金、对外承诺、不可逆操作或权限变更的�
 
 `instruction_path` 的文件由任务型在拉起时写进这次运行的运行目录（文件名 `instruction.txt`，权限 0600），不进提示词正文；包的 `instance_params` 没有字符串参数 `instruction` 时，用了这个占位符的包加载时拒绝；实例没有任务说明时：模板声明了 `default_instruction` 就写它；没有声明则不拉起，规则建的这一份转 `dropped` 并记带 `task_refused` 的告警（`SPIKE-ROUTINE`，主文档 §8.7、§13.5）。实例参数 `instruction` 不超过 2000 字，超过时建实例与改实例都被拒绝。
 
-**入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，起草与抽取带内核组出的四份清单，预筛把未关闭事项与两份去重清单以文本段附在资料后（不带项目清单）；模板不必声明，也不能改它们的形状：
+~~**入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）……~~ **已取消（2026-11-26）**：起草、抽取、预筛与批量归类已删除，改由统一两题 judge（`triage-screen`）与后台批处理运行（`source-batch`）取代。
+
+（以下旧字段表仅作历史说明留存：）
 
 | 输入键 | 内容 |
 |---|---|
@@ -324,9 +319,8 @@ Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates
 | `answer_by` 含未知后端；`classifier` 出现在 `yes_no` 以外的题型；`band` 越界或 `low` 大于 `high`；`band`、`single_shot` 用在不含 `classifier` 的模板上 | 拒绝 |
 | `relay_to` 声明在生成型以外的模板上，或指向的不是任务型模板 | 拒绝 |
 | 模板带已移除的字段（`confidence_threshold`、`escalate_to`） | 拒绝，并给出 C.7 的对应写法 |
-| 来源规则的 `then` 不在枚举内；`alert` 没有 `where[]`；`where[]` 的 `op` 不在枚举内，或变化类 `op` 用在 `metrics` 以外的字段上 | 拒绝 |
-| `prescreen: none` 用在 `extract` 以外的出口上；包里有名为 `none` 的提示词模板 | 拒绝 |
-| `notify_urgent` 用在 `screen`、`extract` 以外的出口上 | 拒绝 |
+| 来源规则的 `then` 不在枚举内（含已移除的 `screen`、`judge`、`extract`）；`alert` 没有 `where[]`；`where[]` 的 `op` 不在枚举内，或变化类 `op` 用在 `metrics` 以外的字段上 | 拒绝 |
+| 来源规则带已移除的字段（`screen`、`prescreen`、`draft`、`extract`、`notify_urgent`） | 拒绝 |
 | `follow_up`、`stale` 规则带 `do[]`；`remind_rounds` 小于 1 | 拒绝 |
 | 包里自报规则类别，或声明不确定带的策略覆盖、外发范围、打扰上限 | 拒绝（属于策略字段） |
 | 动作不在枚举内 | 拒绝 |
@@ -342,7 +336,7 @@ Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates
 | 情况 | 处理 |
 |---|---|
 | 模板带已移除的字段（C.7），或判断型模板缺 `on_undecided` | 拒绝整个包。数据目录里覆盖内置包的用户包被拒绝时，同名内置包生效（它没有"上一有效版本"可回退到 v0.1 的写法）；健康视图逐个列出要改的字段和 C.7 的对应写法 |
-| 来源规则 `then: judge` | 接受，等同 `screen` |
+| 来源规则 `then: screen` / `judge` / `extract` 或旧字段 `screen` / `prescreen` / `draft` / `extract` / `notify_urgent` | 拒绝整个包，统一改为 `then: process` 并删除旧字段 |
 | 来源规则 `project_by: none` | 接受；来源登记了默认项目时取默认项目 |
 | `follow_up` 时钟规则带 `do[]`（v0.1 用它调判断型） | 拒绝，提示删除 `do[]`；到期行为由内核固定为跟进梯度（C.4） |
 | 提醒类规则写了 `mode: observe` 或 `off` | 接受，按所写的值作为初始模式 |
@@ -461,6 +455,6 @@ default_instruction: |-
 | `background-run` | `start_background_run` 的状态规则样例（`trigger: state`，每件事自动只开工一次），初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |
-| `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`reminder-open`（没有到期日的提醒事项 `reminder.open`，`proposed`；只在来源配了 `undated_lists` 时才有这类事件）、`reminder-status`（离开未完成集合的提醒：核实已完成的 `reminder.completed`，与只是移出拉取范围或读不到的 `reminder.out_of_view`；`ignore`，`on_update: attach`：挂到这条提醒建出的事项上，不关闭它，附录 D.2）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠，并刷新它建出的事项）、`pr-discussion`（PR 上的评论与评审，`ignore`，`on_update: attach`）、`issue-comment`（issue 上的评论，`screen`，`on_update: attach`）；评论与评审挂到已有事项时只记为挂靠消息，不改事项的标题、正文与摘要；issue 更新没有规则，交初筛。webhook 校验方案与字段映射（`github-issues`，以及评论与评审的 `github-issue-comments`、`github-pr-reviews`、`github-pr-review-comments`）。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"；问"这一轮有没有尚未完成、未与所列清单重复的新事项，或与未关闭事项有关的新进展"，判据写明闲聊、本轮已修好/验证/上线/答复/本人否决的事、当场已派发的即时任务、纯助手汇报与顺口附带的建议、与三份清单重复的同一件事都不抽）；跨来源合并的批量归类 `merge-batch`（生成型，一批一次调用，超时 300s；先输出 `groups[]`：`group`、`topic`、`members[]`；再输出 `decisions[]`：`new`、`group`、`step`（1 并入事项、2 批内整合、3 保留）、`action`（`attach`/`merge`/`duplicate`/`keep`）、`target`、`reason`、`confident`；第 2 步的整合在 `combined[]`：`merge`、`group`、`members[]`、`title`、`summary`；正文即设置 › 跨来源合并里的内置默认提示词，本人改的只换正文、不换输出结构，主文档 §9.3）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置、`urgent`）与 `triage-extract`（一段内容抽出零到多条候选，每条与起草同一组字段并带 `refs`；正文列出四类不抽的内容并收紧 `decision` 的用法，不再"宁可多抽"）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
+| `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`process`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`process`，`on_update: attach`）。结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`reminder-open`（没有到期日的提醒事项 `reminder.open`，`proposed`；只在来源配了 `undated_lists` 时才有这类事件）、`reminder-status`（离开未完成集合的提醒：`reminder.completed` 与 `reminder.out_of_view`，`ignore`，`on_update: attach`）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`）、`pr-discussion`（PR 上的评论与评审，`ignore`，`on_update: attach`）、`issue-comment`（issue 上的评论，`process`，`on_update: attach`）。webhook 校验方案与字段映射（`github-issues`、`github-issue-comments`、`github-pr-reviews`、`github-pr-review-comments`）。判断型提示词 `triage-screen`（统一 judge 模板，是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`；一次请求同时问"要不要处理"与"急不急"）；任务型提示词 `source-batch`（来源批处理运行说明，正文即设置 › 来源处理里的内置默认，主文档 §9.3、§13.6）。~~`triage-draft`、`triage-extract`、`capture-prescreen`、`merge-batch`~~ **已取消（2026-11-26）**：由统一 judge 与后台批处理 Agent 取代，文件已删除 |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型提示词 `delegation-screen`（是非题"这份回执需要本人核实吗"，下限 0.20，未定取"是"）。命中后在父事项上生成决策请求交本人；拉起任务型用工具查证不在本版（主文档 §20.5） |
 | `routine` | kind `routine`（`spec.result`）；实例参数（`schedule`、`mode`、`title`、`instruction`、`output`；归属项目是实例自己的字段，见 C.10）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型；`mode: create_item` 时 `call_agent` 不执行）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`）；列表与卡片视图 |

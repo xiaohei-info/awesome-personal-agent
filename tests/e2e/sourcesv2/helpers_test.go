@@ -83,6 +83,7 @@ func setup(t *testing.T) *kit {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+hostPathWithout(t, "himalaya"))
 	e := baseline.Setup(t)
 	e.WireEndpoints()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	e.InstallToolStub()
 	// gh 样本固定在 2026-11-10，而内核时钟不会倒退：平移到此刻之后，用测试时钟逐个放出（见 tests/doubles/tools/gh_rebase.go）。
 	// 只在本包开启；环境基线的重放仍拿到录制时的原样输出。
@@ -379,11 +380,15 @@ func (k *kit) audit(typ, object string) []Audit {
 // clsYes 给 CLS_STUB 的一道题配 p_yes（题目内容含 key）。
 func (k *kit) clsYes(key string, p float64) { k.Cls.PYes(modelstub.Key{Contains: key}, p) }
 
-// draft 让 MODEL_STUB 对标题为 subject 的事件的起草请求（triage-draft）返回给定 JSON。
-// 起草的结构化输入里 subject 之后紧跟 today，判断题的输入没有 today，据此只命中起草请求。
-func (k *kit) draft(subject string, out map[string]any) {
-	b, _ := json.Marshal(out)
-	k.ModelStub.When(`\"subject\":\"`+subject+`\",\"today\"`, modelstub.Reply{Content: string(b)})
+// askedWhether 数分类端点收到的、含 subject 的"要不要处理"题：规则直通的事件只问急不急（§9.3）。
+func (k *kit) askedWhether(subject string) int {
+	n := 0
+	for _, b := range k.Cls.Batches() {
+		if strings.Contains(b.BodyText, subject) && strings.Contains(b.BodyText, "需要本人知道或处理吗") {
+			n++
+		}
+	}
+	return n
 }
 
 // chatJudge 配 MODEL_STUB 的判断题作答（对话端点，题目内容含 subject）。
@@ -556,16 +561,6 @@ func (k *kit) suggestions() []string {
 		ids = append(ids, s.ID)
 	}
 	return ids
-}
-
-// hasDraftRequest 报告 MODEL_STUB 是否收到过标题含 subject 的起草请求（triage-draft）。
-func (k *kit) hasDraftRequest(subject string) bool {
-	for _, r := range k.ModelStub.Requests() {
-		if strings.Contains(r.BodyText, "起草一条建议") && strings.Contains(r.BodyText, subject) {
-			return true
-		}
-	}
-	return false
 }
 
 func eq(t *testing.T, what string, got, want any) {

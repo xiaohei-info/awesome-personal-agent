@@ -18,7 +18,7 @@ func TestDeclarationIsAcceptedByKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := d.Headless
-	if d.Harness != "hermes" || h.Session.Extract != "$.session_id" || len(h.Resume) == 0 {
+	if d.Harness != "hermes" || h.Session.Extract != "$.session_id" || h.FinalText != "$.text" || len(h.Resume) == 0 {
 		t.Fatalf("unexpected declaration: %+v", d)
 	}
 	for _, tier := range []string{"read", "edit", "full"} {

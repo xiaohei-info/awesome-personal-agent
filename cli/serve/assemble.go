@@ -252,7 +252,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 
 	// 跟进消息归属与入站流水线互相接线：拦截在判断之前，退回后立即唤醒入站流水线。
 	fm, err := followmsg.New(followmsg.Options{Store: st, Exec: x, Owner: owner,
-		Wake: func(ctx context.Context) error { return k.in.Process(ctx) }, OnError: logErr("follow-up message")})
+		Wake: func(ctx context.Context) error { return k.in.ProcessAndTick(ctx) }, OnError: logErr("follow-up message")})
 	if err != nil {
 		return nil, err
 	}
@@ -330,6 +330,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		if !k.rs.Settle(ctx, res) { // 续接因会话失效已改用新会话重新拉起时，不再按失败收尾
 			bg.Settle(ctx, res)
 		}
+		k.in.SettleBatch(ctx, res)
 		hs.OnResult(res)
 		if res.Run.Launch == kpolicy.LaunchWake { // 超时、失败等不经命令提交的终态：立即释放租约
 			if err := k.wk.Settle(ctx, st, k.result); err != nil {
@@ -337,12 +338,16 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 			}
 		}
 	}
-	// 运行凭据在启动时签发并注入（§7.7）：任务型与后台运行各自签发，其他类别没有凭据。
-	env := func(r domain.Run) map[string]string {
-		if r.Category == domain.RunBackground {
-			return bg.Env(r)
+	// 运行凭据在启动时签发并注入（§7.7）：任务型、后台运行与来源批处理各自签发，其他类别没有凭据。
+	envErr := func(r domain.Run) (map[string]string, error) {
+		switch r.Category {
+		case domain.RunBackground:
+			return bg.Env(r), nil
+		case domain.RunSourceBatch:
+			return k.in.BatchEnv(r)
+		default:
+			return tk.Env(r), nil
 		}
-		return tk.Env(r)
 	}
 	// 同时运行数取策略的 limits（§14.5），没设过取 config.yaml 的初值；调度器在启动时定额，改了在下次启动时生效。
 	if err := st.View(context.Background(), func(tx *store.Tx) error {
@@ -352,7 +357,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}); err != nil {
 		return nil, err
 	}
-	k.disp = proc.New(st, cfg, proc.Options{CheckAgent: executors.CheckRun, Env: env, ContextDir: l.RunCredentials, OnResult: k.result})
+	k.disp = proc.New(st, cfg, proc.Options{CheckAgent: executors.CheckRun, EnvErr: envErr, ContextDir: l.RunCredentials, OnResult: k.result})
 	agmFetch.st, agmFetch.disp, agmFetch.reader = st, k.disp, hostedReader
 	k.ids.st, k.ids.disp, k.ids.rn = st, k.disp, k.rn
 	host, herr := os.Hostname()
@@ -371,6 +376,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	k.rn.Attach(k.disp)
 	k.wh.Attach(k.disp)
+	k.in.AttachBatch(inbound.BatchOptions{RunsDir: l.Runs, APIURL: apiURL, Queue: k.disp,
+		Notify: func(ctx context.Context, run domain.Run, summary string) error {
+			return st.Update(ctx, func(tx *store.Tx) error { return att.SourceResult(tx, run.ID, summary) })
+		}})
 	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, WebBase: base,
 		OnError: func(run string, err error) { slog.Error("task run", "run", run, "err", err) }}); err != nil {
 		return nil, err
@@ -549,6 +558,11 @@ func (k *kernel) start(ctx context.Context) error {
 	} else if n > 0 {
 		slog.Info("backfilled unassigned active items to Inbox", "count", n)
 	}
+	if n, err := k.in.ReleasePending(ctx, k.x); err != nil { // 已取消的批量归类留下的"待归类"建议放回普通建议（§16.5）
+		return err
+	} else if n > 0 {
+		slog.Info("released proposals left waiting for batch classification", "count", n)
+	}
 	if err := kprojects.SeedCapture(ctx, k.x, k.st, owner); err != nil { // 对话捕获默认开启：已有项目一次性补开（§16.5）
 		return err
 	}
@@ -647,6 +661,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		for _, r := range k.failed {
 			k.result(proc.Result{Run: r, Reason: "no live process after restart"})
 		}
+		report("inbound batch recover", k.in.RecoverBatches(ctx))
 		report("webhook recover", k.wh.Recover(ctx))
 		// 清理单独计时：启动时一次，之后每天 04:10；出错只记日志，不影响下面的维护循环。
 		wg.Add(1)
@@ -663,7 +678,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		maintain := func() {
 			report("inbound", k.in.Process(ctx))
 			report("inbound rejudge", k.in.Rejudge(ctx)) // 模型恢复后重判积压、到期的转 expired（§9.3）
-			report("inbound merge", k.in.Sweep(ctx))     // 跨来源合并：攒够一批才调模型（§9.3）
+			report("inbound queue", k.in.TickQueue(ctx)) // 来源处理线唯一的定时驱动：立即与攒批（§9.3）
 			report("webhook", k.wh.Process(ctx))
 			report("wake receipts", k.wk.Settle(ctx, k.st, k.result)) // 补上重启前漏掉的回执，先于调度器的超时判定
 			report("dispatch", k.disp.Dispatch(ctx))

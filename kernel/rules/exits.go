@@ -13,19 +13,15 @@ import (
 const (
 	ExitProposed = "proposed"
 	ExitIgnore   = "ignore"
-	ExitScreen   = "screen"
-	ExitExtract  = "extract"
+	ExitProcess  = "process"
 	ExitDigest   = "digest"
 	ExitAlert    = "alert"
 )
 
-// Exit 返回规则的出口：省略取 proposed，旧名 judge 等同 screen。包校验已保证取值在枚举内。
+// Exit 返回规则的出口：省略取 proposed。包校验已保证取值在枚举内。
 func Exit(r packs.SourceRule) string {
-	switch r.Then {
-	case "":
+	if r.Then == "" {
 		return ExitProposed
-	case "judge":
-		return ExitScreen
 	}
 	return r.Then
 }

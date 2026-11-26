@@ -51,6 +51,7 @@ type tg struct {
 	state  string
 	apaURL string // ext 使用的内核代理地址（ACT-TG-06 用它卡住 ack）
 	ext    *exec.Cmd
+	exited chan struct{} // ext 进程已回收；Wait 只能由 startExt 里那一处调
 	extOut *syncBuffer
 
 	holdMu sync.Mutex
@@ -220,6 +221,7 @@ func (f *tg) startExt() {
 	}
 	f.ext = cmd
 	done := make(chan struct{})
+	f.exited = done
 	go func() { _ = cmd.Wait(); close(done) }()
 	f.root.Cleanup(func() {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
@@ -248,7 +250,7 @@ func (f *tg) killExt() {
 	if err := exec.Command("kill", "-9", pids[0]).Run(); err != nil {
 		f.t.Fatal(err)
 	}
-	_ = f.ext.Wait()
+	<-f.exited
 }
 
 func newTg(t *testing.T) *tg {

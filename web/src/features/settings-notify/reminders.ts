@@ -7,12 +7,13 @@ import { TASK_TYPES, type Delivery, type Target } from "./matrix";
 export type Choice = "phone" | "chat_now" | "chat_next" | "both" | "off";
 
 /** 每类提醒唯一可编辑的页面（§4）。 */
-export type Home = "decide" | "rules" | "schedule" | "sources" | "agents" | "proposals" | "status";
+export type Home = "decide" | "rules" | "schedule" | "sources" | "pipeline" | "agents" | "proposals" | "status";
 export const HOME_PATH: Record<Home, string> = {
   decide: "/settings",
   rules: "/settings/rules",
   schedule: "/briefs/schedule",
   sources: "/sources",
+  pipeline: "/settings/source-pipeline",
   agents: "/settings/agents",
   proposals: "/proposals",
   status: "/health",
@@ -39,6 +40,7 @@ export const EDITORS: Record<string, Home> = {
   "instance:": "schedule",
   "instance_failed:": "schedule",
   source_failing: "sources",
+  source_result: "pipeline",
   run_failed: "agents",
   new_proposals: "proposals",
   health: "status",

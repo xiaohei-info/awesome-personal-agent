@@ -227,7 +227,6 @@ func TestFlowTriageFailure(t *testing.T) {
 		k.Cls.SetFault(modelstub.ClsFault{})
 		k.screenCls("tri-down", 0.90)
 		k.ModelStub.Reset()
-		k.draft("tri-down 自由文本", map[string]any{"title": "tri-down 起草标题", "kind": "task"})
 		before := k.rawEvent(inpSrc, "tri-down-1")["rejudges"]
 		// 模型仍不可用时重判退避 10 分钟：用测试时钟越过退避，再等后台重判。
 		k.TCAdvance(11 * 60)
@@ -236,7 +235,7 @@ func TestFlowTriageFailure(t *testing.T) {
 			t.Fatalf("tri-down-1 一直没有重判: %+v\n%s", ev, k.ServiceLog())
 		}
 		ev = k.byEventID(inpSrc, "tri-down-1")[0]
-		eq(t, "title", k.item(ev.Item).Title, "tri-down 起草标题")
+		eq(t, "title", k.item(ev.Item).Title, "tri-down 自由文本")
 		requeued := false
 		for _, e := range k.auditOf("inbound.requeued", ev.ID) {
 			requeued = requeued || strings.Contains(k.actorOf(e), "system")
@@ -250,7 +249,7 @@ func TestFlowTriageFailure(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-TRI-07 只有判断端点时，进建议流的内容用来源标题、摘要留空", func(t *testing.T) {
+	k.step("ACT-TRI-07 只有判断端点时照常进队列成为建议", func(t *testing.T) {
 		k.setEndpoints(true, false)
 		k.screenCls("tri-clsonly", 0.90)
 		k.clear()
@@ -259,7 +258,7 @@ func TestFlowTriageFailure(t *testing.T) {
 		eq(t, "disposition", ev.Disposition, "proposed")
 		it := k.item(ev.Item)
 		eq(t, "title", it.Title, "tri-clsonly 原始标题")
-		eq(t, "summary", it.Summary, "")
+		eq(t, "summary", it.Summary, "原始摘要")
 		eq(t, "kind", it.Kind, "task")
 		eq(t, "project", it.Project, "prj_inbox") // 同上
 		eq(t, "MODEL_LOG 请求", k.modelAny("tri-clsonly"), 0)

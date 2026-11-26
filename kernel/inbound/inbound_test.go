@@ -20,11 +20,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
-	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -44,20 +43,14 @@ var (
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
-// accPackYAML 是只有规则、不带模板的自定义包：省略 screen、draft、prescreen、extract，取内置包 inbound-triage 的模板（C.5）。
+// accPackYAML 是只有规则、不带模板的自定义包：固定使用内置包 inbound-triage/triage-screen（C.5）。
 const accPackYAML = `name: acc-pack
 version: 1.0.0
 description: custom pack that relies on builtin templates
 source_rules:
-  - id: acc-screen-rule
-    match: {source_type: accsrc, event_type: acc.screen}
-    then: screen
-  - id: acc-judge-rule
-    match: {source_type: accsrc, event_type: acc.judge}
-    then: judge
-  - id: acc-extract-rule
-    match: {source_type: accsrc, event_type: acc.extract}
-    then: extract
+  - id: acc-process-rule
+    match: {source_type: accsrc, event_type: acc.process}
+    then: process
 `
 
 const (
@@ -76,7 +69,7 @@ source_rules:
   - id: mail-in
     match: {source_type: inbox, event_type: mail.received}
     project_by: "fixed:p_mail"
-    then: judge
+    then: process
   - id: auto-pr
     match: {source_type: review, event_type: pr.opened}
     kind: task
@@ -104,26 +97,9 @@ source_rules:
   - id: x-none
     match: {source_type: exits, event_type: x.none}
     project_by: none
-  - id: x-tpl
-    match: {source_type: exits, event_type: x.tpl}
-    then: screen
-    screen: acc-screen
   - id: x-chat
     match: {source_type: exits, event_type: x.chat}
-    then: extract
-  - id: x-chat-np
-    match: {source_type: exits, event_type: x.chat_np}
-    then: extract
-    prescreen: none
-  - id: x-urgent
-    match: {source_type: exits, event_type: x.urgent}
-    then: screen
-    notify_urgent: true
-  - id: x-urgent-ex
-    match: {source_type: exits, event_type: x.urgent_ex}
-    then: extract
-    prescreen: none
-    notify_urgent: true
+    then: process
   - id: x-alert
     match: {source_type: exits, event_type: x.metric}
     where: [{field: metrics.value, op: crosses_above, value: 90}]
@@ -162,6 +138,8 @@ type env struct {
 	att       *attention.Attention
 	// wantErr 为真时，拉取期间的流水线错误留在 errs 里，不让 waitRuns 失败。
 	wantErr bool
+	// noAutoBatch 为真时不让测试环境自动充当批处理 Agent（断言事件停在队列里的用例使用）。
+	noAutoBatch bool
 }
 
 func (e *env) Now() time.Time { return e.now }
@@ -171,7 +149,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, proc.Module, delivery.Module, attention.Module, registry.Module, runner.Module, rules.Module, direct.Module, delegation.Module} {
+		items.Module, proc.Module, delivery.Module, attention.Module, registry.Module, runner.Module, rules.Module, direct.Module, delegation.Module, executors.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -206,15 +184,12 @@ func newEnv(t *testing.T, configured bool) *env {
 	e.web, e.mail = web.ID, mail.ID
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(strings.ReplaceAll(packYAML, "p_mail", mail.ID))}}
 	fs["acc-pack/pack.yaml"] = &fstest.MapFile{Data: []byte(accPackYAML)}
-	for _, name := range []string{"triage-screen", "triage-draft", "triage-extract", "capture-prescreen", MergeTemplate} { // 用内置包里随发行的模板，不另写一份
+	for _, name := range []string{"triage-screen", "source-batch"} { // 用内置包里随发行的模板，不另写一份
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
 			t.Fatal(err)
 		}
 		fs["inbound-triage/prompts/"+name+".md"] = &fstest.MapFile{Data: b}
-		if name == "triage-screen" {
-			fs["inbound-triage/prompts/acc-screen.md"] = &fstest.MapFile{Data: b}
-		}
 	}
 	e.loadr = packs.New(packs.Options{Builtin: fs, Kinds: kinds})
 	if rej, err := e.loadr.Load(); err != nil || len(rej) != 0 {
@@ -326,6 +301,47 @@ func (e *env) emitRaw(source, kind string, events ...map[string]any) {
 		e.t.Fatal(err)
 	}
 	e.waitRuns()
+	if !e.noAutoBatch {
+		e.drainBatch()
+	}
+}
+
+// drainBatch 在测试里模拟批处理 Agent（生产里由 source_batch 运行里的 Agent 用 apa source propose / ignore / attach 完成）：
+// 把当前待处理队列的事件逐条取批并转成建议，使断言“事件最终成为建议”的用例继续成立。
+func (e *env) drainBatch() {
+	e.t.Helper()
+	var ids []string
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT id FROM sources_runner_event WHERE queue_state = 'queued' ORDER BY seq`)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var id string
+			if err := r.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return nil
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := runner.Claim(tx, "run_test_batch", 500)
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	for _, id := range ids {
+		if _, err := e.svc.ProposeInto(bg, owner, id, ""); err != nil {
+			continue // 已被处置、状态已变或目标已不在建议：跳过，不算失败
+		}
+	}
 }
 
 // waitRuns 等所有已登记来源本轮到期的 Run 结束（含结果入账与入站处理）。
@@ -509,55 +525,7 @@ func TestModelFailureLeavesEventUnjudgedAfterRetries(t *testing.T) {
 	}
 }
 
-// ACT-INP-06：初筛为是的事件被完整起草后进入 proposed：标题、摘要、类别、项目、日期与推荐处置都来自起草；
-// 判断记录 id 记在来源事件上；起草请求用 triage-draft 模板且不含判断题。
-func TestScreenedInEventIsFullyDrafted(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.9)
-	e.draft(`{"title":"审阅季度报告","summary":"对方请你周五前审阅","kind":"task","project":"` + e.web + `","deadline":"2026-03-13","planned_for":"2026-03-12","recommend":"accept","reason":"对方明确提出请求"}`)
-	e.emit("src_x", "other", ev("h1", "thing.happened", "请在周五前审阅季度报告", nil))
-	d := e.events("src_x")[0]
-	if d.Disposition != domain.DispositionProposed || d.Judgment == "" {
-		t.Fatalf("event %+v", d)
-	}
-	it := e.item(d.Item)
-	if it.Phase != domain.PhaseProposed || it.Title != "审阅季度报告" || it.Summary != "对方请你周五前审阅" || it.Kind != "task" ||
-		it.Project != e.web || it.PlannedFor != "2026-03-12" || it.Deadline == nil || it.Deadline.Format("2006-01-02") != "2026-03-13" {
-		t.Fatalf("item %+v", it)
-	}
-	// ACT-JRC-04/06：处置 Event 的载荷自带结论，记录过保留期后 apa why 仍能显示答案与定案者。
-	_ = e.st.View(bg, func(tx *store.Tx) error {
-		rec, err := record.Get(tx, d.Judgment)
-		if err != nil {
-			t.Fatal(err)
-		}
-		es, _ := eventlog.ReadObject(tx, d.ID)
-		for _, x := range es {
-			if x.Event.Type == EvDisposed {
-				var got record.Ref
-				_ = json.Unmarshal(x.Event.Payload, &got)
-				if got != record.RefOf(rec) || got.Answer == "" || got.DecidedBy == "" {
-					t.Fatalf("disposed payload %s, want %+v", x.Event.Payload, record.RefOf(rec))
-				}
-				if dr := draftOf(x.Event.Payload); dr == nil || *dr != (Draft{Outcome: DraftOK}) {
-					t.Fatalf("draft outcome %+v", dr)
-				}
-				return nil
-			}
-		}
-		t.Fatal("no inbound.disposed event")
-		return nil
-	})
-	p := it.Proposal
-	if p == nil || p.Recommend != "accept" || p.Reason != "对方明确提出请求" || p.LowConfidence || len(p.Sources) != 1 || p.Sources[0] != d.ID {
-		t.Fatalf("proposal %+v", p)
-	}
-	if n := e.drafts(); n != 1 || len(e.cls.Batches()) != 1 || strings.Contains(e.sent(0), "answer") {
-		t.Fatalf("drafts %d batches %d", n, len(e.cls.Batches()))
-	}
-}
-
-// ACT-INP-05：初筛低于下限：忽略并留痕（有判断记录），不重答、不起草。
+// ACT-INP-05：统一 judge 低于下限：忽略并留痕（有判断记录），不进队列。
 func TestScreenedOutIsIgnoredWithRecord(t *testing.T) {
 	e := newEnv(t, true)
 	e.screen(0.05)
@@ -571,128 +539,7 @@ func TestScreenedOutIsIgnoredWithRecord(t *testing.T) {
 	}
 }
 
-// ACT-INP-07：分类端点落入不确定带、对话端点也未定：留为建议并标"把握低"，仍被起草。
-func TestUndecidedStaysAsLowConfidenceSuggestion(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.35)
-	no := false
-	e.stub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: "unsure"}, Answer: "no", Sufficient: &no})
-	e.draft(`{"title":"unsure 起草标题","kind":"task","recommend":"dismiss"}`)
-	e.emit("src_x", "other", ev("u1", "thing.happened", "unsure 也许相关", nil))
-	d := e.events("src_x")[0]
-	it := e.item(d.Item)
-	if d.Disposition != domain.DispositionProposed || it.Title != "unsure 起草标题" || it.Proposal == nil || !it.Proposal.LowConfidence {
-		t.Fatalf("event %+v item %+v", d, it)
-	}
-}
-
-// ACT-INP-08、09：起草失败（端点 500）或输出不合 schema 都不挡路：标题取来源事件的标题，摘要留空，kind 取缺省。
-func TestDraftFailureDegradesToEventTitle(t *testing.T) {
-	for name, reply := range map[string]modelstub.Reply{
-		"http 500":   {Status: 500},
-		"bad schema": {Content: `{"kind":"foo"}`},
-		"bad kind":   {Content: `{"title":"x","kind":"foo"}`},
-		// 网关没按结构化输出返回：代码块包着、一段文字、空内容。校验不放宽，也不重试。
-		"fenced": {Content: "```json\n{\"title\":\"x\",\"kind\":\"task\"}\n```"},
-		"prose":  {Content: "我先看一下这条消息。"},
-		"empty":  {Content: ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			e := newEnv(t, true)
-			e.screen(0.9)
-			e.stub.SetDefault(reply)
-			e.emit("src_x", "other", ev("f1", "thing.happened", "原始标题", map[string]any{"summary": "原始摘要"}))
-			d := e.events("src_x")[0]
-			it := e.item(d.Item)
-			if d.Disposition != domain.DispositionProposed || it.Title != "原始标题" || it.Summary != "" || it.Kind != "task" || it.Project != "" {
-				t.Fatalf("event %+v item %+v", d, it)
-			}
-			if reply.Status == 0 && e.drafts() != 1 {
-				t.Fatalf("a schema failure was retried: %d draft requests", e.drafts())
-			}
-			// 失败原因随处置留痕；不合 JSON 的返回写明内容形态，不带内容本身。
-			_ = e.st.View(bg, func(tx *store.Tx) error {
-				es, _ := eventlog.ReadObject(tx, d.ID)
-				for _, x := range es {
-					if x.Event.Type == EvDisposed {
-						if !strings.Contains(x.Event.Reason, "draft failed") || strings.Contains(x.Event.Reason, "我先看一下") {
-							t.Fatalf("disposed reason %q", x.Event.Reason)
-						}
-						if name == "fenced" && !strings.Contains(x.Event.Reason, model.ShapeFence) {
-							t.Fatalf("disposed reason lacks the content shape: %q", x.Event.Reason)
-						}
-						// 起草成败另有结构化字段，不必解析理由（§9.3）。
-						want := DraftCodeSchema
-						if reply.Status != 0 {
-							want = DraftCodeUnavailable
-						}
-						if dr := draftOf(x.Event.Payload); dr == nil || dr.Outcome != DraftFailed || dr.Code != want {
-							t.Fatalf("draft outcome %+v, want failed/%s", dr, want)
-						}
-						return nil
-					}
-				}
-				t.Fatal("no inbound.disposed event")
-				return nil
-			})
-		})
-	}
-}
-
-// 自检探测的模板与入站起草用的是同一个（doctor 不依赖 inbound，常量各存一份，这里对照）。
-func TestDoctorProbesTheDraftTemplateInboundUses(t *testing.T) {
-	if kdoctor.DraftPack != DefaultPack || kdoctor.DraftTemplate != DraftTemplate {
-		t.Fatalf("doctor probes %s/%s, inbound drafts with %s/%s", kdoctor.DraftPack, kdoctor.DraftTemplate, DefaultPack, DraftTemplate)
-	}
-}
-
-// ACT-INP-10、11：起草只能从内核给的候选清单里推荐"补到已有事项"；编造的事项 id 不被采纳，事件也不丢。
-func TestAttachRecommendationComesOnlyFromCandidates(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.9)
-	var t2 struct{ ID string }
-	_ = json.Unmarshal(e.must("item.create", map[string]any{"kind": "task", "title": "供应商合同", "project": e.web, "phase": "open", "reason": "r"}), &t2)
-	e.draft(`{"title":"供应商合同第三版","kind":"task","recommend":"attach","attach_to":"` + t2.ID + `","reason":"同一件事"}`)
-	e.emit("src_x", "other", ev("c1", "thing.happened", "供应商合同第三版", nil))
-	it := e.item(e.events("src_x")[0].Item)
-	if it.Proposal == nil || it.Proposal.Recommend != "attach" || it.Proposal.AttachTo != t2.ID {
-		t.Fatalf("proposal %+v", it.Proposal)
-	}
-	if !strings.Contains(e.sent(0), t2.ID) { // 候选清单在起草请求的结构化输入里
-		t.Fatal("draft request carries no candidate list")
-	}
-	if got := e.item(t2.ID); got.Phase != domain.PhaseOpen {
-		t.Fatalf("recommendation changed the target: %+v", got)
-	}
-
-	e.draft(`{"title":"某个通知","kind":"task","recommend":"attach","attach_to":"itm-does-not-exist"}`)
-	e.emit("src_y", "other", ev("c2", "thing.happened", "某个通知", nil))
-	d := e.events("src_y")[0]
-	if p := e.item(d.Item).Proposal; d.Disposition != domain.DispositionProposed || p == nil || p.AttachTo != "" || p.Recommend == "attach" {
-		t.Fatalf("invented attach target adopted: %+v", p)
-	}
-}
-
-// ACT-IRL-18：project_by 缺省时起草从活动项目清单里选；清单外的项目不被写入。
-func TestDraftProjectComesFromActiveList(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.9)
-	e.draft(`{"title":"a","kind":"task","project":"` + e.web + `"}`)
-	e.emit("src_x", "other", ev("r1", "thing.happened", "r1", nil))
-	e.draft(`{"title":"b","kind":"task","project":"no-such-project"}`)
-	e.emit("src_y", "other", ev("r2", "thing.happened", "r2", nil))
-	if got := e.item(e.events("src_x")[0].Item).Project; got != e.web {
-		t.Fatalf("r1 project %q", got)
-	}
-	if got := e.item(e.events("src_y")[0].Item).Project; got != "" {
-		t.Fatalf("r2 project %q", got)
-	}
-	if !strings.Contains(e.sent(0), e.mail) || !strings.Contains(e.sent(0), `\"projects\"`) {
-		t.Fatal("draft request carries no active project list")
-	}
-}
-
-// ACT-EPC-08 / ACT-TRI-07：只配判断端点时初筛照常定案，起草退化为来源标题、摘要留空，不向生成端点发请求。
+// ACT-EPC-08 / ACT-TRI-07：只配判断端点时 judge 照常定案，不向生成端点发请求。
 func TestOnlyJudgeEndpointDraftsFromEventTitle(t *testing.T) {
 	e := newEnv(t, true)
 	e.st.Update(bg, func(tx *store.Tx) error {
@@ -706,7 +553,7 @@ func TestOnlyJudgeEndpointDraftsFromEventTitle(t *testing.T) {
 		t.Fatalf("low: %s", got)
 	}
 	d := e.disposition("src_x", "epc-high")
-	if it := e.item(d.Item); d.Disposition != domain.DispositionProposed || it.Title != "epc-high" || it.Summary != "" {
+	if it := e.item(d.Item); d.Disposition != domain.DispositionProposed || it.Title != "epc-high" {
 		t.Fatalf("high: %+v %+v", d, it)
 	}
 	if len(e.stub.Requests()) != 0 {
@@ -724,18 +571,17 @@ func TestNoEndpointsOnlyRulesApply(t *testing.T) {
 	}
 }
 
-// ACT-INP-02：同一事件重复到达只处理一次：一条来源事件、一条建议，初筛与起草各一次。
+// ACT-INP-02：同一事件重复到达只处理一次：一条来源事件、一条建议，judge 只问一次。
 func TestDuplicateEventIsProcessedOnce(t *testing.T) {
 	e := newEnv(t, true)
 	e.screen(0.9)
-	e.draft(`{"title":"inp-dup 起草标题","kind":"task"}`)
 	e.emit("src_x", "other", ev("inp-dup-1", "thing.happened", "inp-dup 请审阅文档", nil))
 	e.emit("src_x", "other", ev("inp-dup-1", "thing.happened", "inp-dup 请审阅文档", nil))
 	if n := len(e.events("src_x")); n != 1 {
 		t.Fatalf("events = %d", n)
 	}
-	if n := len(e.allItems()); n != 1 || len(e.cls.Batches()) != 1 || e.drafts() != 1 {
-		t.Fatalf("items %d batches %d drafts %d", n, len(e.cls.Batches()), e.drafts())
+	if n := len(e.allItems()); n != 1 || len(e.cls.Batches()) != 1 {
+		t.Fatalf("items %d batches %d", n, len(e.cls.Batches()))
 	}
 }
 
@@ -756,39 +602,7 @@ func TestExistingProposalIsNotRedrafted(t *testing.T) {
 	}
 }
 
-// ACT-IRL-07：extract 出口先预筛、再由生成型从一条聚合事件抽出多条候选，各成 proposed 事项，来源事件记下全部事项。
-func TestExtractExitProposesEveryCandidate(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.9)
-	e.draft(`{"candidates":[{"title":"周五前交方案","kind":"task"},{"title":"约李工下周对接","kind":"task","summary":"s"}]}`)
-	e.emit("src_x", "exits", ev("x1", "x.chat", "群聊片段", map[string]any{"items": []map[string]any{
-		{"sender": "bob", "text": "方案周五前给我", "at": "2026-03-01T00:00:00Z"}}}))
-	d := e.events("src_x")[0]
-	if d.Disposition != domain.DispositionProposed || len(d.Items) != 2 || d.Item != d.Items[0] || d.Judgment == "" {
-		t.Fatalf("event %+v", d)
-	}
-	for i, want := range []string{"周五前交方案", "约李工下周对接"} {
-		if it := e.item(d.Items[i]); it.Title != want || it.Phase != domain.PhaseProposed || it.Proposal == nil || it.Proposal.Sources[0] != d.ID {
-			t.Fatalf("item %d: %+v", i, it)
-		}
-	}
-	if !strings.Contains(e.sent(0), "bob: 方案周五前给我") {
-		t.Fatal("aggregated messages were not passed as material")
-	}
-}
-
-// extract 出口预筛为否或没有候选：忽略，不建事项。
-func TestExtractExitIgnoresWhenNothingToExtract(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.9)
-	e.draft(`{"candidates":[]}`)
-	e.emit("src_x", "exits", ev("x1", "x.chat", "闲聊", nil))
-	if d := e.events("src_x")[0]; d.Disposition != domain.DispositionIgnored || len(e.allItems()) != 0 {
-		t.Fatalf("event %+v", d)
-	}
-}
-
-// ACT-TRI-06：端点恢复后，未判定事件自动重判并走完整流水线（初筛 → 起草），重判计数加一。
+// ACT-TRI-06：端点恢复后，未判定事件自动重判并入队（重判计数加一）。
 func TestRejudgeRunsFullPipelineAfterRecovery(t *testing.T) {
 	e := newEnv(t, true)
 	e.svc.o.Now = e.Now
@@ -800,13 +614,13 @@ func TestRejudgeRunsFullPipelineAfterRecovery(t *testing.T) {
 	}
 	e.cls.Reset()
 	e.screen(0.9)
-	e.draft(`{"title":"tri-down 起草标题","kind":"task"}`)
 	e.now = e.now.Add(15 * time.Minute)
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
 	}
+	e.drainBatch()
 	d := e.events("src_x")[0]
-	if d.Disposition != domain.DispositionProposed || d.Rejudges != 1 || e.item(d.Item).Title != "tri-down 起草标题" {
+	if d.Disposition != domain.DispositionProposed || d.Rejudges != 1 || d.Item == "" {
 		t.Fatalf("event %+v", d)
 	}
 }
@@ -835,9 +649,6 @@ type passJudge struct{ J Judge }
 
 func (p passJudge) Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error) {
 	return p.J.Judge(ctx, c)
-}
-func (p passJudge) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
-	return p.J.Do(ctx, c)
 }
 
 type failingJudge struct {
@@ -963,64 +774,6 @@ func TestNewRequiresDependencies(t *testing.T) {
 	}
 }
 
-// crashJudge 模拟"事项已建好、处置没记完"：判断之后、本轮建事项之前，替上一轮补上它已经建出的事项。
-type crashJudge struct {
-	passJudge
-	e    *env
-	once bool
-}
-
-func (c *crashJudge) Do(ctx context.Context, call direct.Call) (direct.Outcome, error) {
-	out, err := c.passJudge.Do(ctx, call)
-	if err == nil && !c.once {
-		c.once = true
-		var pend []domain.SourceEvent
-		_ = c.e.st.View(bg, func(tx *store.Tx) (err error) { pend, err = runner.Pending(tx); return })
-		in, _ := json.Marshal(map[string]any{"kind": "task", "title": "上一轮的标题", "ext": map[string]string{"source_event": pend[0].ID}})
-		if _, err := c.e.x.Do(bg, command.Request{Identity: system, Command: "item.create", Input: in, IdemKey: "inbound:item:" + pend[0].ID}); err != nil {
-			c.e.t.Error(err)
-		}
-	}
-	return out, err
-}
-
-// 中途失败后重跑：判断输出变了也不会卡死，恰好一个事项并最终记下处置。
-func TestRerunAfterPartialFailureResumesWithoutDuplicate(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.95)
-	e.draft(`{"title":"第一轮的标题","kind":"task"}`)
-	e.svc.o.Judge = &crashJudge{passJudge: passJudge{e.svc.o.Judge}, e: e}
-	var b strings.Builder
-	j, _ := json.Marshal(ev("m1", "mail.received", "合同请签字", nil))
-	b.WriteString("echo '" + string(j) + "'\necho '{\"cursor\":\"c\"}'\n")
-	e.must(registry.CmdRegisterExec, map[string]any{"id": "src_m", "type": "script", "source_type": "inbox", "command": e.script("m.sh", b.String()), "schedule": "1m", "timeout": 30})
-	e.sources++
-	e.now = e.now.Add(2 * time.Minute)
-	if err := e.r.Tick(bg, e.clk); err != nil {
-		t.Fatal(err)
-	}
-	e.waitRunsNoErr()
-	select { // 第一轮：同一事件的幂等键遇到不同输入，真实报错
-	case err := <-e.errs:
-		if !strings.Contains(err.Error(), "idempotency") {
-			t.Fatalf("unexpected error %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatalf("no error on first pass; event %+v items %+v", e.events("src_m")[0], e.allItems())
-	}
-	if got := e.events("src_m")[0].Disposition; got != domain.DispositionPending {
-		t.Fatalf("first pass: %s", got)
-	}
-	e.draft(`{"title":"重跑时的标题","kind":"note"}`) // 重跑时起草输出已不同
-	if err := e.svc.Process(bg); err != nil {
-		t.Fatal(err)
-	}
-	evs := e.events("src_m")
-	if evs[0].Disposition != domain.DispositionProposed || len(e.allItems()) != 1 || e.allItems()[0].ID != evs[0].Item {
-		t.Fatalf("event %+v items %+v", evs[0], e.allItems())
-	}
-}
-
 // ACT-TRI-02：未判定事件手动转建议：进建议流，操作者是本人，处置改为 proposed 并关联事项，事项可从事件折叠重建。
 func TestProposeUnjudgedManually(t *testing.T) {
 	e := newEnv(t, false)
@@ -1139,16 +892,7 @@ func TestDraftProposalIsIdempotentAndLeavesDispositionAlone(t *testing.T) {
 	}
 }
 
-func draftOf(payload json.RawMessage) *Draft {
-	var p struct {
-		Draft *Draft `json:"draft"`
-	}
-	_ = json.Unmarshal(payload, &p)
-	return p.Draft
-}
-
-// 统一时间字段在规则直出（then: proposed）时直接写成事项的截止、计划日期与时段，并在 ext 记下来源给的原值（§9.2、§9.3）。
-// 这条用例不按来源类型写任何分支：来源类型是随便起的，事件只带统一字段。
+// 统一时间字段在转建议时直接写成事项的截止、计划日期与时段，并在 ext 记下来源给的原值（§9.2、§9.3）。
 func TestStructuredTimesBecomeItemSchedule(t *testing.T) {
 	e := newEnv(t, false)
 	e.emit("src_t", "ticket", ev("t1", "ticket.opened", "交材料", map[string]any{
@@ -1158,7 +902,6 @@ func TestStructuredTimesBecomeItemSchedule(t *testing.T) {
 		t.Fatalf("event %+v", d)
 	}
 	it := e.item(d.Item)
-	// 只到日的截止按主机的时区落成当天 23:59:59；时段按同一时区折算（这里按本机时区算期望值）。
 	loc := time.Local
 	if it.Deadline == nil || !it.Deadline.Equal(time.Date(2026, 12, 2, 23, 59, 59, 0, loc)) {
 		t.Fatalf("deadline %v", it.Deadline)
@@ -1176,39 +919,6 @@ func TestStructuredTimesBecomeItemSchedule(t *testing.T) {
 	if ext["source_event"] != d.ID || ext["source_deadline"] != time.Date(2026, 12, 2, 23, 59, 59, 0, loc).Format(time.RFC3339) ||
 		ext["source_planned_for"] != wantPlan || ext["source_planned_slot"] != wantSlot {
 		t.Fatalf("ext %+v", ext)
-	}
-	if n := len(e.stub.Requests()); n != 0 {
-		t.Fatalf("rule exit must not call the model: %d", n)
-	}
-}
-
-// 结构化字段优先于起草：来源给了截止时，模型抽出的截止不覆盖它；来源没给的字段才用模型的（§9.3）。
-func TestStructuredTimesBeatDraft(t *testing.T) {
-	e := newEnv(t, true)
-	e.screen(0.9)
-	e.draft(`{"title":"审阅季度报告","summary":"对方请你周五前审阅","kind":"task","deadline":"2026-03-13","planned_for":"2026-03-12","planned_slot":"09:00 - 10:00","recommend":"accept"}`)
-	e.emit("src_x", "other", ev("h1", "thing.happened", "请在周五前审阅季度报告", map[string]any{"due_at": "2026-03-20"}))
-	it := e.item(e.events("src_x")[0].Item)
-	if it.Deadline == nil || it.Deadline.Format(time.DateOnly) != "2026-03-20" {
-		t.Fatalf("source deadline should win: %v", it.Deadline)
-	}
-	if it.PlannedFor != "2026-03-12" || it.PlannedSlot != "09:00 - 10:00" {
-		t.Fatalf("draft plan should stay when the source has none: %q %q", it.PlannedFor, it.PlannedSlot)
-	}
-	var ext map[string]string
-	_ = json.Unmarshal(it.Ext, &ext)
-	if ext["source_deadline"] == "" || ext["model_deadline"] != "" || ext["model_planned_for"] != "2026-03-12" {
-		t.Fatalf("ext %+v", ext)
-	}
-	// 起草看得到来源给的时间（不再从正文另推），但写成事项的还是来源的。
-	var req string
-	for _, r := range e.stub.Requests() {
-		if strings.Contains(r.BodyText, "起草一条建议") {
-			req = r.BodyText
-		}
-	}
-	if !strings.Contains(req, "due_at") || !strings.Contains(req, "2026-03-20") {
-		t.Fatalf("structured time missing from the model input: %.300s", req)
 	}
 }
 

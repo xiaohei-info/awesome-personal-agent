@@ -146,6 +146,14 @@ CREATE TABLE sources_runner_tombstone (
 ALTER TABLE sources_runner_event ADD COLUMN starts_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE sources_runner_event ADD COLUMN ends_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE sources_runner_event ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0;`,
+}, {
+	// 账本结构版本 11（§9.3）：来源处理线的队列状态。只增列，已有事件不在队列里（全为空）。
+	Version: 10, Ledger: 11, Name: "ledger-v11-event-queue",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN queue_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN queue_level TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN queue_run TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN queue_tries INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX sources_runner_event_queue ON sources_runner_event(queue_state, seq) WHERE queue_state <> '';`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -894,16 +902,16 @@ const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summar
 	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges,
 	metrics, merge_key, items, judgment,
 	COALESCE((SELECT CAST(content AS TEXT) FROM sources_runner_event_part p WHERE p.event_id = sources_runner_event.id AND p.part = 'messages'), messages),
-	prev_metrics, due_at, starts_at, ends_at, all_day`
+	prev_metrics, due_at, starts_at, ends_at, all_day, queue_state, queue_level`
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
 	return queryEvents(tx, `WHERE source_id = ?`, sourceID)
 }
 
-// Pending 按落盘顺序返回所有还没有处置的来源事件（disposition 为 pending），供入站流水线接手。
+// Pending 按落盘顺序返回所有还没有处置、也不在队列里的来源事件（disposition 为 pending），供入站流水线接手。
 func Pending(tx *store.Tx) ([]domain.SourceEvent, error) {
-	return queryEvents(tx, `WHERE disposition = ?`, string(domain.DispositionPending))
+	return queryEvents(tx, `WHERE disposition = ? AND queue_state = ''`, string(domain.DispositionPending))
 }
 
 // ByDisposition 按落盘顺序返回所有处于某处置的来源事件（简报的"知会"取 digest）。
@@ -1017,14 +1025,17 @@ func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error 
 	case domain.DispositionExpired:
 		from = `disposition = 'unjudged'`
 	case domain.DispositionProposed:
-		from = `disposition IN ('unjudged', 'expired', 'digest')`
-	case domain.DispositionIgnored, domain.DispositionDigest:
+		from = `(disposition IN ('unjudged', 'expired', 'digest') OR (disposition = 'pending' AND queue_state = 'running'))`
+	case domain.DispositionIgnored:
+		from = `(disposition IN ('unjudged', 'expired') OR (disposition = 'pending' AND queue_state = 'running'))`
+	case domain.DispositionDigest:
 	default:
 		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored, digest or expired")
 	}
-	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND `+from, string(to), item, id)
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ?,
+		queue_state = CASE WHEN queue_state <> '' THEN 'done' ELSE queue_state END WHERE id = ? AND `+from, string(to), item, id)
 	if err == nil && n == 0 {
-		return domain.NewError(domain.CodeConflict, "source event "+id+" is not in the unjudged backlog", "re-read the source event")
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not in the unjudged backlog or running in queue", "re-read the source event")
 	}
 	return err
 }
@@ -1172,11 +1183,14 @@ func SetAttachState(tx *store.Tx, id, to, item string) error {
 		)
 		switch {
 		case f == "": // 首次挂靠
-			// 积压事件（unjudged、expired）重走规则时也可挂靠（§9.3 积压放开第 1 步）；原因随之清空。
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ?, unjudged_reason = '' WHERE id = ? AND attach_state = ? AND disposition IN (?, 'unjudged', 'expired')`,
+			// 积压事件（unjudged、expired）、digest 与队列处理中的 pending 事件均可挂靠；原因随之清空，在队列里的标为 done。
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ?, unjudged_reason = '',
+				queue_state = CASE WHEN queue_state <> '' THEN 'done' ELSE queue_state END
+				WHERE id = ? AND attach_state = ? AND disposition IN (?, 'unjudged', 'expired', 'digest')`,
 				to, string(domain.DispositionAttached), item, id, f, string(domain.DispositionPending))
 		case to == AttachHandedBack || to == AttachReleased:
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, queue_state = '', queue_level = '', queue_run = '', queue_tries = 0
+				WHERE id = ? AND attach_state = ? AND disposition = ?`,
 				to, string(domain.DispositionPending), id, f, string(domain.DispositionAttached))
 		default: // forwarded、processed：处置不变
 			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
@@ -1306,7 +1320,7 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 		e := &a.SourceEvent
 		if err := rows.Scan(&a.Seq, &e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
 			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev,
-			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay); err != nil {
+			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay, &e.Queue, &e.QueueLevel); err != nil {
 			return nil, err
 		}
 		e.AllDay = allDay != 0
@@ -1370,7 +1384,7 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 		)
 		if err := rows.Scan(&e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
 			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev,
-			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay); err != nil {
+			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay, &e.Queue, &e.QueueLevel); err != nil {
 			return nil, err
 		}
 		e.AllDay = allDay != 0

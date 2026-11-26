@@ -76,28 +76,18 @@ type ClockRule struct {
 	StaleAfter string `yaml:"stale_after" json:",omitempty"` // 只用于 stale，默认 14d
 }
 
-// NoPrescreen 是 prescreen 的保留字：extract 出口跳过预筛（附录 C.5）。
-const NoPrescreen = "none"
-
-// Where、Screen、Draft、Prescreen、Extract、OnUpdate 是 v0.2 新字段，带 omitempty 以保持 v0.1 规则 hash 不变（见 ClockRule）。
+// Where、OnUpdate 是 v0.2 新字段，带 omitempty 以保持 v0.1 规则 hash 不变（见 ClockRule）。
 type SourceRule struct {
-	ID        string         `yaml:"id"`
-	Match     map[string]any `yaml:"match"`
-	Where     []Condition    `yaml:"where" json:",omitempty"`
-	Kind      string         `yaml:"kind"`
-	ProjectBy string         `yaml:"project_by"`
-	Then      string         `yaml:"then"`
-	// 各步所用的提示词模板名（C.5）；省略时取内置模板。
-	Screen          string   `yaml:"screen" json:",omitempty"`
-	Draft           string   `yaml:"draft" json:",omitempty"`
-	Prescreen       string   `yaml:"prescreen" json:",omitempty"`
-	Extract         string   `yaml:"extract" json:",omitempty"`
-	CorrelationKeys []string `yaml:"correlation_keys"`
-	OnUpdate        string   `yaml:"on_update" json:",omitempty"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
-	Accept          string   `yaml:"accept"`
-	Mode            string   `yaml:"mode"`
-	// NotifyUrgent 只用于 screen、extract 出口（C.5）：规则开启后它产生的新建议，起草或抽取判为 urgent 的即时提醒。
-	NotifyUrgent bool `yaml:"notify_urgent" json:",omitempty"`
+	ID              string         `yaml:"id"`
+	Match           map[string]any `yaml:"match"`
+	Where           []Condition    `yaml:"where" json:",omitempty"`
+	Kind            string         `yaml:"kind"`
+	ProjectBy       string         `yaml:"project_by"`
+	Then            string         `yaml:"then"`
+	CorrelationKeys []string       `yaml:"correlation_keys"`
+	OnUpdate        string         `yaml:"on_update" json:",omitempty"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
+	Accept          string         `yaml:"accept"`
+	Mode            string         `yaml:"mode"`
 }
 
 type WebhookScheme struct {
@@ -592,15 +582,9 @@ func checkSourceRule(r SourceRule) error {
 		return fmt.Errorf("%s: on_update %q must be refresh or attach", where, r.OnUpdate)
 	}
 	switch r.Then {
-	case "", "proposed", "ignore", "screen", "judge", "extract", "digest", "alert":
+	case "", "proposed", "ignore", "process", "digest", "alert":
 	default:
-		return fmt.Errorf("%s: then %q must be proposed, ignore, screen, extract, digest or alert (judge is the old name of screen)", where, r.Then)
-	}
-	if r.Prescreen == NoPrescreen && r.Then != "extract" {
-		return fmt.Errorf("%s: prescreen: %s only applies to then: extract", where, NoPrescreen)
-	}
-	if r.NotifyUrgent && r.Then != "screen" && r.Then != "judge" && r.Then != "extract" {
-		return fmt.Errorf("%s: notify_urgent only applies to then: screen or then: extract", where)
+		return fmt.Errorf("%s: then %q must be proposed, ignore, process, digest or alert", where, r.Then)
 	}
 	if r.Then == "alert" && len(r.Where) == 0 {
 		return fmt.Errorf("%s: an alert rule must carry where[]: alert cannot hang on every event", where)
@@ -710,10 +694,6 @@ func loadParts(p *Pack, files map[string][]byte, names []string, schema func(str
 		switch dir {
 		case "prompts/":
 			name := strings.TrimSuffix(base, ".md")
-			if name == NoPrescreen {
-				bad = append(bad, fmt.Sprintf("%s: %q is reserved for prescreen: %s, rename the template", n, name, NoPrescreen))
-				continue
-			}
 			pr, err := parsePrompt(files[n], n, schema)
 			if err != nil {
 				bad = append(bad, fmt.Sprintf("%s: %v", n, err))

@@ -618,3 +618,18 @@ func TestFormMinimalDeclarationIsAccepted(t *testing.T) {
 		t.Fatalf("form declaration: %+v %v", d, err)
 	}
 }
+
+func TestHeadlessFinalTextValidationAndExtraction(t *testing.T) {
+	if _, err := ParseDeclaration([]byte(`{"harness":"bad","headless":{"command":["x"],"output":["--format","stream-json"],"final_text":"text","session":{"extract":"$.s"},"access":{"read":[]}}}`)); err == nil {
+		t.Fatal("invalid final_text path should be rejected")
+	}
+	h := Headless{Output: []string{"--format", "stream-json"}, FinalText: "$.payload.summary"}
+	out := []byte("log line\n{\"type\":\"tool_use\",\"name\":\"read\",\"payload\":{\"summary\":\"LEAK\"}}\n{\"type\":\"result\",\"payload\":{\"summary\":\"最终结论\"}}\n")
+	if got := h.ExtractFinalText(out); got != "最终结论" {
+		t.Fatalf("ExtractFinalText = %q, want 最终结论", got)
+	}
+	toolOnly := []byte("log line\n{\"type\":\"tool_result\",\"output\":\"raw-secret\"}\n")
+	if got := h.ExtractFinalText(toolOnly); got != "" {
+		t.Fatalf("tool-only stream-json must not leak raw logs, got %q", got)
+	}
+}

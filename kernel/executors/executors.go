@@ -66,6 +66,7 @@ type Session struct {
 type Headless struct {
 	Command    []string            `json:"command"`
 	Output     []string            `json:"output,omitempty"`
+	FinalText  string              `json:"final_text,omitempty"`
 	Session    Session             `json:"session"`
 	Resume     []string            `json:"resume,omitempty"`
 	Access     map[string][]string `json:"access"`
@@ -102,6 +103,115 @@ func (h Headless) Means(key string, code int, stdout, stderr []byte) bool {
 		}
 	}
 	return false
+}
+
+// StructuredOutput 报告声明的 output 参数或 final_text 是否表示结构化（JSON / JSONL）输出。
+func (h Headless) StructuredOutput() bool {
+	if h.FinalText != "" {
+		return true
+	}
+	for _, a := range h.Output {
+		if strings.Contains(strings.ToLower(a), "json") {
+			return true
+		}
+	}
+	return false
+}
+
+// ExtractFinalText 按执行器声明从无头运行的 stdout 提取最终助手文本（附录 A.2）。
+// 声明了 FinalText 或结构化输出，或 stdout 本身为 JSONL 事件流时，只提取最终结果或助手文本事件，
+// 过滤工具调用、工具返回、系统事件与非 JSON 运行日志；提取不到时返回空串，绝不把原始结构化日志泄给下游。
+func (h Headless) ExtractFinalText(stdout []byte) string {
+	raw := strings.TrimSpace(string(stdout))
+	if raw == "" {
+		return ""
+	}
+	paths := []string{"$.text", "$.result"}
+	if h.FinalText != "" {
+		paths = []string{h.FinalText}
+	}
+	structured := h.StructuredOutput()
+	var (
+		hasJSONEvent bool
+		finalText    string
+		hasFinal     bool
+		chunks       []string
+	)
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") || !strings.HasSuffix(line, "}") {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			continue
+		}
+		typ, _ := obj["type"].(string)
+		if typ != "" {
+			hasJSONEvent = true
+		} else if !structured {
+			continue
+		}
+		switch typ {
+		case "result", "final", "":
+			if s, ok := extractJSONPath(obj, paths); ok && s != "" {
+				finalText = s
+				hasFinal = true
+			}
+		case "text", "assistant":
+			if s, ok := extractJSONPath(obj, paths); ok && s != "" {
+				chunks = append(chunks, s)
+			}
+		default:
+			// system / init / tool_use / tool_result / tool_call / thinking / error 等非最终助手文本事件一律过滤
+		}
+	}
+	if structured || hasJSONEvent {
+		if hasFinal {
+			return strings.TrimSpace(finalText)
+		}
+		return strings.TrimSpace(strings.Join(chunks, ""))
+	}
+	return raw
+}
+
+func validJSONPath(p string) bool {
+	if !strings.HasPrefix(p, "$.") || len(p) <= 2 {
+		return false
+	}
+	for _, seg := range strings.Split(p[2:], ".") {
+		if seg == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func extractJSONPath(obj map[string]any, paths []string) (string, bool) {
+	for _, p := range paths {
+		if !strings.HasPrefix(p, "$.") {
+			continue
+		}
+		var cur any = obj
+		ok := true
+		for _, seg := range strings.Split(p[2:], ".") {
+			m, isMap := cur.(map[string]any)
+			if !isMap {
+				ok = false
+				break
+			}
+			cur, ok = m[seg]
+			if !ok {
+				break
+			}
+		}
+		if ok {
+			if s, isStr := cur.(string); isStr {
+				return s, true
+			}
+		}
+	}
+	return "", false
 }
 
 // MainSession 声明以 Agent 本人身份运行时能怎么拉起（§13.6、附录 A.2）：无头运行必有；Wake 为真表示 Agent 侧装了唤醒插件，
@@ -305,6 +415,9 @@ func (h *Headless) validate() error {
 	}
 	if (len(h.Session.Assign) > 0) == (h.Session.Extract != "") {
 		return invalid("headless.session needs exactly one of assign and extract")
+	}
+	if h.FinalText != "" && !validJSONPath(h.FinalText) {
+		return invalid("headless.final_text must be a $.field path")
 	}
 	if len(h.Access) == 0 {
 		return invalid("headless.access must declare at least one of read, edit, full")

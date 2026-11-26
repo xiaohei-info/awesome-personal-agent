@@ -25,6 +25,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -81,12 +83,16 @@ type Replayer interface {
 	StoreKey(tx *store.Tx, sourceID, secret string) error // secret 为空：删除明文文件
 }
 
-// Proposer 把未判定事件转为建议（*inbound.Service 满足它）。
+// Proposer 把未判定或处理中的事件转为建议或挂到事项（*inbound.Service 满足它）。
 type Proposer interface {
 	ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error)
+	// ProposeInto 把处于处理中、未判定或 digest 的来源事件转为建议；into 非空时并入该已有建议（§9.3）。
+	ProposeInto(ctx context.Context, id command.Identity, event, into string) (domain.SourceEvent, error)
+	// AttachEvent 把处于处理中、未判定或 digest 的来源事件挂到指定未关闭事项（§9.3、§9.4）。
+	AttachEvent(ctx context.Context, id command.Identity, event, item, reason string) (domain.SourceEvent, error)
 	// Split 把误并入建议 from 的来源事件拆成一条新建议，返回新建议的 id（§9.3）。
 	Split(ctx context.Context, id command.Identity, event, from string) (string, error)
-	// Unmerge 撤销跨来源合并的一条折叠：被折叠的建议回到建议页（§9.3）。
+	// Unmerge 撤销建议合并的一条折叠：被折叠的建议回到建议页（§9.3）。
 	Unmerge(ctx context.Context, id command.Identity, item string) error
 	// BacklogRules 是积压放开第 1 步：只跑规则，不调模型（§9.3）。req 带调用者身份与本人原话。
 	BacklogRules(ctx context.Context, req command.Request, source string) (inbound.RulesResult, error)
@@ -195,10 +201,10 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/attachments/{n}/fetch", MaxBody: 1 << 10, Handler: a.fetchAttachment})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/attach", MaxBody: 1 << 10, Handler: a.attachEvent})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/split", MaxBody: 1 << 10, Handler: a.split})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/unmerge", MaxBody: 1 << 10, Handler: a.unmerge})
-		r.Handle(core.Route{Method: "GET", Path: "/merge/activity", Handler: readable(a.mergeActivity)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rejudge", MaxBody: 1 << 10, Handler: a.backlogRejudge})
@@ -857,7 +863,30 @@ func (a *api) outboundPreview(w http.ResponseWriter, r *http.Request, p *core.Pr
 }
 
 func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	ev, err := a.pr.ProposeUnjudged(r.Context(), p.Identity, r.PathValue("id"))
+	var in struct {
+		Into string `json:"into,omitempty"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+			return domain.NewError(domain.CodeInvalidRequest, "invalid JSON body: "+err.Error(), "pass {} or {\"into\": \"<proposal id>\"}")
+		}
+	}
+	ev, err := a.pr.ProposeInto(r.Context(), p.Identity, r.PathValue("id"), in.Into)
+	if err != nil {
+		return err
+	}
+	return a.writeEvent(w, r, p, ev)
+}
+
+func (a *api) attachEvent(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Item   string `json:"item"`
+		Reason string `json:"reason,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Item) == "" {
+		return domain.NewError(domain.CodeInvalidRequest, "body must be {\"item\": \"<item id>\"}", "name the open item to attach this event to")
+	}
+	ev, err := a.pr.AttachEvent(r.Context(), p.Identity, r.PathValue("id"), in.Item, in.Reason)
 	if err != nil {
 		return err
 	}
@@ -879,7 +908,7 @@ func (a *api) split(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 	return core.WriteJSON(w, http.StatusOK, map[string]string{"item": item})
 }
 
-// unmerge 撤销跨来源合并的一条折叠，返回 {"item": 回到建议页的那条}。
+// unmerge 撤销建议合并的一条折叠，返回 {"item": 回到建议页的那条}。
 func (a *api) unmerge(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	id := r.PathValue("id")
 	if err := a.pr.Unmerge(r.Context(), p.Identity, id); err != nil {

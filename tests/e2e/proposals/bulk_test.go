@@ -80,17 +80,13 @@ func TestFlowProposalGroupBulk(t *testing.T) {
 		k.registerSource(srcG)
 		k.screen("pgb", 0.90)
 		k.ModelStub.Judge(judgeYes("pgb"))
-		for subj, title := range map[string]string{"pgb-ci-1": "修复 main 分支 CI build 失败（一）", "pgb-ci-2": "排查 main 分支 CI e2e 失败（二）",
-			"pgb-ob-1": "评审 PR #77：新增导出", "pgb-ob-2": "PR #77 请求评审（再次提醒）"} {
-			k.draft(subj, map[string]any{"title": title, "kind": "task", "recommend": "accept", "reason": "需要跟进"})
-		}
-		k.emit(srcG, Ev{ID: "pgb-ci-1", Type: "mail.received", Subject: "pgb-ci-1"})
-		k.emit(srcG, Ev{ID: "pgb-ci-2", Type: "mail.received", Subject: "pgb-ci-2"})
-		k.emit(srcG, Ev{ID: "pgb-ob-1", Type: "mail.received", Subject: "pgb-ob-1", Link: "https://code.test/o/r/pull/77"})
+		k.emit(srcG, Ev{ID: "pgb-ci-1", Type: "mail.received", Subject: "pgb 修复 main 分支 CI build 失败（一）"})
+		k.emit(srcG, Ev{ID: "pgb-ci-2", Type: "mail.received", Subject: "pgb 排查 main 分支 CI e2e 失败（二）"})
+		k.emit(srcG, Ev{ID: "pgb-ob-1", Type: "mail.received", Subject: "pgb 评审 PR #77：新增导出", Link: "https://code.test/o/r/pull/77"})
 		ci1, ci2, ob1 = k.proposalFrom(srcG, "pgb-ci-1"), k.proposalFrom(srcG, "pgb-ci-2"), k.proposalFrom(srcG, "pgb-ob-1")
 		// 线上同一对象两条建议的来历：第一条被忽略后同一对象又来了消息另起一条，之后第一条被改回建议。
 		k.webOK("POST", "/items/"+ob1+"/dismiss", `{}`, 200)
-		k.emit(srcG, Ev{ID: "pgb-ob-2", Type: "mail.received", Subject: "pgb-ob-2", Link: "https://code.test/o/r/pull/77"})
+		k.emit(srcG, Ev{ID: "pgb-ob-2", Type: "mail.received", Subject: "pgb PR #77 请求评审（再次提醒）", Link: "https://code.test/o/r/pull/77"})
 		ob2 = k.proposalFrom(srcG, "pgb-ob-2")
 		k.webOK("POST", "/items/"+ob1+"/transition", `{"to":"proposed","reason":"改回建议"}`, 200)
 		if ob1 == ob2 || k.proposalOf(ob1)["merge_key"] != k.proposalOf(ob2)["merge_key"] || k.proposalOf(ob1)["merge_key"] == nil {

@@ -244,9 +244,10 @@ func TestFlowPurge(t *testing.T) {
 	})
 
 	step(t, "ACT-PRG-05 墓碑不计入统计", func(t *testing.T) {
-		const judge = "这条来源事件是否值得成为建议" // inbound-triage/triage.md（判断型，声明 event_stats）
+		const judge = "这条来源事件需要本人知道或处理吗" // inbound-triage/triage-screen.md（判断型，声明 event_stats）
 		// 来源事件经 triage-screen：判断端点落在 band 内（0.15–0.60）才升级到对话端点，统计只出现在对话端点的请求里。
 		f.WireEndpoints()
+		f.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 		f.ModelStub.Reset()
 		f.Cls.PYes(modelstub.Key{Contains: judge}, 0.40)
 		f.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: judge}, Answer: "yes"})

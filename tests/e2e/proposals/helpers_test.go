@@ -52,6 +52,7 @@ func newKit(t *testing.T) *kit {
 	t.Helper()
 	e := baseline.Setup(t)
 	e.WireEndpoints() // 判断端点 CLS_STUB、生成端点 MODEL_STUB（ACT-ENV-09）
+	e.BatchAgent("")  // 过了 judge 的事件由批处理替身逐条转为建议
 	return &kit{Env: e, t: t, queues: map[string]string{}}
 }
 
@@ -387,19 +388,6 @@ func (k *kit) screen(key string, p float64) {
 
 func (k *kit) unsure(key string) {
 	k.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: key}, Answer: "no", Sufficient: ptr(false)})
-}
-
-// draft 配置 triage-draft：请求里的来源标题为 subject 时返回给定起草结果。
-// 请求体里的输入 JSON 经转义，所以用 `subject":"X"` 的转义形态做键：候选清单里的事项标题不会误命中。
-func (k *kit) draft(subject string, d map[string]any) {
-	b, _ := json.Marshal(d)
-	key := `subject\":\"` + subject + `\"`
-	k.ModelStub.When(key, modelstub.Reply{Content: string(b)})
-}
-
-// draftDefault 配置缺省起草：title 取事件 subject 加前缀"起草："、recommend accept、reason "需要跟进"。
-func (k *kit) draftDefault(subject string) {
-	k.draft(subject, map[string]any{"title": "起草：" + subject, "summary": "摘要 " + subject, "kind": "task", "recommend": "accept", "reason": "需要跟进"})
 }
 
 func (k *kit) clear() {

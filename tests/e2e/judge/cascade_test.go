@@ -73,8 +73,8 @@ func TestFlowAgentCascade(t *testing.T) {
 		_, j := f.one("cas-band", func(e *ev) { e.Detail = "cas-band 资料正文 UNIQUE-MATERIAL" })
 		cb := parseCls(t, f.Cls.Batches()[0].BodyText)
 		jr := f.judgeRequests()
-		if len(jr) != 1 {
-			t.Fatalf("MODEL_LOG 判断题请求 = %d，期望 1", len(jr))
+		if len(jr) != 2 {
+			t.Fatalf("MODEL_LOG 判断题请求 = %d，期望 2（要不要处理、急不急）", len(jr))
 		}
 		q := cb.Questions[0]
 		for _, must := range []string{q.Question, "cas-band", "UNIQUE-MATERIAL", "alice@example.invalid"} {
@@ -233,8 +233,8 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.judgmentOf(a)
 		b := f.write(withID(same, "cas-reuse-2"))[0]
 		_, jb := f.judgmentOf(b)
-		if n := len(f.judgeRequests()); n != 1 {
-			t.Errorf("MODEL_LOG 判断题请求 = %d，期望 1", n)
+		if n := len(f.judgeRequests()); n != 2 {
+			t.Errorf("MODEL_LOG 判断题请求 = %d，期望 2（两道题各一次）", n)
 		}
 		reused := false
 		for _, l := range jb.Levels {
@@ -260,10 +260,6 @@ func TestFlowAgentCascade(t *testing.T) {
 				f.webOK("POST", "/items/"+e.Item+"/dismiss", `{"reason":"cas-stats"}`, 200)
 			}
 		}
-		// 规则自动接受的 note 不计入：由验收包的 auto-accept-note 规则处理。
-		f.ModelStub.When("为这条来源事件起草一条建议", reply(`{"title":"cas-auto","kind":"note"}`))
-		f.cls("cas-st-auto", 0.9)
-		f.one("cas-st-auto")
 		f.Cls.Reset()
 		f.cls("cas-stats", 0.05)
 		same := ev{Subject: "cas-stats", Detail: "统计用", Sender: "alice@example.invalid"}
@@ -278,8 +274,8 @@ func TestFlowAgentCascade(t *testing.T) {
 				}
 			}
 		}
-		if len(seen) != 1 || seen[0]["accepted"] != 2.0 || seen[0]["dismissed"] != 3.0 {
-			t.Fatalf("input.stats 应为 {accepted:2, dismissed:3}（规则自动接受不计入），实际 %v", seen)
+		if len(seen) != 2 || seen[0]["accepted"] != 2.0 || seen[0]["dismissed"] != 3.0 { // 两道题各带一份
+			t.Fatalf("input.stats 应为 {accepted:2, dismissed:3}，实际 %v", seen)
 		}
 		e6, _ := f.srcEvent("cas-st-6")
 		f.webOK("POST", "/items/"+e6.Item+"/accept", "{}", 200)
@@ -290,27 +286,6 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 		if n := len(f.Cls.Batches()); n != 1 {
 			t.Errorf("统计变化后不应再外呼，CLS_LOG 批次 = %d", n)
-		}
-	})
-
-	f.step(t, "ACT-CAS-09 生成端点失败时退避重试且可见", func(t *testing.T) {
-		f.reset()
-		f.ModelStub.SetDefault(modelstub.Reply{Status: 500})
-		f.cls("cas-gen-fail", 0.9)
-		e, _ := f.one("cas-gen-fail")
-		if got := len(f.genRequests()); got < 2 {
-			t.Errorf("起草请求应按退避重试，MODEL_LOG 生成请求 = %d", got)
-		}
-		_, d := f.modelHealth()
-		eq(t, "model_unavailable.detail.generate", d["generate"], "failing")
-		if e.Item == "" || f.proposals()[e.Item] != "cas-gen-fail" {
-			t.Errorf("起草失败不挡路，建议应进入建议流且标题取来源 subject: item=%q proposals=%v", e.Item, f.proposals())
-		}
-		f.reset()
-		f.cls("cas-gen-ok", 0.9)
-		f.one("cas-gen-ok")
-		if _, d := f.modelHealth(); d["generate"] != nil && d["generate"] != "" {
-			t.Errorf("恢复后 detail.generate = %v，期望信号消失", d["generate"])
 		}
 	})
 
@@ -339,8 +314,6 @@ func TestFlowAgentCascade(t *testing.T) {
 		eq(t, "判断型照常", j.DecidedBy, "classifier")
 	})
 
-	const draftMark = "为这条来源事件起草一条建议"
-
 	f.step(t, "ACT-CAS-11 概率低于下限按否定案，不再问对话端点", func(t *testing.T) {
 		f.reset()
 		f.cls("cas-below", 0.10)
@@ -356,20 +329,13 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 	})
 
-	f.step(t, "ACT-CAS-12 概率高于上限按是定案，进入起草", func(t *testing.T) {
+	f.step(t, "ACT-CAS-12 概率高于上限按是定案，进入队列", func(t *testing.T) {
 		f.reset()
 		f.cls("cas-above", 0.85)
 		e, j := f.one("cas-above")
 		if n := len(f.judgeRequests()); n != 0 {
 			t.Errorf("MODEL_LOG 不应有判断题请求: %d", n)
 		}
-		drafts := 0
-		for _, g := range f.genRequests() {
-			if strings.Contains(g, draftMark) {
-				drafts++
-			}
-		}
-		eq(t, "起草请求数", drafts, 1)
 		eq(t, "decided_by", j.DecidedBy, "classifier")
 		eq(t, "answer", j.Answer, "yes")
 		if _, ok := f.proposals()[e.Item]; !ok {
@@ -400,11 +366,8 @@ func TestFlowAgentCascade(t *testing.T) {
 			t.Errorf("%s 应留为建议: %+v", subject, e)
 			return
 		}
-		if !strings.Contains(mustJSON(f.item(e.Item)), `"low_confidence":true`) {
-			t.Errorf("%s 的建议应带 proposal.low_confidence: %s", subject, mustJSON(f.item(e.Item)))
-		}
 	}
-	f.step(t, "ACT-CAS-14 对话端点自报资料不足时取保守默认，留为建议并标把握低", func(t *testing.T) {
+	f.step(t, "ACT-CAS-14 对话端点自报资料不足时取保守默认，留为建议", func(t *testing.T) {
 		f.reset()
 		f.cls("cas-insufficient", 0.40)
 		f.chat("cas-insufficient", "no", false)
@@ -449,14 +412,16 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.Judge(modelstub.ChatJudge{Key: key("cas-selfconf"), Raw: `{"answer": "no", "sufficient": false, "confidence": 0.99}`})
 		e, j := f.one("cas-selfconf")
 		jr := f.judgeRequests()
-		if len(jr) != 1 {
-			t.Fatalf("判断题请求 = %d，期望 1", len(jr))
+		if len(jr) != 2 {
+			t.Fatalf("判断题请求 = %d，期望 2（要不要处理、急不急）", len(jr))
 		}
-		if strings.Contains(strings.ToLower(jr[0]), "confidence") {
-			t.Errorf("输出 schema 不应含置信度字段: %s", jr[0])
-		}
-		if !contains(jr[0], "answer", "sufficient") {
-			t.Errorf("输出 schema 应有 answer 与 sufficient: %s", jr[0])
+		for _, r := range jr {
+			if strings.Contains(strings.ToLower(r), "confidence") {
+				t.Errorf("输出 schema 不应含置信度字段: %s", r)
+			}
+			if !contains(r, "answer", "sufficient") {
+				t.Errorf("输出 schema 应有 answer 与 sufficient: %s", r)
+			}
 		}
 		lowConfidence(t, "cas-selfconf", e, j)
 		if strings.Contains(mustJSON(f.rawJudgment(j.ID)), "0.99") {
@@ -486,20 +451,6 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 		if n := len(f.judgeRequests()); n != 0 {
 			t.Errorf("single_shot 不应交给对话端点: %d", n)
-		}
-	})
-
-	f.step(t, "ACT-CAS-19 生成型信息不足而没有 relay_to 时取该用途的默认处置", func(t *testing.T) {
-		f.reset()
-		before := len(f.runs("--category", "task"))
-		f.ModelStub.When(draftMark, reply(`{"insufficient_info":true}`))
-		f.cls("cas-noreplay", 0.9)
-		e, _ := f.one("cas-noreplay")
-		if n := len(f.runs("--category", "task")); n != before {
-			t.Errorf("不应拉起任务型：Run %d → %d", before, n)
-		}
-		if f.proposals()[e.Item] != "cas-noreplay" {
-			t.Errorf("建议仍应进入建议流，标题取来源 subject: %+v %v", e, f.proposals())
 		}
 	})
 
@@ -538,7 +489,6 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 		for _, w := range []want{
 			{"packs/inbound-triage/prompts/triage-screen.md", "0.15", "0.60"},
-			{"packs/inbound-triage/prompts/capture-prescreen.md", "0.10", ""},
 			{"packs/decision-card/prompts/web-only-screening.md", "0.20", ""},
 			{"packs/delegation-verify/prompts/delegation-screen.md", "0.20", ""},
 		} {
