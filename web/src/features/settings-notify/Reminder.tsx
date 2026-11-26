@@ -73,7 +73,7 @@ export function WhenReady({ children }: { children: ReactNode }) {
 
 /** 一个页面的提醒单选共用的数据。取不到策略时什么都不显示（页面其余部分照常）。
  * 定时安排页自己维护实例列表（新建、改动即时可见），由 instances 传入；其余页面由这里读。 */
-export function ReminderScope({ children, instances: given }: { children: ReactNode; instances?: Instance[] }) {
+export function ReminderScope({ children, instances: given, onSaved }: { children: ReactNode; instances?: Instance[]; onSaved?: () => void }) {
   const { api } = useSession();
   const channels = useChannels();
   const [doc, setDoc] = useState<Doc | null>(null);
@@ -99,6 +99,7 @@ export function ReminderScope({ children, instances: given }: { children: ReactN
     const next = await api.put<Doc>("/settings/policy", { disturb: { ...rest, ...fields } });
     setDoc(next);
     loadOverview();
+    onSaved?.();
     return next.version;
   };
   const choose = async (key: string, c: Choice) => {
@@ -107,7 +108,10 @@ export function ReminderScope({ children, instances: given }: { children: ReactN
       const r = await api.patch<{ key: string; mode: string }>(`/rules/${encodeURIComponent(ch.mode.rule)}/mode`, { mode: ch.mode.mode });
       setModes((m) => ({ ...m, [r.key]: r.mode ?? ch.mode!.mode }));
     }
-    if (ch.disturb) setDoc(await api.put<Doc>("/settings/policy", { disturb: ch.disturb }));
+    if (ch.disturb) {
+      setDoc(await api.put<Doc>("/settings/policy", { disturb: ch.disturb }));
+      onSaved?.(); // 写策略会换版本号：同页另存一份策略文档的地方要重读
+    }
     loadOverview();
   };
   return <Ctx.Provider value={{ doc, state, channels, overview, instances, choose, putDisturb }}>{children}</Ctx.Provider>;
@@ -323,9 +327,9 @@ export function InstanceReminders({ i }: { i: Instance }) {
 }
 
 /** 页面顶部（或底部）一行：自带数据范围的单个单选（来源、Agent、建议、状态页）。 */
-export function PageReminder({ row, children }: { row: string; children?: ReactNode }) {
+export function PageReminder({ row, children, onSaved }: { row: string; children?: ReactNode; onSaved?: () => void }) {
   return (
-    <ReminderScope>
+    <ReminderScope onSaved={onSaved}>
       <section className="panel stack" aria-label={rstrings.zh.rows[row]}>
         <Reminder row={row}>{children}</Reminder>
       </section>

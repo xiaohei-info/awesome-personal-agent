@@ -48,7 +48,7 @@ export function AgentPage() {
             <p className="sub">{t.keysScope}</p>
             <Keys e={e} reload={load} onError={setError} />
           </section>
-          <Permission e={e} version={Number(pol.version)} />
+          <Permission e={e} version={Number(pol.version)} onSaved={loadPol} />
           {e.live && <Launch e={e} name={name} pol={pol} save={save} />}
           <UsedBy e={e} pol={pol} />
           <Records e={e} />

@@ -63,13 +63,13 @@ export function useLimits(agent: string) {
   return { limits, error, load };
 }
 
-export function Permission({ e, version }: { e: Entry; version: number }) {
+export function Permission({ e, version, onSaved }: { e: Entry; version: number; onSaved: () => Promise<void> }) {
   const { limits, error, load } = useLimits(e.id);
   if (error) return <div role="alert">{error}</div>;
   if (!limits) return null;
   return (
     <>
-      <PermissionCard e={e} card={limits.card} version={version} onSaved={load} />
+      <PermissionCard e={e} card={limits.card} version={version} onSaved={async () => { await Promise.all([load(), onSaved()]); }} />
       <LimitsList l={limits} />
     </>
   );
