@@ -15,19 +15,18 @@ func TestDefaultSchedulesPaused(t *testing.T) {
 	e := Setup(t)
 	e.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub"}`, 200)
 	week := func() { e.TCAdvance(8 * 24 * 60 * 60) }
-	has := func(kind string) bool {
-		r := e.Apa(e.OBS, "", "item", "list", "--kind", kind)
+	// 简报与复盘建的事项 kind 都是 brief，标题以包名开头。
+	briefs := func() string {
+		r := e.Apa(e.OBS, "", "item", "list", "--kind", "brief")
 		if r.Code != 0 {
-			t.Fatalf("item list --kind %s: %d %s%s", kind, r.Code, r.Stdout, r.Stderr)
+			t.Fatalf("item list --kind brief: %d %s%s", r.Code, r.Stdout, r.Stderr)
 		}
-		return strings.Contains(r.Stdout, "itm_")
+		return r.Stdout
 	}
 	week()
 	time.Sleep(5 * time.Second)
-	for _, kind := range []string{"brief", "review"} {
-		if has(kind) {
-			t.Errorf("默认安排不应在验收环境触发 %s", kind)
-		}
+	if out := briefs(); strings.Contains(out, "itm_") {
+		t.Errorf("默认安排不应在验收环境触发: %s", out)
 	}
 	e.WebLogin() // 拨过一周后原会话已过期
 	var l struct {
@@ -42,7 +41,10 @@ func TestDefaultSchedulesPaused(t *testing.T) {
 		e.webOK("PATCH", "/v1/instances/"+in.ID, `{"enabled":true}`, 200)
 	}
 	week()
-	if !e.WaitFor(30*time.Second, func() bool { return has("brief") && has("review") }) {
-		t.Errorf("重新启用后拨一周应出现简报与复盘事项\n%s", e.ServiceLog())
+	if !e.WaitFor(30*time.Second, func() bool {
+		out := briefs()
+		return strings.Contains(out, `"title":"brief `) && strings.Contains(out, `"title":"review `)
+	}) {
+		t.Errorf("重新启用后拨一周应出现简报与复盘事项: %s\n%s", briefs(), e.ServiceLog())
 	}
 }
