@@ -102,6 +102,18 @@ func TestNoKeyNoMerge(t *testing.T) {
 	}
 }
 
+// 对话捕获与聚合消息不推导合并键：标题相同不代表同一件事。
+func TestConversationEventsDeriveNoKey(t *testing.T) {
+	for _, ev := range []domain.SourceEvent{
+		{SourceID: "capture:prj_x", Subject: "conversation delta"},
+		{SourceID: "src_chat", Subject: "项目群", Link: "https://chat.invalid/room/1", Messages: []domain.EventMessage{{Sender: "a"}}},
+	} {
+		if k := mergeKeyOf(ev); k != "" {
+			t.Fatalf("%s: key %q", ev.SourceID, k)
+		}
+	}
+}
+
 // 来源程序自带的合并键优先于内核推导的。
 func TestSourceMergeKeyWins(t *testing.T) {
 	e := mergeEnv(t)

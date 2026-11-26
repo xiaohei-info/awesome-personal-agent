@@ -1906,7 +1906,7 @@ HTTP 层错误的响应体为 `{"error": {"code": "<标识>", "message": "…"}}
 - 两份提示词（`judge_prompt` 与 `batch_prompt`）：留空用内置能力包模板正文，改了只换正文不换结构。
 
 **事件去向三个命令**：批处理 Agent 用以下三个面向 Agent 的命令落账，保持来源页的事件去向与建议页的"合并自 N 条"（不用系统内部命令）：
-- **转成建议或并入已有建议**：`inbound.propose_unjudged`（`POST /source-events/{id}/propose`、`apa source propose <事件> [--into <建议>]`），接受积压、`digest` 与处于 `running`（处理中）的 `pending` 事件；带 `into` 时并入该已有建议并记入来源清单与合并留痕。
+- **转成建议或并入已有建议**：`inbound.propose_unjudged`（`POST /source-events/{id}/propose`、`apa source propose <事件> [--into <建议>]`），接受积压、`digest` 与处于 `running`（处理中）的 `pending` 事件；带 `into` 时并入该已有建议并记入来源清单与合并留痕。不带 `into` 时，合并键命中 7 天内的待确认建议仍自动并入：合并键取来源给的 `merge_key`，其次规范化链接，其次规范化标题加发送者；对话捕获与按会话聚合的消息只认来源给的 `merge_key`（它们的标题是固定占位或会话名，是否同一件事由处理它的 Agent 决定）。
 - **忽略**：`inbound.ignore_unjudged`（`POST /source-events/{id}/ignore`、`apa source ignore <事件>`），同样放宽接受处于 `running` 的 `pending` 事件。
 - **挂到已有事项**：`inbound.attach_event`（`POST /source-events/{id}/attach`、`apa source attach <事件> --to <事项>`），校验事件处于 `running`（或未判定/digest）且目标事项未关闭后，走 `followmsg.attach` 同一段落账逻辑，把事件作为挂靠消息记在目标事项上；挂错后可用"交回"（`followmsg.handback`）撤回。
 

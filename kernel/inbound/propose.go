@@ -42,6 +42,10 @@ func registerPropose(x *command.Executor) error {
 			if v.Item == "" {
 				return nil, nil
 			}
+			ev, err := runner.Event(c.Tx, v.Event)
+			if err != nil {
+				return nil, err
+			}
 			if err := runner.Resolve(c.Tx, v.Event, domain.DispositionProposed, v.Item); err != nil {
 				return nil, err
 			}
@@ -54,8 +58,14 @@ func registerPropose(x *command.Executor) error {
 					return nil, err
 				}
 			}
-			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionProposed, "item": v.Item, "merged": v.Merge})
-			_, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p})
+			payload := map[string]any{"event": v.Event, "disposition": domain.DispositionProposed, "item": v.Item, "merged": v.Merge}
+			if runner.Running(ev) && ev.Judgment != "" { // 批处理建出的建议：判断一行跟着事项走（§15.1）
+				if err := addJudgmentRef(c.Tx, payload, ev.Judgment); err != nil {
+					return nil, err
+				}
+			}
+			p, _ := json.Marshal(payload)
+			_, err = c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p})
 			return nil, err
 		}})
 }
@@ -314,6 +324,10 @@ func missingTime(it domain.Item, st domain.EventSchedule) bool {
 func mergeKeyOf(ev domain.SourceEvent) string {
 	if ev.MergeKey != "" {
 		return ev.MergeKey
+	}
+	// 对话捕获与按会话聚合的消息，标题是固定占位或会话名，推不出"同一件事"：只认来源给的键，并不并由处理它的 Agent 决定。
+	if IsCaptureSource(ev.SourceID) || len(ev.Messages) > 0 {
+		return ""
 	}
 	if l := normalizeLink(ev.Link); l != "" {
 		return "link:" + l
