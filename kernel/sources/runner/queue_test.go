@@ -131,3 +131,66 @@ func TestFinishRequeuesThenDrops(t *testing.T) {
 		return nil
 	})
 }
+
+// FIX-2：运行成功（ok=true）但遗漏了部分事件（仍为 pending）时，绝不能标为 done 成为永久孤儿；
+// 应按未处理路径重排计次，达重试上限转 unjudged/process_failed，已处置的事件才转 done。
+func TestFinishSuccessRequeuesUnhandledEvents(t *testing.T) {
+	st := queueStore(t, 2)
+	// 第 1 次成功退出：ev_00 已处置（ignored），ev_01 仍为 pending（模型遗漏）。
+	if err := st.Update(bg, func(tx *store.Tx) error {
+		if _, err := Claim(tx, "run_ok_1", 10); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE sources_runner_event SET disposition = 'ignored' WHERE id = 'ev_00'`); err != nil {
+			return err
+		}
+		f, err := Finish(tx, "run_ok_1", true, 1)
+		if err != nil {
+			return err
+		}
+		if len(f.Done) != 1 || f.Done[0] != "ev_00" {
+			t.Fatalf("expected only handled ev_00 in Done, got %+v", f)
+		}
+		if len(f.Requeued) != 1 || f.Requeued[0] != "ev_01" {
+			t.Fatalf("expected unhandled pending ev_01 to be Requeued even on ok=true, got %+v", f)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 验证 ev_00 为 done，ev_01 回到 queued 仍可被下一批取到。
+	_ = st.View(bg, func(tx *store.Tx) error {
+		e0, err := Event(tx, "ev_00")
+		if err != nil || e0.Queue != QueueDone {
+			t.Fatalf("ev_00 should be done: %+v %v", e0, err)
+		}
+		e1, err := Event(tx, "ev_01")
+		if err != nil || e1.Queue != QueueQueued || e1.Disposition != domain.DispositionPending {
+			t.Fatalf("ev_01 should be requeued pending: %+v %v", e1, err)
+		}
+		return nil
+	})
+	// 第 2 次成功退出仍遗漏 ev_01：超过 maxTries=1，转 unjudged/process_failed 进积压。
+	if err := st.Update(bg, func(tx *store.Tx) error {
+		if _, err := Claim(tx, "run_ok_2", 10); err != nil {
+			return err
+		}
+		f, err := Finish(tx, "run_ok_2", true, 1)
+		if err != nil {
+			return err
+		}
+		if len(f.Dropped) != 1 || f.Dropped[0] != "ev_01" {
+			t.Fatalf("second unhandled success should drop ev_01 to backlog, got %+v", f)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.View(bg, func(tx *store.Tx) error {
+		e1, err := Event(tx, "ev_01")
+		if err != nil || e1.Queue != "" || e1.Disposition != domain.DispositionUnjudged || e1.UnjudgedReason != domain.UnjudgedProcessFailed {
+			t.Fatalf("dropped ev_01 state mismatch: %+v %v", e1, err)
+		}
+		return nil
+	})
+}

@@ -111,9 +111,9 @@ type Finished struct {
 	Done, Requeued, Dropped []string
 }
 
-// Finish 在调用方事务内收尾运行 run 取走的事件：ok 为真全部转已处理；为假时已经有了去向（不再是 pending）的转已处理，
-// 其余计次放回待处理，计次超过 maxTries 的离开队列、转入积压。
-func Finish(tx *store.Tx, run string, ok bool, maxTries int) (Finished, error) {
+// Finish 在调用方事务内收尾运行 run 取走的事件：无论运行退出是否成功，只有已经有了去向（不再是 pending）的
+// 事件才转已处理；仍为 pending 的未处理事件一律计次放回待处理，计次超过 maxTries 的离开队列、转入积压。
+func Finish(tx *store.Tx, run string, _ bool, maxTries int) (Finished, error) {
 	var f Finished
 	r, err := tx.Query(`SELECT id, disposition, queue_tries FROM sources_runner_event WHERE queue_run = ? AND queue_state = ? ORDER BY seq`, run, QueueRunning)
 	if err != nil {
@@ -139,7 +139,7 @@ func Finish(tx *store.Tx, run string, ok bool, maxTries int) (Finished, error) {
 		var q string
 		var args []any
 		switch {
-		case ok || x.disp != string(domain.DispositionPending):
+		case x.disp != string(domain.DispositionPending):
 			q, args = `UPDATE sources_runner_event SET queue_state = ? WHERE id = ?`, []any{QueueDone, x.id}
 			f.Done = append(f.Done, x.id)
 		case int(x.tries)+1 <= maxTries:
