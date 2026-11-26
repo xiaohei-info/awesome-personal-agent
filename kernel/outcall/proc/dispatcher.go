@@ -72,6 +72,8 @@ type Options struct {
 	// Env 返回某次运行额外注入的变量（APA_URL、APA_TOKEN、APA_PROJECT 等）。
 	// 在启动时调用而不入账本；运行凭据只落在运行上下文文件里（ContextDir），随运行删除。
 	Env func(domain.Run) map[string]string
+	// EnvErr 与 Env 相同，但允许返回凭据签发等错误；若设置则优先调用，返回错误时直接按失败收尾、禁止无令牌启动。
+	EnvErr func(domain.Run) (map[string]string, error)
 	// ContextDir 是运行上下文文件的目录（权限 0700，§7.7）；空表示不写。
 	ContextDir string
 	// OnResult 在终态提交后被调用（可并发）。
@@ -259,7 +261,13 @@ func (d *Dispatcher) environ(rec Record) ([]string, error) {
 		env = append(env, key+"="+value)
 	}
 	var extra map[string]string
-	if d.opt.Env != nil {
+	if d.opt.EnvErr != nil {
+		var err error
+		extra, err = d.opt.EnvErr(rec.Run)
+		if err != nil {
+			return nil, err
+		}
+	} else if d.opt.Env != nil {
 		extra = d.opt.Env(rec.Run)
 	}
 	for k, v := range extra {

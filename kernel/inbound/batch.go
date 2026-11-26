@@ -265,24 +265,28 @@ func (s *Service) TickQueue(ctx context.Context) error {
 }
 
 // BatchEnv 在外呼调用器拉起 source_batch 子进程前签发运行凭据并组装环境变量（§7.7、§13.6）。
-func (s *Service) BatchEnv(r domain.Run) map[string]string {
+// 签发失败时向外返回错误，禁止在没有运行令牌的情况下启动子进程。
+func (s *Service) BatchEnv(r domain.Run) (map[string]string, error) {
 	if r.Category != domain.RunSourceBatch {
-		return nil
-	}
-	env := map[string]string{
-		"APA_URL":     s.o.Batch.APIURL,
-		"APA_RUN":     r.ID,
-		"APA_HARNESS": r.Harness,
+		return nil, nil
 	}
 	var token string
 	if err := s.o.Store.Update(context.Background(), func(tx *store.Tx) error {
 		var err error
 		token, err = runidentity.Issue(tx, r.ID, s.o.Now())
 		return err
-	}); err == nil && token != "" {
-		env["APA_TOKEN"] = token
+	}); err != nil {
+		return nil, fmt.Errorf("issue run credential: %w", err)
 	}
-	return env
+	if token == "" {
+		return nil, fmt.Errorf("issue run credential: empty token")
+	}
+	return map[string]string{
+		"APA_URL":     s.o.Batch.APIURL,
+		"APA_RUN":     r.ID,
+		"APA_HARNESS": r.Harness,
+		"APA_TOKEN":   token,
+	}, nil
 }
 
 // SettleBatch 在 source_batch 运行结束后收尾队列状态：成功转 done 并把输出作为知会发给主会话；

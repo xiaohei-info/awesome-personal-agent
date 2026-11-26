@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -274,4 +275,70 @@ func TestBatchFailureTimeoutAndRestartRecovery(t *testing.T) {
 	}
 	checkEv(domain.DispositionUnjudged, "", domain.UnjudgedProcessFailed)
 	var _ json.RawMessage
+}
+
+// FIX-1：BatchEnv 签发运行凭据失败时必须向外返回错误，且 proc.Dispatcher 禁止无令牌启动子进程，事件回到 queued。
+func TestBatchEnvIssueErrorBlocksLaunch(t *testing.T) {
+	e := setupUnifiedJudgeEnv(t, nil, nil, "", "")
+	if err := executors.Register(e.x, executors.Options{Owner: "owner"}); err != nil && !strings.Contains(err.Error(), "already registered") {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(e.dir, "launched-without-token")
+	decl := executors.Declaration{
+		Harness: "stub-harness",
+		Headless: &executors.Headless{
+			Command: []string{"/bin/sh", "-c", "touch " + marker},
+			Session: executors.Session{Extract: "$.session_id"},
+			Access:  map[string][]string{"read": {}},
+		},
+	}
+	e.must("executor.register", decl)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "batch settings", func(p *policy.Policy) error {
+			p.DefaultHarness = "stub-harness"
+			p.SourcePipeline = policy.SourcePipeline{BatchSize: 1}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan proc.Result, 1)
+	disp := proc.New(e.st, config.Config{MaxSubprocesses: 2, MaxShortSubprocesses: 1}, proc.Options{
+		EnvErr: e.svc.BatchEnv,
+		OnResult: func(res proc.Result) {
+			e.svc.SettleBatch(bg, res)
+			done <- res
+		},
+	})
+	t.Cleanup(disp.Close)
+	e.svc.AttachBatch(BatchOptions{RunsDir: filepath.Join(e.dir, "runs"), APIURL: "http://127.0.0.1:19999", Queue: disp})
+
+	// 1) 直接调 BatchEnv：签发失败（当前分支 runidentity 尚未允许 source_batch 或 run 不存在）必须返回错误且 env 为 nil
+	if env, err := e.svc.BatchEnv(domain.Run{ID: "run_missing", Category: domain.RunSourceBatch, Harness: "stub-harness"}); err == nil || env != nil {
+		t.Fatalf("BatchEnv must return error on issue failure, got env=%v err=%v", env, err)
+	}
+
+	// 2) 走完整 TickQueue -> proc.Dispatcher：签发失败时禁止启动子进程（marker 不得存在），运行失败，事件重排回 queued
+	enqueueEvent(t, e, "ev_notok", runner.LevelNormal, "body", e.now)
+	if err := e.svc.TickQueue(bg); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case res := <-done:
+		if res.Run.State != domain.RunFailed || !strings.Contains(res.Reason, "issue run credential") {
+			t.Fatalf("expected failed run due to credential issue error, got state=%s reason=%q", res.Run.State, res.Reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for batch run failure")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("subprocess was launched despite BatchEnv credential issue failure")
+	}
+	var ev domain.SourceEvent
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, "ev_notok"); return })
+	if ev.Queue != runner.QueueQueued || ev.Disposition != domain.DispositionPending {
+		t.Fatalf("event should be requeued after credential failure, got queue=%s disp=%s", ev.Queue, ev.Disposition)
+	}
 }

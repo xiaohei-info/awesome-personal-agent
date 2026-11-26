@@ -339,17 +339,17 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		}
 	}
 	// 运行凭据在启动时签发并注入（§7.7）：任务型、后台运行与来源批处理各自签发，其他类别没有凭据。
-	env := func(r domain.Run) map[string]string {
+	envErr := func(r domain.Run) (map[string]string, error) {
 		switch r.Category {
 		case domain.RunBackground:
-			return bg.Env(r)
+			return bg.Env(r), nil
 		case domain.RunSourceBatch:
 			return k.in.BatchEnv(r)
 		default:
-			return tk.Env(r)
+			return tk.Env(r), nil
 		}
 	}
-	k.disp = proc.New(st, cfg, proc.Options{CheckAgent: executors.CheckRun, Env: env, ContextDir: l.RunCredentials, OnResult: k.result})
+	k.disp = proc.New(st, cfg, proc.Options{CheckAgent: executors.CheckRun, EnvErr: envErr, ContextDir: l.RunCredentials, OnResult: k.result})
 	agmFetch.st, agmFetch.disp, agmFetch.reader = st, k.disp, hostedReader
 	k.ids.st, k.ids.disp, k.ids.rn = st, k.disp, k.rn
 	host, herr := os.Hostname()
