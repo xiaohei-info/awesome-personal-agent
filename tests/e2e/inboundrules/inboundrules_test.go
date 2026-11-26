@@ -516,7 +516,12 @@ esac`, seen, target, open.ID, open.ID))
 		if strings.Contains(f.apa(e.OBS, 0, "pack", "list").Stdout, "acc-rules") {
 			t.Error("apa pack list 不应再有 acc-rules")
 		}
-		f.until("model_unavailable 恢复 ok", func() bool { return !unavailable(f.apa(e.OBS, 0, "health").Stdout) })
+		// 积压事件经分类端点重判即定案，不再附带起草调用；要不要处理一问用得到的端点恢复后信号即转正常。
+		var health string
+		if !e.WaitFor(waitMax, func() bool { health = f.apa(e.OBS, 0, "health").Stdout; return !unavailable(health) }) {
+			ev, _ := src.find("irl-s2")
+			t.Fatalf("model_unavailable 没有恢复: irl-s2=%+v\n%s", ev, health)
+		}
 	})
 }
 

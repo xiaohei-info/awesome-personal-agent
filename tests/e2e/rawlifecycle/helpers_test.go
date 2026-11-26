@@ -66,7 +66,9 @@ func newKit(t *testing.T, e *baseline.Env) *kit {
 func setup(t *testing.T) *kit {
 	t.Helper()
 	srcStubBin(t)
-	return newKit(t, baseline.Setup(t))
+	e := baseline.Setup(t)
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
+	return newKit(t, e)
 }
 
 // step 运行一个验收动作；失败后后续动作不得开始。

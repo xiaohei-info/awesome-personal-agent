@@ -352,6 +352,7 @@ func TestFlowWebhook(t *testing.T) {
 	e.CreateProjects()
 	e.StartModelStub()
 	e.ModelStub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.95}`})
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 
 	step("ACT-HOOK-01 创建接收地址和密钥", func(t *testing.T) {
 		f.addSource(ghSource, "github", `{"scheme":"hmac-sha256-header","mappings":["github-issues"]}`, "")

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
@@ -77,7 +76,6 @@ func TestFlowMaterialBudget(t *testing.T) {
 	bigRaw := asString(k.stubOut("big-body")[0]["detail"])
 	var bigEv srcEvent
 	var bigItem string
-	var bigSent int
 
 	k.step("ACT-BUD-01 生成端点的资料预算缺省 16000 token（原 24000 字）且只在 Web 可改", func(t *testing.T) {
 		_, ep := k.endpoints("")
@@ -95,10 +93,9 @@ func TestFlowMaterialBudget(t *testing.T) {
 		eq(t, "被拒后预算不变", ep.Generate.MaxMaterialTokens, genBudgetTokens)
 	})
 
-	k.step("ACT-BUD-02 超预算的长正文按首 3/4 尾 1/4 裁剪送给起草", func(t *testing.T) {
+	k.step("ACT-BUD-02 超预算的长正文按首 3/4 尾 1/4 裁剪送给对话端点", func(t *testing.T) {
 		k.addStub("src_acc_raw", "mail", "full", "full")
-		k.screenYes("Big body", 0.95)
-		k.draftReply("Big body", map[string]any{"title": "预算验收：长邮件", "kind": "task", "summary": "长正文"})
+		k.escalate("Big body")
 		k.clear()
 		k.setCase("src_acc_raw", "big-body")
 		bigEv = k.disposed("src_acc_raw", "big-big-body")
@@ -106,25 +103,19 @@ func TestFlowMaterialBudget(t *testing.T) {
 		bigItem = bigEv.Item
 		req := k.waitGenerate("Big body")
 		sent := headTailCut(t, req, bigBody, genBudget)
-		bigSent = sent
-		t.Logf("起草请求里的资料 %d / %d 字符", sent, runes(bigBody))
+		t.Logf("判断请求里的资料 %d / %d 字符", sent, runes(bigBody))
 	})
 
 	k.step("ACT-BUD-03 聚合消息从最新一条往前整条保留", func(t *testing.T) {
 		k.loadPack("acc-bud", `name: acc-bud
 version: 1.0.0
-description: 资料预算验收包：会话来源抽取；来源对象的更新刷新事项（规则没有 on_update，ACT-BUD-08）
+description: 资料预算验收包：会话来源经 judge；来源对象的更新刷新事项（规则没有 on_update，ACT-BUD-08）
 source_rules:
-  - {id: chat-extract, match: {source_type: chat, event_type: [chat.message]}, then: extract}
+  - {id: chat-extract, match: {source_type: chat, event_type: [chat.message]}, then: process}
   - {id: obj-proposed, match: {source_type: acc-obj, event_type: [mail.received]}, kind: task, project_by: none, then: proposed}
 `)
 		k.addStub("src_acc_chat", "chat", "full", "full")
-		k.screenYes("Long chat", 0.95)
-		r, err := modelstub.WBCase("legacy3", modelstub.WBParams{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		k.ModelStub.When("Long chat", r)
+		k.escalate("Long chat")
 		k.clear()
 		k.setCase("src_acc_chat", "chat-long")
 		k.disposed("src_acc_chat", "chat-long-1")
@@ -138,7 +129,7 @@ source_rules:
 		}
 		loc := regexp.MustCompile(`\[省略更早的 (\d+) 条消息\]\n`).FindStringSubmatchIndex(req)
 		if loc == nil {
-			t.Fatalf("抽取请求里没有\"省略更早的 N 条消息\"一行:\n%s", req)
+			t.Fatalf("判断请求里没有\"省略更早的 N 条消息\"一行:\n%s", req)
 		}
 		omitted, _ := strconv.Atoi(req[loc[2]:loc[3]])
 		var kept []string
@@ -161,7 +152,7 @@ source_rules:
 		t.Logf("60 条消息：保留最新 %d 条，省略更早的 %d 条", len(kept), omitted)
 	})
 
-	k.step("ACT-BUD-04 裁剪量在判断记录、处置载荷与处理经过里可见，原文不变", func(t *testing.T) {
+	k.step("ACT-BUD-04 裁剪量在判断记录里可见，原文不变", func(t *testing.T) {
 		// 判断记录：apa why 里初筛一级记送出字符数、裁剪前字符数与方式（判断端点预算 8000）。
 		var why struct {
 			Steps []struct {
@@ -189,41 +180,6 @@ source_rules:
 		eq(t, "初筛送出字符数（判断端点预算）", lv.Sent, judgeBudget)
 		eq(t, "初筛裁剪前字符数", lv.Original, runes(bigBody))
 		eq(t, "初筛裁剪方式", lv.Mode, "head_tail")
-
-		// 处置载荷：GET /v1/audit/events 里该事件的 inbound.disposed 带 material。
-		disp := k.disposedPayload(bigEv.ID)
-		if disp.Material == nil {
-			t.Fatal("处置载荷没有 material")
-		}
-		eq(t, "载荷送出字符数等于起草请求里实际送出的", disp.Material.Sent, bigSent)
-		eq(t, "载荷裁剪前字符数", disp.Material.Original, runes(bigBody))
-		eq(t, "载荷裁剪方式", disp.Material.Mode, "head_tail")
-
-		// 处理经过页读的接口 GET /source-events/{id}/trace：处置行带的 material 与载荷一致（页面据此显示"送给模型 N / M 字符"）。
-		var tr struct {
-			Entries []struct {
-				Steps []struct {
-					Type    string `json:"type"`
-					Payload struct {
-						Material *mat `json:"material"`
-					} `json:"payload"`
-				} `json:"steps"`
-			} `json:"entries"`
-		}
-		if err := json.Unmarshal([]byte(k.web("GET", "/v1/source-events/"+bigEv.ID+"/trace", "", 200)), &tr); err != nil {
-			t.Fatal(err)
-		}
-		var disposedShown *mat
-		for _, e := range tr.Entries {
-			for _, s := range e.Steps {
-				if s.Type == "inbound.disposed" && s.Payload.Material != nil {
-					disposedShown = s.Payload.Material
-				}
-			}
-		}
-		if disposedShown == nil || *disposedShown != *disp.Material {
-			t.Errorf("处理经过里处置行的裁剪量 %+v 应与载荷 %+v 一致", disposedShown, disp.Material)
-		}
 
 		// 账本里的原文没变：body 的 sha256 与 SRC_STUB 输出相同。
 		var body struct {
@@ -284,13 +240,6 @@ source_rules:
 		if strings.Contains(req, bigBody[excerptLen:excerptLen+60]) {
 			t.Error("外部端点收到了超出 excerpt 范围的正文")
 		}
-		m := k.disposedPayload(ev.ID).Material
-		if m == nil {
-			t.Fatal("处置载荷没有 material")
-		}
-		if m.Sent > excerptLen || m.Original > excerptLen || m.Mode != "none" {
-			t.Errorf("excerpt 范围先裁到 %d 字符以内，预算 %d 不再裁剪: material = %+v", excerptLen, genBudget, *m)
-		}
 	})
 
 	k.step("ACT-BUD-07 建议事项正文超过 4000 字符时只写前 4000 并链到原文", func(t *testing.T) {
@@ -300,7 +249,6 @@ source_rules:
 			t.Errorf("proposal.sources[] 应含来源事件 %s: %+v", bigEv.ID, long.Proposal)
 		}
 		k.screenYes("Mid body", 0.95)
-		k.draftReply("Mid body", map[string]any{"title": "预算验收：短邮件", "kind": "task", "summary": "三千字符"})
 		k.setCase("src_acc_raw", "mid-body")
 		mid := k.disposed("src_acc_raw", "mid-body-1")
 		midBody := asString(k.stubOut("mid-body")[0]["detail"])
@@ -400,23 +348,4 @@ func (k *kit) audit(typ string) []auditEv {
 	return out.Events
 }
 
-type disposedView struct {
-	Material *mat `json:"material"`
-}
-
 // disposedPayload 是 GET /v1/audit/events 里该来源事件的 inbound.disposed 载荷。
-func (k *kit) disposedPayload(event string) disposedView {
-	k.t.Helper()
-	var out struct {
-		Events []struct {
-			Payload disposedView `json:"payload"`
-		} `json:"events"`
-	}
-	if err := json.Unmarshal([]byte(k.web("GET", "/v1/audit/events?limit=50&type=inbound.disposed&object="+event, "", 200)), &out); err != nil {
-		k.t.Fatal(err)
-	}
-	if len(out.Events) == 0 {
-		k.t.Fatalf("事件 %s 没有 inbound.disposed", event)
-	}
-	return out.Events[len(out.Events)-1].Payload
-}

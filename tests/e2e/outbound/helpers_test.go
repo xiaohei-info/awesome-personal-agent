@@ -55,6 +55,7 @@ func newKit(t *testing.T) *kit {
 	t.Helper()
 	e := baseline.Setup(t)
 	e.WireEndpoints()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	k := &kit{Env: e, t: t, top: t, queue: filepath.Join(e.Root, "obd-source")}
 	k.must(os.MkdirAll(filepath.Join(k.queue, "in"), 0o755))
 	k.must(os.MkdirAll(filepath.Join(k.queue, "done"), 0o755))
@@ -202,20 +203,6 @@ func requestsWith(log []string, mark string) []string {
 	return out
 }
 
-// draftRequests 是 MODEL_STUB 收到的、提到 mark 的起草请求（非判断题）。
-func (k *kit) draftRequests(mark string) []string {
-	var out []string
-	for _, r := range k.ModelStub.Requests()[k.modelOff:] {
-		if baseline.IsJudgeRequest(r) {
-			continue
-		}
-		if strings.Contains(r.BodyText, mark) || strings.Contains(plain(r.BodyText), mark) {
-			out = append(out, plain(r.BodyText)+"\n"+r.BodyText)
-		}
-	}
-	return out
-}
-
 // screenRequests 是 MODEL_STUB 收到的、提到 mark 的判断题（对话端点作答）。
 func (k *kit) screenRequests(mark string) []string {
 	var out []string
@@ -257,14 +244,12 @@ func (k *kit) lacks(label string, bodies []string, banned ...string) {
 
 // ---- 替身用例（$CLS_CASES、$MODEL_CASES） ----
 
-// cases 配置验收文档 ACT-OBD-01 的用例：含 mark 的 triage-screen 题，分类端点 p_yes=0.90，对话端点 answer=yes、sufficient=true；
-// triage-draft 生成请求返回合法起草结果。
+// cases 配置验收文档 ACT-OBD-01 的用例：含 mark 的 triage-screen 题，分类端点 p_yes=0.90，对话端点 answer=yes、sufficient=true。
 func (k *kit) cases(mark string) {
+	k.Cls.PYes(modelstub.Key{Contains: "OBD-5"}, 0.40) // 带内：交对话端点重答，用来看送给它的资料
 	k.Cls.PYes(modelstub.Key{Contains: mark}, 0.90)
 	yes := true
 	k.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: mark}, Answer: "yes", Sufficient: &yes})
-	draft, _ := json.Marshal(map[string]any{"title": "处理 " + mark, "summary": "来源事件需要处理", "kind": "task", "recommend": "accept", "reason": "需要本人处理"})
-	k.ModelStub.When(mark, modelstub.Reply{Content: string(draft)})
 }
 
 // ---- 来源 ----
@@ -566,9 +551,6 @@ func (k *kit) capture(project, text string) {
 		k.t.Fatalf("POST /v1/capture: %d %s", r.Code, r.Body)
 	}
 }
-
-// extractRequests 是 MODEL_STUB 收到的、提到 mark 的抽取请求（triage-extract，生成端点）。
-func (k *kit) extractRequests(mark string) []string { return k.draftRequests(mark) }
 
 // ---- 账本夹具 ----
 

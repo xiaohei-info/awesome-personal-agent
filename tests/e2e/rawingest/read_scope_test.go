@@ -21,6 +21,7 @@ var scopeSources = []struct{ id, external string }{
 func TestFlowRawReadScope(t *testing.T) {
 	srcStubBin(t)
 	e := baseline.Setup(t)
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	e.EnableStubRuns()
 	k := newKit(t, e)
 	ids := map[string]string{} // 来源 id → 其 mail-like 事件 id
