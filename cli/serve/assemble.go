@@ -349,6 +349,14 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 			return tk.Env(r), nil
 		}
 	}
+	// 同时运行数取策略的 limits（§14.5），没设过取 config.yaml 的初值；调度器在启动时定额，改了在下次启动时生效。
+	if err := st.View(context.Background(), func(tx *store.Tx) error {
+		_, pol, err := kpolicy.Current(tx)
+		cfg.MaxSubprocesses, cfg.MaxShortSubprocesses = pol.Limits.Long(cfg.MaxSubprocesses), pol.Limits.Short(cfg.MaxShortSubprocesses)
+		return err
+	}); err != nil {
+		return nil, err
+	}
 	k.disp = proc.New(st, cfg, proc.Options{CheckAgent: executors.CheckRun, EnvErr: envErr, ContextDir: l.RunCredentials, OnResult: k.result})
 	agmFetch.st, agmFetch.disp, agmFetch.reader = st, k.disp, hostedReader
 	k.ids.st, k.ids.disp, k.ids.rn = st, k.disp, k.rn
@@ -472,7 +480,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), apipolicy.OverviewRoutes(st, ld, k.stale.After), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x, st, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apiexec.LimitsRoutes(st, apiexec.Fallback{Long: cfg.MaxSubprocesses, Short: cfg.MaxShortSubprocesses, Chain: x.MaxChainDepth}), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x, st, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)

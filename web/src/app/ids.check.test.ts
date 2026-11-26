@@ -10,6 +10,8 @@ const go = import.meta.glob(
     "../../../kernel/delivery/delivery.go",
     "../../../kernel/delivery/disturb.go",
     "../../../kernel/policy/policy.go",
+    "../../../kernel/policy/card.go",
+    "../../../api/settings/exec/limits.go",
     "../../../kernel/why/rulechanges.go",
     "../../../kernel/auth/auth.go",
     "../../../kernel/executors/executors.go",
@@ -96,7 +98,8 @@ const CASES: [string, string, () => string[]][] = [
   ["NOTICE_CODE", "notice", () => typed("domain/notice.go", "NoticeCode")],
   ["GRANT_REASON", "grantReason", () => named("domain/errors.go", "GrantReason")],
   ["REJECT_REASON", "rejectReason", () => named("domain/errors.go", "Reason")],
-  ["AGENT_TIER", "agentTier", () => named("kernel/policy/policy.go", "Allow")],
+  ["PERMISSION_GROUP", "permissionGroup", () => named("kernel/policy/card.go", "Group")],
+  ["FIXED_RULE", "fixedRule", () => block("api/settings/exec/limits.go", "var fixedRules = []string{")],
   ["REVERT_WHY", "revertWhy", () => named("kernel/why/rulechanges.go", "Revert")],
   ["EVENT", "event", () => named("domain/event.go", "Ev")],
 ];

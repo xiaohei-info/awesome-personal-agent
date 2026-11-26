@@ -250,7 +250,7 @@ func unmergeable(tx *store.Tx, v unmergeIn) (domain.Item, error) {
 }
 
 func registerUnmerge(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdUnmerge, Action: authz.ActionManageSource, Tier: authz.TierOrganize, KeepVersion: true, Page: "/proposals",
+	return x.Register(command.Spec{Name: CmdUnmerge, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents, KeepVersion: true, Page: "/proposals",
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseUnmerge(in)
 			return authz.Object{ID: v.Item}, err

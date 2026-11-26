@@ -11,8 +11,6 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
@@ -107,29 +105,12 @@ func denied(why, next string) error {
 }
 
 // readScope 决定 p 读 ev 的原文时的范围。webhook 与非导出 ext 密钥已被 readable 挡在外面。
+// 对话捕获与其他来源一样：Web 本人、运行凭据与内部钥匙全文；外部钥匙只看钥匙自己的逐来源档位（对话捕获不在其中），
+// 挂在事项上也不例外（§14.14）。
 func readScope(tx *store.Tx, p *core.Principal, ev domain.SourceEvent) (string, error) {
-	if inbound.IsCaptureSource(ev.SourceID) { // 对话内容只给本人
-		if !p.Web {
-			return "", denied("conversation capture can only be read by the owner in the Web UI", "open it in the Web UI")
-		}
-		return scopeFull, nil
-	}
 	if p.Web {
 		return scopeFull, nil
 	}
-	if p.Caller.Level == authz.LevelRun { // 运行凭据只经挂靠消息的权限读（转发白名单），不读其他来源原文（§7.6、§14.6）
-		if ev.Disposition == domain.DispositionAttached && ev.Item != "" {
-			msgs, err := allowlist.Messages(tx, ev.Item, p.Caller.Level)
-			if err != nil {
-				return "", err
-			}
-			if slices.ContainsFunc(msgs, func(m allowlist.Attached) bool { return m.ID == ev.ID }) {
-				return scopeFull, nil
-			}
-		}
-		return "", denied("run credential cannot read source event content", "read forwarded messages from the context instead")
-	}
-	// 内部钥匙全文；外部钥匙只看钥匙自己的逐来源档位，挂在事项上也不例外（§14.14）。
 	return sourceTier(tx, p, ev.SourceID)
 }
 
@@ -142,11 +123,8 @@ func sourceTier(tx *store.Tx, p *core.Principal, id string) (string, error) {
 	return t, nil
 }
 
-// internalOnly 挡住外部钥匙与运行凭据：原始请求体、被拒行、外发预览是给本人排查用的，不按档位裁剪，只给 Web 与内部钥匙。
+// internalOnly 挡住外部钥匙：原始请求体、被拒行、外发预览是排查用的，不按档位裁剪，只给 Web、运行凭据与内部钥匙。
 func internalOnly(p *core.Principal, what string) error {
-	if p.Caller.Level == authz.LevelRun {
-		return denied("run credential cannot read "+what, "read forwarded messages from the context instead")
-	}
 	if p.Caller.External() {
 		return denied("an external key cannot read "+what, "use the source events this key is given")
 	}
@@ -162,7 +140,7 @@ func scoped(ev domain.SourceEvent, scope string) domain.SourceEvent {
 	// 只留元信息与处置状态（处置、未判定原因、挂靠与判断的关联）；来源给的数值、关联键与合并键只随全文给。
 	out := domain.SourceEvent{ID: ev.ID, SourceID: ev.SourceID, Type: t.Type, Subject: t.Subject, Sender: t.Sender, SenderVerified: ev.SenderVerified,
 		OccurredAt: ev.OccurredAt, Link: t.Link, Disposition: ev.Disposition, Item: ev.Item, Summary: t.Summary, Detail: t.Detail,
-		DedupeKey: ev.DedupeKey, AttachState: ev.AttachState, UnjudgedReason: ev.UnjudgedReason, Rejudges: ev.Rejudges, Items: ev.Items, Judgment: ev.Judgment}
+		DedupeKey: ev.DedupeKey, AttachState: ev.AttachState, Queue: ev.Queue, QueueLevel: ev.QueueLevel, UnjudgedReason: ev.UnjudgedReason, Rejudges: ev.Rejudges, Items: ev.Items, Judgment: ev.Judgment}
 	return out
 }
 

@@ -97,7 +97,7 @@ func (a *api) reply(w http.ResponseWriter, r *http.Request, status int, res comm
 }
 
 func webOnlyExecutors() error {
-	return domain.NewError(domain.CodeWebOnly, "allowed_executors can only be changed by the owner in the Web UI", "ask the owner to change it in Web settings")
+	return domain.NewError(domain.CodeInvalidRequest, "allowed_executors is not part of creating a project", "create the project, then set it with PUT /v1/settings/projects/{id}/allowed-executors")
 }
 
 func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {

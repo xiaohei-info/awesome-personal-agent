@@ -102,7 +102,7 @@ func (s *svc) progress() command.Spec {
 		var v progressIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.progress", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+	return command.Spec{Name: "item.progress", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -115,7 +115,7 @@ func (s *svc) progress() command.Spec {
 			return object(tx, cur, cur)
 		},
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) []authz.Action {
-			return editActions(c, o, boundOr(tx, c, o), false, false)
+			return editActions(boundOr(tx, c, o), false, false)
 		},
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)

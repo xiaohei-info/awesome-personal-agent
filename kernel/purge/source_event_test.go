@@ -225,7 +225,7 @@ func TestPurgeWithSourceEventsOnlyForItems(t *testing.T) {
 func TestPurgeSourceEventOnlyOwnerOnWeb(t *testing.T) {
 	e := setup(t)
 	sid := e.addEvent(t, "m1", "", "")
-	if _, err := e.do(delegate, Command, map[string]any{"object": sid}); exit(err) != domain.ExitWebOnly {
+	if _, err := e.do(delegate, Command, map[string]any{"object": sid}); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("delegate: %v", err)
 	}
 	if e.eventGone(t, sid) {

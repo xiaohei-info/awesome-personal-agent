@@ -575,7 +575,7 @@ func attachEvent() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: CmdAttachEvent, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+	return command.Spec{Name: CmdAttachEvent, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return authz.Object{ID: v.Event}, err
@@ -622,7 +622,7 @@ func attach() command.Spec {
 		var v attachIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdAttach, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
+	return command.Spec{Name: CmdAttach, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return ownObject(v.Event), err
@@ -679,7 +679,7 @@ func ack() command.Spec {
 		var v ackIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdAck, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
+	return command.Spec{Name: CmdAck, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return ownObject(v.Item), err
@@ -712,7 +712,7 @@ func handback() command.Spec {
 		var v handbackIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdHandback, Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+	return command.Spec{Name: CmdHandback, Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -756,7 +756,7 @@ func release() command.Spec {
 		var v releaseIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdRelease, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
+	return command.Spec{Name: CmdRelease, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return ownObject(v.Item), err

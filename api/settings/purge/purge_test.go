@@ -236,7 +236,7 @@ func TestNonWebCredentialsCannotPurge(t *testing.T) {
 	before := len(e.events())
 	body := `{"object":"` + id + `"}`
 
-	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeWebOnly, auth.Worker: domain.CodeWebOnly, auth.Observer: domain.CodeWebOnly} {
+	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeTierClosed, auth.Worker: domain.CodePermissionDenied, auth.Observer: domain.CodePermissionDenied} {
 		r := e.do("POST", "/v1/settings/purge", body, e.token(kind))
 		if r.Code != 403 || code(t, r) != want {
 			t.Fatalf("%s: %d %s, want 403 %s", kind, r.Code, r.Body, want)

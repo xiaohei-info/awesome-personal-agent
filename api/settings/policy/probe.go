@@ -106,7 +106,7 @@ func invalidDraft(err error) error {
 
 // models：取生成端点（按所选协议的鉴权头）或判断接口的模型列表。探测本身的成败是数据（200 + ok:false + reason），不是 HTTP 错误。
 func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if _, err := Authorize(pr.st, r, p, authz.TierPower, "/settings/models", "settings:"+r.URL.Path); err != nil {
+	if _, err := Authorize(pr.st, r, p, authz.GroupOutbound, "/settings/models", "settings:"+r.URL.Path); err != nil {
 		return err
 	}
 	var in struct {
@@ -185,7 +185,7 @@ func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Princip
 
 // test：用 doctor 的内置示例题探测草稿端点（与 `apa doctor` 同一份代码），返回同形的明细。
 func (pr *prober) test(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if _, err := Authorize(pr.st, r, p, authz.TierPower, "/settings/models", "settings:"+r.URL.Path); err != nil {
+	if _, err := Authorize(pr.st, r, p, authz.GroupOutbound, "/settings/models", "settings:"+r.URL.Path); err != nil {
 		return err
 	}
 	var in struct {

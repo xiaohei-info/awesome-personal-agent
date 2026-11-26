@@ -134,14 +134,20 @@ type Error struct {
 	// Reason 是同一个码之下更细的稳定原因（如授权单不可用的具体原因 GrantReason*），展示层据它说人话；空表示只看 Code。
 	Reason string  `json:"reason,omitempty"`
 	WebURL *string `json:"web_url"`
+	// Group 与 SettingsURL 只随退出码 23 返回：没开的那一组（组键）与这个 Agent 权限卡的页面（§14.3）。
+	Group       string  `json:"group,omitempty"`
+	SettingsURL *string `json:"settings_url,omitempty"`
 }
 
-// 拒绝的三种口径（Error.Reason，§14.3）：硬线、档位未放开、钥匙范围外；reauth_required 是硬线下 Web 会话还没再输口令。
+// 拒绝的三种口径（Error.Reason，§14.3）：只有本人（hard_line）、权限卡没开（tier_closed）、钥匙范围外；
+// reauth_required 是 Web 会话做后果较大的事还没再输口令。
 const (
 	ReasonHardLine       = "hard_line"
 	ReasonReauthRequired = "reauth_required"
 	ReasonTierClosed     = "tier_closed"
 	ReasonOutOfScope     = "out_of_scope"
+	// ReasonChainDepthExceeded：连锁触发超过设置里的层数，命令不生效（退出码 6，§14.9）。
+	ReasonChainDepthExceeded = "chain_depth_exceeded"
 )
 
 // 旧模型授权单不可用的原因：内核不再产出，只供读旧的拒绝记录。

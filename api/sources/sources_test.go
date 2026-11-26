@@ -268,9 +268,9 @@ func TestSourceRegistrationContract(t *testing.T) {
 	if r := e.do(obs, "POST", "/v1/sources", hook); r.Code != 403 {
 		t.Fatalf("observer register: %d", r.Code)
 	}
-	// 登记来源是 3b：Agent 钥匙一律硬线（20），只有 Web 本人能登记。
-	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 403 || r.code() != "web_only" || !strings.Contains(r.Body.String(), `"reason":"hard_line"`) {
-		t.Fatalf("delegate register must hit the hard line: %d %s", r.Code, r.Body)
+	// 登记来源属"接入来源"：没开这一组的 delegate 是 23。
+	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 403 || r.code() != "tier_closed" || !strings.Contains(r.Body.String(), `"group":"connect"`) {
+		t.Fatalf("delegate register needs the connect group: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("web webhook register: %d %s", r.Code, r.Body)
@@ -321,8 +321,8 @@ func TestSourceRegistrationContract(t *testing.T) {
 			t.Fatalf("patch %s: %d %s", body, r.Code, r.Body)
 		}
 	}
-	// 改来源配置是 3b（硬线）；只启停是 3a，Agent 档位未放开为 23。
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"schedule":"2h"}`); r.Code != 403 || r.code() != "web_only" {
+	// 改来源配置属"接入来源"；只启停属"改日常规则与提醒"：两组都没开的 Agent 为 23。
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"schedule":"2h"}`); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate config patch: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"enabled":false}`); r.Code != 403 || r.code() != "tier_closed" {
@@ -343,10 +343,10 @@ func TestCustomCommandsRejectedForTokensAcceptedInWeb(t *testing.T) {
 	script := `{"id":"src_mail","name":"邮件","type":"script","command":"/opt/tool --json","schedule":"10m","timeout":30}`
 
 	r := e.do(dlg, "POST", "/v1/sources", script)
-	if r.Code != 403 || r.code() != "web_only" {
+	if r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate script register must be web_only: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(wrk, "POST", "/v1/sources", script); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(wrk, "POST", "/v1/sources", script); r.Code != 403 || r.code() != "permission_denied" {
 		t.Fatalf("worker script register hits the hard line before scope: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", "/v1/sources", `{"id":"src_x","type":"pull","command":"/bin/sh -c evil","schedule":"1h","timeout":5}`); r.Code != 400 {
@@ -366,7 +366,7 @@ func TestCustomCommandsRejectedForTokensAcceptedInWeb(t *testing.T) {
 		t.Fatalf("web script register: %d %s", r.Code, r.Body)
 	}
 	// 已有 script 来源：delegate 不能改命令，Web 可以；delegate 也不能把命令字段塞进 PATCH
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_mail", `{"command":"/opt/other"}`); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_mail", `{"command":"/opt/other"}`); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate script patch: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("PATCH", "/v1/sources/src_mail", `{"command":"/opt/other"}`); r.Code != 200 || !strings.Contains(r.Body.String(), "/opt/other") {
@@ -388,9 +388,9 @@ func TestWebhookKeyIngestsAndReplay(t *testing.T) {
 	e.web("POST", "/v1/sources", hook)
 	e.web("POST", "/v1/sources", pull)
 
-	// 发接收密钥是 3b：任何 Agent 钥匙都是硬线，只有 Web 本人能发。
+	// 发接收密钥属"接入来源"：没开这一组的 delegate 是 23，observer、worker 在钥匙范围外。
 	for name, tok := range map[string]string{"observer": obs, "worker": wrk, "delegate": dlg} {
-		if r := e.do(tok, "POST", "/v1/sources/src_hook/webhook", ""); r.Code != 403 || r.code() != "web_only" {
+		if r := e.do(tok, "POST", "/v1/sources/src_hook/webhook", ""); r.Code != 403 || r.code() != map[bool]string{true: "tier_closed", false: "permission_denied"}[name == "delegate"] {
 			t.Fatalf("%s: %d %s", name, r.Code, r.Body)
 		}
 	}
@@ -601,9 +601,9 @@ func TestRevokeWebhookKeyDeletesKeyFile(t *testing.T) {
 	e.web("POST", "/v1/sources/src_signed/webhook", "").into(&k2) // 轮换：宽限期内两把都有效
 	file := filepath.Join(e.keys, "src_signed")
 
-	for _, tok := range []string{obs, dlg} {
-		if r := e.do(tok, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 403 || r.code() != "web_only" {
-			t.Fatalf("revoking receive keys is 3b, Agent keys hit the hard line: %d %s", r.Code, r.Body)
+	for tok, want := range map[string]string{obs: "permission_denied", dlg: "tier_closed"} {
+		if r := e.do(tok, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 403 || r.code() != want {
+			t.Fatalf("revoking receive keys needs the connect group: %d %s", r.Code, r.Body)
 		}
 	}
 	if os.Geteuid() != 0 { // root 不受目录权限限制，无法制造删除失败
@@ -774,8 +774,8 @@ func TestSourceEventsListFilterAndPage(t *testing.T) {
 	if r := e.do(e.token(auth.Ext), "GET", "/v1/sources/src_hook/events", ""); r.Code != 403 {
 		t.Errorf("ext: %d", r.Code)
 	}
-	// 列表是未过滤的外部内容：运行凭据不能绕过转发白名单。
-	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/events", ""); r.Code != 403 {
+	// 运行凭据与所属 Agent 的钥匙同读（§14.2）。
+	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/events", ""); r.Code != 200 {
 		t.Errorf("run credential: %d %s", r.Code, r.Body)
 	}
 }
@@ -852,8 +852,8 @@ func TestSourceRejectsListPageAndAccess(t *testing.T) {
 	if r := e.do(e.token(auth.Ext), "GET", "/v1/sources/src_hook/rejects", ""); r.Code != 403 {
 		t.Errorf("ext: %d", r.Code)
 	}
-	// 原始行是未过滤的外部输出：运行凭据不能绕过转发白名单。
-	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/rejects", ""); r.Code != 403 {
+	// 原始行是排查用的：运行凭据与内部钥匙可读，外部钥匙不行。
+	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/rejects", ""); r.Code != 200 {
 		t.Errorf("run credential: %d %s", r.Code, r.Body)
 	}
 }
@@ -935,26 +935,30 @@ func TestCaptureSourceEventsAreWebOnly(t *testing.T) {
 	if r.Code != 200 || len(page.Events) != 1 || page.Events[0].Subject != "c1" {
 		t.Fatalf("web: %d %s", r.Code, r.Body)
 	}
+	// 对话捕获与其他来源一样：内部钥匙与运行凭据可读，外部受众的钥匙读不到（§14.14）。
 	for _, k := range []auth.Kind{auth.Observer, auth.Worker, auth.Delegate} {
-		if r := e.do(e.token(k), "GET", path, ""); r.Code != 404 {
+		if r := e.do(e.token(k), "GET", path, ""); r.Code != 200 {
 			t.Errorf("%s: %d", k, r.Code)
 		}
 	}
-	if r := e.do(e.runCredential(), "GET", path, ""); r.Code != 403 {
+	if r := e.do(e.runCredential(), "GET", path, ""); r.Code != 200 {
 		t.Errorf("run credential: %d", r.Code)
+	}
+	if r := e.do(e.scoped(auth.Observer, map[string]string{"src_hook": "full"}), "GET", path, ""); r.Code != 403 {
+		t.Errorf("external key: %d", r.Code)
 	}
 	if r := e.web("GET", "/v1/sources/capture:/events", ""); r.Code != 404 {
 		t.Errorf("empty project: %d", r.Code)
 	}
 }
 
-// 入站记录的原始请求体未经转发白名单，运行凭据不能读（§14.3、§14.6）。
-func TestRunCredentialCannotReadIngests(t *testing.T) {
+// 入站记录的原始请求体是排查用的：运行凭据与内部钥匙可读（§14.3）。
+func TestRunCredentialReadsIngests(t *testing.T) {
 	e := setup(t)
 	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/ingests", ""); r.Code != 403 {
+	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/ingests", ""); r.Code != 200 {
 		t.Fatalf("run credential: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(e.token(auth.Observer), "GET", "/v1/sources/src_hook/ingests", ""); r.Code != 200 {
@@ -1026,7 +1030,7 @@ func TestSourceRoutesWriteDefaultProjectButNeverOutbound(t *testing.T) {
 		},
 		"web patch": func() resp { return e.web("PATCH", "/v1/sources/src_feed", `{"outbound":{"external":"full"}}`) },
 	} {
-		if r := call(); r.Code != 403 {
+		if r := call(); r.Code != 403 && r.Code != 400 { // Agent 没开数据去向为 403；外发范围本就不在登记请求里，Web 为 400
 			t.Errorf("%s: %d %s", name, r.Code, r.Body)
 		}
 	}
@@ -1087,11 +1091,8 @@ func TestRestoreSourceEventsRoutes(t *testing.T) {
 		}
 	}
 	run := e.runCredential()
-	if r := e.do(run, "GET", "/v1/source-events/restorable?"+win, ""); r.Code != 403 || strings.Contains(r.Body.String(), "matched") {
+	if r := e.do(run, "GET", "/v1/source-events/restorable?"+win, ""); r.Code != 200 || !strings.Contains(r.Body.String(), "matched") {
 		t.Fatalf("run credential preview: %d %s", r.Code, r.Body)
-	}
-	if r := e.do(run, "POST", "/v1/source-events/restore", body); r.Code != 403 {
-		t.Fatalf("run credential restore: %d %s", r.Code, r.Body)
 	}
 	dlg := e.token(auth.Delegate)
 	for name, r := range map[string]resp{
@@ -1171,15 +1172,15 @@ func TestOutboundPreviewRoute(t *testing.T) {
 	if r := e.do(e.token(auth.Ext), "GET", path, ""); r.Code != 403 {
 		t.Errorf("ext: %d", r.Code)
 	}
-	if r := e.do(e.runCredential(), "GET", path, ""); r.Code != 403 {
+	if r := e.do(e.runCredential(), "GET", path, ""); r.Code != 200 {
 		t.Errorf("run credential: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(e.token(auth.Observer), "GET", "/v1/source-events/sev_nope/outbound-preview", ""); r.Code != 404 {
 		t.Errorf("unknown event: %d", r.Code)
 	}
 	capPath := "/v1/source-events/" + idOf("capture:prj_1") + "/outbound-preview"
-	if r := e.do(e.token(auth.Delegate), "GET", capPath, ""); r.Code != 404 {
-		t.Errorf("capture event for a token: %d", r.Code)
+	if r := e.do(e.token(auth.Delegate), "GET", capPath, ""); r.Code != 200 {
+		t.Errorf("capture event for an internal token: %d", r.Code)
 	}
 	if r := e.web("GET", capPath, ""); r.Code != 200 {
 		t.Errorf("capture event for Web: %d %s", r.Code, r.Body)
@@ -1280,7 +1281,7 @@ func TestSourceSenderAndSelfSenderRoutes(t *testing.T) {
 	if r := e.web("GET", "/v1/settings/sources/src_s/self-sender", ""); r.Code != 404 {
 		t.Fatalf("self-sender without identity: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(e.token(auth.Delegate), "GET", "/v1/settings/sources/src_a/self-sender", ""); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(e.token(auth.Delegate), "GET", "/v1/settings/sources/src_a/self-sender", ""); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("self-sender for a token: %d %s", r.Code, r.Body)
 	}
 }

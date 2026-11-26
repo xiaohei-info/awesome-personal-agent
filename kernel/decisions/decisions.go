@@ -123,7 +123,7 @@ func request() command.Spec {
 		var v requestIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "decision.request", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+	return command.Spec{Name: "decision.request", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -202,13 +202,13 @@ func answer() command.Spec {
 		var v answerIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, Page: "/decisions",
-		TierFor: func(tx *store.Tx, _ command.Caller, o authz.Object, _ json.RawMessage) (authz.Tier, error) {
+	return command.Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Group: authz.GroupDecide, Page: "/decisions",
+		GroupFor: func(tx *store.Tx, _ command.Caller, o authz.Object, _ json.RawMessage) (authz.Group, error) {
 			it, err := items.Get(tx, o.ID)
 			if err == nil && it.Ask != nil && it.Ask.Code == domain.AskAgentsMDDrift {
-				return authz.TierRules, nil // 这个回答改的是以后同步写进仓库的 AGENTS.md（§14.3）
+				return authz.GroupRules, nil // 这个回答改的是以后同步写进仓库的 AGENTS.md（§14.3）
 			}
-			return authz.TierDecide, err
+			return authz.GroupDecide, err
 		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
@@ -300,7 +300,7 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 		var v proposalIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: name, Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, Page: "/proposals",
+	return command.Spec{Name: name, Action: authz.ActionAnswerDecision, Group: authz.GroupDecide, Page: "/proposals",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

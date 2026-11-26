@@ -1,7 +1,7 @@
 // Package command 是所有写入的统一路径（设计 §7.0）：认证 → 授权 → 校验 → 事务 → 提交后。
 // 本包只提供管线与登记表，不含任何业务命令；业务模块登记 Spec，经 Do 执行，不直写对方的数据。
 //
-// 管线保证：每条命令登记一档（§14.3），授权只在这里判一次；乐观版本与幂等键、链路深度由内核继承（调用方只能指明
+// 管线保证：每条命令登记一组（§14.3），授权只在这里判一次；乐观版本与幂等键、链路深度由内核继承（调用方只能指明
 // "继承自哪个对象"，写不了数值，输入里出现内核维护字段直接拒绝）；被拒绝的命令在独立事务里留痕。
 package command
 
@@ -26,7 +26,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// DefaultMaxChainDepth 是链路深度阈值（§14.9）。
+// DefaultMaxChainDepth 是链路深度阈值没设过时的初值（§14.9）；生效值取策略的 limits.chain_depth。
 const DefaultMaxChainDepth = 8
 
 // Module 是本模块在存储层登记的迁移：对象乐观版本与幂等结果。
@@ -57,18 +57,15 @@ type Caller struct {
 	Kind  auth.Kind // 仅凭据入口有值
 	// Credential 是凭据 id，仅凭据入口有值（Actor.Principal 在绑定执行者时是执行者 id）。
 	Credential string
-	// CredentialAgentID 是凭据上内核记录的所属 Agent，仅凭据入口有值；档位按它取（§14.3）。
+	// CredentialAgentID 是凭据上内核记录的所属 Agent，仅凭据入口有值；权限卡按它取（§14.5）。
 	CredentialAgentID string
-	// CredentialHarness 是凭据所属程序；没有 Agent 归属的旧设置迁移来的凭据，档位按兼容卡 legacy:<程序> 取（只改档位，不改投递路由）。
+	// CredentialHarness 是凭据所属程序；没有 Agent 归属的旧设置迁移来的凭据，权限卡按兼容卡 legacy:<程序> 取（不改投递路由）。
 	CredentialHarness string
-	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
-	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
-	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
 	// RunDepth 只有运行凭据有值：运行记录的链路深度，本运行发出的命令据它继承（§14.9）。
 	RunDepth int
-	// RunAgentID 只有运行凭据有值：运行所属的 Agent（运行记录上的快照），后台运行随它的档位。
+	// RunAgentID 只有运行凭据有值：运行所属的 Agent（运行记录上的快照），后台运行随它的权限卡。
 	RunAgentID string
-	// Fresh 只有 Web 本人有值：会话刚再输过一次口令，3b 动作要求它（§14.3）。
+	// Fresh 只有 Web 本人有值：会话刚再输过一次口令，后果较大的组与只有本人的事要求它（§14.3）。
 	Fresh bool
 	// Internal 与 SourceScopes 只有凭据入口有值（§14.2、§14.14）：内部钥匙读来源内容不受档位限制；
 	// 外部钥匙只读 SourceScopes 里列出的来源（来源 id → full/excerpt/meta），不在表里即不给。
@@ -80,7 +77,7 @@ type Caller struct {
 // Web 本人、运行凭据与内核自己的入口没有 Kind，一律按内部。
 func (c Caller) External() bool { return c.Kind != "" && !c.Internal }
 
-// Agent 是调用者所属的 Agent：运行钥匙取运行记录，其余取凭据归属；没有归属为空（只整理）。
+// Agent 是调用者所属的 Agent：运行凭据取运行记录，其余取凭据归属；没有归属为空（默认卡）。
 func (c Caller) Agent() string {
 	if c.Level == authz.LevelRun {
 		return c.RunAgentID
@@ -108,6 +105,12 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	if err != nil {
 		return Caller{}, err
 	}
+	return CallerOf(c, b.Origin), nil
+}
+
+// CallerOf 是长期凭据 c 认证出的 Caller：操作者主语（绑定执行者的 worker 为执行者 id，其余为凭据 id）、
+// 信任级与所属 Agent 的依据都只在这里定；权限卡切换预演按同一函数把旧事件的操作者归到 Agent。
+func CallerOf(c auth.Credential, o auth.Origin) Caller {
 	l := authz.LevelWorker
 	switch c.Kind {
 	case auth.Observer:
@@ -115,8 +118,8 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	case auth.Delegate:
 		l = authz.LevelDelegate
 	}
-	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID, CredentialHarness: c.Harness,
-		Internal: c.Audience == auth.AudienceInternal, SourceScopes: c.SourceScopes}, nil
+	return Caller{Actor: c.Actor(o), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID, CredentialHarness: c.Harness,
+		Internal: c.Audience == auth.AudienceInternal, SourceScopes: c.SourceScopes}
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。
@@ -175,8 +178,8 @@ type Ctx struct {
 	Object     authz.Object
 	ChainDepth int
 	Basis      *domain.Basis
-	// Tier 是本次实际适用的档（按状态变化定档的命令由 TierFor 给出）。
-	Tier   authz.Tier
+	// Group 是本次实际适用的组（按状态变化归组的命令由 GroupFor 给出）。
+	Group  authz.Group
 	now    func() time.Time
 	seqs   []int64
 	events []domain.Event
@@ -233,11 +236,11 @@ type Spec struct {
 	// ChannelAnswer 非空时（ActionChannelAnswer），管线用返回的渠道与回答人填授权请求以查回答人名单；
 	// 渠道与回答人只能据账本与凭据得出，不来自对象之外的声明。
 	ChannelAnswer func(tx *store.Tx, c Caller, in json.RawMessage) (channel, sender, webURL string, err error)
-	// Tier 是命令按后果固定的档（§14.3、附录 B.1），必填。判定只在管线一处，命令体内不重复。
-	Tier authz.Tier
-	// TierFor 非空时取代 Tier：按状态变化定档（如离开"建议"是二档）；只据账本与输入得出。
-	TierFor func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) (authz.Tier, error)
-	// Page 是这个动作所在的 Web 页面（如 /settings/agents），3a/3b 拒绝时作为链接返回。
+	// Group 是命令所属的组（§14.3、附录 B.1），必填。判定只在管线一处，命令体内不重复。
+	Group authz.Group
+	// GroupFor 非空时取代 Group：按状态变化归组（如离开"建议"是替我拍板）；只据账本与输入得出。
+	GroupFor func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) (authz.Group, error)
+	// Page 是这个动作所在的 Web 页面（如 /settings/agents），被拒时作为本人直接做这件事的链接返回。
 	Page string
 	// Receipt 标记回执与捕获类命令（§14.5 失败可见）：它们多由插件异步发起、对模型不可见，
 	// 内核可达但拒绝（退出码 2、4、23）时，管线在独立事务里另记 health.alert。
@@ -253,11 +256,10 @@ type Spec struct {
 
 // Result 是命令结果。
 type Result struct {
-	Value      json.RawMessage
-	Version    int64 // 对象写入后的版本；无对象为 0
-	Seqs       []int64
-	Replayed   bool // 幂等键命中，返回首次结果，未重复写入
-	Suppressed bool // 链路深度超阈值：只记录不派发
+	Value    json.RawMessage
+	Version  int64 // 对象写入后的版本；无对象为 0
+	Seqs     []int64
+	Replayed bool // 幂等键命中，返回首次结果，未重复写入
 }
 
 // Commit 在提交后交给内部消费者（事件规则、触达、订阅等待方）。
@@ -307,13 +309,13 @@ func New(st *store.Store, now func() time.Time) *Executor {
 // Now 是命令落账用的时钟（事件的 at 取它）：要与事件时刻比较的调用方（如撤销窗口）用同一个时钟。
 func (x *Executor) Now() time.Time { return x.now() }
 
-// Register 登记命令；名称重复、缺 Apply/Object 或没有登记档位会被拒绝。
+// Register 登记命令；名称重复、缺 Apply/Object 或没有登记组会被拒绝。
 func (x *Executor) Register(s Spec) error {
 	if s.Name == "" || s.Apply == nil || s.Object == nil {
 		return fmt.Errorf("command: spec %q needs name, Object and Apply", s.Name)
 	}
-	if s.Tier == authz.TierUnset {
-		return fmt.Errorf("command: spec %q has no tier", s.Name)
+	if s.Group == "" {
+		return fmt.Errorf("command: spec %q has no group", s.Name)
 	}
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -324,12 +326,23 @@ func (x *Executor) Register(s Spec) error {
 	return nil
 }
 
-// Tier 返回已登记命令的档（按状态变化定档的命令返回它的基础档），供对照测试与权限页使用。
-func (x *Executor) Tier(name string) (authz.Tier, bool) {
+// Group 返回已登记命令的组（按状态变化归组的命令返回它的基础组），供对照测试与权限页使用。
+func (x *Executor) Group(name string) (authz.Group, bool) {
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 	s, ok := x.specs[name]
-	return s.Tier, ok
+	return s.Group, ok
+}
+
+// Groups 返回全部已登记命令的组，键是命令名。
+func (x *Executor) Groups() map[string]authz.Group {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	out := make(map[string]authz.Group, len(x.specs))
+	for n, s := range x.specs {
+		out[n] = s.Group
+	}
+	return out
 }
 
 // Store 返回执行器所用的账本，供只持有执行器的路由读取。
@@ -351,7 +364,7 @@ func (x *Executor) InTx(f func(*Ctx) error) {
 	x.mu.Unlock()
 }
 
-// OnReject 登记拒绝回调：被拒绝的命令（硬线 20、执行者 21、档位 23、范围外 4）在记 command.rejected 之后、
+// OnReject 登记拒绝回调：被拒绝的命令（只有本人 20、执行者 21、权限卡 23、范围外 4）在记 command.rejected 之后、
 // 同一事务里按登记顺序调用，返回错误则拒绝留痕一并回滚。供事项转 needs_input 等"依据不足不静默"的处理（§14.5）。
 // 回调不得另开事务，也不得发起外呼。
 func (x *Executor) OnReject(f func(*store.Tx, Rejection) error) {
@@ -435,11 +448,35 @@ func exitOf(err error) int {
 	return domain.ExitUnclassified
 }
 
+// overDepth 是链路深度超过阈值：命令不生效、返回错误，健康告警在独立事务里记（§14.9）。
+type overDepth struct {
+	err error
+	ev  domain.Event
+}
+
+func (o *overDepth) Error() string { return o.err.Error() }
+
+// ChainLimit 是 p 下生效的链路深度阈值：策略的 limits.chain_depth，没设过取 MaxChainDepth。
+func (x *Executor) ChainLimit(p policy.Policy) int { return p.Limits.Chain(x.MaxChainDepth) }
+
+// ChainLimitNow 读当前策略给出生效的链路深度阈值；读不出时取 MaxChainDepth。
+func (x *Executor) ChainLimitNow(ctx context.Context) int {
+	limit := x.MaxChainDepth
+	_ = x.st.View(ctx, func(tx *store.Tx) error {
+		_, p, err := policy.Current(tx)
+		if err == nil {
+			limit = x.ChainLimit(p)
+		}
+		return err
+	})
+	return limit
+}
+
 func (r *rejected) Error() string { return r.err.Error() }
 func (r *rejected) Unwrap() error { return r.err }
 
 // Do 执行一次命令：五步在同一写事务里完成（提交后消费者除外）。失败整体回滚；
-// 硬线、执行者、档位、范围外的拒绝另开事务记 command.rejected。
+// 只有本人、执行者、权限卡、范围外的拒绝另开事务记 command.rejected。
 func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 	x.mu.RLock()
 	spec, ok := x.specs[req.Command]
@@ -462,6 +499,12 @@ func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 	})
 	if err == errPreflight {
 		return Result{}, nil
+	}
+	if od, ok := err.(*overDepth); ok {
+		if rerr := x.st.Update(ctx, func(tx *store.Tx) error { _, err := eventlog.Append(tx, od.ev); return err }); rerr != nil {
+			return Result{}, fmt.Errorf("command: record chain depth alert: %w (original: %v)", rerr, od.err)
+		}
+		return Result{}, od.err
 	}
 	if err != nil {
 		rj, isRej := err.(*rejected)
@@ -548,11 +591,6 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			return Result{}, Commit{}, err
 		}
 	}
-	if caller.Level == authz.LevelRun && caller.RunScope != nil {
-		if obj.InRunScope, obj.InRunProject, err = caller.RunScope(tx, obj); err != nil {
-			return Result{}, Commit{}, err
-		}
-	}
 	pv, pol, err := policy.Current(tx)
 	if err != nil {
 		return Result{}, Commit{}, err
@@ -572,17 +610,18 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			webURL = w
 		}
 	}
-	tier := spec.Tier
-	if spec.TierFor != nil {
-		if tier, err = spec.TierFor(tx, caller, obj, req.Input); err != nil {
+	group := spec.Group
+	if spec.GroupFor != nil {
+		if group, err = spec.GroupFor(tx, caller, obj, req.Input); err != nil {
 			return Result{}, Commit{}, err
 		}
 	}
 	agent := caller.Agent()
-	allowance := pol.Allowance(agent)
+	card := pol.Card(agent)
+	now := x.now()
 	for _, act := range actions {
-		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Tier: tier, Object: obj, Fresh: caller.Fresh,
-			Agent: agent, Allowance: allowance, Owner: req.Owner, WebURL: webURL, Page: spec.Page, Channel: channel, Sender: sender}
+		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Group: group, Object: obj, Fresh: caller.Fresh,
+			Agent: agent, Card: card, Now: now, Owner: req.Owner, WebURL: webURL, Page: spec.Page, Channel: channel, Sender: sender}
 		d := authz.Decide(pol, ar)
 		if d.Err == nil {
 			continue
@@ -648,24 +687,24 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 	if caller.Actor.Via == domain.ViaRule && req.RuleID == "" {
 		return Result{}, Commit{}, invalid("rule action requires a rule id")
 	}
-	basis := &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID, Via: basisVia(caller, spec, tier), Command: spec.Name, Tier: tier.String(), Agent: caller.Agent()}
+	basis := &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID, Via: basisVia(caller, spec, group), Command: spec.Name, Tier: string(group), Agent: caller.Agent()}
 	at := x.now()
-	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, Tier: tier,
+	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, Group: group,
 		now: func() time.Time { return at }}
 	// 4 事务
 	var out Result
 	var value any
-	// 超阈值只记录不派发（健康类投递由 kernel/health 据该事件统一产出）。本人在 Web 的操作照常生效：深度照样沿用，
-	// 但本人就是熔断后的处理者，拦下他会让被熔断的事项既改不了也放弃不了。
-	if depth > x.MaxChainDepth && caller.Level != authz.LevelWeb {
-		if _, err := c.Emit(domain.Event{Type: domain.EvHealthAlert, Object: objectOrCommand(obj, spec),
-			Reason:  "chain depth exceeded",
-			Payload: mustJSON(map[string]any{"command": spec.Name, "chain_depth": depth, "threshold": x.MaxChainDepth})}); err != nil {
-			return Result{}, Commit{}, err
-		}
-		out.Suppressed = true
-		out.Version = cur
-	} else {
+	// 超阈值：命令不生效，返回明确的错误，健康告警（健康类投递由 kernel/health 据它统一产出）在独立事务里记。
+	// 本人在 Web 的操作照常生效：深度照样沿用，但本人就是熔断后的处理者，拦下他会让被熔断的事项既改不了也放弃不了。
+	if limit := x.ChainLimit(pol); depth > limit && caller.Level != authz.LevelWeb {
+		e := domain.NewError(domain.CodeConflict, fmt.Sprintf("chain depth %d is over the limit %d; nothing was written", depth, limit),
+			"stop and tell the owner; the limit is under Settings › Agent")
+		e.Reason = domain.ReasonChainDepthExceeded
+		return Result{}, Commit{}, &overDepth{err: e, ev: domain.Event{Type: domain.EvHealthAlert, Object: objectOrCommand(obj, spec), Actor: caller.Actor,
+			Reason: "chain depth exceeded", ChainDepth: depth, At: at, Basis: basis,
+			Payload: mustJSON(map[string]any{"command": spec.Name, "chain_depth": depth, "threshold": limit})}}
+	}
+	{
 		if value, err = spec.Apply(c); err != nil {
 			return Result{}, Commit{}, err
 		}
@@ -717,8 +756,8 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: live, Input: req.Input, Value: out.Value}, nil
 }
 
-// basisVia 是事件的"凭什么"（§14.3 审计）。
-func basisVia(c Caller, spec Spec, t authz.Tier) string {
+// basisVia 是事件的"凭什么"（§14.3 审计）：Agent 做默认卡之外的组记为凭权限卡（allowance）。
+func basisVia(c Caller, spec Spec, g authz.Group) string {
 	switch {
 	case c.Level == authz.LevelWeb:
 		return domain.BasisOwnerWeb
@@ -728,7 +767,7 @@ func basisVia(c Caller, spec Spec, t authz.Tier) string {
 		return domain.BasisRule
 	case c.Actor.Type == domain.ActorSystem:
 		return ""
-	case t == authz.TierDecide || t == authz.TierRules:
+	case g.OnCard() && g != authz.GroupView && g != authz.GroupOrganize && g != authz.GroupSourceEvents:
 		return domain.BasisAllowance
 	}
 	return domain.BasisOrganize

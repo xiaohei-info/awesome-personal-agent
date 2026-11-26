@@ -140,7 +140,7 @@ func TestReviewPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("do[]: %v", acts)
 	}
 	w, ok := p.Prompts["write-review"]
-	if !ok || w.Meta.Agent != "task" || w.Meta.Access != "read" {
+	if !ok || w.Meta.Agent != "task" || w.Meta.Access != "" {
 		t.Fatalf("write-review must be a read-only task prompt: %+v", w.Meta)
 	}
 	if got := strings.Join(w.Meta.ResultFields, ","); got != "period,sections[].body" { // 内核按它判定代转 done（§8.4）；节可以只有 title

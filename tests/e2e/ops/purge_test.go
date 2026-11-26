@@ -227,11 +227,11 @@ func TestFlowPurge(t *testing.T) {
 		}
 	})
 
-	step(t, "ACT-PRG-04 物理删除只在 Web", func(t *testing.T) {
+	step(t, "ACT-PRG-04 物理删除默认只有本人能做", func(t *testing.T) {
 		keep := f.material("不可被代删", "保留 KEEP-MATERIAL")
 		for _, c := range []struct{ name, token, code string }{
-			// 物理删除是 3b：硬线先于钥匙范围，任何钥匙都是 web_only（hard_line）（2026-11-20）。
-			{"DEL", f.DEL, "web_only"}, {"WRK", f.WRK, "web_only"}, {"OBS", f.OBS, "web_only"},
+			// 物理删除属权限卡的"物理删除"组（2026-11-26）：没开这一组的 delegate 为 tier_closed，worker、observer 在钥匙范围外。
+			{"DEL", f.DEL, "tier_closed"}, {"WRK", f.WRK, "permission_denied"}, {"OBS", f.OBS, "permission_denied"},
 		} {
 			r := f.APIRaw("POST", "/v1/settings/purge", `{"object":"`+keep+`"}`, c.token)
 			if r.Code != http.StatusForbidden || !strings.Contains(r.Body, `"code":"`+c.code+`"`) {

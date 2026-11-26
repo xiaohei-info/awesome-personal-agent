@@ -123,9 +123,9 @@ printf '%s' "$APA_TOKEN" > "$2/token"
 while [ ! -f "$2/go" ]; do sleep 0.05; done
 echo '{"session_id":"sess-cli","outcome":"done"}'
 `,
-	"summary":  `printf '%s' "$1" > "$2/prompt.seen"; echo '{"session_id":"sess-sum","outcome":"done"}'` + "\n",
+	"summary": `printf '%s' "$1" > "$2/prompt.seen"; echo '{"session_id":"sess-sum","outcome":"done"}'` + "\n",
 	// 先写一段 200KB 的正文（开头带标记），最后一行才是摘要：长正文任务的正文不在末段。
-	"bigout": `echo BRIEF-HEAD; i=0; while [ $i -lt 2000 ]; do printf '%099d\n' $i; i=$((i+1)); done; echo '{"session_id":"sess-big","outcome":"done"}'` + "\n",
+	"bigout":   `echo BRIEF-HEAD; i=0; while [ $i -lt 2000 ]; do printf '%099d\n' $i; i=$((i+1)); done; echo '{"session_id":"sess-big","outcome":"done"}'` + "\n",
 	"pwd":      `pwd -P > "$2/pwd"; echo '{"session_id":"s","outcome":"done"}'` + "\n",
 	"silent":   "true\n",
 	"exit1":    "exit 1\n",
@@ -836,11 +836,12 @@ func TestUnconfirmedDeclarationDoesNotRun(t *testing.T) {
 	}
 }
 
-// §8.7、§5.6：声明没有模板要的权限档位时不拉起（2026-11-20 起交回 task_refused，不转 needs_input）。
+// §8.7、§5.6：声明没有权限卡上那一档工具时不拉起（2026-11-20 起交回 task_refused，不转 needs_input）。
 func TestMissingAccessTierDoesNotRun(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary", "read")
-	out, err := e.svc.Launch(bg, e.task("hx", "full"))
+	e.setCard("legacy:hx", policy.PermFull)
+	out, err := e.svc.Launch(bg, e.task("hx", "brief"))
 	notStarted(t, err, domain.NoticeTaskRefused)
 	if out.Run != "" || !strings.Contains(out.Reason, "full") {
 		t.Fatalf("outcome: %+v", out)
@@ -1053,8 +1054,9 @@ func TestCommandFollowsDeclaration(t *testing.T) {
 	}
 }
 
-// 没有指定 harness、Web 也没设默认 harness，或档位超过上限：不拉起，交回带原因的 task_refused（§8.7、§13.6）。
-func TestLaunchWithoutHarnessOrOverCapGoesToOwner(t *testing.T) {
+// 没有指定 harness、Web 也没设默认 harness：不拉起，交回带原因的 task_refused（§8.7、§13.6）。模板头部的 access 不再生效：
+// 工具档位取权限卡（§14.5），模板写了 full 照样按卡上的只读拉起。
+func TestLaunchWithoutHarnessGoesToOwnerAndToolFollowsCard(t *testing.T) {
 	e := setup(t)
 	if _, err := e.svc.Launch(bg, Task{Pack: "tk", Template: "brief"}); err == nil {
 		t.Fatal("no title and no target accepted")
@@ -1067,15 +1069,25 @@ func TestLaunchWithoutHarnessOrOverCapGoesToOwner(t *testing.T) {
 	e.harness("hx", "summary", "read", "full")
 	e.setDefaultHarness("hx")
 	out, err = e.svc.Launch(bg, e.task("", "full"))
-	notStarted(t, err, domain.NoticeTaskRefused)
-	if out.Run != "" || !strings.Contains(out.Reason, "上限") || out.Item != "" { // 2026-11-20 改写：同上
-		t.Fatalf("over cap: %+v %v", out, err)
+	if err != nil || out.Run == "" {
+		t.Fatalf("template access is ignored: %+v %v", out, err)
 	}
-	if n := len(e.runList()); n != 0 {
-		t.Fatalf("runs: %d", n)
+	if rs := e.runList(); len(rs) != 1 || rs[0].Run.Access != policy.PermRead {
+		t.Fatalf("tool follows the card: %+v", rs)
 	}
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("New accepted empty options")
+	}
+}
+
+// setCard 以本人身份把 agent 权限卡上的工具档位设为 tool（其余同默认卡）。
+func (e *env) setCard(agent, tool string) {
+	e.t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "card", func(p *policy.Policy) error { p.AgentCards[agent] = policy.DefaultCard().WithTool(tool); return nil })
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
 	}
 }
 
@@ -1491,6 +1503,26 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 	res := e.waitResult()
 	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != ok || !strings.Contains(m, "boss@example.com") || !strings.Contains(m, "relay_input") || !strings.Contains(m, "relay-marker") {
 		t.Fatalf("listed message and the generate step's verdict must reach the task agent: %s", m)
+	}
+
+	// 权限卡上"后台运行看哪些消息"改为全部：同一个事项上白名单外的消息照常交给任务型（§14.6）。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "all messages", func(p *policy.Policy) error {
+			c := policy.DefaultCard()
+			c.RunsAllMessages = true
+			p.AgentCards["legacy:hx"] = c
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h(bg, e.call("gen", blocked)); err != nil {
+		t.Fatalf("with runs_all_messages the relay must start: %v", err)
+	}
+	res = e.waitResult()
+	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != blocked || !strings.Contains(m, "stranger@example.com") {
+		t.Fatalf("an unlisted message must reach the task agent when the card says all: %s", m)
 	}
 }
 

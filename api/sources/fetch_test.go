@@ -148,7 +148,7 @@ func TestFetchStoresContentAddressedBlobAndRecordsItInTheManifest(t *testing.T) 
 	}
 }
 
-// 授权：取回附件是一档，Web 与 delegate 直接可取回；observer、worker、运行凭据在钥匙范围外（4）；
+// 授权：取回附件是一档，Web、delegate 与运行凭据直接可取回；observer、worker 在钥匙范围外（4）；
 // 被拒的调用者不会触发来源程序，也不改清单。
 func TestFetchAuthorization(t *testing.T) {
 	e, id, calls := fetchEnv(t)
@@ -158,7 +158,6 @@ func TestFetchAuthorization(t *testing.T) {
 	denied := map[string]resp{
 		"observer": e.do(e.token(auth.Observer), "POST", path, ""),
 		"worker":   e.do(e.token(auth.Worker), "POST", path, ""),
-		"run":      e.do(e.runCredential(), "POST", path, ""),
 	}
 	for name, r := range denied {
 		if r.Code != 403 || r.code() != "permission_denied" {

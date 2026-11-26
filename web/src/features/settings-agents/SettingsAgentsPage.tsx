@@ -125,7 +125,7 @@ function Row({ e, pol }: { e: Entry; pol: Doc }) {
           {roleId("default_agent_id") === e.id && <span className="badge plain">{t.isDaily}</span>}{" "}
           {roleId("main_agent_id") === e.id && <span className="badge plain">{t.isMain}</span>}
         </span>
-        <span className="sub">{e.card && !e.card.enabled ? t.stateOff : ready(e) ? t.stateReady : t.stateMissing(step)} · {label("agentTier", (e.instance && e.card?.tier) || "organize")}</span>
+        <span className="sub">{e.card && !e.card.enabled ? t.stateOff : ready(e) ? t.stateReady : t.stateMissing(step)}{e.card?.permission?.groups.decide ? " · " + label("permissionGroup", "decide") : ""}</span>
       </div>
       {ready(e) ? <Link className="btn" to={to}>{t.open}</Link> : <Link className="btn" to={to + "#connect"}>{t.goConnect}</Link>}
     </li>

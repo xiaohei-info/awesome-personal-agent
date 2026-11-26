@@ -14,7 +14,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// CmdSplit 把误并入一条建议的来源事件拆出来，另成一条建议（§9.3 跨来源合并的纠正）。
+// CmdSplit 把误并入一条建议的来源事件拆出来，另成一条建议（§9.3 建议合并的纠正）。
 // 输入不带 to 时只过授权与状态校验，不写入；带 to（已为它建好的新事项）时在同一事务里改两边的建议信息与事件指向。
 const CmdSplit = "inbound.split"
 
@@ -54,7 +54,7 @@ func splittable(tx *store.Tx, v splitIn) (domain.Item, error) {
 }
 
 func registerSplit(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdSplit, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+	return x.Register(command.Spec{Name: CmdSplit, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseSplit(in)
 			return authz.Object{ID: v.Event}, err

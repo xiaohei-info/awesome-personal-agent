@@ -80,7 +80,7 @@ func TestMatrixRunIDExchange(t *testing.T) {
 
 // ---- 对照矩阵（§3.5 验收）：身份 × 每档一条代表命令 × 入口 ----
 
-// tierCols 是每档挑的一条代表命令：读、一档（改事项）、二档（接受建议）、3a（对话捕获开关）、3b（加远程仓库）。
+// tierCols 是每组挑的一条代表命令：查看、整理事项（改事项）、替我拍板（接受建议）、改日常（对话捕获开关）、Agent 与执行者配置（加远程仓库）。
 var tierCols = []string{"read", "organize", "decide", "rules", "power"}
 
 // entryOutcome 是一次调用的结果：成功为 0，被拒为错误体的退出码。
@@ -162,8 +162,8 @@ func outcomeOf(t *testing.T, code int, body []byte) entryOutcome {
 // 调用方自报的本人原话、会话类型、授权单（--evidence、APA_SESSION_KIND、X-APA-Grant）一律不改变结果。Web 本人没有命令行入口。
 func TestEntryMatrixIdentityByTier(t *testing.T) {
 	e := setupWith(t, true)
-	e.agent("DEL_DECIDE", "agent_d", policy.AllowDecide)
-	e.agent("DEL_RULES", "agent_r", policy.AllowRules)
+	e.agent("DEL_DECIDE", "agent_d", policy.DefaultCard().With(policy.GroupDecide))
+	e.agent("DEL_RULES", "agent_r", policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules))
 	ts := httptest.NewServer(e.srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -172,12 +172,12 @@ func TestEntryMatrixIdentityByTier(t *testing.T) {
 		who  string
 		want [5]int
 	}{
-		{"OBS", [5]int{0, 4, 4, 4, 20}},
-		{"WRK", [5]int{0, 0, 23, 4, 20}},
-		{"DEL", [5]int{0, 0, 23, 23, 20}},
-		{"DEL_DECIDE", [5]int{0, 0, 0, 23, 20}},
-		{"DEL_RULES", [5]int{0, 0, 0, 0, 20}},
-		{run, [5]int{0, 0, 23, 4, 20}},
+		{"OBS", [5]int{0, 4, 4, 4, 4}},
+		{"WRK", [5]int{0, 0, 23, 4, 4}},
+		{"DEL", [5]int{0, 0, 23, 23, 23}},
+		{"DEL_DECIDE", [5]int{0, 0, 0, 23, 23}},
+		{"DEL_RULES", [5]int{0, 0, 0, 0, 23}},
+		{run, [5]int{0, 0, 23, 23, 23}}, // 运行凭据只带身份：与所属 Agent（未设档位，只整理）的钥匙相同
 		{"web", [5]int{0, 0, 0, 0, 0}},
 	}
 	wantReason := map[int]string{domain.ExitPermissionDenied: domain.ReasonOutOfScope, domain.ExitTierClosed: domain.ReasonTierClosed, domain.ExitWebOnly: domain.ReasonHardLine}
@@ -194,7 +194,7 @@ func TestEntryMatrixIdentityByTier(t *testing.T) {
 				secret := e.secret[row.who]
 				if row.who == run {
 					target := id
-					if col == "rules" || col == "power" { // 项目不是运行的目标：运行范围只有目标事项
+					if col == "rules" || col == "power" { // 对象是项目：运行的目标另建一条事项
 						target = e.item(workHost, fmt.Sprintf("t%d", n))
 					}
 					secret = e.runFor(target)

@@ -22,7 +22,7 @@ func (s *svc) start() command.Spec {
 		var v ref
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.start", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/items",
+	return command.Spec{Name: "item.start", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/items",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

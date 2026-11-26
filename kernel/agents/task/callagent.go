@@ -85,7 +85,6 @@ type instParams struct {
 	AgentID     string `json:"agent_id"`
 	Mode        string `json:"mode"`
 	Instruction string `json:"instruction"`
-	Access      string `json:"access"`
 }
 
 func instanceParams(c rules.Call) (p instParams) {
@@ -251,7 +250,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	}
 	ip := instanceParams(c)
 	harness, _ := c.Action["harness"].(string)
-	t := Task{Selection: executors.Selection{Rule: c.Rule, Schedule: ip.AgentID}, Harness: harness, Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
+	t := Task{Selection: executors.Selection{Rule: c.Rule, Schedule: ip.AgentID}, Harness: harness, Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
 		Digest: digest, Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:
@@ -272,7 +271,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 // launchDepth 是规则拉起任务型与直接调用的链路深度，规则与后台运行同一处（chain.Next）；超过阈值只记录不派发，over 为真。
 func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, over bool, err error) {
 	depth = chain.Next(c.Depth)
-	if max := s.o.Exec.MaxChainDepth; depth > max {
+	if max := s.o.Exec.ChainLimitNow(ctx); depth > max {
 		object := "rule:" + c.Rule
 		if c.Item != nil {
 			object = c.Item.ID
@@ -289,7 +288,7 @@ func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, ove
 func (s *Service) attachedMessages(ctx context.Context, item string) ([]Message, error) {
 	var out []Message
 	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
-		as, err := allowlist.Messages(tx, item, authz.LevelWeb)
+		as, err := allowlist.Messages(tx, item, authz.LevelWeb, "")
 		for _, a := range as {
 			if a.AttachState == runner.AttachPending || a.AttachState == runner.AttachForwarded {
 				out = append(out, Message{Source: a.Source, Sender: a.Sender, Verified: a.SenderVerified, Body: a.Detail})

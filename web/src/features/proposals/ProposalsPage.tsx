@@ -41,7 +41,7 @@ export interface Proposal {
   proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[];
     merges?: Merge[]; absorbed?: Absorbed[]; integrated?: Integrated; similar?: { item: string; score: number }[]; split_from?: string; not_same?: string[]; sweep?: Sweep; urgent?: boolean };
 }
-/** 一次合并的留痕（§9.3 跨来源合并）：并入的来源事件、当时的内容、判断方与理由；item 是被折叠的那条建议（批量归类才有）。 */
+/** 一次合并的留痕（§9.3 建议合并）：并入的来源事件、当时的内容、判断方与理由；item 是被折叠的那条建议（批量归类才有）。 */
 interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; why?: string; batch?: string; item?: string; at: string }
 /** 归类折叠进这一条的建议本身（§9.3 proposal.absorbed）：撤销时服务端删掉，重新加载后随之消失。 */
 interface Absorbed { item: string; title: string; summary?: string; events?: string[]; source?: string; ref?: string; created_at?: string; action: string; at: string }

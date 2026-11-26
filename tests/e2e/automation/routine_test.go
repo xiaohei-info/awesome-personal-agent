@@ -75,11 +75,11 @@ func TestFlowRoutine(t *testing.T) {
 	k.step("ACT-RTN-01 准备默认 harness 与替身", func(t *testing.T) {
 		h = k.declareHarness("acc-stub-rtn", "routine")
 		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub-rtn"}`, 200)
-		k.webOK("PUT", "/v1/settings/access-limits", `{"permission_cap":{"default":"read","by_harness":{"acc-stub-rtn":"read"}}}`, 200)
+		k.webOK("PUT", "/v1/settings/agents/legacy:acc-stub-rtn/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"read"}`, 200)
 		if p := packList(t, e); p["routine"].Name == "" {
 			t.Fatalf("pack list 应含内置 routine 包: %v", p)
 		}
-		if pol := k.webOK("GET", "/v1/settings/policy", "", 200) + k.webOK("GET", "/v1/settings/access-limits", "", 200); !contains(strings.ReplaceAll(pol, " ", ""), `"default_harness":"acc-stub-rtn"`, `"acc-stub-rtn":"read"`) {
+		if pol := k.webOK("GET", "/v1/settings/policy", "", 200) + k.webOK("GET", "/v1/settings/access-limits", "", 200); !contains(strings.ReplaceAll(pol, " ", ""), `"default_harness":"acc-stub-rtn"`, `"legacy:acc-stub-rtn":{"groups"`) {
 			t.Errorf("Web 设置应显示默认 harness 为 acc-stub-rtn、上限 read: %s", pol)
 		}
 		k.markModelBaseline()
@@ -148,7 +148,7 @@ func TestFlowRoutine(t *testing.T) {
 		if n := len(routineItems()) - before; n != 0 {
 			t.Errorf("停用后不应再建 routine 事项，实际新增 %d", n)
 		}
-		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; !contains(l, ci) || !strings.Contains(strings.ReplaceAll(l, " ", ""), `"enabled":false`) {
+		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; !contains(l, ci) || len(stillEnabled(t, l, ci)) > 0 {
 			t.Errorf("instance list 应显示该实例已停用: %s", l)
 		}
 	})
@@ -251,45 +251,26 @@ func TestFlowRoutine(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-RTN-09 run 模式受权限档位上限约束", func(t *testing.T) {
-		disable(rtnInst) // 之后只看 edit 档实例的行为
+	// 2026-11-26 改写（权限卡）：实例的 access 已取消，工具档位取权限卡（这里是只读）；实例写了 edit 也按只读运行。
+	k.step("ACT-RTN-09 run 模式的工具档位取权限卡", func(t *testing.T) {
+		disable(rtnInst)
 		runsBefore := len(h.RunRecords())
 		id, status, body := newInstance(map[string]any{"schedule": "* * * * *", "mode": "run", "title": "acc 越权 {date}",
 			"instruction": "越权", "access": "edit", "output": "item"})
-		t.Logf("access=edit 实例建立结果: HTTP %d %s", status, body)
-		if status == 201 {
-			// 实例可建，但到期时 Run 不得以 edit 档拉起：这一份转 dropped 并写明超出上限。
-			// 2026-11-20 改写（本人裁决：规则建的事项没拉起转 dropped，不挂问题）：原等待事项转 needs_input；
-			// 改为等待转 dropped、阶段变更理由（apa why）含被拒的档位 edit（超出上限或声明没有该档位都会写出它；
-			// 原断言没有检查原因内容）。不拉起 Run、不以高档位运行两条不变。
-			instances = append(instances, id)
-			before := routineItems()
-			tick(1)
-			it := waitNew(before, "access=edit 实例到期", func(it ledgerItem) bool { return strings.HasPrefix(it.Title, "acc 越权 ") })
-			var raw string
-			if !k.WaitFor(45*time.Second, func() bool {
-				var cur ledgerItem
-				cur, raw = k.show(it.ID)
-				return cur.Phase == "dropped" && strings.Contains(k.apa(e.DEL, 0, "why", it.ID).Stdout, "edit")
-			}) {
-				t.Fatalf("超出上限时这一份应转 dropped 并写明被拒的档位: %s", raw)
-			}
-			t.Logf("超出上限的事项: %s", raw)
-			time.Sleep(3 * time.Second)
-			if n := runsOf(it.ID); n != 0 {
-				t.Errorf("超出上限不得拉起 Run，实际 %d", n)
-			}
-		} else if !contains(body, "access") && !contains(body, "cap") {
-			t.Errorf("被拒绝时应指出超出上限: %d %s", status, body)
+		if status != 201 {
+			t.Fatalf("建立实例: HTTP %d %s", status, body)
+		}
+		instances = append(instances, id)
+		tick(1)
+		if !k.WaitFor(45*time.Second, func() bool { return len(h.RunRecords()) > runsBefore }) {
+			t.Fatal("到期后应拉起运行")
 		}
 		for _, r := range h.RunRecords()[runsBefore:] {
 			if a := h.File(r, "args.txt"); !strings.Contains(a, "--access=read") || strings.Contains(a, "--access=edit") || strings.Contains(a, "--access=full") {
-				t.Errorf("不得以高于上限的档位运行: %s", a)
+				t.Errorf("应按权限卡的只读运行: %s", a)
 			}
 		}
-		if status == 201 {
-			disable(id)
-		}
+		disable(id)
 	})
 
 	// 以下两步复用一个新的 run 实例：每次到期换一次替身模式。

@@ -245,9 +245,9 @@ func (e *env) leases(t *testing.T, runID string) (out []lease) {
 }
 
 // registerFake 登记一条只做判定的命令，用来验证硬线（3b、系统内部）不受唤醒影响。
-func registerFake(t *testing.T, x *command.Executor, name string, tier authz.Tier) {
+func registerFake(t *testing.T, x *command.Executor, name string, group authz.Group) {
 	t.Helper()
-	if err := x.Register(command.Spec{Name: name, Action: authz.ActionChangeSettings, Tier: tier, Page: "/settings",
+	if err := x.Register(command.Spec{Name: name, Action: authz.ActionChangeSettings, Group: group, Page: "/settings",
 		Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{ID: name}, nil },
 		Apply:  func(*command.Ctx) (any, error) { return nil, nil }}); err != nil {
 		t.Fatal(err)
@@ -258,11 +258,11 @@ func registerFake(t *testing.T, x *command.Executor, name string, tier authz.Tie
 // 与没有租约的钥匙结果相同；运行身份只属于携带运行凭据的调用，它仍只在本次目标内。硬线与档位照旧。
 func TestDelegateKeepsItsOwnLevelDuringWakeRun(t *testing.T) {
 	e := setup(t)
-	registerFake(t, e.x, "test.power", authz.TierPower)
-	registerFake(t, e.x, "test.internal", authz.TierInternal)
+	registerFake(t, e.x, "test.power", authz.GroupOwner)
+	registerFake(t, e.x, "test.internal", authz.GroupInternal)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_main"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			p.AgentCards["agent_main"] = policy.DefaultCard().With(policy.GroupDecide)
 			return nil
 		})
 		return err
@@ -313,16 +313,16 @@ func TestDelegateKeepsItsOwnLevelDuringWakeRun(t *testing.T) {
 		}
 	}
 
-	// 运行凭据才是运行身份：只在本次目标内，目标外是 4，不能代答。
+	// 运行凭据只带身份：写目标外的事项、代答都随所属 Agent，与它的钥匙相同（§14.2）。
 	run := runidentity.Identity{Secret: secret, Now: func() time.Time { return e.now }}
 	if _, err := e.do(run, "item.update", map[string]any{"id": target, "title": "by run"}); err != nil {
 		t.Fatalf("run credential on its target: %v", err)
 	}
-	if _, err := e.do(run, "item.update", map[string]any{"id": other.ID, "title": "by run"}); exitOf(err) != domain.ExitPermissionDenied {
+	if _, err := e.do(run, "item.update", map[string]any{"id": other.ID, "title": "by run"}); err != nil {
 		t.Fatalf("run credential outside its target: %v", err)
 	}
-	if _, err := e.do(run, "decision.answer", map[string]any{"id": e.asked(t), "choice": "A"}); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("run credential deciding: %v", err)
+	if _, err := e.do(run, "decision.answer", map[string]any{"id": e.asked(t), "choice": "A"}); err != nil {
+		t.Fatalf("run credential deciding follows its Agent: %v", err)
 	}
 	if _, err := e.do(run, "test.power", map[string]any{}); exitOf(err) != domain.ExitWebOnly {
 		t.Fatalf("run credential 3b: %v", err)

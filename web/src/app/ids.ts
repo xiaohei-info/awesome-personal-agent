@@ -143,13 +143,17 @@ export type RunFault = (typeof RUN_FAULT)[number];
 export const NOTICE_CODE = ["task_refused", "background_refused", "resume_refused", "model_unset", "models_paused", "outbound_blocked", "chain_tripped", "action_rejected", "action_failed"] as const;
 export type NoticeCode = (typeof NOTICE_CODE)[number];
 /** 拒绝的三种口径：kernel/domain/errors.go Reason*（错误体与拒绝记录的 reason，设计 §14.3）；reauth_required 是硬线下网页还没再输口令 */
-export const REJECT_REASON = ["hard_line", "reauth_required", "tier_closed", "out_of_scope"] as const;
+export const REJECT_REASON = ["hard_line", "reauth_required", "tier_closed", "out_of_scope", "chain_depth_exceeded"] as const;
 export const REAUTH = "reauth_required";
 /** api/core ReasonCSRFInvalid：手里的 CSRF 令牌过时 */
 export const CSRF_INVALID = "csrf_invalid";
-/** Agent 的档位：kernel/policy/policy.go Allow*（设计 §14.3） */
-export const AGENT_TIER = ["organize", "decide", "rules"] as const;
-export type AgentTier = (typeof AGENT_TIER)[number];
+/** 权限卡的十组：kernel/policy/card.go Group*（设计 §14.3），按卡上的顺序 */
+export const PERMISSION_GROUP = ["view", "organize", "source_events", "decide", "rules", "connect", "outbound", "channels", "agents", "purge"] as const;
+export type PermissionGroup = (typeof PERMISSION_GROUP)[number];
+/** 后果较大的五组：折叠在「更多权限」里，开放时选有效期；物理删除没有「一直」 */
+export const GRAVE_GROUP: readonly PermissionGroup[] = ["connect", "outbound", "channels", "agents", "purge"];
+/** 改不了的规则：api/settings/exec/limits.go fixedRules（设计 §14.5） */
+export const FIXED_RULE = ["runs_not_captured", "done_needs_evidence", "same_account_host"] as const;
 /** 规矩改动撤不回的原因：kernel/why/rulechanges.go Revert* */
 export const REVERT_WHY = ["run_started", "data_purged", "superseded", "not_revertible"] as const;
 /** 旧模型授权单不可用的细分原因（只读历史值） */

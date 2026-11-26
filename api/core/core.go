@@ -20,11 +20,14 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -303,9 +306,35 @@ func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 		if runidentity.IsSecret(secret) { // 运行凭据：worker 级、绑定一次运行、没有代答能力
 			id = runidentity.Identity{Secret: secret, Origin: origin}
 		}
-		var caller command.Caller
-		if err := s.d.Store.View(r.Context(), func(tx *store.Tx) (err error) { caller, err = id.Authenticate(tx); return }); err != nil {
+		var (
+			caller command.Caller
+			closed *authz.Request
+			d      authz.Decision
+		)
+		if err := s.d.Store.View(r.Context(), func(tx *store.Tx) (err error) {
+			if caller, err = id.Authenticate(tx); err != nil || !safeMethod(r.Method) || caller.Kind == auth.Ext || caller.Kind == auth.Webhook {
+				return err
+			}
+			// 读取一律属"查看"组（§14.3）：Agent 的权限卡关了它，任何读路由都是 23。
+			_, pol, err := policy.Current(tx)
+			if err != nil {
+				return err
+			}
+			ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: authz.ActionRead, Group: authz.GroupView,
+				Agent: caller.Agent(), Card: pol.Card(caller.Agent()), Now: s.d.Now(), Page: "/settings/agents", Object: authz.Object{ID: "read:" + r.URL.Path}}
+			if d = authz.Decide(pol, ar); d.Err != nil {
+				closed = &ar
+			}
+			return nil
+		}); err != nil {
 			return nil, err
+		}
+		if closed != nil {
+			if ev, ok := authz.RejectionEvent(*closed, d); ok {
+				ev.At = s.d.Now()
+				_ = s.d.Store.Update(context.WithoutCancel(r.Context()), func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err })
+			}
+			return nil, d.Err
 		}
 		s.noteSeen(r.Context(), caller, origin)
 		return &Principal{Identity: id, Caller: caller}, nil

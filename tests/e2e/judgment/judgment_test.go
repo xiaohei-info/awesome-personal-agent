@@ -218,11 +218,12 @@ func TestFlowJudgmentRecord(t *testing.T) {
 		if read("jrc-high.code") != "200" {
 			t.Errorf("读目标事项的记录应返回 200，实际 %s", read("jrc-high.code"))
 		}
-		if c := read("jrc-low.code"); c != "403" && c != "404" {
-			t.Errorf("读 JRC-LOW 的记录应被拒（403 或 404），实际 %s", c)
+		// 2026-11-26 改写（权限卡）：运行凭据只带身份，别的事项的判断记录同样能读。
+		if c := read("jrc-low.code"); c != "200" {
+			t.Errorf("读 JRC-LOW 的记录应返回 200，实际 %s", c)
 		}
-		if read("jrc-cli.code") != "5" {
-			t.Errorf("运行内 apa judgment show <JRC-LOW> 退出码应为 5，实际 %s", read("jrc-cli.code"))
+		if read("jrc-cli.code") != "0" {
+			t.Errorf("运行内 apa judgment show <JRC-LOW> 退出码应为 0，实际 %s", read("jrc-cli.code"))
 		}
 	})
 

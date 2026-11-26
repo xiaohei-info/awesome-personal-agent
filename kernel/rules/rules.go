@@ -281,7 +281,7 @@ func setMode(src PackSource) command.Spec {
 		var v setModeIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "rule.set_mode", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/rules",
+	return command.Spec{Name: "rule.set_mode", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/rules",
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -331,7 +331,7 @@ func createTimer() command.Spec {
 		var v timerIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "rule.create_timer", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+	return command.Spec{Name: "rule.create_timer", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

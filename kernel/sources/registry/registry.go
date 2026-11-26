@@ -190,14 +190,14 @@ func Register(x *command.Executor, o Options) error {
 		m.spec(CmdRegisterExec, authz.ActionChangeSettings, opRegister, true),
 		m.spec(CmdUpdateExec, authz.ActionChangeSettings, opUpdate, true),
 		// 外发范围是数据去向，3b（裁决 3）。
-		{Name: CmdSetOutbound, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/sources", Object: objectOf,
+		{Name: CmdSetOutbound, Action: authz.ActionChangeSettings, Group: authz.GroupOutbound, Page: "/sources", Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, err := planOutbound(tx, in)
 				return err
 			},
 			Apply: m.applyOutbound},
 		// 登记后的启停与改名是 3a（改日常）。
-		{Name: CmdSetEnabled, Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/sources", Object: objectOf,
+		{Name: CmdSetEnabled, Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/sources", Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var e enabledInput
 				if err := strict(in, &e); err != nil {
@@ -207,7 +207,7 @@ func Register(x *command.Executor, o Options) error {
 				return err
 			},
 			Apply: m.applyEnabled},
-		{Name: CmdRename, Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/sources", Object: objectOf,
+		{Name: CmdRename, Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/sources", Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, _, err := m.planRename(tx, in)
 				return err
@@ -215,7 +215,7 @@ func Register(x *command.Executor, o Options) error {
 			Apply: m.applyRename},
 	}
 	// 原文保留期是 3a（改日常）。
-	specs = append(specs, command.Spec{Name: CmdSetRetention, Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/sources", Object: objectOf,
+	specs = append(specs, command.Spec{Name: CmdSetRetention, Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/sources", Object: objectOf,
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			_, _, err := planRetention(tx, in)
 			return err
@@ -242,7 +242,7 @@ const (
 )
 
 func (m *mod) spec(name string, a authz.Action, o op, exec bool) command.Spec {
-	return command.Spec{Name: name, Action: a, Tier: authz.TierPower, Page: "/sources", Object: objectOf,
+	return command.Spec{Name: name, Action: a, Group: authz.GroupConnect, Page: "/sources", Object: objectOf,
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			_, _, err := m.plan(tx, o, exec, in)
 			return err

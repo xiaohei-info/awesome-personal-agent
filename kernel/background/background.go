@@ -137,9 +137,10 @@ func str(a map[string]any, k string) string {
 }
 
 // spec 是一次拉起的全部参数：来自规则动作、提示词模板和 Web 设置，没有任何一项来自事件内容。
+// spec 是规则动作的参数。工具档位不在这里：一律取所属 Agent 权限卡上的值（§14.5），规则与模板里的 access 已取消。
 type spec struct {
-	runner, access, cwd, harness, executor string
-	prompt                                 packs.Prompt
+	runner, cwd, harness, executor string
+	prompt                         packs.Prompt
 }
 
 func (s *Service) parse(c rules.Call) (spec, error) {
@@ -153,7 +154,7 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 	if !ok {
 		return spec{}, invalid("prompt " + pack + "/" + tmpl + " does not exist")
 	}
-	sp := spec{runner: str(c.Action, "runner"), access: str(c.Action, "access"), cwd: str(c.Action, "cwd"),
+	sp := spec{runner: str(c.Action, "runner"), cwd: str(c.Action, "cwd"),
 		harness: str(c.Action, "harness"), executor: str(c.Action, "executor"), prompt: pr}
 	switch {
 	case sp.runner == "task" && pr.Meta.Agent != "task":
@@ -164,15 +165,6 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 		return sp, invalid("start_background_run runner must be task or main_session")
 	case sp.runner == "task" && sp.executor == "":
 		return sp, invalid("runner task needs an executor")
-	}
-	if sp.access == "" {
-		sp.access = pr.Meta.Access
-	}
-	if sp.access == "" {
-		sp.access = policy.PermRead
-	}
-	if sp.access != policy.PermRead && sp.access != policy.PermEdit && sp.access != policy.PermFull {
-		return sp, invalid("access must be read, edit or full")
 	}
 	if sp.cwd == "" {
 		sp.cwd = pr.Meta.Cwd
@@ -294,7 +286,7 @@ func (s *Service) Ready(ctx context.Context, c rules.Call) (string, error) {
 	if f.busy {
 		return "该事项已有在途运行", nil
 	}
-	return f.selected.AccessReason(sp.access), nil
+	return f.selected.AccessReason(f.selected.Snapshot.PermissionCap), nil
 }
 
 func (s *Service) start(ctx context.Context, c rules.Call) error {
@@ -313,8 +305,8 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if f.busy {
 		return s.audit(ctx, c, f, EvSkipped, f.item.ID, "该事项已有在途运行，不重复拉起", nil)
 	}
-	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
-		return chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, f.item.ID, f.depth, s.o.MaxChainDepth)
+	if limit := f.pol.Limits.Chain(s.o.MaxChainDepth); f.depth > limit { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
+		return chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, f.item.ID, f.depth, limit)
 	}
 	harness := f.selected.Card.Harness
 	headless, ms := executors.Headless{}, executors.MainSession{}
@@ -345,8 +337,8 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	switch {
 	case f.mode != rules.ModeAuto && !c.Requested: // 本人“现在开工”不看规则模式，其余复核照旧
 		reason = "规则已不是 auto"
-	case f.selected.AccessReason(sp.access) != "":
-		reason = f.selected.AccessReason(sp.access)
+	case f.selected.AccessReason(f.selected.Snapshot.PermissionCap) != "":
+		reason = f.selected.AccessReason(f.selected.Snapshot.PermissionCap)
 	case f.selected.Card.Rev > 0 && (wakes || how.fallback):
 		reason = "这张卡尚未绑定已有对话"
 	case wakes && s.o.Wake == nil:
@@ -412,7 +404,7 @@ func (s *Service) createChild(c rules.Call, parent domain.Item, executor string)
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(res.Value, &out); err != nil || out.ID == "" {
-		return "", fmt.Errorf("background: delegate.create returned no id (suppressed=%v): %v", res.Suppressed, err)
+		return "", fmt.Errorf("background: delegate.create returned no id: %v", err)
 	}
 	return out.ID, nil
 }
@@ -450,7 +442,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 	}
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
 	run := domain.Run{AgentSnapshot: &f.selected.Snapshot, ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
-		Harness: harness, Access: sp.access, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(f.pol.BackgroundRunTimeout() / time.Second)}
+		Harness: harness, Access: f.selected.Snapshot.PermissionCap, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(f.pol.BackgroundRunTimeout() / time.Second)}
 	if how.launch == policy.LaunchWake { // 进程在真实主会话所在处：不写运行目录与命令，凭据由网关插件换取（§13.6）
 		run.Launch = runidentity.LaunchWake
 		return s.enqueue(ctx, c, f, how, proc.Request{Run: run, External: true}, func(tx *store.Tx) error {
@@ -476,7 +468,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 	if sp.runner == "main_session" {
 		argv = append(argv, ms.Args...)
 	}
-	argv = append(argv, hl.Access[sp.access]...)
+	argv = append(argv, hl.Access[run.Access]...)
 	if len(hl.Session.Assign) > 0 {
 		run.SessionID = runID
 		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)

@@ -268,7 +268,7 @@ func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err er
 	f.declared = f.rec.Declaration.Headless != nil
 	// 挂靠消息按运行身份过滤：只有白名单内的发送者进入新会话的上下文。
 	for _, id := range slices.Compact([]string{itemID, f.link.Item}) {
-		ms, err := allowlist.Messages(tx, id, authz.LevelRun)
+		ms, err := allowlist.Messages(tx, id, authz.LevelRun, f.selected.Snapshot.AgentID)
 		if err != nil {
 			return f, err
 		}
@@ -347,16 +347,16 @@ func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome
 	if err != nil || !f.ready {
 		return Skipped, err
 	}
-	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发（§14.9）
+	if limit := f.pol.Limits.Chain(s.o.MaxChainDepth); f.depth > limit { // 与命令管线同一口径：超过阈值只记录不派发（§14.9）
 		return Skipped, s.audit(tx, f, domain.EvHealthAlert, "chain depth exceeded",
-			map[string]any{"chain_depth": f.depth, "threshold": s.o.MaxChainDepth})
+			map[string]any{"chain_depth": f.depth, "threshold": limit})
 	}
 	harness := f.selected.Card.Harness
 	var hl executors.Headless
 	if f.declared {
 		hl = *f.rec.Declaration.Headless
 	}
-	tier, runner := f.base.Run.Access, f.base.Run.Runner
+	tier, runner := f.selected.Snapshot.PermissionCap, f.base.Run.Runner // 续接是新进程：工具档位取权限卡现在的值（§14.5）
 	var reason string
 	switch {
 	case f.mode != rules.ModeAuto:
@@ -425,14 +425,16 @@ func materials(f facts, runDir string) (prompt, file string) {
 	body := fmt.Sprintf("问题：%s\n回答：%s\n续接备注（resume_note）：%s\n", a.Question, answerText(a), a.ResumeNote)
 	prompt = head + body + "完整上下文见 " + filepath.Join(runDir, "context.md") + "。\n"
 	var b strings.Builder
-	b.WriteString(head + body + "\n## 挂靠消息（仅白名单内的发送者）\n")
+	heading := "\n## 挂靠消息\n"
+	if allowlist.RunsFiltered(f.pol, f.selected.Snapshot.AgentID) {
+		heading = "\n## 挂靠消息（仅白名单内的发送者）\n"
+	}
+	b.WriteString(head + body + heading)
 	if len(f.msgs) == 0 {
 		b.WriteString("（无）\n")
 	}
-	for _, m := range f.msgs {
-		if m.ForwardAllowed {
-			fmt.Fprintf(&b, "- 来源 %s 发送者 %s：%s %s\n", m.Source, m.Sender, m.Subject, m.Summary)
-		}
+	for _, m := range f.msgs { // 已按权限卡过滤（allowlist.Messages）
+		fmt.Fprintf(&b, "- 来源 %s 发送者 %s：%s %s\n", m.Source, m.Sender, m.Subject, m.Summary)
 	}
 	return prompt, b.String()
 }
@@ -464,7 +466,7 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 	if ms := f.rec.Declaration.MainSession; base.Run.Runner == "main_session" && ms != nil {
 		argv = append(argv, ms.Args...)
 	}
-	argv = append(argv, hl.Access[base.Run.Access]...)
+	argv = append(argv, hl.Access[f.selected.Snapshot.PermissionCap]...)
 	mode, sid, contextName := string(Fresh), "", ""
 	if !sessionLost && len(hl.Resume) > 0 && f.session != "" && base.Run.Harness == harness {
 		mode, sid, contextName = string(Resumed), f.session, base.ContextName()
@@ -478,7 +480,7 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 	snapshot := f.selected.Snapshot
 	snapshot.SelectionSource = "resume"
 	run := domain.Run{AgentSnapshot: &snapshot, ID: runID, Category: domain.RunBackground, Runner: base.Run.Runner, Launch: "headless", Target: f.it.ID,
-		Harness: harness, SessionID: sid, Access: base.Run.Access, Basis: basis, ChainDepth: f.depth, TimeoutSec: timeout}
+		Harness: harness, SessionID: sid, Access: f.selected.Snapshot.PermissionCap, Basis: basis, ChainDepth: f.depth, TimeoutSec: timeout}
 	if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{OptionEnv: f.selected.Env, Command: argv, Dir: dir, RunDir: runDir, ContextName: contextName}}, s.o.Now()); err != nil {
 		return Skipped, err
 	}

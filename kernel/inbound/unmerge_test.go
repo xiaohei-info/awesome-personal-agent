@@ -9,7 +9,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// TestUnmergeRestoresFoldedProposalAndRejectsSecond：历史上被跨来源合并折叠的建议仍可撤销合并（回到建议页、搬回来源与留痕、重复撤销返回冲突）。
+// TestUnmergeRestoresFoldedProposalAndRejectsSecond：历史上被建议合并折叠的建议仍可撤销合并（回到建议页、搬回来源与留痕、重复撤销返回冲突）。
 func TestUnmergeRestoresFoldedProposalAndRejectsSecond(t *testing.T) {
 	e := newEnv(t, false)
 	// 先建两条来源事件，规则入队后经模拟批处理建两条建议。

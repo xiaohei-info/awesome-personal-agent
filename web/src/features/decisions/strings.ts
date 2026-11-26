@@ -36,7 +36,7 @@ const zh = {
   rejectedAction: { answer_decision: "替你回答", edit_any_item: "修改这件事", update_own: "改它负责的事", create_proposed: "提建议", delegate: "把活派出去" } as Record<string, string>,
   notApplied: "事项未被修改（未生效）",
   goSelf: "你来处理",
-  goTier: "去放开它的档位",
+  goTier: "去看它的权限卡",
   goKeys: "看它的钥匙",
   // 内核问题（按类别码渲染）与旧格式
   details: "详情",
@@ -80,7 +80,7 @@ const en: typeof zh = {
   rejectedAction: { answer_decision: "answering for you", edit_any_item: "changing this item", update_own: "changing its own item", create_proposed: "proposing", delegate: "handing work out" },
   notApplied: "The item was not changed (did not take effect)",
   goSelf: "Handle it yourself",
-  goTier: "Open its tier",
+  goTier: "See its permission card",
   goKeys: "See its keys",
   details: "Details",
   legacy: "Old format",

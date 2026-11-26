@@ -374,10 +374,10 @@ func TestFlowWebhook(t *testing.T) {
 		if st, err := os.Stat(kf); err != nil || st.Mode().Perm() != 0o600 {
 			t.Fatalf("HMAC 密钥文件 %s: %v %v", kf, st, err)
 		}
-		// 任何钥匙都不能创建：3b 硬线先于钥匙范围，observer 与档位放开的 delegate 都是 20。
-		for name, tok := range map[string]string{"OBS": f.OBS, "DEL": f.DEL} {
-			r := f.Apa(tok, "", "source", "webhook", "create", ghSource)
-			eq(t, name+" 创建接收密钥的退出码", r.Code, 20)
+		// 2026-11-26 改写（权限卡）：接收密钥属"接入来源"：observer 在钥匙范围外为 4，没开这一组的 delegate 为 23。
+		for name, want := range map[string]int{"OBS": 4, "DEL": 23} {
+			r := f.Apa(map[string]string{"OBS": f.OBS, "DEL": f.DEL}[name], "", "source", "webhook", "create", ghSource)
+			eq(t, name+" 创建接收密钥的退出码", r.Code, want)
 		}
 	})
 

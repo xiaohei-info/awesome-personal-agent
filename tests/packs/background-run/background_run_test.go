@@ -126,7 +126,7 @@ func newEnv(t *testing.T, taskExecutor string) *env {
 		"access": map[string][]string{"read": {}, "edit": {}}}})
 	if err := st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "t", func(p *policy.Policy) error {
-			p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx"
+			p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
 			return nil
 		})
 		return err
@@ -284,7 +284,7 @@ func TestPackDeclaresWhatC14Lists(t *testing.T) {
 	}
 	r := p.EventRules[0]
 	if r.ID != "handle-labelled" || r.Mode != "observe" || len(r.Do) != 1 || r.Do[0]["action"] != "start_background_run" ||
-		r.Do[0]["runner"] != "main_session" || r.Do[0]["prompt"] != "handle-item" || r.Do[0]["access"] != "edit" || r.Do[0]["cwd"] != "run_dir" {
+		r.Do[0]["runner"] != "main_session" || r.Do[0]["prompt"] != "handle-item" || r.Do[0]["access"] != nil || r.Do[0]["cwd"] != "run_dir" { // 工具档位取权限卡，规则不写 access
 		t.Fatalf("rule: %+v", r)
 	}
 	if _, set := r.Do[0]["harness"]; set {
@@ -415,7 +415,7 @@ func TestTaskRunnerPromptWorksOnChild(t *testing.T) {
 	e.must(owner, "project.allowed_executors.set", map[string]any{"id": p.ID, "executors": []string{"work-host.cli"}})
 	parent := e.newOpen("修复", []string{"run-it"}, map[string]any{"project": p.ID})
 	rs := e.runs_()
-	if len(rs) != 1 || rs[0].Run.Runner != "task" || rs[0].Run.Target == parent || rs[0].Run.Access != "read" {
+	if len(rs) != 1 || rs[0].Run.Runner != "task" || rs[0].Run.Target == parent || rs[0].Run.Access != policy.PermEdit { // 权限卡上的工具档位（newEnv 设为可编辑）
 		t.Fatalf("runs = %+v", rs)
 	}
 	child := e.item(rs[0].Run.Target)

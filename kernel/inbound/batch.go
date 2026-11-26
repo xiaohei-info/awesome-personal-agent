@@ -191,10 +191,7 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("inbound: batch prompt template %s/%s not loaded", DefaultPack, BatchTemplate)
 	}
-	access := pr.Meta.Access
-	if access == "" {
-		access = "read"
-	}
+	access := selected.Snapshot.PermissionCap // 工具档位取所属 Agent 权限卡上的值（§14.5）
 	if why := selected.AccessReason(access); why != "" {
 		return nil
 	}

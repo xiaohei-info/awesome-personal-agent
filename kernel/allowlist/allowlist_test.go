@@ -100,7 +100,7 @@ func allow(t *testing.T, st *store.Store, who ...string) {
 func read(t *testing.T, st *store.Store, id string, lv authz.Level) []Attached {
 	t.Helper()
 	var out []Attached
-	if err := st.View(bg, func(tx *store.Tx) (err error) { out, err = Messages(tx, id, lv); return }); err != nil {
+	if err := st.View(bg, func(tx *store.Tx) (err error) { out, err = Messages(tx, id, lv, "agent_a"); return }); err != nil {
 		t.Fatal(err)
 	}
 	return out
@@ -124,6 +124,44 @@ func TestRunSeesOnlyVerifiedAllowlisted(t *testing.T) {
 	allow(t, st, "alice")
 	if got := subjects(read(t, st, id, authz.LevelRun)); got != "s-m1" {
 		t.Fatalf("got %q, want only verified alice", got)
+	}
+}
+
+// 权限卡上"后台运行看哪些消息"改为全部后不再过滤；过滤时 Withheld 给出被滤掉的、还没确认的条数（§14.6）。
+func TestRunsAllMessagesTurnsTheFilterOff(t *testing.T) {
+	st := open(t)
+	id := seed(t, st, false)
+	var withheld int
+	if err := st.View(bg, func(tx *store.Tx) error {
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		it, err := items.Get(tx, id)
+		if err != nil {
+			return err
+		}
+		withheld, err = Withheld(tx, id, Keep(pol, authz.LevelRun, "agent_a", it))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if all := len(read(t, st, id, authz.LevelWeb)); withheld != all || all == 0 {
+		t.Fatalf("withheld %d of %d", withheld, all)
+	}
+	if err := st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, web, "test", func(p *policy.Policy) error {
+			c := policy.DefaultCard()
+			c.RunsAllMessages = true
+			p.AgentCards["agent_a"] = c
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, all := subjects(read(t, st, id, authz.LevelRun)), subjects(read(t, st, id, authz.LevelWeb)); got != all {
+		t.Fatalf("filter off: run sees %q, all is %q", got, all)
 	}
 }
 
@@ -201,10 +239,10 @@ func TestFilteredAndKeep(t *testing.T) {
 		{authz.LevelWorker, domain.Item{}, false},
 	}
 	for _, c := range cases {
-		if Filtered(c.lv, c.it) != c.want {
+		if Filtered(policy.Default(), c.lv, "", c.it) != c.want {
 			t.Errorf("Filtered(%v, unattended=%v) != %v", c.lv, c.it.Unattended, c.want)
 		}
-		if (Keep(policy.Default(), c.lv, c.it) == nil) == c.want {
+		if (Keep(policy.Default(), c.lv, "", c.it) == nil) == c.want {
 			t.Errorf("Keep nil-ness wrong for %v", c.lv)
 		}
 	}

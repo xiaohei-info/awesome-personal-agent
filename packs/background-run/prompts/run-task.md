@@ -1,6 +1,5 @@
 ---
 agent: task
-access: read
 cwd: run_dir
 ---
 你在子事项 {item_id} 上自己完成工作，本人不在场。

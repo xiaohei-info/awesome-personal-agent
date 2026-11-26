@@ -615,7 +615,7 @@ func TestReportDoneRefreshesCommit(t *testing.T) {
 // agents.check 属连接模块（它依赖本包），这里登记一个同名替身命令，只验证本包对提交的订阅。
 func TestAgentsCheckRefreshesRepo(t *testing.T) {
 	e := setup(t)
-	if err := e.x.Register(command.Spec{Name: "agents.check", Action: authz.ActionRead, Tier: authz.TierOrganize,
+	if err := e.x.Register(command.Spec{Name: "agents.check", Action: authz.ActionRead, Group: authz.GroupOrganize,
 		Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil },
 		Apply:  func(*command.Ctx) (any, error) { return nil, nil }}); err != nil {
 		t.Fatal(err)

@@ -18,8 +18,11 @@ import (
 func init() { client.Register("why", run) }
 
 func run(c *client.Ctx, args []string) error {
+	if len(args) >= 1 && args[0] == "denied" {
+		return denied(c, args[1:])
+	}
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		return domain.NewError(domain.CodeInvalidRequest, "apa why takes exactly one item or run id", "usage: apa why <id> [--pretty]")
+		return domain.NewError(domain.CodeInvalidRequest, "apa why takes exactly one item or run id", "usage: apa why <id> [--pretty] | denied [--agent <id>]")
 	}
 	var tl kwhy.Timeline
 	if err := c.Do(context.Background(), "GET", "/why/"+url.PathEscape(args[0]), nil, &tl); err != nil {
@@ -116,4 +119,50 @@ func renderJudgment(b *strings.Builder, j *kwhy.Judgment) {
 	for i, l := range r.Levels {
 		fmt.Fprintf(b, "        %d. %s\n", i+1, judgment.LevelLine(l, r.Band))
 	}
+}
+
+// denied 是 `apa why denied`（§14.5）：读这个 Agent 最近被拦下的记录，每条四行说明——没做成什么、哪条限制、在哪看、谁能改。
+// 数据来自 GET /agents/{agent}/limits（与 Agent 页同一份）；--agent 只给本人在本机看别的 Agent，缺省是调用者自己。
+func denied(c *client.Ctx, args []string) error {
+	agent := "me"
+	switch {
+	case len(args) == 2 && args[0] == "--agent":
+		agent = args[1]
+	case len(args) != 0:
+		return domain.NewError(domain.CodeInvalidRequest, "invalid arguments for apa why denied", "usage: apa why denied [--agent <id>]")
+	}
+	var l struct {
+		DeniedWeek int `json:"denied_week"`
+		Denied     []struct {
+			At          string `json:"at"`
+			Object      string `json:"object"`
+			Action      string `json:"action"`
+			Group       string `json:"group"`
+			Reason      string `json:"reason"`
+			Exit        int    `json:"exit"`
+			WebURL      string `json:"web_url"`
+			SettingsURL string `json:"settings_url"`
+			OwnerOnly   bool   `json:"owner_only"`
+		} `json:"denied"`
+	}
+	if err := c.Do(context.Background(), "GET", "/agents/"+url.PathEscape(agent)+"/limits", nil, &l); err != nil {
+		return err
+	}
+	if !c.Pretty {
+		return c.Print(l)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "denied in the last 7 days: %d\n", l.DeniedWeek)
+	for _, d := range l.Denied {
+		limit, where, who := "permission card group "+d.Group+" is not allowed", d.SettingsURL, "the owner, on this Agent's permission card"
+		switch {
+		case d.OwnerOnly:
+			limit, where, who = "only the owner can do this", d.WebURL, "nobody: no setting opens it"
+		case d.Exit != 23:
+			limit, where, who = "this key cannot reach the object ("+d.Reason+")", "/settings/agents", "the owner, by issuing a different key"
+		}
+		fmt.Fprintf(&b, "%s\n  not done: %s on %s\n  limit: %s\n  see: %s\n  who can change it: %s\n", d.At, d.Action, d.Object, limit, where, who)
+	}
+	_, err := fmt.Fprint(c.Env.Stdout, b.String())
+	return err
 }

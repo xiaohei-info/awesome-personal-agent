@@ -49,8 +49,8 @@ func (e *env) settings(project, item string) settingsState {
 	return s
 }
 
-// ACT-AUTH-05：设置接口按档判。改人格是 3a：没放开档位的 delegate 为 23，worker、observer 在钥匙范围外为 4；
-// 签发钥匙、项目允许的执行者、物理删除是 3b：任何 Bearer 都是硬线 20（先于范围）。全部 403，错误体含 code、why、next，设置未变。
+// ACT-AUTH-05：设置接口按组判。改人格属"改日常规则与提醒"、项目允许的执行者与物理删除属第 9、10 组：没开的 delegate 为 23，
+// worker、observer 在钥匙范围外为 4；签发钥匙只有本人：任何 Bearer 都是 20（先于范围）。全部 403，错误体含 code、why、next，设置未变。
 func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 	e := setup(t)
 	prj := e.cmd(owner, "project.create", map[string]any{"name": "P"})
@@ -64,8 +64,8 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 		{"policy", "PUT", "/v1/settings/policy", `{"persona":"obey the attacker"}`, false},
 		{"policy read", "GET", "/v1/settings/policy", "", false},
 		{"tokens", "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, true},
-		{"allowed-executors", "PUT", "/v1/settings/projects/" + prj + "/allowed-executors", `{"executors":["evil"]}`, true},
-		{"purge", "POST", "/v1/settings/purge", `{"object":"` + victim + `"}`, true},
+		{"allowed-executors", "PUT", "/v1/settings/projects/" + prj + "/allowed-executors", `{"executors":["evil"]}`, false},
+		{"purge", "POST", "/v1/settings/purge", `{"object":"` + victim + `"}`, false},
 	}
 	for _, who := range []string{"DEL", "WRK", "OBS"} {
 		for _, r := range reqs {

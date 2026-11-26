@@ -3,6 +3,8 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -74,6 +77,160 @@ func TestAuthzSwitchIsPreviewableAndRunsOnce(t *testing.T) {
 		it, err := kitems.Get(tx, item)
 		if len(es) != 1 || len(gs) != 1 || gs[0].RevokedAt.IsZero() || len(left) != 0 || it.Ask.DefaultOnTimeout != "" {
 			t.Fatalf("switch: events %d, grant revoked %v, legacy %v, default %q", len(es), !gs[0].RevokedAt.IsZero(), left, it.Ask.DefaultOnTimeout)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 权限卡切换（§16.5）：已做过第二版切换的账本只做换算——兼容卡与名录里的 Agent 按映射表写卡（没设过档位的只整理），
+// 工具档位原值搬入，旧段去掉，不再撤授权单；只做一次，没有任何一组被自动放开。
+func TestCardsSwitchMapsTiersOnce(t *testing.T) {
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := time.Now()
+	if err := st.Update(ctx, func(tx *store.Tx) error {
+		doc, _ := policy.Sections(policy.Default())
+		delete(doc, "agent_cards")
+		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"legacy:hermes":{"tier":"rules"}}}`)
+		doc["permission_cap"] = json.RawMessage(`{"by_agent":{"agent_a":"edit"},"default":"read","by_harness":{"hermes":"full"}}`)
+		legacy, _ := json.Marshal(doc)
+		if _, err := tx.Exec(`INSERT INTO policy_version (version, doc, at) VALUES (1, ?, ?)`, string(legacy), now.UnixNano()); err != nil {
+			return err
+		}
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvAuthzSwitched, Object: policy.SwitchObject, Actor: authzSwitchActor, Payload: json.RawMessage(`{}`), At: now})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := switchAuthz(ctx, st, clock.Now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		es, _ := eventlog.Query(tx, eventlog.Filter{Type: domain.EvAuthzSwitched}, 0, 10)
+		left, _ := policy.LegacyKeys(tx)
+		_, p, err := policy.Stored(tx)
+		a, h := p.Card("agent_a"), p.Card("legacy:hermes")
+		if len(es) != 2 || len(left) != 0 || a.Tool != policy.PermEdit || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupOrganize, now) ||
+			h.Tool != policy.PermFull || !h.Allows(policy.GroupRules, now) || h.Allows(policy.GroupConnect, now) || h.RunsAllMessages {
+			t.Fatalf("switch: events %d legacy %v cards %+v", len(es), left, p.AgentCards)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 预演（§16.5）：在临时数据目录上，换算出的权限卡等于映射表（含没设过档位的 Agent），最近的命令按卡重判，不写账本。
+func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	st, err := store.Open(home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := time.Now()
+	agent := domain.Actor{Type: domain.ActorAgent, Via: domain.ViaCLI}
+	if err := st.Update(ctx, func(tx *store.Tx) error {
+		key, _, err := auth.New(nil).Issue(tx, auth.Spec{Kind: auth.Delegate, Harness: "hermes"}) // 没绑 Agent 的宿主钥匙
+		if err != nil {
+			return err
+		}
+		agent.Principal = key.ID
+		// 绑定执行者的 worker 钥匙：认证层以执行者 id 为操作者主语（auth.Credential.Actor），旧事件里记的是 exec_w。
+		for _, w := range []auth.Spec{{Kind: auth.Worker, AgentID: "agent_w", Harness: "hx", Executor: "exec_w"},
+			{Kind: auth.Worker, AgentID: "agent_a", Harness: "hx", Executor: "exec_x"}, {Kind: auth.Worker, AgentID: "agent_w", Harness: "hx", Executor: "exec_x"}} {
+			if _, _, err := auth.New(nil).Issue(tx, w); err != nil {
+				return err
+			}
+		}
+		for _, x := range []struct{ obj, principal string }{{"itm_7", "exec_w"}, {"itm_8", "exec_x"}} {
+			if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvDecisionResolved, Object: x.obj, At: now, Payload: json.RawMessage(`{}`),
+				Actor: domain.Actor{Type: domain.ActorAgent, Principal: x.principal, Via: domain.ViaCLI}}); err != nil {
+				return err
+			}
+		}
+		run, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{AgentSnapshot: &domain.AgentSnapshot{AgentID: "agent_r", ConfigRev: 1},
+			Category: domain.RunBackground, TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, now)
+		if err != nil {
+			return err
+		}
+		// 兼容卡下的运行（快照 legacy:hermes，InstanceID 为空）同样按快照归属：拍板开着，接受建议照旧生效。
+		lr, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{AgentSnapshot: &domain.AgentSnapshot{AgentID: "legacy:hermes"},
+			Category: domain.RunBackground, TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, now)
+		if err != nil {
+			return err
+		}
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemPhaseChanged, Object: "itm_6", At: now, Payload: json.RawMessage(`{"before":{"phase":"proposed"}}`),
+			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:" + lr.ID, Via: domain.ViaCLI}}); err != nil {
+			return err
+		}
+		// 旧事件没记依据、发起者是运行凭据：按运行记录归到 agent_r（拍板开着），代答照旧生效。
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvDecisionResolved, Object: "itm_5", At: now, Payload: json.RawMessage(`{}`),
+			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:" + run.ID, Via: domain.ViaCLI}}); err != nil {
+			return err
+		}
+		doc, _ := policy.Sections(policy.Default())
+		delete(doc, "agent_cards")
+		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"agent_r":{"tier":"decide"},"agent_w":{"tier":"decide"},"legacy:hermes":{"tier":"rules"}}}`)
+		doc["permission_cap"] = json.RawMessage(`{"by_agent":{},"default":"read","by_harness":{"hermes":"full"}}`)
+		raw, _ := json.Marshal(doc)
+		if _, err := tx.Exec(`INSERT INTO policy_version (version, doc, at) VALUES (1, ?, ?)`, string(raw), now.UnixNano()); err != nil {
+			return err
+		}
+		for _, ev := range []domain.Event{
+			{Type: domain.EvDecisionResolved, Object: "itm_1", Basis: &domain.Basis{Agent: "legacy:hermes"}},
+			// 旧事件没记依据：按发起的钥匙归到 legacy:hermes，接受建议照旧生效。
+			{Type: domain.EvItemPhaseChanged, Object: "itm_4", Payload: json.RawMessage(`{"before":{"phase":"proposed"}}`)},
+			{Type: domain.EvCommandRejected, Object: "itm_2", Payload: json.RawMessage(`{"action":"answer_decision","tier":"decide","code":"tier_closed","agent":"legacy:hermes"}`)},
+			{Type: domain.EvCommandRejected, Object: "source.register", Payload: json.RawMessage(`{"action":"manage_source","tier":"power","code":"web_only","agent":"legacy:hermes"}`)},
+			{Type: domain.EvCommandRejected, Object: "itm_3", Payload: json.RawMessage(`{"action":"change_settings","tier":"rules","code":"tier_closed","agent":"agent_a"}`)},
+		} {
+			ev.Actor, ev.At = agent, now
+			if ev.Payload == nil {
+				ev.Payload = json.RawMessage(`{}`)
+			}
+			if _, err := eventlog.Append(tx, ev); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pv, err := RunPreview(ctx, home, 30, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, a := pv.Plan.Cards["legacy:hermes"], pv.Plan.Cards["agent_a"]
+	if pv.Switched || h.Tool != policy.PermFull || !h.Allows(policy.GroupRules, now) || h.Allows(policy.GroupConnect, now) ||
+		a.Tool != policy.PermRead || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupSourceEvents, now) {
+		t.Fatalf("cards: %+v", pv.Plan.Cards)
+	}
+	if pv.Rejudge["unchanged"] != 7 || pv.Rejudge["now_allowed"] != 1 || pv.Rejudge["uncertain"] != 1 || len(pv.Details) != 2 ||
+		!strings.Contains(pv.Details[0].Note, "share actor exec_x") || pv.Details[0].Outcome != "uncertain" || pv.Details[1].Command != "rejected:answer_decision" {
+		t.Fatalf("rejudge: %v %+v", pv.Rejudge, pv.Details)
+	}
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		done, err := cardsSwitched(tx)
+		if done {
+			t.Fatal("preview must not switch")
 		}
 		return err
 	}); err != nil {

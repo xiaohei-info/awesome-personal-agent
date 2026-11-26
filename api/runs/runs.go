@@ -18,7 +18,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 )
@@ -48,12 +47,8 @@ func authorize(tx *store.Tx, p *core.Principal) error {
 	if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
 		return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read the ledger", "use an owner or agent credential")
 	}
-	_, pol, err := policy.Current(tx)
-	if err != nil {
-		return err
-	}
 	// Decision.Err 是 *domain.Error：直接返回会把 nil 指针包成非空 error。
-	if d := authz.Decide(pol, authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, Action: authz.ActionRead, Tier: authz.TierRead}); d.Err != nil {
+	if d := authz.CanRead(authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level}); d.Err != nil {
 		return d.Err
 	}
 	return nil

@@ -99,8 +99,7 @@ def message(d):
     title = (d.get("content") or {}).get("title", "")
     return (f"[APA wake] Background run {run} woke this session for item {item}. {title}\n"
             f"Handle it as in chat: read `apa context`, then report. Run every apa command through the "
-            f"`apa_wake_cli` tool with run_id={run}; it carries the run identity. This run cannot decide, "
-            f"accept or dismiss for the owner: if the owner must decide, ask and end the run as needs_input.")
+            f"`apa_wake_cli` tool with run_id={run}; it carries the run identity and the same permission card as this Agent.")
 
 
 NOTICE_KIND = {"reminder": "APA 提醒", "brief": "APA 简报", "health": "APA 需要你看一下"}

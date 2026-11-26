@@ -77,7 +77,7 @@ function useSay(): (r: Row, st: Status) => Said {
           problem: t.receiptOne(credential(r.who ?? ""), t.receiptCmd[r.cmd ?? ""] ?? r.cmd ?? "", why),
           impact: t.receiptImpact,
           button: tier ? t.goTier : scope ? t.seeKey : t.seeWhy,
-          to: tier ? "/settings" : scope ? "/settings/agents" : r.to, // 档位在「我来拍板」，钥匙在 Agent 页
+          to: tier ? "/settings" : scope ? "/settings/agents" : r.to, // 权限卡一览在「权限总览」，钥匙在 Agent 页
           second: { button: t.seeWhy, to: r.obj ? "/audit?object=" + encodeURIComponent(r.obj) : "/audit" },
         };
       }

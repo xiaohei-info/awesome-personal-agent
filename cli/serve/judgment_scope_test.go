@@ -35,9 +35,9 @@ func (rt roundTrip) RoundTrip(r *http.Request) (*http.Response, error) {
 	return rec.Result(), nil
 }
 
-// ACT-JRC-02、ACT-JRC-05：在完整账本结构上，每条判断记录逐级可读；运行凭据读目标事项的记录 200，
-// 读别的事项的记录 404，CLI 退出码 5；记录里没有资料正文。
-func TestRunCredentialReadsOnlyTargetItemJudgmentRecords(t *testing.T) {
+// ACT-JRC-02、ACT-JRC-05：在完整账本结构上，每条判断记录逐级可读；运行凭据只带身份，目标事项与别的事项的记录都能读；
+// 记录里没有资料正文。
+func TestRunCredentialReadsJudgmentRecords(t *testing.T) {
 	ctx := context.Background()
 	reg, err := registry()
 	if err != nil {
@@ -137,7 +137,7 @@ func TestRunCredentialReadsOnlyTargetItemJudgmentRecords(t *testing.T) {
 	if r := get(runSecret, "/v1/judgments/jd_high"); r.Code != 200 {
 		t.Fatalf("run credential, target item's record: %d %s", r.Code, r.Body)
 	}
-	if r := get(runSecret, "/v1/judgments/jd_mid"); r.Code != 404 {
+	if r := get(runSecret, "/v1/judgments/jd_mid"); r.Code != 200 {
 		t.Fatalf("run credential, other item's record: %d %s", r.Code, r.Body)
 	}
 
@@ -151,7 +151,7 @@ func TestRunCredentialReadsOnlyTargetItemJudgmentRecords(t *testing.T) {
 	if code, out := apa(runSecret, "judgment", "show", "jd_high"); code != 0 || !strings.Contains(out, `"jd_high"`) {
 		t.Fatalf("apa judgment show (target): %d %s", code, out)
 	}
-	if code, _ := apa(runSecret, "judgment", "show", "jd_mid"); code != domain.ExitNotFound {
-		t.Fatalf("apa judgment show (other item) exit = %d, want %d", code, domain.ExitNotFound)
+	if code, _ := apa(runSecret, "judgment", "show", "jd_mid"); code != 0 {
+		t.Fatalf("apa judgment show (other item) exit = %d", code)
 	}
 }

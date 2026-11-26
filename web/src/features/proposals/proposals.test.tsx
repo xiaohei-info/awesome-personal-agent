@@ -204,7 +204,7 @@ describe("被拒绝的处理（ACT-PROP-05、flow-proposal-triage）", () => {
     const a = await screen.findByRole("article", { name: "建议 a" });
     const note = within(a).getByRole("note", { name: "被拒绝的处理" });
     expect(note).toHaveTextContent("no basis for dismiss");
-    expect(within(note).getByRole("link", { name: "去放开它的档位" })).toHaveAttribute("href", "/settings") // 档位在「我来拍板」;
+    expect(within(note).getByRole("link", { name: "去看它的权限卡" })).toHaveAttribute("href", "/settings") // 档位在「我来拍板」;
     expect(within(screen.getByRole("article", { name: "建议 b" })).queryByRole("note")).toBeNull();
     expect(within(a).getByRole("button", { name: "接受" })).toBeEnabled();
   });
@@ -359,7 +359,7 @@ describe("接受并交给 Agent", () => {
   });
 });
 
-describe("跨来源合并：展开看来源与依据，一键拆分（§9.3）", () => {
+describe("建议合并：展开看来源与依据，一键拆分（§9.3）", () => {
   it("展开列出每个来源的名字、时间、原话与合并依据；点「拆出来」发 POST /source-events/{id}/split，回执指向新建议", async () => {
     const merged = prop("m", { origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sources: ["e1", "e2"],
       merges: [{ event: "e2", source: "src_wx", title: "AgentSafe 资产确认", by: "classifier", score: 0.72, judgment: "jdg_1", at: "2030-01-01T00:00:00Z" }] } as any });
@@ -386,7 +386,7 @@ describe("跨来源合并：展开看来源与依据，一键拆分（§9.3）",
   });
 });
 
-describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3）", () => {
+describe("合并建议的归类记录：过程可追溯、可撤销（§9.3）", () => {
   const merged = prop("m", { origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sources: ["e1", "e2"],
     merges: [{ event: "e2", source: "src_wx", title: "AgentSafe 资产确认", by: "generate", score: 0.81, why: "同一个资产编号 B18630823", batch: "mb_1", item: "f1", at: "2030-01-01T02:00:00Z" }] } as any });
   function withMerge() {

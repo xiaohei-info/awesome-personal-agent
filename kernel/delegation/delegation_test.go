@@ -469,9 +469,10 @@ func TestCreateAuthorizationAndParentPhase(t *testing.T) {
 func TestUnattendedInheritance(t *testing.T) {
 	e := setup(t)
 	parent := e.parent(t, "")
-	// 直接构造运行身份的调用者：运行凭据的范围解析不在本模块，这里只验证标记继承。
 	run := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run", Via: domain.ViaCLI, Run: "r1"}, Level: authz.LevelRun}
-	e.wantExit(t, domain.ExitPermissionDenied, run, "delegate.create", map[string]any{"parent": parent, "assignee": workHost})
+	if !e.item(t, e.delegate(t, run, parent, workHost)).Unattended {
+		t.Fatal("a child created by a run must be unattended")
+	}
 
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, _, snap, err := items.Revise(tx, parent, "test", time.Now(), func(it *domain.Item) error { it.Unattended = true; return nil })
@@ -529,13 +530,13 @@ func TestUnrelatedItemCommandsDoNotRaiseSettleErrors(t *testing.T) {
 	e.consistent(t)
 }
 
-// flow-brief：任务型运行持运行凭据，对本次运行的目标事项（不是委派子事项）apa report 生效；范围外的事项仍被拒绝。
+// flow-brief：任务型运行持运行凭据，对本次运行的目标事项（不是委派子事项）apa report 生效；
+// 运行凭据只带身份，写别的事项与所属 Agent 的钥匙同样判定（§14.2）。
 func TestRunCredentialReportsOnRunTarget(t *testing.T) {
 	e := setup(t)
 	target := e.parent(t, "")
 	other := e.parent(t, "")
-	run := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r1", Via: domain.ViaCLI, Run: "r1"}, Level: authz.LevelRun,
-		RunScope: func(_ *store.Tx, o authz.Object) (bool, bool, error) { return o.ID == target, false, nil }}
+	run := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r1", Via: domain.ViaCLI, Run: "r1"}, Level: authz.LevelRun}
 
 	e.must(t, run, "delegate.report", rep(target, "progress", Evidence{}))
 	if got := e.item(t, target); got.Phase != domain.PhaseOpen || got.StatusLabel != "s" {
@@ -553,9 +554,9 @@ func TestRunCredentialReportsOnRunTarget(t *testing.T) {
 	if n := countType(e.events(t), domain.EvDelegationReported); n != 0 {
 		t.Fatalf("run-target receipts emitted %d delegation.reported", n)
 	}
-	e.wantExit(t, domain.ExitPermissionDenied, run, "delegate.report", rep(other, "done", Evidence{Link: "x"}))
-	if got := e.item(t, other); got.Phase != domain.PhaseOpen {
-		t.Fatalf("out-of-scope item changed: %+v", got)
+	e.must(t, run, "delegate.report", rep(other, "done", Evidence{Link: "x"}))
+	if got := e.item(t, other); got.Phase != domain.PhaseDone {
+		t.Fatalf("a run writes a non-target item like its Agent's key: %+v", got)
 	}
 	e.consistent(t)
 }

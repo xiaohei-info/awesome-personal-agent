@@ -1174,7 +1174,7 @@ func TestAgentAnswerPushesWhatItAnswered(t *testing.T) {
 	e := setup(t)
 	e.toChannel()
 	e.policy(func(p *policy.Policy) {
-		p.AgentTier.ByAgent = map[string]policy.AgentAllowance{"ag": {Tier: policy.AllowDecide}}
+		p.AgentCards = map[string]policy.Card{"ag": policy.DefaultCard().With(policy.GroupDecide)}
 	})
 	id := e.asked(nil)
 	if d := e.claim("channel:chan"); d == nil || d.Class != domain.DeliveryDecision {

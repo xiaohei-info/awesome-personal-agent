@@ -356,7 +356,7 @@ func TestProbeConflictWhileRunning(t *testing.T) {
 func TestProbeWebOnly(t *testing.T) {
 	e := setup(t)
 	rec := e.do("POST", modelsPath, `{"endpoint":"generate","url":"https://x.example","api_key":"k"}`, e.bearer(auth.Delegate))
-	if rec.Code != 403 || errCode(t, rec) != "web_only" {
+	if rec.Code != 403 || errCode(t, rec) != "tier_closed" {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }

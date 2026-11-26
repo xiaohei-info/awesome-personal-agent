@@ -21,7 +21,7 @@ import (
 const CmdProposeUnjudged = "inbound.propose_unjudged"
 
 func registerPropose(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdProposeUnjudged, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+	return x.Register(command.Spec{Name: CmdProposeUnjudged, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseDispose(in)
 			return authz.Object{ID: v.Event}, err
@@ -376,7 +376,7 @@ func (s *Service) planMerge(ctx context.Context, key string) (into, attachTo str
 }
 
 // place 为来源事件找到它的建议：合并键命中可并入的建议就返回那条（并标记 Merge），否则新建，
-// 命中已接受事项时新建的建议推荐补到它。语义相近的跨来源合并不在这里当场做，由批量归类（Sweep）做。调用方把返回的 mergeFields 带进处置命令。
+// 命中已接受事项时新建的建议推荐补到它。语义相近的不在这里判断，由处理它的后台 Agent 决定。调用方把返回的 mergeFields 带进处置命令。
 func (s *Service) place(ctx context.Context, id command.Identity, rule string, src domain.Source, ev domain.SourceEvent, p proposal, project string) (string, mergeFields, error) {
 	key := mergeKeyOf(ev)
 	into, attachTo, err := s.planMerge(ctx, key)

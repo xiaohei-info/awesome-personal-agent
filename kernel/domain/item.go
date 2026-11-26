@@ -206,7 +206,7 @@ type Proposal struct {
 	Sources       []string `json:"sources,omitempty"`   // 来源事件 id
 	MergeKey      string   `json:"merge_key,omitempty"` // 合并键（§9.3）：同一件事的后续事件凭它找到这条建议
 	Urgent        *bool    `json:"urgent,omitempty"`    // 起草或抽取对"今天不处理是否有后果"的判断；缺失表示模型没给，只供紧急提醒使用（§9.3）
-	// Merges 是并入这条建议的来源事件各自的合并留痕（§9.3 跨来源合并）：并入时的候选内容与依据，拆分时据此另建一条。
+	// Merges 是并入这条建议的来源事件各自的合并留痕（§9.3 建议合并）：并入时的候选内容与依据，拆分时据此另建一条。
 	Merges []ProposalMerge `json:"merges,omitempty"`
 	// Similar 是只提示、没有自动合并的相似建议（判断方拿不准或不可用）。
 	Similar []ProposalSimilar `json:"similar,omitempty"`
@@ -214,7 +214,7 @@ type Proposal struct {
 	NotSame []string `json:"not_same,omitempty"`
 	// SplitFrom 是这条建议从哪条建议里拆出来的。
 	SplitFrom string `json:"split_from,omitempty"`
-	// Sweep 是跨来源合并的批量归类（§9.3）：新建议记 pending，归类后记结论与依据。升级前的建议没有，不回填。
+	// Sweep 是合并建议的归类记录（§9.3）：历史批量归类与批量接受时的合并写的；新建议没有。
 	Sweep *ProposalSweep `json:"sweep,omitempty"`
 	// Absorbed 是归类折叠进这一条的建议本身的溯源（§9.3）：折叠时不论那条名下有没有消息（迁移来的建议常没有）都记一条，撤销时删掉。
 	Absorbed []ProposalAbsorbed `json:"absorbed,omitempty"`
@@ -252,7 +252,7 @@ type ProposalAbsorbed struct {
 	At      time.Time `json:"at"` // 折叠的时刻
 }
 
-// 跨来源合并的归类结论（ProposalSweep.Action）。
+// 合并建议的归类结论（ProposalSweep.Action）。
 const (
 	SweepKeep      = "keep"      // 留着：照常作为建议
 	SweepMerge     = "merge"     // 合并成一条建议：来源并入去处，这条折叠
@@ -277,7 +277,7 @@ const (
 	RejectNotLanded      = "not_landed"      // 落账时整合没有落成
 )
 
-// ProposalSweep 是一条建议在跨来源合并里的归类记录。State 为 pending（待归类）或 done。
+// ProposalSweep 是一条建议在建议合并里的归类记录。State 为 pending（待归类）或 done。
 // By 是判断方：generate（写作模型）或 rule（规则，没有调模型）。Run 是本批那次模型调用的 run id，Size 与 Chars 是同批条数与送出字数；
 // Deferred 是本批因资料超出预算、砍半后留到下一轮的条数（0 为没砍半）。
 type ProposalSweep struct {
@@ -297,10 +297,9 @@ type ProposalSweep struct {
 	// Group 与 Topic 是归类时模型给的分组（批号/G<k>）与主题：下一批作已有主题沿用；建议页的分组不读它（§7.2）。
 	Group string `json:"group,omitempty"`
 	Topic string `json:"topic,omitempty"`
-	// Backfill 是本人补打的待归类标记（apa merge mark-pending）：维护循环不自动归类它，只由 apa merge run --apply 处理；归类后保留。
+	// Backfill、Retry 是已取消的 apa merge 留在历史记录上的标记，只读。
 	Backfill *SweepBackfill `json:"backfill,omitempty"`
-	// Retry 记这条建议被 apa merge run --retry-rejected 重新纳入过：上一次判定的批号、拒绝码与原因。有它说明重判过一次，不再重复纳入。
-	Retry *SweepRetry `json:"retry,omitempty"`
+	Retry    *SweepRetry    `json:"retry,omitempty"`
 	// Prev 是批量接受折叠这一条之前它的归类记录（By 为 bulk 时才有）：按批撤销时原样恢复，建议回到折叠前的状态。
 	Prev *ProposalSweep `json:"prev,omitempty"`
 }

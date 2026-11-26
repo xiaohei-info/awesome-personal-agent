@@ -66,7 +66,7 @@ func (e *env) decideFor() {
 	e.t.Helper()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_dlg"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			p.AgentCards["agent_dlg"] = policy.DefaultCard().With(policy.GroupDecide)
 			return nil
 		})
 		return err
@@ -124,7 +124,7 @@ func (e *env) verify() {
 	}
 }
 
-// ACT-PRH-08、09、18：把建议补到已有事项是二档：档位只整理的 delegate 得 23，运行钥匙在范围外；
+// ACT-PRH-08、09、18：把建议补到已有事项是二档：档位只整理的 delegate 与运行凭据都得 23；
 // 放开后补到，之后同一线程的消息直接回到目标事项。
 func TestAttachProposalToExistingItem(t *testing.T) {
 	e := attachEnv(t)
@@ -134,8 +134,8 @@ func TestAttachProposalToExistingItem(t *testing.T) {
 	if _, err := e.do(delegate, CmdAttach, "", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitTierClosed {
 		t.Fatalf("organize-only delegate must get exit 23: %v", err)
 	}
-	if _, err := e.do(runIdent, CmdAttach, "", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("run identity must get exit 4: %v", err)
+	if _, err := e.do(runIdent, CmdAttach, "", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitTierClosed {
+		t.Fatalf("run identity follows its Agent and must get exit 23: %v", err)
 	}
 	if got := e.item(pa); got.Phase != domain.PhaseProposed {
 		t.Fatalf("rejected attach changed the proposal: %+v", got)
@@ -269,8 +269,8 @@ func TestBatchExplicitPerItemOutcomesAndRevert(t *testing.T) {
 	if err != nil || len(closed) != 4 || closed[0].Code != domain.CodeTierClosed || closed[2].Code != domain.CodeTierClosed || closed[3].Code != domain.CodeNotFound {
 		t.Fatalf("organize-only delegate: %+v %v", closed, err)
 	}
-	// 运行钥匙：这些建议都在它的范围外，逐条 4。
-	if out, err := Batch(bg, e.x, e.st, command.Request{Identity: runIdent, Owner: "owner"}, plan); err != nil || out[0].Code != domain.CodePermissionDenied || out[1].Code != domain.CodePermissionDenied {
+	// 运行凭据随所属 Agent：同样逐条 23。
+	if out, err := Batch(bg, e.x, e.st, command.Request{Identity: runIdent, Owner: "owner"}, plan); err != nil || out[0].Code != domain.CodeTierClosed || out[1].Code != domain.CodeTierClosed {
 		t.Fatalf("run identity: %+v %v", out, err)
 	}
 	// 超上限：整批不生效。
@@ -523,7 +523,9 @@ func (e *env) propose(src, id, subject string, extra map[string]any) string {
 // 关闭后又有动静、编号只是前缀相同的，一律拿不准、不动。依据写进每条忽略理由；同一幂等键重放不多改；改回建议后逐条接受照常。
 func TestBatchEndedOnlyOnVerifiableEvidence(t *testing.T) {
 	e := attachEnv(t)
-	link := func(n int) map[string]any { return map[string]any{"link": fmt.Sprintf("https://code.test/o/r/pull/%d", n)} }
+	link := func(n int) map[string]any {
+		return map[string]any{"link": fmt.Sprintf("https://code.test/o/r/pull/%d", n)}
+	}
 	merged := e.propose("src_t", "pr-7", "PR 7", link(7))
 	e.emit("src_t", "ticket", ev("pr-7-m", "ticket.merged", "PR 7", link(7)))
 	reopened := e.propose("src_t", "pr-8", "PR 8", link(8))

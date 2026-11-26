@@ -186,10 +186,10 @@ describe("被拒绝的替你回答（档位没放开，设计 §14.3）", () => 
     const a = (await screen.findByRole("article", { name: "事项 a" }));
     const note = within(a).getByRole("note", { name: "被拒绝的替你回答" });
     expect(note).toHaveTextContent("DEL");
-    expect(note).toHaveTextContent("等你确认：它的档位没放开");
+    expect(note).toHaveTextContent("它的权限卡上这一组没开");
     expect(note).toHaveTextContent("the Agent's tier does not open this");
     expect(within(note).getByRole("link", { name: "你来处理" })).toHaveAttribute("href", "/items/a");
-    expect(within(note).getByRole("link", { name: "去放开它的档位" })).toHaveAttribute("href", "/settings") // 档位在「我来拍板」;
+    expect(within(note).getByRole("link", { name: "去看它的权限卡" })).toHaveAttribute("href", "/settings") // 权限总览;
     expect(within(screen.getByRole("article", { name: "事项 b" })).queryByRole("note")).toBeNull();
   });
 
@@ -197,7 +197,7 @@ describe("被拒绝的替你回答（档位没放开，设计 §14.3）", () => 
     mount(server([item("a")], undefined, { a: rej({ code: "basis_required", reason: undefined, why: "needs the owner's words" }) }).impl);
     const note = await screen.findByRole("note", { name: "被拒绝的替你回答" });
     expect(note).toHaveTextContent("这一项需要你本人决定");
-    expect(within(note).getByRole("link", { name: "去放开它的档位" })).toBeInTheDocument();
+    expect(within(note).getByRole("link", { name: "去看它的权限卡" })).toBeInTheDocument();
   });
 });
 
