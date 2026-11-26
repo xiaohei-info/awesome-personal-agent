@@ -2,7 +2,7 @@ import type { Dict } from "../../app/i18n";
 import { shared } from "../settings-policy/strings";
 
 // 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表是分工、Agent 一行一个、所有 Agent 共用的语言与语气、很少用到的钥匙；
-// 一个 Agent 一页：接入清单、基本信息、钥匙与档位、后台权限、在哪里做、被谁使用、高级。
+// 一个 Agent 一页：接入清单、基本信息、钥匙、权限卡与限制清单、在哪里做、被谁使用、高级。
 const zh = {
   ...shared.zh,
   title: "Agent",
@@ -91,11 +91,6 @@ const zh = {
   legacyBasics: "从旧设置迁移来的，名字取自程序",
   duplicate: "复制成新的 Agent",
   copy: " 副本",
-  tools: "后台权限",
-  notOffered: "它没提供",
-  allowFirst: "先允许 APA 在后台启动它",
-  fullPreview: "完全放开会给它：",
-  confirmFull: "确认完全放开",
   launchTitle: "在哪里做",
   launchHow: { headless: "单独在后台做（不打扰对话）", wake: "在和你的对话里接着做" } as Record<string, string>,
   wakeOff: (name: string, why: string) => `${name} 还没打开唤醒：${why}`,
@@ -103,8 +98,6 @@ const zh = {
   howToOpen: "怎么打开",
   changeWakeOn: "这次变化：能在对话里接着做了",
   changeWakeOff: (why: string) => `这次变化：不能在对话里接着做了${why ? `（${why}）` : ""}`,
-  tierNow: (tier: string) => `能替你做到：${tier}`,
-  tierChange: "在「我来拍板」改",
   records: "它做过什么",
   recChanges: "它改过的事（诊断 › Agent 改动）",
   recRules: "它改过的日常规矩（诊断 › 规矩改动）",
@@ -126,7 +119,7 @@ const zh = {
   savedIt: "我已保存",
   fullDecl: "启动方式原文",
   purpose: {
-    delegate: { name: "Agent 本人", can: "能碰全部事项；能做到哪一档看它的档位" },
+    delegate: { name: "Agent 本人", can: "能碰全部事项；能做哪些事看它的权限卡" },
     worker: { name: "执行者交回结果", can: "能更新派给它的事、提问、交材料；不能替你决定" },
     observer: { name: "只读的程序（脚本、看板）", can: "能看事项和材料、提一条等你确认的新事项；不能改事项" },
   } as Record<string, { name: string; can: string }>,
@@ -263,11 +256,6 @@ const en: typeof zh = {
   legacyBasics: "Carried over from old settings; named after the program",
   duplicate: "Copy as a new Agent",
   copy: " copy",
-  tools: "Background access",
-  notOffered: "Not offered",
-  allowFirst: "Let APA start it in the background first",
-  fullPreview: "Fully open gives it:",
-  confirmFull: "Confirm fully open",
   launchTitle: "Where it works",
   launchHow: { headless: "On its own in the background (leaves the chat alone)", wake: "Continue in your chat with it" },
   wakeOff: (name, why) => `${name} has not turned on wake-up: ${why}`,
@@ -275,8 +263,6 @@ const en: typeof zh = {
   howToOpen: "How to turn it on",
   changeWakeOn: "What changes: it can continue in your chat now",
   changeWakeOff: (why) => `What changes: it can no longer continue in your chat${why ? ` (${why})` : ""}`,
-  tierNow: (tier) => `May go as far as: ${tier}`,
-  tierChange: "Change in Your call",
   records: "What it has done",
   recChanges: "Its changes (Diagnostics › Agent changes)",
   recRules: "Its rule changes (Diagnostics › Rule changes)",
@@ -298,7 +284,7 @@ const en: typeof zh = {
   savedIt: "I've saved it",
   fullDecl: "How it starts (original)",
   purpose: {
-    delegate: { name: "The Agent itself", can: "Can touch every item; how far it goes follows its tier" },
+    delegate: { name: "The Agent itself", can: "Can touch every item; what it may do follows its permission card" },
     worker: { name: "An executor returning results", can: "May update work given to it, ask, submit materials; never decides for you" },
     observer: { name: "A read-only program (script, dashboard)", can: "May read items and materials and propose a new item for you to confirm; cannot change items" },
   },

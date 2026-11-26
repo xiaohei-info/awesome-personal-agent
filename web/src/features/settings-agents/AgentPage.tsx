@@ -2,12 +2,11 @@ import { useEffect, useId, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
-import { PERM } from "../../app/ids";
 import { useRaw } from "../../app/raw";
-import { Val, useLabel } from "../../app/values";
+import { Val } from "../../app/values";
 import { Basics } from "./AgentEditor";
 import { Permission } from "./Permission";
-import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
+import { PolicyPage, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { AGENT_KINDS, entries, hasKey, LEGACY, useData, type Credential, type Declaration, type Entry } from "./data";
 import { useEntryName } from "./SettingsAgentsPage";
 import { strings } from "./strings";
@@ -21,13 +20,13 @@ import { AudienceChoice, ScopeEditor, ScopeSummary, SourceScopeTable, useSources
 export function AgentPage() {
   const t = useT(strings);
   const { id = "" } = useParams();
-  const { docs, error: polError, load: loadPol, save } = usePolicyDocs(["policy", "access-limits"] as const);
+  const { docs, error: polError, load: loadPol, save } = usePolicyDocs(["policy"] as const);
   const { data, error, setError, load } = useData();
   const nameOf = useEntryName();
-  const pol = docs?.policy, lim = docs?.["access-limits"];
+  const pol = docs?.policy;
   const e = data ? entries(data).find((x) => x.id === id) : undefined;
   const reloadAll = async () => { await load(); await loadPol(); };
-  if (data && pol && lim && !e)
+  if (data && pol && !e)
     return (
       <main>
         <p className="eyebrow"><Link to="/settings/agents">{t.back}</Link></p>
@@ -36,10 +35,10 @@ export function AgentPage() {
     );
   const name = e ? nameOf(e) : t.agent;
   return (
-    <PolicyPage title={name} error={polError ?? (data ? null : error)} ready={!!pol && !!lim && !!data && !!e} onRetry={() => { void loadPol(); void load(); }}>
+    <PolicyPage title={name} error={polError ?? (data ? null : error)} ready={!!pol && !!data && !!e} onRetry={() => { void loadPol(); void load(); }}>
       <p className="eyebrow"><Link to="/settings/agents">{t.back}</Link></p>
       {error && data && <div role="alert">{error}</div>}
-      {e && pol && lim && (
+      {e && pol && (
         <div className="stack">
           <Connect e={e} name={name} reload={load} onError={setError} />
           <RolesLine e={e} pol={pol} />

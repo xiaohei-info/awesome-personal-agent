@@ -1,6 +1,6 @@
 // Test double for the settings pages that edit the policy document (not shipped: only imported by tests).
 // It answers like api/settings/policy: three routes read and replace whole sections, keys are masked,
-// an over-long persona is rejected and nothing is saved, GET /agents lists the Agent cards with their tier,
+// an over-long persona is rejected and nothing is saved, GET /agents lists the Agent cards with their permission card,
 // and a non-Web session gets 403 web_only (error bodies follow appendix B.3).
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
@@ -8,7 +8,7 @@ const err = (status: number, code: string, why: string) => json(status, { code, 
 export const SECTIONS: Record<string, string[]> = {
   "/v1/settings/policy": ["disturb", "persona", "persona_lang", "background_run_timeout_sec", "channels", "default_harness", "main_session_launch"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
-  "/v1/settings/access-limits": ["permission_cap"],
+  "/v1/settings/access-limits": ["agent_cards"],
 };
 
 export function initialDoc(): Record<string, any> {
@@ -22,7 +22,7 @@ export function initialDoc(): Record<string, any> {
     main_session_launch: { by_harness: {}, by_rule: {} },
     forward_allowlist: { telegram: ["alice"] },
     channel_answerers: {},
-    permission_cap: { default: "read", by_harness: {} },
+    agent_cards: {},
   };
 }
 
@@ -134,7 +134,6 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
   const rules = structuredClone(opts.rules ?? []);
   const patches: { url: string; body: any }[] = [];
   const puts: { path: string; body: any; csrf?: string }[] = [];
-  const tiers: { url: string; body: any }[] = [];
   const previews: any[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -162,10 +161,6 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
     if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: (doc.persona_lang || (url.endsWith("locale=zh") ? "zh" : "en")) === "zh" ? "Default tone (zh)" : "Default tone (en)" });
-    if (url.endsWith("/tier") && method === "PUT") {
-      tiers.push({ url, body: JSON.parse(init.body as string) });
-      return json(200, { version: ++version });
-    }
     if (url === "/v1/agents") return opts.webOnlyDenied ? err(403, "web_only", "settings can only be used by the owner in the Web UI") : json(200, { agents: opts.agents ?? [], selected: {}, reason: "" });
     const keys = SECTIONS[url];
     if (!keys) return err(404, "not_found", "no such route");
@@ -191,5 +186,5 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
     if (JSON.stringify(doc) !== before) version++;
     return json(200, render());
   }) as unknown as typeof fetch;
-  return { impl, puts, doc, tiers, previews, patches, rules };
+  return { impl, puts, doc, previews, patches, rules };
 }
