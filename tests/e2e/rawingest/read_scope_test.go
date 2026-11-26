@@ -145,7 +145,8 @@ func TestFlowRawReadScope(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-RSC-05 运行凭据与 ext 密钥不能读来源原文", func(t *testing.T) {
+	// 2026-11-26 改写（权限卡）：运行凭据与所属 Agent 的钥匙同读，能读来源原文；ext 密钥仍不能。
+	k.step("ACT-RSC-05 运行凭据能读来源原文，ext 密钥不能", func(t *testing.T) {
 		_, _, env := k.StubRun("hang") // 运行期间凭据有效：在超时（4 秒）之前用完
 		tok := env["APA_TOKEN"]
 		if tok == "" {
@@ -155,9 +156,9 @@ func TestFlowRawReadScope(t *testing.T) {
 			t.Fatalf("运行凭据应能调 today: %d", r.Code)
 		}
 		id := ids["src_acc_raw"]
-		eq(t, "运行凭据读来源事件的 HTTP 状态", k.APIRaw("GET", "/v1/source-events/"+id, "", tok).Code, 403)
+		eq(t, "运行凭据读来源事件的 HTTP 状态", k.APIRaw("GET", "/v1/source-events/"+id, "", tok).Code, 200)
 		eq(t, "ext 密钥读来源事件的 HTTP 状态", k.APIRaw("GET", "/v1/source-events/"+id, "", k.CHAN).Code, 403)
-		eq(t, "apa source event 的退出码（运行凭据）", k.Apa(tok, "", "source", "event", id).Code, exitDenied)
+		eq(t, "apa source event 的退出码（运行凭据）", k.Apa(tok, "", "source", "event", id).Code, 0)
 	})
 
 	k.step("ACT-RSC-06 已接受事项上的挂靠消息：内部钥匙全文，外部钥匙按档位（挂上事项不再放行）", func(t *testing.T) {

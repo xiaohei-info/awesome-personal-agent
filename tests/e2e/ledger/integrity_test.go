@@ -151,7 +151,7 @@ func TestFlowLedgerIntegrity(t *testing.T) {
 			"TestInv3PhaseEntryConstraints", "TestInv3ReportDoneNeedsResultEvidence",
 			"TestInv5AllowedExecutorsBindEveryEntry", // 第 4 条（web_only 只升不降）随高风险类别取消（2026-11-20）
 			"TestInv6RuleActionEventsDoNotRetriggerRules", "TestInv7OneRunPerItem",
-			"TestInv8RunIdentityCannotAnswer", "TestInv9RevisionsAreAppendOnly",
+			"TestInv8RunIdentityFollowsAgent", "TestInv9RevisionsAreAppendOnly",
 			"TestInv10OnlyOutcallReachesNetworkOrSubprocess", "TestInv11ProxyDecisionsNeedWordsAndSession")
 		goTest(t, "./kernel/...")
 	})

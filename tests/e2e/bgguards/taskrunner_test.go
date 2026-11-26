@@ -66,8 +66,9 @@ $APA report "$ITEM" --outcome done --summary 任务型完成 --link https://exam
 		}
 	})
 
-	f.step("ACT-BGT-03 运行凭据只限目标范围", func(t *testing.T) {
-		// 无关事项：另一条委派链上的子事项（assignee 是 WRK 的执行者），运行凭据不属于它。
+	// 2026-11-26 改写（权限卡）：运行凭据只带身份，写目标之外的事项、建项目与所属 Agent 的钥匙同样判定（默认卡开着整理事项）。
+	f.step("ACT-BGT-03 运行凭据与所属 Agent 同权", func(t *testing.T) {
+		// 别的事项：另一条委派链上的子事项（assignee 是 WRK 的执行者）。
 		other := f.task("bgt-unrelated-parent", "acc-work")
 		unrelated := idOf(t, f.apa(f.DEL, 0, "delegate", "--parent", other, "--assignee", "work-host.cli").Stdout)
 		f.mode("summary-only", preamble+`
@@ -81,12 +82,12 @@ $APA project create --name evil-project > /dev/null 2>&1; rc project_create
 		f.task("bgt-scope", "acc-work", "acc-task")
 		f.waitFor("脚本跑完", 40*1e9, func() bool { return f.outFile("project_create.rc") != "" })
 		for name, want := range map[string]string{"target_report": "0", "sub_delegate": "0", "timer_ask": "0",
-			"other_report": "4", "other_transition": "4", "project_create": "4"} {
+			"other_report": "0", "other_transition": "0", "project_create": "0"} {
 			eq(t, name+" 退出码 "+f.outFile(name+".out"), f.outFile(name+".rc"), want)
 		}
-		eq(t, "无关事项阶段", f.phase(unrelated), "open")
-		if f.projectNamed("evil-project") {
-			t.Error("运行凭据不应建出项目")
+		eq(t, "别的事项阶段", f.phase(unrelated), "done")
+		if !f.projectNamed("evil-project") {
+			t.Error("运行凭据与所属 Agent 一样能建项目")
 		}
 		eq(t, "运行建的子事项 assignee", f.item(idFrom(f.outFile("sub.out")))["assignee"], "work-host.cli")
 		if len(f.events(idFrom(f.outFile("timer_ask.out")), "decision.requested")) == 0 {
