@@ -165,9 +165,18 @@ event_rules:
 	})
 
 	step(t, "造出：外呼超时", func(t *testing.T) {
+		// 任务型运行的时限取策略 background_run_timeout_sec（模板 timeout 不再生效）：临时调到下限 15 分钟再拨测试时钟，
+		// 之后改回默认值，免得下一步的长时占用在后续拨时钟时跟着超时。
+		f.webOK("PUT", "/settings/policy", `{"background_run_timeout_sec":900}`, http.StatusOK)
 		f.auto("run-hang")
 		f.task("HLT 超时", "acc-hang")
-		f.waitFor("外呼超时进入健康视图", 60*time.Second, func() bool { return !f.health().sig("outcall").OK })
+		f.waitFor("挂起的运行在跑", 30*time.Second, func() bool { return f.health().sig("outcall").outcall(t).Long.Running == 1 })
+		f.TCAdvance(901)
+		f.waitFor("外呼超时进入健康视图", 60*time.Second, func() bool {
+			s := f.health().sig("outcall")
+			return !s.OK && len(s.outcall(t).Timeouts) > 0
+		})
+		f.webOK("PUT", "/settings/policy", `{"background_run_timeout_sec":14400}`, http.StatusOK)
 	})
 
 	step(t, "造出：长时运行与短任务各自排队", func(t *testing.T) {

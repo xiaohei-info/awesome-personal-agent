@@ -525,11 +525,9 @@ func TestFlowOutcallProc(t *testing.T) {
 		if len(before) < 2 || !alive(child) {
 			t.Fatalf("超时前应有父子两个进程在运行目录内: %v child=%d", before, child)
 		}
-		start := time.Now()
+		// 任务型运行的时限取策略 background_run_timeout_sec（默认 4 小时，模板 timeout 不再生效，§13.6）。
+		f.TCAdvance(14460)
 		f.waitFor("Run 超时", 90*time.Second, func() bool { return f.runByID(r.ID).State == "timeout" })
-		if d := time.Since(start); d < 20*time.Second {
-			t.Errorf("超时过早: 距拉起不足 20 秒（%v）", d)
-		}
 		f.waitFor("残留进程清理", 5*time.Second, func() bool { return len(procsIn(dir)) == 0 && !alive(child) })
 		// 2026-11-20 起超时是运行故障（事件）：事项阶段不变、不挂问题，运行带故障类别码 timeout。
 		f.waitFor("运行带故障类别码", 10*time.Second, func() bool { rr := f.runByID(r.ID); return rr.Fault != nil && rr.Fault.Code == "timeout" })
