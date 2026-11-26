@@ -765,10 +765,6 @@ func scoredPage(tx *store.Tx, source string, ds []domain.Disposition, after int6
 }
 
 func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	// 这里是未过滤的外部内容，运行凭据只能经转发白名单读挂靠消息（§9.4、§14.3）。
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot list source events", "read forwarded messages from the context instead")
-	}
 	q := r.URL.Query()
 	var ds []domain.Disposition
 	if raw := q.Get("disposition"); raw != "" {
@@ -799,7 +795,7 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		out  = map[string]any{}
 	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
-		if !(p.Web && inbound.IsCaptureSource(id)) { // 对话内容只给本人；其他凭据和登记外的来源一样是 404
+		if !inbound.IsCaptureSource(id) { // 对话捕获不在登记表里；外部钥匙读它由下面的档位拒绝（§14.14）
 			if _, err := registry.Get(tx, id); err != nil {
 				return err
 			}
@@ -847,9 +843,6 @@ func (a *api) outboundPreview(w http.ResponseWriter, r *http.Request, p *core.Pr
 			return err
 		}
 		if inbound.IsCaptureSource(ev.SourceID) {
-			if !p.Web { // 对话内容只给本人；其他凭据看来就是不存在
-				return domain.NewError(domain.CodeNotFound, "source event "+ev.ID+" not found", "list the source's events")
-			}
 			return nil
 		}
 		_, err = registry.Get(tx, ev.SourceID)
@@ -911,11 +904,9 @@ func (a *api) ignoreOne(w http.ResponseWriter, r *http.Request, p *core.Principa
 func (a *api) writeEvent(w http.ResponseWriter, r *http.Request, p *core.Principal, ev domain.SourceEvent) error {
 	var v eventView
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
-		scope := scopeFull
-		if !inbound.IsCaptureSource(ev.SourceID) {
-			if scope = readscope.New(tx, p.Caller).Tier(ev.SourceID); scope == readscope.None {
-				scope = scopeMeta // 写命令已经成功，响应只带元信息
-			}
+		scope := readscope.New(tx, p.Caller).Tier(ev.SourceID)
+		if scope == readscope.None {
+			scope = scopeMeta // 写命令已经成功，响应只带元信息
 		}
 		var err error
 		v, err = viewEvent(tx, ev, scope)
@@ -998,11 +989,8 @@ func (a *api) backlogRejudge(w http.ResponseWriter, r *http.Request, p *core.Pri
 	return core.WriteJSON(w, http.StatusOK, res)
 }
 
-// restorable 预览可放回积压的旧判断忽略事件：from、to 必填（RFC 3339），source 可选；只读。命中的是未过滤的外部事件，运行凭据不能预览。
+// restorable 预览可放回积压的旧判断忽略事件：from、to 必填（RFC 3339），source 可选；只读。
 func (a *api) restorable(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot preview restorable source events", "ask the owner to preview from the source page or the CLI")
-	}
 	q := r.URL.Query()
 	var t [2]time.Time
 	for i, k := range []string{"from", "to"} {

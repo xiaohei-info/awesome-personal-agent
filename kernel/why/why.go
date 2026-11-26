@@ -93,9 +93,9 @@ type content struct{ reason, payload, evidence bool }
 
 func visible(l authz.Level) content {
 	switch l {
-	case authz.LevelWeb, authz.LevelDelegate:
+	case authz.LevelWeb, authz.LevelDelegate, authz.LevelRun: // 运行凭据与 delegate 钥匙同读（§14.2）
 		return content{true, true, true}
-	case authz.LevelWorker, authz.LevelRun:
+	case authz.LevelWorker:
 		return content{true, true, false}
 	}
 	return content{} // observer：只有信封与授权依据

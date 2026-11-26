@@ -173,16 +173,8 @@ func isNotFound(err error) bool {
 	return errors.As(err, &de) && de.Code == domain.CodeNotFound
 }
 
-// traceable：处理经过含来源原文的标题与发件人，口径同 GET /sources/{id}/events——运行凭据不可读（§9.4、§14.3）。
-func traceable(p *core.Principal) error {
-	if err := readable(p); err != nil {
-		return err
-	}
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot read source messages", "read forwarded messages from the context instead")
-	}
-	return nil
-}
+// traceable：处理经过含来源原文的标题与发件人，口径同 GET /sources/{id}/events（§9.4、§14.3）。
+func traceable(p *core.Principal) error { return readable(p) }
 
 func (h *handlers) messageTrace(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := traceable(p); err != nil {
@@ -199,7 +191,7 @@ func (h *handlers) messageTrace(w http.ResponseWriter, r *http.Request, p *core.
 		if err != nil {
 			return err
 		}
-		if !p.Web && inbound.IsCaptureSource(ev.SourceID) { // 对话内容只给本人；其他凭据与不存在一样
+		if p.Caller.External() && inbound.IsCaptureSource(ev.SourceID) { // 对话捕获不给外部受众的钥匙；看来与不存在一样
 			return domain.NewError(domain.CodeNotFound, "source event not found", "check the id")
 		}
 		level, err := replayLevel(tx, p, id, false)
@@ -236,7 +228,7 @@ func (h *handlers) itemTrace(w http.ResponseWriter, r *http.Request, p *core.Pri
 		if t, err = kwhy.ItemTrace(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: level, ID: id}); err != nil {
 			return err
 		}
-		if !p.Web {
+		if p.Caller.External() {
 			t.Origins = slices.DeleteFunc(t.Origins, func(o kwhy.Trace) bool { return inbound.IsCaptureSource(o.Message.Source) })
 		}
 		return nil

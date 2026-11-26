@@ -11,7 +11,6 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
@@ -124,11 +123,8 @@ func sourceTier(tx *store.Tx, p *core.Principal, id string) (string, error) {
 	return t, nil
 }
 
-// internalOnly 挡住外部钥匙与运行凭据：原始请求体、被拒行、外发预览是给本人排查用的，不按档位裁剪，只给 Web 与内部钥匙。
+// internalOnly 挡住外部钥匙：原始请求体、被拒行、外发预览是排查用的，不按档位裁剪，只给 Web、运行凭据与内部钥匙。
 func internalOnly(p *core.Principal, what string) error {
-	if p.Caller.Level == authz.LevelRun {
-		return denied("run credential cannot read "+what, "read forwarded messages from the context instead")
-	}
 	if p.Caller.External() {
 		return denied("an external key cannot read "+what, "use the source events this key is given")
 	}

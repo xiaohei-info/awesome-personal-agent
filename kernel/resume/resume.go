@@ -268,7 +268,7 @@ func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err er
 	f.declared = f.rec.Declaration.Headless != nil
 	// 挂靠消息按运行身份过滤：只有白名单内的发送者进入新会话的上下文。
 	for _, id := range slices.Compact([]string{itemID, f.link.Item}) {
-		ms, err := allowlist.Messages(tx, id, authz.LevelRun)
+		ms, err := allowlist.Messages(tx, id, authz.LevelRun, f.selected.Snapshot.AgentID)
 		if err != nil {
 			return f, err
 		}

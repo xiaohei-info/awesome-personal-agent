@@ -16,6 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -37,7 +38,7 @@ func setup(t *testing.T, groups ...RouteGroup) *env {
 	t.Helper()
 	testIterations = 1000
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -774,5 +775,47 @@ func TestServeCancelsLongPollsOnShutdown(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("long poll held up shutdown")
+	}
+}
+
+// 读取一律属"查看"组（§14.3）：权限卡关了它的 Agent 读任何路由都是 23，并留痕；开着照常读。
+func TestReadsFollowTheViewGroup(t *testing.T) {
+	e := setup(t)
+	var secret string
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) (err error) {
+		_, secret, err = e.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_v", Harness: "h"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
+	if r := e.do("GET", "/v1/echo", "", bearer); r.Code != 200 {
+		t.Fatalf("default card reads: %d %s", r.Code, r.Body)
+	}
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test", func(p *policy.Policy) error {
+			p.AgentCards["agent_v"] = policy.Card{Groups: map[string]policy.GroupGrant{policy.GroupOrganize: {}}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := e.do("GET", "/v1/echo", "", bearer)
+	var de domain.Error
+	if r.json(&de); r.Code != 403 || de.Code != domain.CodeTierClosed || de.Group != policy.GroupView {
+		t.Fatalf("view closed: %d %s", r.Code, r.Body)
+	}
+	if r := e.do("POST", "/v1/echo", "{}", bearer); r.Code != 200 {
+		t.Fatalf("writes are judged by their own group: %d %s", r.Code, r.Body)
+	}
+	if err := e.st.View(context.Background(), func(tx *store.Tx) error {
+		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvCommandRejected}, 0, 10)
+		if len(es) != 1 {
+			t.Fatalf("rejections: %d", len(es))
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

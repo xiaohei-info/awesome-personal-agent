@@ -250,7 +250,7 @@ func TestStatsReadableByObserverOnly(t *testing.T) {
 			t.Fatalf("%s: %d", k, rr.Code)
 		}
 	}
-	if rr := e.get(e.run, "/v1/judgments/stats"); rr.Code != 403 {
+	if rr := e.get(e.run, "/v1/judgments/stats"); rr.Code != 200 { // 运行凭据与所属 Agent 的钥匙同读（§14.2）
 		t.Fatalf("run: %d", rr.Code)
 	}
 }

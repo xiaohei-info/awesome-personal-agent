@@ -188,7 +188,7 @@ func TestBacklogRestoreFlow(t *testing.T) {
 
 	k.step("ACT-RST-05 放回的授权边界", func(t *testing.T) {
 		grantsBefore := k.maxSeq()
-		// 2026-11-20 改写（权限模型第二版）：放回积压是一档，delegate 不再需要本人原话；边界只剩钥匙范围：observer 与运行凭据在范围外。
+		// 2026-11-20 改写（权限模型第二版）：放回积压是一档，delegate 不再需要本人原话；边界只剩钥匙范围：observer 在范围外。
 		base := []string{"source", "backlog", "restore", "--from", win.From, "--to", win.To}
 		if r := k.Apa(k.OBS, "", base...); r.Code != 4 {
 			t.Fatalf("④ observer 退出码 %d，期望 4\n%s%s", r.Code, r.Stdout, r.Stderr)
@@ -197,14 +197,9 @@ func TestBacklogRestoreFlow(t *testing.T) {
 		if r := k.APIRaw("GET", "/v1/health", "", run); r.Code != 200 { // 运行凭据此刻有效，下面的 403 才是权限而不是凭据失效
 			t.Fatalf("运行凭据不可用: %d %s", r.Code, r.Body)
 		}
-		body := fmt.Sprintf(`{"from":%q,"to":%q}`, win.From, win.To)
-		for name, resp := range map[string]int{
-			"POST /v1/source-events/restore":   k.APIRaw("POST", "/v1/source-events/restore", body, run).Code,
-			"GET /v1/source-events/restorable": k.APIRaw("GET", "/v1/source-events/restorable?"+q(""), "", run).Code,
-		} {
-			if resp != 403 {
-				t.Fatalf("⑤ 运行凭据 %s 返回 %d，期望 403", name, resp)
-			}
+		// 2026-11-26 改写（权限卡）：运行凭据只带身份，预览与所属 Agent 的钥匙同读；放回本身留给下面的 delegate 做。
+		if r := k.APIRaw("GET", "/v1/source-events/restorable?"+q(""), "", run); r.Code != 200 {
+			t.Fatalf("⑤ 运行凭据预览返回 %d，期望 200", r.Code)
 		}
 		for _, e := range k.audit("inbound.disposed", grantsBefore) {
 			t.Fatalf("被拒的尝试之后出现了处置 Event: %+v", e)

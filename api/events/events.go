@@ -16,7 +16,6 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventfeed"
@@ -53,13 +52,13 @@ func invalid(why, next string) error {
 }
 
 // authorize：observer 及以上可读；ext 只有导出与转发两种（scope 为 export、forward 或带 .<名> 后缀），
-// 渠道 ext、webhook 另有用途；运行凭据限于一次运行，不订阅全账本。
+// 渠道 ext、webhook 另有用途；运行凭据与所属 Agent 的钥匙同读，可以订阅。
 func authorize(p *core.Principal) error {
 	denied := func() error {
 		return domain.NewError(domain.CodePermissionDenied, "credential cannot subscribe to events", "use an observer token or an export/forward ext key")
 	}
 	switch {
-	case p.Caller.Level == authz.LevelRun, p.Caller.Kind == auth.Webhook:
+	case p.Caller.Kind == auth.Webhook:
 		return denied()
 	case p.Caller.Kind == auth.Ext:
 		scope := strings.TrimPrefix(p.Caller.Actor.Principal, "ext:")

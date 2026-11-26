@@ -394,7 +394,7 @@ func TestItemMessagesRouteFiltersUnattendedReaders(t *testing.T) {
 	if _, ms := w.messages(dlg, item); subjects(ms) != "m1,m2,m3,m4" {
 		t.Fatalf("delegate: %v", subjects(ms))
 	}
-	if !allowlist.Filtered(authz.LevelRun, domain.Item{}) || allowlist.Filtered(authz.LevelWeb, domain.Item{ItemKernelState: domain.ItemKernelState{Unattended: true}}) {
+	if !allowlist.Filtered(policy.Default(), authz.LevelRun, "", domain.Item{}) || allowlist.Filtered(policy.Default(), authz.LevelWeb, "", domain.Item{ItemKernelState: domain.ItemKernelState{Unattended: true}}) {
 		t.Fatal("Filtered: run must filter, Web must not")
 	}
 	if w.state(alice) != runner.AttachPending {

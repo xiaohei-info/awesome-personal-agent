@@ -41,7 +41,7 @@ func Routes(x *command.Executor) core.RouteGroup {
 			}
 			msgs := []messageView{}
 			if err := x.Store().View(r.Context(), func(tx *store.Tx) error {
-				as, err := allowlist.Messages(tx, r.PathValue("id"), p.Caller.Level)
+				as, err := allowlist.Messages(tx, r.PathValue("id"), p.Caller.Level, p.Caller.Agent())
 				if err != nil {
 					return err
 				}

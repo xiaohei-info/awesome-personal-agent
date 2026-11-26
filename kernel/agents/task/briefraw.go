@@ -184,9 +184,12 @@ func (s *Service) briefRaw(ctx context.Context, digest []summaries.DigestEntry, 
 	return Material{Name: "digest", Body: string(db)}, files, nil
 }
 
-// rawScope 是简报运行读来源原文的范围：运行属于 APA 内部，已登记的来源一律全文，不受来源送外部模型端点的范围限制（§14.14）。
-// 不在来源登记里的内部来源（对话捕获只给本人）读作空串，不写文件。
+// rawScope 是简报运行读来源原文的范围：运行属于 APA 内部，已登记的来源与对话捕获一律全文，不受来源送外部模型端点的范围限制（§14.14）。
+// 其他不在来源登记里的名字读作空串，不写文件。
 func rawScope(tx *store.Tx, ev domain.SourceEvent) string {
+	if strings.HasPrefix(ev.SourceID, "capture:") {
+		return registry.ScopeFull
+	}
 	if _, err := registry.Get(tx, ev.SourceID); err != nil {
 		return ""
 	}

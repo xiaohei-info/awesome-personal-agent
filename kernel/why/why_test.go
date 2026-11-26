@@ -109,7 +109,7 @@ func TestCredentialLevelTrimsContent(t *testing.T) {
 	}{
 		{authz.LevelDelegate, true, true, true},
 		{authz.LevelWorker, true, true, false},
-		{authz.LevelRun, true, true, false},
+		{authz.LevelRun, true, true, true}, // 运行凭据与 delegate 钥匙同读（§14.2）
 		{authz.LevelObserver, false, false, false},
 	}
 	for _, c := range cases {
@@ -125,7 +125,7 @@ func TestCredentialLevelTrimsContent(t *testing.T) {
 		if a.Basis == nil || a.Basis.RuleID != "inbound-triage" || a.Type == "" || a.Actor.Principal == "" {
 			t.Errorf("%s: envelope/basis trimmed: %+v", c.level, a)
 		}
-		if c.level != authz.LevelDelegate && !b.Redacted {
+		if c.level != authz.LevelDelegate && c.level != authz.LevelRun && !b.Redacted {
 			t.Errorf("%s: trimmed step must be marked redacted", c.level)
 		}
 	}

@@ -25,7 +25,7 @@
 | `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份（默认带连接凭据的主密钥 `master.key`，`--no-secrets` 不带）；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
 | `apa secrets rekey` | 换连接凭据的主密钥：全部可解的密文用新密钥重新加密，再原子替换 `master.key`；只在服务停止时运行，服务仍在监听时拒绝；账本还没迁移到本二进制时拒绝（主文档 §14.2、§16.5） | 主机本地 | 2、6 |
 | **上下文** | | | |
-| `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息；`--scope item` 见主文档 §7.6 | observer | 3、5、7 |
+| `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息；`--scope item` 见主文档 §7.6。后台运行按权限卡只看信任发件人的消息时，每个事项的消息另带 `filtered_messages`：没给它看的、还没确认的条数（主文档 §14.6） | observer | 3、5、7 |
 | `apa persona [--lang zh\|en]` | 读取当前人格，供插件在新会话开始时注入；本人没写时是内置默认语气（主文档 §11.2）；语言：`--lang` > Web 里选的助手语言 > `LC_ALL`、`LC_MESSAGES`、`LANG` > 英文 | observer | 3、7 |
 | `apa inbox` | 列出待决和建议 | observer | |
 | `apa today` | 今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1） | observer | |
@@ -177,14 +177,14 @@
 | | `POST /items/{id}/report` | 回执 | worker |
 | | `POST /items/{id}/dispatches` | 写委派记录 `{session, resumable?, cwd?, repo?, handle?, continues?}`，返回 201 与记录 | 同回执 |
 | | `PATCH /dispatches/{id}` | 推进委派记录 `{state?, resumable?}` | 同回执 |
-| | `GET /dispatches` | 列委派记录，可带 `executor`、`item`、`resumable`、`limit` | observer；运行凭据限范围内的事项 |
+| | `GET /dispatches` | 列委派记录，可带 `executor`、`item`、`resumable`、`limit` | observer |
 | | `POST /messages/{id}/handback` | 交回挂靠消息 | worker |
 | 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目；建与改是一档，改对话捕获开关是 3a | observer 读，delegate 写 |
 | | `POST /projects/{id}/repos` | repos 属性：本机检出是一档，远程地址是 3b | worker；远程地址只有 Web 登录 |
 | | `GET /projects/resolve?path&host` | 当前目录到项目的映射 | observer |
 | 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料；单个材料带与事项的类型化关系 `relations` | observer 读，worker 写；导出 ext 密钥可 `GET` |
 | | `GET /materials/{id}/content` | 托管型正文，异步读取 | 只有 Web 登录 |
-| | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate；worker、运行凭据须带自己范围内的 `parent` |
+| | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate 与运行凭据；worker 须带自己范围内的 `parent` |
 | | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
 | | `POST /materials/{id}/revert` | 回退一次 `direct` 修订（3a） | Web 登录；Agent 按权限卡 |
 | | `PATCH /materials/{id}` | 改链接型材料的标题、kind 与标签 `{"title"?, "kind"?, "tags"?, "reason"?}`，经 `material.update`；位置不可改，非链接型返回 409（3a） | Web 登录；Agent 按权限卡 |
@@ -206,9 +206,9 @@
 | | `GET /sources/declared-name?type&command&source_type&config` | 来源程序接入声明的显示名（中英），新登记表单预填 | observer |
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥（3b） | 只有 Web 登录 |
 | | `DELETE /sources/{id}/webhook` | 吊销该来源全部接收密钥，同时删除 HMAC 密钥文件（3b） | 只有 Web 登录 |
-| | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | Web 登录与内部钥匙；外部钥匙与运行凭据不能读入站记录（返回 403：原始请求体不按档位裁剪，也未经转发白名单） |
-| | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 只有 Web 登录能读；外部钥匙按它对该来源的档位裁（见下），没给这个来源返回 403（退出码 4） | observer 及以上、有档位的导出 ext 密钥；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
-| | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；运行凭据不可用（返回 403，原始行是未过滤的外部输出） |
+| | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | Web 登录、内部钥匙与运行凭据；外部钥匙不能读入站记录（返回 403：原始请求体不按档位裁剪） |
+| | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 与其他来源一样，Web 登录、内部钥匙与运行凭据可读，外部钥匙读不到；外部钥匙按它对该来源的档位裁（见下），没给这个来源返回 403（退出码 4） | observer 及以上、有档位的导出 ext 密钥；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
+| | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；外部钥匙不可用（返回 403） |
 | | `POST /source-events/{id}/propose` | 把未判定事件或 digest 事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/split` | 把误并入一条建议的来源事件拆出来另成一条建议（`inbound.split`，主文档 §9.3）：请求体 `{"from": "<建议 id>"}`，返回 `{"item": "<新建议 id>"}` | Web 登录、delegate |
 | | `POST /items/{id}/unmerge` | 撤销跨来源合并的一条折叠（`inbound.unmerge`，一档，主文档 §9.3）：被折叠的建议回到 proposed，`proposal.sweep.action` 记 `undone`，与去处互记 `not_same`；合并的来源事件与留痕从去处移回，并入的在去处追加一条撤回说明；撤销一条批内整合过的成员时整组还原（同一次整合的其他成员一并回到建议，载体的标题与摘要恢复成 `proposal.integrated` 里的原文，本人事后改过的不覆盖）。返回 `{"item": "<id>"}`；不是被折叠的或已撤销过是 409 |
@@ -218,14 +218,14 @@
 | | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate |
 | | `POST /source-events/score` | 积压放开第 2 步：影子打分，返回 `{"scored", "skipped"}`；请求体 `{"source"?}`；没有判断端点是 409；模型已暂停是 409 `models_paused` | Web 登录、delegate |
 | | `POST /source-events/rejudge` | 积压放开第 4 步：放开重判，返回 `{"requeued", "deferred"}`；请求体 `{"source"?, "limit"?}`；模型已暂停是 409 `models_paused` | Web 登录、delegate |
-| | `GET /source-events/restorable?from&to&source` | 预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
-| | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | Web 登录与内部钥匙；外部钥匙与运行凭据不可用（返回 403）；内部来源 `capture:<项目>` 的事件只有 Web 登录能读 |
+| | `GET /source-events/restorable?from&to&source` | 预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer |
+| | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | Web 登录、内部钥匙与运行凭据；外部钥匙不可用（返回 403） |
 | | `POST /source-events/restore` | 把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate |
-| | `GET /source-events/{id}` | 单条读取来源事件及其原文，见下 | Web 登录与内部钥匙读全文；外部钥匙按钥匙的逐来源档位裁剪，没给的来源 403；运行凭据只经挂靠消息与转发白名单；非导出 ext 密钥不可用（403） |
+| | `GET /source-events/{id}` | 单条读取来源事件及其原文，见下 | Web 登录与内部钥匙读全文；外部钥匙按钥匙的逐来源档位裁剪，没给的来源 403；运行凭据与内部钥匙相同；非导出 ext 密钥不可用（403） |
 | | `POST /source-events/{id}/attachments/{n}/fetch` | 取回第 n 个附件（`source.fetch_attachment`，主文档 §7.6）：成功返回 200 与更新后的附件清单项（带 `blob`）；来源程序不支持取回是 409，取回失败是 502 并带原因 | Web 登录、delegate |
 | | `GET /storage` | 存储用量：`{"ledger_bytes", "blobs_bytes", "content_bytes", "sources": [{"id", "name", "events", "content_bytes", "oldest", "retention_days"?}]}` | observer |
 | | 已有路由 GET /sources/{id}/events 与 GET /items/{id}/messages 的改动 | 列表不再带正文全文：每条事件的 `detail` 是前 2000 个字符的预览，另带 `content`（原文清单：各部分的字节数、总字节数、`state`、`missing?`）；全文经上面的单条读取（见 B.6） | 同原路由 |
-| 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
+| 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer |
 | | `GET /judgments/stats?use&template&source&since` | 各级调用次数与四项指标（主文档 §8.10） | observer |
 | | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}`（3a） | 读 observer；填 Web 登录，delegate 按档位 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
@@ -321,7 +321,7 @@
 `GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`；带 `sort=score` 时按最近一次判断记录的概率从高到低返回（同分保持落盘顺序），没有分数的排在最后；此时 `after`、`next_after` 是已返回的条数（偏移），不是落盘序号；带 `sort=recent` 时从新到旧返回，`after`、`next_after` 同样是偏移；其他 `sort` 值返回 400。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`、`unjudged_reason`、`rejudges`，以及 v0.2.0 新增的 `metrics`、`merge_key`、`items`、`judgment`、`score`（最近一次判断的概率，没有时省略）。其中 `item` 是挂靠或生成的事项 id，`items` 是一条事件抽出多条候选时的全部事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`digest`、`alerted`、`unjudged`、`expired`，可逗号分隔多个（来源页的积压用 `unjudged,expired`），其他值返回 400。`unjudged_reason` 取 `model_unavailable`、`models_paused`（本人暂停了模型，主文档 §8.7）、`outbound_unset`、`restored`；v0.1 留下的 `undecided` 与空值原样返回，内核按 `model_unavailable` 对待。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
 
 `GET /sources/{id}/rejects` 按发生顺序返回 `{"rejects": [...], "next_after": 12}`，分页参数与 `events` 相同；带 `sort=recent` 时从新到旧返回，`after`、`next_after` 是偏移（同 `events`），其他 `sort` 值返回 400。每条含 `source_id`、`run_id`、`line`（输出中的行号）、`reason`、`raw`（原始行）、`at`。`raw` 在落账时已截断到 512 字节；含接收密钥明文前缀的行返回 `[redacted]`（与入站记录的请求头同一规则）。来源未登记返回 404。
-`capture:<项目>` 是对话捕获的内部来源（主文档 §9.3），不在 `GET /sources` 里，Web 按开启捕获的项目拼出 id。Web 登录读它返回同样的结构，其他凭据返回 404（运行凭据仍是 403）。
+`capture:<项目>` 是对话捕获的内部来源（主文档 §9.3），不在 `GET /sources` 里，Web 按开启捕获的项目拼出 id。Web 登录、内部钥匙与运行凭据读它返回同样的结构，外部受众的钥匙返回 403（主文档 §14.14）。
 
 `POST /source-events/{id}/propose` 不带请求体，成功返回 200 与更新后的来源事件（`disposition` 为 `proposed`，`item` 为新事项 id），事件不是 `unjudged`、`expired` 或 `digest`（简报"知会"一节的条目）时返回 409，不存在时返回 404。事项阶段为 `proposed`，事项的 `item.created` 与来源事件的 `inbound.disposed` 都记调用者为操作者。
 

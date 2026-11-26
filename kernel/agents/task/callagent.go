@@ -289,7 +289,7 @@ func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, ove
 func (s *Service) attachedMessages(ctx context.Context, item string) ([]Message, error) {
 	var out []Message
 	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
-		as, err := allowlist.Messages(tx, item, authz.LevelWeb)
+		as, err := allowlist.Messages(tx, item, authz.LevelWeb, "")
 		for _, a := range as {
 			if a.AttachState == runner.AttachPending || a.AttachState == runner.AttachForwarded {
 				out = append(out, Message{Source: a.Source, Sender: a.Sender, Verified: a.SenderVerified, Body: a.Detail})
