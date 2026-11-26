@@ -160,10 +160,11 @@ func TestFlowCapture(t *testing.T) {
 		eq(t, "建议流条数", len(k.proposed()), before)
 	})
 
+	// 模型替身按请求体子串匹配：待处理建议的标题会随 active_proposals 进后续请求，所以匹配串取只出现在本次增量里的整句。
 	k.step("ACT-CAP-05 预筛落在下限之上即抽取（宁可多抽）", func(t *testing.T) {
 		before, seen := len(k.proposed()), k.captureIDs(open)
 		k.Cls.PYes(keyOf("cap-maybe"), 0.30)
-		k.ModelStub.When("cap-maybe", replyJSON(extract(map[string]any{"title": "cap-maybe 回电话给房东"})))
+		k.ModelStub.When("cap-maybe 回头记得给房东回电话", replyJSON(extract(map[string]any{"title": "cap-maybe 回电话给房东"})))
 		k.clear()
 		k.capture(k.WRK, open, "cap-maybe 回头记得给房东回电话")
 		ev := k.waitCapture(open, seen)
@@ -177,7 +178,7 @@ func TestFlowCapture(t *testing.T) {
 	k.step("ACT-CAP-06 抽取出零条候选时不建建议", func(t *testing.T) {
 		before, seen := len(k.proposed()), k.captureIDs(open)
 		k.Cls.PYes(keyOf("cap-zero"), 0.90)
-		k.ModelStub.When("cap-zero", replyJSON(`{"candidates":[]}`))
+		k.ModelStub.When("cap-zero 我们讨论了一下架构", replyJSON(`{"candidates":[]}`))
 		k.clear()
 		k.capture(k.WRK, open, "cap-zero 我们讨论了一下架构")
 		ev := k.waitCapture(open, seen)
@@ -190,7 +191,7 @@ func TestFlowCapture(t *testing.T) {
 		before, seen := len(k.proposed()), k.captureIDs(open)
 		k.Cls.SetFault(modelstub.ClsFault{Status: 503})
 		defer k.Cls.SetFault(modelstub.ClsFault{})
-		k.ModelStub.When("cap-nocls", replyJSON(extract(map[string]any{"title": "cap-nocls 交报销单"})))
+		k.ModelStub.When("cap-nocls 明天交报销单", replyJSON(extract(map[string]any{"title": "cap-nocls 交报销单"})))
 		k.clear()
 		k.capture(k.WRK, open, "cap-nocls 明天交报销单")
 		ev := k.waitCapture(open, seen)
@@ -203,7 +204,7 @@ func TestFlowCapture(t *testing.T) {
 		before, seen := len(k.proposed()), k.captureIDs(open)
 		k.Cls.SetFault(modelstub.ClsFault{Status: 503})
 		defer k.Cls.SetFault(modelstub.ClsFault{})
-		k.ModelStub.When("cap-down", failReply(500))
+		k.ModelStub.When("cap-down 下周一体检", failReply(500))
 		k.capture(k.WRK, open, "cap-down 下周一体检")
 		ev := k.waitCapture(open, seen)
 		eq(t, "disposition", ev.Disposition, "unjudged")
