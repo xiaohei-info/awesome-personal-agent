@@ -157,6 +157,16 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// 兼容卡下的运行（快照 legacy:hermes，InstanceID 为空）同样按快照归属：拍板开着，接受建议照旧生效。
+		lr, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{AgentSnapshot: &domain.AgentSnapshot{AgentID: "legacy:hermes"},
+			Category: domain.RunBackground, TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, now)
+		if err != nil {
+			return err
+		}
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemPhaseChanged, Object: "itm_6", At: now, Payload: json.RawMessage(`{"before":{"phase":"proposed"}}`),
+			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:" + lr.ID, Via: domain.ViaCLI}}); err != nil {
+			return err
+		}
 		// 旧事件没记依据、发起者是运行凭据：按运行记录归到 agent_r（拍板开着），代答照旧生效。
 		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvDecisionResolved, Object: "itm_5", At: now, Payload: json.RawMessage(`{}`),
 			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:" + run.ID, Via: domain.ViaCLI}}); err != nil {
@@ -199,7 +209,7 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 		a.Tool != policy.PermRead || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupSourceEvents, now) {
 		t.Fatalf("cards: %+v", pv.Plan.Cards)
 	}
-	if pv.Rejudge["unchanged"] != 5 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
+	if pv.Rejudge["unchanged"] != 6 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
 		t.Fatalf("rejudge: %v %+v", pv.Rejudge, pv.Details)
 	}
 	if err := st.View(ctx, func(tx *store.Tx) error {

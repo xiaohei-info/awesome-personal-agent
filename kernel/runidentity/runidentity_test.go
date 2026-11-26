@@ -222,6 +222,48 @@ func TestRunCredentialFollowsAgentTier(t *testing.T) {
 	}
 }
 
+// 兼容卡下的后台运行（快照 legacy:<宿主>，InstanceID 为空）凭据按该卡判权；快照 Agent 没有卡时仍落默认卡。
+func TestRunCredentialFollowsSnapshotAgentCard(t *testing.T) {
+	e := setup(t)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "card", func(p *policy.Policy) error {
+			p.AgentCards["legacy:hx"] = policy.DefaultCard().With(policy.GroupDecide)
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		snap domain.AgentSnapshot
+		exit int
+	}{
+		{domain.AgentSnapshot{AgentID: "legacy:hx"}, 0},                                      // 兼容卡开着拍板
+		{domain.AgentSnapshot{AgentID: "agent_nocard", ConfigRev: 1}, domain.ExitTierClosed}, // 没有卡：默认卡
+	} {
+		var secret string
+		target := e.newItem(t, map[string]any{})
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			snap := c.snap
+			r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{AgentSnapshot: &snap, Category: domain.RunBackground, Target: target, TimeoutSec: 60},
+				Spec: proc.Spec{Command: []string{"true"}}}, now)
+			if err != nil {
+				return err
+			}
+			secret, err = Issue(tx, r.ID, now)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		prop := e.newItem(t, map[string]any{"phase": "proposed"})
+		if c.exit == 0 {
+			e.must(t, e.as(secret), "proposal.accept", map[string]any{"id": prop})
+		} else {
+			e.want(t, c.exit, e.as(secret), "proposal.accept", map[string]any{"id": prop})
+		}
+	}
+}
+
 // 来源批处理运行的目标不是事项（固定的 source_batch）也能签；凭据只带运行与 Agent 身份，权限只按所属 Agent 的权限卡判。
 func TestSourceBatchRunGetsIdentityOnlyCredential(t *testing.T) {
 	e := setup(t)

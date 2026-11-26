@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -266,7 +267,7 @@ func commandOf(ev domain.Event) (cmd, group, agent, note string) {
 	return "", "", "", ""
 }
 
-// agentOf 与 command.Caller.Agent 同口径：运行凭据（run:<id>）取运行记录上的 Agent，钥匙取 owners 里的归属。
+// agentOf 与 command.Caller.Agent 同口径：运行凭据（run:<id>）取运行记录上的快照 Agent（runidentity.AgentOf），钥匙取 owners 里的归属。
 func agentOf(tx *store.Tx, owners map[string]string, principal string) (string, error) {
 	run, ok := strings.CutPrefix(principal, "run:")
 	if !ok {
@@ -277,7 +278,7 @@ func agentOf(tx *store.Tx, owners map[string]string, principal string) (string, 
 	if errors.As(err, &de) && de.Code == domain.CodeNotFound {
 		return "", nil // 运行记录已不在：按没有归属
 	}
-	return rec.Run.InstanceID(), err
+	return runidentity.AgentOf(rec.Run), err
 }
 
 func keyOwners(tx *store.Tx) (map[string]string, error) {
