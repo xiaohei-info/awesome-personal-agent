@@ -118,18 +118,19 @@ func (f *fx) runDir(id string) string { return filepath.Join(f.Home, "runs", id)
 
 func (f *fx) dirExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// newRuns 触发 n 次一次性任务型运行（回执后结束），返回等到结束的新 Run id。
+// finishedRuns 触发 n 次一次性任务型运行（回执后结束），返回它们的 Run id。只认本次事项上的运行：
+// 拨测试时钟后到点的简报等定时安排也会拉起任务型运行。
 func (f *fx) finishedRuns(n int) []string {
 	f.t.Helper()
-	known := f.runs()
+	targets := map[string]bool{}
 	for i := 0; i < n; i++ {
-		f.task(fmt.Sprintf("RET 一次性运行 %d", i), "acc-once")
+		targets[f.task(fmt.Sprintf("RET 一次性运行 %d", i), "acc-once")] = true
 	}
 	var ids []string
 	f.waitFor("一次性运行结束", 30*time.Second, func() bool {
 		ids = ids[:0]
 		for id, r := range f.runs() {
-			if _, old := known[id]; !old && r.State == "succeeded" {
+			if targets[r.Target] && r.State == "succeeded" {
 				ids = append(ids, id)
 			}
 		}
@@ -194,11 +195,11 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 				t.Fatalf("运行目录应存在: %s", id)
 			}
 		}
-		f.task("RET 在途运行", "acc-hold")
+		hold := f.task("RET 在途运行", "acc-hold")
 		var live string
 		f.waitFor("在途运行开始", 30*time.Second, func() bool {
 			for id, r := range f.runs() {
-				if r.State == "running" {
+				if r.Target == hold && r.State == "running" {
 					live = id
 					return true
 				}
