@@ -49,6 +49,12 @@ func (f *fx) kernelNow() time.Time {
 	return time.Now().Add(time.Duration(off) * time.Second)
 }
 
+// waitUnjudged 等未判定积压在场：拨过测试时钟后内核会重判积压（§9.3），重判中的事件短暂回到 pending，模型仍故障时随即落回。
+func (f *fx) waitUnjudged() {
+	f.t.Helper()
+	f.waitFor("未判定积压在健康视图里", 60*time.Second, func() bool { return !f.health().sig("unjudged_backlog").OK })
+}
+
 // ---- 全流程 ----
 
 // TestFlowHealth 对应 flow-health（ACT-HLT-01..07）：十三类信号一次全造出，Web、CLI、HTTP 三处一致，只报不修；
@@ -216,6 +222,7 @@ event_rules:
 
 	var cli healthView
 	step(t, "ACT-HLT-01 十四类信号都显示，三处一致，每类有修复入口", func(t *testing.T) {
+		f.waitUnjudged()
 		cli = f.health()
 		web := f.webHealth()
 		http := decode[healthView](t, f.APIRaw("GET", "/v1/health", "", f.OBS).Body)
@@ -307,6 +314,7 @@ event_rules:
 				t.Errorf("安静期间出现修复类 Event: seq=%d type=%s object=%s actor=%+v", e.Seq, e.Type, e.Object, e.Actor)
 			}
 		}
+		f.waitUnjudged()
 		// 十三类问题仍在：没有任何一类被自动修好。
 		for _, id := range allSignalIDs {
 			if f.health().sig(id).OK {
