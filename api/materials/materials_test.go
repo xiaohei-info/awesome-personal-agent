@@ -459,10 +459,11 @@ func TestHostedMaterial(t *testing.T) {
 		t.Fatalf("hits: %+v", hits)
 	}
 
-	// 正文只给 Web 登录；读取是异步的：先 reading，轮询到 ready。
+	// 正文属"查看"组，Agent 与 Web 一样能读；读取是异步的：先 reading，轮询到 ready。
 	content := "/v1/materials/" + id + "/content"
-	want(t, e.do("wrk", "GET", content, ""), 403, "web_only")
-	want(t, e.do("dlg", "GET", content, ""), 403, "web_only")
+	if r := e.do("dlg", "GET", content, ""); r.Code != 200 {
+		t.Fatalf("delegate reads hosted content: %d %s", r.Code, r.Body)
+	}
 	var got map[string]any
 	deadline := time.Now().Add(20 * time.Second)
 	for {

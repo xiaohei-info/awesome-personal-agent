@@ -199,7 +199,7 @@ func TestAllowedExecutorsCannotBeWrittenThroughProjectRoutes(t *testing.T) {
 	if r := e.do(wrk, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "permission_denied" {
 		t.Fatalf("worker PATCH with allowed_executors is out of scope: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/projects", `{"name":"y","allowed_executors":[]}`); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(dlg, "POST", "/v1/projects", `{"name":"y","allowed_executors":[]}`); r.Code != 400 {
 		t.Fatalf("POST with allowed_executors: %d %s", r.Code, r.Body)
 	}
 	if p := e.project(dlg, id); p.AllowedExecutors != nil || p.Name != "Work" {

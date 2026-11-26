@@ -23,7 +23,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -543,76 +542,29 @@ func UpdateKey(st *store.Store, r *http.Request, p *core.Principal, basis *domai
 	return v, pol, err
 }
 
-// webOnly：只读的探测类路由（模型端点测试）只给 Web 本人。
-func webOnly(p *core.Principal) error {
+// rulesOnly：提醒设置的预览与总览属"改日常规则与提醒"（§14.3），Web 本人直接放行。
+func rulesOnly(st *store.Store, r *http.Request, p *core.Principal) error {
 	if p.Web {
 		return nil
 	}
-	return domain.NewError(domain.CodeWebOnly, "settings can only be used by the owner in the Web UI", "ask the owner to change it in the Web settings")
+	_, err := core.Authorize(st, r, p, authz.GroupRules, "/settings/notify", "api:"+r.URL.Path)
+	return err
 }
 
-// Authorize 判一次不走命令管线的设置写入（§14.3）：与命令同一个 authz.Decide——只有本人的段对 Agent 是 20，
-// 其余按调用者所属 Agent 的权限卡判这一组；Web 本人做后果较大的组须刚输过口令。被拒的按同一条留痕路径记 command.rejected（§6.7）；
-// 记账失败不改变拒绝结果。object 是留痕用的对象名（如 settings:/settings/policy）。
+// Authorize 判一次不走命令管线的设置读写（§14.3），见 core.Authorize。
 func Authorize(st *store.Store, r *http.Request, p *core.Principal, group authz.Group, page, object string) (*domain.Basis, error) {
-	basis, rej, err := decide(st, r, p, group, page, object)
-	if rej != nil {
-		record(st, r, rej)
-	}
-	return basis, err
-}
-
-// rejection 是一次待留痕的拒绝。
-type rejection struct {
-	req authz.Request
-	d   authz.Decision
-}
-
-// decide 判定但不留痕：被拒时返回 rejection，由调用方决定记不记（读设置时逐段试探，只记最后的结论）。
-func decide(st *store.Store, r *http.Request, p *core.Principal, group authz.Group, page, object string) (*domain.Basis, *rejection, error) {
-	if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
-		return nil, nil, domain.NewError(domain.CodePermissionDenied, "credential kind cannot change settings", "use an owner or agent credential")
-	}
-	var (
-		pv  int
-		pol = kpolicy.Default()
-	)
-	if !p.Web { // Agent 的权限卡在策略里；Web 本人不看权限卡，不必先读（读不出的策略交给写入报 400）
-		if err := st.View(r.Context(), func(tx *store.Tx) (err error) { pv, pol, err = kpolicy.Current(tx); return }); err != nil {
-			return nil, nil, err
-		}
-	}
-	agent := p.Caller.Agent()
-	ar := authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, Action: authz.ActionChangeSettings, Group: group, Fresh: p.Caller.Fresh,
-		Agent: agent, Card: pol.Card(agent), Now: clock.Now(), Page: page, Object: authz.Object{ID: object}}
-	d := authz.Decide(pol, ar)
-	if d.Err == nil {
-		via := domain.BasisAllowance
-		if p.Web {
-			via = domain.BasisOwnerWeb
-		}
-		return &domain.Basis{PolicyVersion: pv, Via: via, Tier: string(group), Agent: agent}, nil, nil
-	}
-	return nil, &rejection{ar, d}, d.Err
-}
-
-// record 按同一条留痕路径记 command.rejected；记账失败不改变拒绝结果。
-func record(st *store.Store, r *http.Request, rej *rejection) {
-	if ev, ok := authz.RejectionEvent(rej.req, rej.d); ok {
-		ev.At = clock.Now()
-		_ = st.Update(detached(r), func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err })
-	}
+	return core.Authorize(st, r, p, group, page, object)
 }
 
 // visible 返回 secs 里调用者的权限卡开放了的段；一段都没有时按第一段的组拒绝并留痕一次。
 func visible(st *store.Store, r *http.Request, p *core.Principal, secs []section, object string) ([]section, error) {
 	var (
 		shown    []section
-		first    *rejection
+		first    *core.Rejection
 		firstErr error
 	)
 	for _, s := range secs {
-		_, rej, err := decide(st, r, p, s.group, s.page, object)
+		_, rej, err := core.Decide(st, r, p, s.group, s.page, object)
 		switch {
 		case err == nil:
 			shown = append(shown, s)
@@ -622,7 +574,7 @@ func visible(st *store.Store, r *http.Request, p *core.Principal, secs []section
 	}
 	if len(shown) == 0 {
 		if first != nil {
-			record(st, r, first)
+			core.Record(st, r, first)
 		}
 		return nil, firstErr
 	}

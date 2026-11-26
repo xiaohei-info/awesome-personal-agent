@@ -434,10 +434,7 @@ func (h *handlers) search(w http.ResponseWriter, r *http.Request, p *core.Princi
 
 // content 把 hosted.View 渲染成附录 B.2 的三态。读取失败是降级结果（unavailable），不是错误。
 func (h *handlers) content(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if !p.Web {
-		return domain.NewError(domain.CodeWebOnly, "hosted material content can only be read in the Web UI", "ask the owner to open it in Web")
-	}
-	v, err := h.hs.Content(r.Context(), r.PathValue("id"))
+	v, err := h.hs.Content(r.Context(), r.PathValue("id")) // 读取属"查看"组，由 API 入口统一判（§14.3）
 	if err != nil {
 		return err
 	}

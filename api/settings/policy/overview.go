@@ -72,7 +72,7 @@ type sourceLine struct {
 func OverviewRoutes(st *store.Store, ps krules.PackSource, staleAfter func() time.Duration) core.RouteGroup {
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/settings/notify/overview", Handler: func(w http.ResponseWriter, req *http.Request, p *core.Principal) error {
-			if err := webOnly(p); err != nil {
+			if err := rulesOnly(st, req, p); err != nil {
 				return err
 			}
 			var o Overview

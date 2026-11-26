@@ -354,10 +354,13 @@ func (a *api) get(w http.ResponseWriter, r *http.Request, p *core.Principal) err
 	return core.WriteJSON(w, http.StatusOK, v)
 }
 
-// selfSender：只对声明了 identity 模式的来源；不落账、不缓存。只 Web：它会在主机上运行来源程序。
+// selfSender：只对声明了 identity 模式的来源；不落账、不缓存。它会在主机上运行来源程序，是填信任发件人的一步，
+// 属"改日常规则与提醒"（§14.3）。
 func (a *api) selfSender(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if !p.Web {
-		return domain.NewError(domain.CodeWebOnly, "only the owner in the Web UI can look up their own identity", "open the source in the Web UI")
+		if _, err := core.Authorize(a.st, r, p, authz.GroupRules, "/sources/"+r.PathValue("id"), "api:"+r.URL.Path); err != nil {
+			return err
+		}
 	}
 	s, err := a.source(r, r.PathValue("id"))
 	if err != nil {
@@ -500,7 +503,7 @@ func (a *api) rejectOutbound(r *http.Request, p *core.Principal, id string, in m
 			return err
 		}
 	}
-	return domain.NewError(domain.CodeWebOnly, "outbound is not part of the source registration or update", "set it in the Web UI (PUT /v1/settings/sources/{id}/outbound)")
+	return domain.NewError(domain.CodeInvalidRequest, "outbound is not part of the source registration or update", "set it with PUT /v1/settings/sources/{id}/outbound")
 }
 
 func writeValue(w http.ResponseWriter, status int, res command.Result) error {

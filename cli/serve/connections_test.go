@@ -100,8 +100,8 @@ func TestConnectionsOverHTTPAndMissingMasterKey(t *testing.T) {
 			t.Fatalf("observer list leaks %s: %s", leak, b)
 		}
 	}
-	if code, b := bearer("delegate", "", "POST", "/connections", `{"type":"sample","name":"x"}`); code != 403 || !strings.Contains(b, "web_only") {
-		t.Fatalf("delegate create must stay web_only: %d %s", code, b)
+	if code, b := bearer("delegate", "", "POST", "/connections", `{"type":"sample","name":"x"}`); code != 403 || !strings.Contains(b, "tier_closed") {
+		t.Fatalf("delegate create needs the channels group: %d %s", code, b)
 	}
 	if code, b := bearer("ext", "channel.mine", "GET", "/connections", ""); code != 403 {
 		t.Fatalf("ext key list: %d %s", code, b)

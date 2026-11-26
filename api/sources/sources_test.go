@@ -1030,7 +1030,7 @@ func TestSourceRoutesWriteDefaultProjectButNeverOutbound(t *testing.T) {
 		},
 		"web patch": func() resp { return e.web("PATCH", "/v1/sources/src_feed", `{"outbound":{"external":"full"}}`) },
 	} {
-		if r := call(); r.Code != 403 {
+		if r := call(); r.Code != 403 && r.Code != 400 { // Agent 没开数据去向为 403；外发范围本就不在登记请求里，Web 为 400
 			t.Errorf("%s: %d %s", name, r.Code, r.Body)
 		}
 	}
@@ -1281,7 +1281,7 @@ func TestSourceSenderAndSelfSenderRoutes(t *testing.T) {
 	if r := e.web("GET", "/v1/settings/sources/src_s/self-sender", ""); r.Code != 404 {
 		t.Fatalf("self-sender without identity: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(e.token(auth.Delegate), "GET", "/v1/settings/sources/src_a/self-sender", ""); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(e.token(auth.Delegate), "GET", "/v1/settings/sources/src_a/self-sender", ""); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("self-sender for a token: %d %s", r.Code, r.Body)
 	}
 }

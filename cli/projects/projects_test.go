@@ -236,10 +236,10 @@ func TestAllowedExecutorsRejectedOnBothPaths(t *testing.T) {
 		t.Fatalf("allowed_executors changed: %v", got.AllowedExecutors)
 	}
 	// create 带该字段同样不是成功路径。
-	if c := k.apa(dlg, "project", "create", "--name", "Q", "--allowed-executors", "x"); c.code != 20 {
-		t.Fatalf("create with allowed_executors must exit 20: %+v", c)
+	if c := k.apa(dlg, "project", "create", "--name", "Q", "--allowed-executors", "x"); c.code != 2 {
+		t.Fatalf("create with allowed_executors is a usage error: %+v", c)
 	}
-	// 硬线先于范围：worker 同样是 20。
+	// worker 在钥匙范围外。
 	if w := k.apa(k.token(auth.Worker), "project", "update", p.ID, "--allowed-executors", "x"); w.code != 4 {
 		t.Fatalf("worker must exit 20: %+v", w)
 	}

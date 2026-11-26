@@ -22,6 +22,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	kconn "github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
@@ -39,32 +40,28 @@ type api struct {
 }
 
 // Routes 返回路由分组；x 须已由 kconn.Service.Register 登记命令。
+// gate：读这些设置按权限卡的"渠道"组判（Web 本人直接放行），与命令同一条留痕路径（§14.3）。
+func gate(st *store.Store, h core.Handler) core.Handler {
+	return core.Gate(st, authz.GroupChannels, "/settings/channels", h)
+}
+
 func Routes(st *store.Store, x *command.Executor, cs *kconn.Service, call *conn.Caller, s *channel.Sender) core.RouteGroup {
 	a := &api{st, x, cs, call, s}
 	return func(r *core.Router) {
 		for _, rt := range []core.Route{
 			{Method: "GET", Path: "/connections", Handler: a.list},
-			{Method: "GET", Path: "/connections/types", Handler: web(a.types)},
-			{Method: "POST", Path: "/connections", MaxBody: 16 << 10, Handler: web(a.create)},
-			{Method: "PUT", Path: "/connections/{id}", MaxBody: 16 << 10, Handler: web(a.cmd(kconn.CmdConfigure))},
-			{Method: "POST", Path: "/connections/{id}/rename", MaxBody: 1 << 10, Handler: web(a.cmd(kconn.CmdRename))},
-			{Method: "POST", Path: "/connections/{id}/enable", MaxBody: 1 << 10, Handler: web(a.cmd(kconn.CmdEnable))},
-			{Method: "POST", Path: "/connections/{id}/disable", MaxBody: 1 << 10, Handler: web(a.cmd(kconn.CmdDisable))},
-			{Method: "DELETE", Path: "/connections/{id}", Handler: web(a.cmd(kconn.CmdRemove))},
-			{Method: "POST", Path: "/connections/test", MaxBody: 16 << 10, Handler: web(a.testDraft)},
-			{Method: "POST", Path: "/connections/{id}/test", MaxBody: 1 << 10, Handler: web(a.testSaved)},
+			{Method: "GET", Path: "/connections/types", Handler: gate(st, a.types)},
+			{Method: "POST", Path: "/connections", MaxBody: 16 << 10, Handler: gate(st, a.create)},
+			{Method: "PUT", Path: "/connections/{id}", MaxBody: 16 << 10, Handler: gate(st, a.cmd(kconn.CmdConfigure))},
+			{Method: "POST", Path: "/connections/{id}/rename", MaxBody: 1 << 10, Handler: gate(st, a.cmd(kconn.CmdRename))},
+			{Method: "POST", Path: "/connections/{id}/enable", MaxBody: 1 << 10, Handler: gate(st, a.cmd(kconn.CmdEnable))},
+			{Method: "POST", Path: "/connections/{id}/disable", MaxBody: 1 << 10, Handler: gate(st, a.cmd(kconn.CmdDisable))},
+			{Method: "DELETE", Path: "/connections/{id}", Handler: gate(st, a.cmd(kconn.CmdRemove))},
+			{Method: "POST", Path: "/connections/test", MaxBody: 16 << 10, Handler: gate(st, a.testDraft)},
+			{Method: "POST", Path: "/connections/{id}/test", MaxBody: 1 << 10, Handler: gate(st, a.testSaved)},
 		} {
 			r.Handle(rt)
 		}
-	}
-}
-
-func web(h core.Handler) core.Handler {
-	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if !p.Web {
-			return domain.NewError(domain.CodeWebOnly, "connections can only be managed by the owner in the Web UI", "ask the owner to change it in the Web settings")
-		}
-		return h(w, r, p)
 	}
 }
 

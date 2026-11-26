@@ -260,15 +260,17 @@ type ruleChanges struct {
 	x  *command.Executor
 }
 
-func ownerOnly(p *core.Principal) error {
-	if !p.Web {
-		return domain.NewError(domain.CodeWebOnly, "rule changes are reviewed by the owner in the Web UI", "open Agent changes in the Web UI")
+// ownerOnly：规矩改动的复核与撤回属"改日常规则与提醒"（§14.3），Web 本人直接放行，其余按权限卡判。
+func (h *ruleChanges) ownerOnly(r *http.Request, p *core.Principal) error {
+	if p.Web {
+		return nil
 	}
-	return nil
+	_, err := core.Authorize(h.st, r, p, authz.GroupRules, "/rule-changes", "api:"+r.URL.Path)
+	return err
 }
 
 func (h *ruleChanges) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if err := ownerOnly(p); err != nil {
+	if err := h.ownerOnly(r, p); err != nil {
 		return err
 	}
 	q := r.URL.Query()
@@ -322,7 +324,7 @@ func (h *ruleChanges) revert(r *http.Request, p *core.Principal, seq int64) erro
 }
 
 func (h *ruleChanges) revertOne(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if err := ownerOnly(p); err != nil {
+	if err := h.ownerOnly(r, p); err != nil {
 		return err
 	}
 	seq, err := strconv.ParseInt(r.PathValue("seq"), 10, 64)
@@ -337,7 +339,7 @@ func (h *ruleChanges) revertOne(w http.ResponseWriter, r *http.Request, p *core.
 
 // revertAgent 把一个 Agent 的 3a 改动从新到旧逐条撤回；撤不回的照列原因，不中断其余。
 func (h *ruleChanges) revertAgent(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if err := ownerOnly(p); err != nil {
+	if err := h.ownerOnly(r, p); err != nil {
 		return err
 	}
 	var in struct {
