@@ -6,6 +6,6 @@ describe("状态 › 规则退回试运行的链接", () => {
   it("跟进、停滞落到矩阵行锚点；其他规则落到「替我动手」的规则锚点；没有明细时落到这一节", () => {
     const s = { id: "rule_fallbacks", ok: false, count: 3, next: "", detail: ["follow-up/clock_rules/follow-up-interval", "follow-up/clock_rules/stale-check", "p/event_rules/rule-1"] };
     expect(rowsOf(s).map((r) => r.to)).toEqual(["/settings/notify#reminder-followup", "/settings/notify#reminder-stale", "/settings/agents#rule-p%2Fevent_rules%2Frule-1"]);
-    expect(rowsOf({ ...s, detail: undefined }).map((r) => r.to)).toEqual(["/settings/agents#auto-act"]);
+    expect(rowsOf({ ...s, detail: undefined }).map((r) => r.to)).toEqual(["/settings/agents#auto-action"]);
   });
 });

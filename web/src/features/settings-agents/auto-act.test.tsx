@@ -94,6 +94,7 @@ describe("设置 › Agent › 权限总览与替我动手", () => {
   it("ACT-RULE-03: 按类别分「替我动手 / 其他」，名字是中文，模式是「关 / 试运行 / 开」；提醒类规则不在列表里（由提醒与推送的单选写模式）", async () => {
     mount(server().impl);
     const act = within(await screen.findByRole("region", { name: "替我动手" }));
+    expect(screen.getByRole("region", { name: "替我动手" })).toHaveAttribute("id", "auto-action"); // 状态页、Agent 页与内核拒绝体链到这个锚点
     expect(screen.queryByText(N2)).toBeNull();
     expect(screen.queryByRole("radiogroup", { name: `${N2}：开关` })).toBeNull();
     expect(act.getByText(N1)).toBeInTheDocument();

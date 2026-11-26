@@ -281,7 +281,7 @@ func setMode(src PackSource) command.Spec {
 		var v setModeIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "rule.set_mode", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/settings/agents#auto-act",
+	return command.Spec{Name: "rule.set_mode", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/settings/agents#auto-action",
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

@@ -124,7 +124,7 @@ export function rowsOf(s: Signal): Row[] {
       ];
     case "rule_fallbacks": {
       const ids = list<string>(d).filter(Boolean);
-      return ids.length ? ids.map((k) => row("fallback", true, 1, ruleLink(k), k)) : [row("fallback", true, s.count, "/settings/agents#auto-act")];
+      return ids.length ? ids.map((k) => row("fallback", true, 1, ruleLink(k), k)) : [row("fallback", true, s.count, "/settings/agents#auto-action")];
     }
     case "receipt_failures": {
       // 逐条说清谁的什么操作被拒、为什么、下一步（原因码在服务端给出）；没有逐条明细的旧接口退回一行计数。
