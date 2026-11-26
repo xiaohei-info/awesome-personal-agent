@@ -29,6 +29,7 @@ func TestDefaultSchedulesPaused(t *testing.T) {
 			t.Errorf("默认安排不应在验收环境触发 %s", kind)
 		}
 	}
+	e.WebLogin() // 拨过一周后原会话已过期
 	var l struct {
 		Instances []struct {
 			ID string `json:"id"`

@@ -89,7 +89,6 @@ func TestFlowHealth(t *testing.T) {
 	f := opsFx(t, "max_subprocesses: 1\nmax_short_subprocesses: 1\n")
 	open := f.Projects["acc-open"]
 	var driftItem, tripItem string
-	f.DiagBriefSoon(2 * time.Minute) // DIAG
 
 	step(t, "全新环境十四项信号都正常", func(t *testing.T) {
 		h := f.health()
