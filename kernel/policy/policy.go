@@ -178,9 +178,11 @@ const (
 	MaxPipelinePrompt         = 12000
 )
 
-func (s SourcePipeline) Batch() int            { return cmp.Or(s.BatchSize, DefaultPipelineBatch) }
-func (s SourcePipeline) Wait() time.Duration   { return time.Duration(cmp.Or(s.WaitMinutes, DefaultPipelineWait)) * time.Minute }
-func (s SourcePipeline) MaxBatchSize() int     { return cmp.Or(s.MaxBatch, DefaultPipelineMaxBatch) }
+func (s SourcePipeline) Batch() int { return cmp.Or(s.BatchSize, DefaultPipelineBatch) }
+func (s SourcePipeline) Wait() time.Duration {
+	return time.Duration(cmp.Or(s.WaitMinutes, DefaultPipelineWait)) * time.Minute
+}
+func (s SourcePipeline) MaxBatchSize() int { return cmp.Or(s.MaxBatch, DefaultPipelineMaxBatch) }
 func (s SourcePipeline) Retries() int {
 	if s.MaxRetries == nil {
 		return DefaultPipelineMaxRetries

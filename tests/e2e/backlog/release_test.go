@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
-	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
 const (
@@ -58,6 +57,7 @@ func (k *kit) rejudge(args ...string) rejudgeResult {
 	nb := len(k.clsLog())
 	k.ownerOK(words, &r, append([]string{"source", "backlog", "rejudge"}, args...)...)
 	k.t.Logf("rejudge %v -> %+v 新增判断批次 %d", args, r, len(k.clsLog())-nb)
+	k.drainQueue()
 	return r
 }
 
@@ -464,19 +464,10 @@ func TestBacklogReleaseFlow(t *testing.T) {
 		before := k.proposed()
 		seqStart := k.maxSeq()
 		// 判断端点 max_batch 改为 2，整批时延 5 秒；起草请求也慢 5 秒，让已放回的事件停在 pending 时进程被杀。
-		// 分类端点的结果会在 7 天窗口内复用前几天预取的答案，所以"第 2 批请求"未必出现；这里以"起草请求出现（事件已放回、在处理中）"为杀进程的时机。
+		// 分类端点的结果会在 7 天窗口内复用前几天预取的答案，所以"第 2 批请求"未必出现；这里以"事件已放回、还没处理完（pending）"为杀进程的时机。
 		k.Cls.SetFault(modelstub.ClsFault{DelayMS: 5000})
-		k.ModelStub.SetDefault(modelstub.Reply{Content: draftReply, Delay: 5 * time.Second})
 		k.wire("local", "local", 2)
 		k.clear()
-		drafts := func() (n int) {
-			for _, r := range k.modelLog() {
-				if !baseline.IsJudgeRequest(r) {
-					n++
-				}
-			}
-			return
-		}
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() { // 进程被杀后这条命令失败，退出码不重要
@@ -485,11 +476,8 @@ func TestBacklogReleaseFlow(t *testing.T) {
 			cmd.Env = append(os.Environ(), "APA_HOME="+k.Home, "APA_URL="+k.URL, "APA_TOKEN="+k.DEL, "APA_SESSION=e2e-session", "APA_SESSION_KIND=direct")
 			_ = cmd.Run()
 		}()
-		if !k.WaitFor(60*time.Second, func() bool { return drafts() >= 1 }) {
-			t.Fatalf("放开重判没有走到起草: 判断批次 %d\n%s", len(k.clsLog()), k.ServiceLog())
-		}
-		if len(k.all("pending")) == 0 {
-			t.Fatal("杀进程时应有已放回、停在 pending 的事件")
+		if !k.WaitFor(60*time.Second, func() bool { return len(k.all("pending")) > 0 }) {
+			t.Fatalf("放开重判没有把事件放回: 判断批次 %d\n%s", len(k.clsLog()), k.ServiceLog())
 		}
 		k.KillKernel()
 		wg.Wait()
@@ -499,10 +487,9 @@ func TestBacklogReleaseFlow(t *testing.T) {
 			}
 		}
 		k.Cls.SetFault(modelstub.ClsFault{})
-		k.ModelStub.SetDefault(modelstub.Reply{Content: draftReply})
-		k.StartKernelAgain() // 偏移量文件不变，时间仍为 T0+2d
-		k.TCAdvance(900)     // 等待 15 分钟
-		if !k.WaitFor(60*time.Second, func() bool { return len(k.all("pending")) == 0 }) {
+		k.StartKernelAgain()                                                                // 偏移量文件不变，时间仍为 T0+2d
+		k.TCAdvance(900)                                                                    // 等待 15 分钟
+		if !k.WaitFor(150*time.Second, func() bool { return len(k.all("pending")) == 0 }) { // 被打断的批次等下一个维护节拍重排
 			t.Fatalf("重启后事件仍卡在 pending: %d 条", len(k.all("pending")))
 		}
 		k.rejudge()
@@ -529,7 +516,7 @@ func TestBacklogReleaseFlow(t *testing.T) {
 				t.Fatal("没有任何 inbound.requeued")
 			}
 			for id, n := range per {
-				if n != 1 {
+				if n != 1 && !(typ == "inbound.disposed" && n == 2) { // 处置两条：进队列、批处理转建议
 					t.Fatalf("事件 %s 有 %d 条 %s", id, n, typ)
 				}
 			}

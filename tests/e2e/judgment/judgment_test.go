@@ -149,7 +149,7 @@ func TestFlowJudgmentRecord(t *testing.T) {
 			if strings.Contains(string(s.Payload), "p_yes") || strings.Contains(string(s.Payload), "probability") {
 				t.Errorf("Event 里不应有逐级的概率或答案: seq %d %s", s.Seq, s.Payload)
 			}
-			if _, ok := mine[s.Object]; ok && s.Type == "inbound.disposed" {
+			if _, ok := mine[s.Object]; ok && s.Type == "inbound.disposed" && payloadField(s.Payload, "judgment") != "" { // 批处理转建议那一条不带判断
 				disposed[s.Object] = payloadField(s.Payload, "judgment")
 			}
 		}
@@ -434,7 +434,7 @@ func TestFlowJudgmentRecord(t *testing.T) {
 		}
 		disposed := ""
 		for _, s := range f.audit("inbound.disposed") {
-			if s.Object == shdEvent.ID {
+			if s.Object == shdEvent.ID && payloadField(s.Payload, "judgment") != "" {
 				disposed = payloadField(s.Payload, "judgment")
 			}
 		}

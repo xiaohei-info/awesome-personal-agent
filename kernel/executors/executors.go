@@ -64,10 +64,10 @@ type Session struct {
 
 // Headless 是无头运行声明（A.2）。Command 是命令模板，只作数据保存。
 type Headless struct {
-	Command   []string            `json:"command"`
-	Output    []string            `json:"output,omitempty"`
-	FinalText string              `json:"final_text,omitempty"`
-	Session   Session             `json:"session"`
+	Command    []string            `json:"command"`
+	Output     []string            `json:"output,omitempty"`
+	FinalText  string              `json:"final_text,omitempty"`
+	Session    Session             `json:"session"`
 	Resume     []string            `json:"resume,omitempty"`
 	Access     map[string][]string `json:"access"`
 	Credential string              `json:"credential,omitempty"`

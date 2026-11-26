@@ -75,12 +75,12 @@ func (s *Service) ProposeInto(ctx context.Context, id command.Identity, event, i
 		return domain.SourceEvent{}, err
 	}
 	var (
-		item       string
-		mf         mergeFields
-		ev         domain.SourceEvent
-		autoRule   string
-		autoMode   string
-		err        error
+		item     string
+		mf       mergeFields
+		ev       domain.SourceEvent
+		autoRule string
+		autoMode string
+		err      error
 	)
 	if strings.TrimSpace(into) != "" {
 		into = strings.TrimSpace(into)

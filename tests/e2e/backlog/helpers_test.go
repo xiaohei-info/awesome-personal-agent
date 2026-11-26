@@ -50,6 +50,7 @@ func newKit(t *testing.T, cfg map[string]string, wire bool) *kit {
 		c[k] = v
 	}
 	e.ServeFixture(fx, c)
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 	k := &kit{Env: e, t: t, fx: fx, cfg: c}
 	if wire {
 		k.wire("local", "local", 0)
@@ -275,6 +276,7 @@ type srcEvent struct {
 	Judgment    string   `json:"judgment"`
 	Unjudged    string   `json:"unjudged_reason"`
 	Score       *float64 `json:"score"`
+	Queue       string   `json:"queue"`
 }
 
 func (k *kit) sources() (ids []string) {
@@ -316,6 +318,21 @@ func (k *kit) all(dispositions string) (out []srcEvent) {
 		out = append(out, k.events(s, dispositions, "")...)
 	}
 	return
+}
+
+// drainQueue 等批处理把队列里的事件处理完：放开重判只把事件送进队列，建议由批处理建出。
+func (k *kit) drainQueue() {
+	k.t.Helper()
+	if !k.WaitFor(150*time.Second, func() bool {
+		for _, e := range k.all("pending") {
+			if e.Queue != "" {
+				return false
+			}
+		}
+		return true
+	}) {
+		k.t.Fatalf("队列没有处理完: %+v\n%s", k.all("pending"), k.ServiceLog())
+	}
 }
 
 // backlog 是积压：未判定与已到期。
@@ -426,6 +443,7 @@ type judgmentView struct {
 	DecidedBy string `json:"decided_by"`
 	Answer    string `json:"answer"`
 	Shadow    bool   `json:"shadow"`
+	Use       string `json:"use"`
 	Levels    []struct {
 		Backend  string   `json:"backend"`
 		Locality string   `json:"locality"`
@@ -455,7 +473,7 @@ func (k *kit) judgmentsOf(eventID string) []judgmentView {
 // decision 是事件最近一条非影子判断记录；没有则 ok 为假。
 func (k *kit) decision(eventID string) (j judgmentView, ok bool) {
 	for _, r := range k.judgmentsOf(eventID) {
-		if !r.Shadow {
+		if !r.Shadow && r.Use != "inbound_urgent" { // 取"要不要处理"一问
 			j, ok = r, true
 		}
 	}
