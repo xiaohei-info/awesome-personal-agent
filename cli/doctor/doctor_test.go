@@ -414,8 +414,8 @@ func openLegacy(t *testing.T, old *store.Registry) string {
 func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 	home := openLegacy(t, regWith(t, 2, 0))
 	reg := fullReg(t)
-	if reg.SchemaLedger() != 10 {
-		t.Fatalf("precondition: structure 10, got %d", reg.SchemaLedger())
+	if reg.SchemaLedger() != 11 {
+		t.Fatalf("precondition: structure 11, got %d", reg.SchemaLedger())
 	}
 	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: now}
 	r := Run(bg, in)
@@ -426,7 +426,7 @@ func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 		t.Fatalf("sources: %+v", c)
 	}
 	u := UpgradeCheck(bg, in)
-	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 10") {
+	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 11") {
 		t.Fatalf("upgrade check: %+v", c)
 	}
 	if c := find(t, u, checkOutbound); c.Status != kdoctor.OK {

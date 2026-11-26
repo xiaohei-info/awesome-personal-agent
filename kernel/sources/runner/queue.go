@@ -34,7 +34,7 @@ func Enqueue(tx *store.Tx, id, level string) error {
 	return err
 }
 
-// QueueStat 是待处理的条数（按等级）与最早一条普通事件的入账时刻（攒批的等待从入账算起）。
+// QueueStat 是待处理的条数（按等级）与最早一条待处理事件的入账时刻（攒批的等待从入账算起，包含急件关闭立即开关时的场景）。
 type QueueStat struct {
 	Urgent, Normal int
 	Oldest         time.Time
@@ -47,8 +47,8 @@ func Queued(tx *store.Tx) (QueueStat, error) {
 	r, err := tx.Query(`SELECT
 		COALESCE(SUM(CASE WHEN queue_level = ? THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN queue_level <> ? THEN 1 ELSE 0 END), 0),
-		COALESCE(MIN(CASE WHEN queue_level <> ? THEN COALESCE(ingested_at, occurred_at) END), 0)
-		FROM sources_runner_event WHERE queue_state = ?`, LevelUrgent, LevelUrgent, LevelUrgent, QueueQueued)
+		COALESCE(MIN(CASE WHEN COALESCE(ingested_at, 0) > 0 THEN ingested_at ELSE occurred_at END), 0)
+		FROM sources_runner_event WHERE queue_state = ?`, LevelUrgent, LevelUrgent, QueueQueued)
 	if err != nil {
 		return st, err
 	}
@@ -73,13 +73,32 @@ func Claim(tx *store.Tx, run string, limit int) ([]domain.SourceEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range evs {
+	for i := range evs {
 		if _, err := tx.Exec(`UPDATE sources_runner_event SET queue_state = ?, queue_run = ? WHERE id = ? AND queue_state = ?`,
-			QueueRunning, run, e.ID, QueueQueued); err != nil {
+			QueueRunning, run, evs[i].ID, QueueQueued); err != nil {
 			return nil, err
 		}
+		evs[i].Queue = QueueRunning
 	}
 	return evs, nil
+}
+
+// RunningRuns 返回当前有"处理中"事件的去重运行 id 列表（内核启动恢复时用于检查无存活进程的孤儿批）。
+func RunningRuns(tx *store.Tx) ([]string, error) {
+	r, err := tx.Query(`SELECT DISTINCT queue_run FROM sources_runner_event WHERE queue_state = ? AND queue_run <> '' ORDER BY queue_run`, QueueRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	var runs []string
+	for r.Next() {
+		var id string
+		if err := r.Scan(&id); err != nil {
+			return nil, err
+		}
+		runs = append(runs, id)
+	}
+	return runs, r.Err()
 }
 
 // InRun 按落盘顺序返回某次运行取走的事件（处理中或已处理）。
