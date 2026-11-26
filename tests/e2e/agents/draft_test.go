@@ -83,6 +83,7 @@ func (f *fx) shortDraftCycle() {
 func TestFlowGuidelineDraft(t *testing.T) {
 	f := setup(t, "guideline_draft_executor: work-host.cli\n")
 	f.shortDraftCycle()
+	f.DiagBriefSoon(90 * time.Second) // DIAG
 
 	// DRAFT_REPO：git init 的本地仓库，并有一份本机检出（origin 就是它）。
 	root := t.TempDir()

@@ -19,6 +19,7 @@ func TestFlowRoutine(t *testing.T) {
 	e := k.Env
 	var h *accHarness
 	home := e.Projects["acc-home"]
+	e.DiagBriefSoon(90 * time.Second) // DIAG
 
 	// tick 让测试时钟走过一个周期（61 秒），之后等内核处理完到期。
 	tick := func(minutes int) {
