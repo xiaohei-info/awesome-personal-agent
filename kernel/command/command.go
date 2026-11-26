@@ -26,7 +26,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// DefaultMaxChainDepth 是链路深度阈值（§14.9）。
+// DefaultMaxChainDepth 是链路深度阈值没设过时的初值（§14.9）；生效值取策略的 limits.chain_depth。
 const DefaultMaxChainDepth = 8
 
 // Module 是本模块在存储层登记的迁移：对象乐观版本与幂等结果。
@@ -250,11 +250,10 @@ type Spec struct {
 
 // Result 是命令结果。
 type Result struct {
-	Value      json.RawMessage
-	Version    int64 // 对象写入后的版本；无对象为 0
-	Seqs       []int64
-	Replayed   bool // 幂等键命中，返回首次结果，未重复写入
-	Suppressed bool // 链路深度超阈值：只记录不派发
+	Value    json.RawMessage
+	Version  int64 // 对象写入后的版本；无对象为 0
+	Seqs     []int64
+	Replayed bool // 幂等键命中，返回首次结果，未重复写入
 }
 
 // Commit 在提交后交给内部消费者（事件规则、触达、订阅等待方）。
@@ -443,6 +442,30 @@ func exitOf(err error) int {
 	return domain.ExitUnclassified
 }
 
+// overDepth 是链路深度超过阈值：命令不生效、返回错误，健康告警在独立事务里记（§14.9）。
+type overDepth struct {
+	err error
+	ev  domain.Event
+}
+
+func (o *overDepth) Error() string { return o.err.Error() }
+
+// ChainLimit 是 p 下生效的链路深度阈值：策略的 limits.chain_depth，没设过取 MaxChainDepth。
+func (x *Executor) ChainLimit(p policy.Policy) int { return p.Limits.Chain(x.MaxChainDepth) }
+
+// ChainLimitNow 读当前策略给出生效的链路深度阈值；读不出时取 MaxChainDepth。
+func (x *Executor) ChainLimitNow(ctx context.Context) int {
+	limit := x.MaxChainDepth
+	_ = x.st.View(ctx, func(tx *store.Tx) error {
+		_, p, err := policy.Current(tx)
+		if err == nil {
+			limit = x.ChainLimit(p)
+		}
+		return err
+	})
+	return limit
+}
+
 func (r *rejected) Error() string { return r.err.Error() }
 func (r *rejected) Unwrap() error { return r.err }
 
@@ -470,6 +493,12 @@ func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 	})
 	if err == errPreflight {
 		return Result{}, nil
+	}
+	if od, ok := err.(*overDepth); ok {
+		if rerr := x.st.Update(ctx, func(tx *store.Tx) error { _, err := eventlog.Append(tx, od.ev); return err }); rerr != nil {
+			return Result{}, fmt.Errorf("command: record chain depth alert: %w (original: %v)", rerr, od.err)
+		}
+		return Result{}, od.err
 	}
 	if err != nil {
 		rj, isRej := err.(*rejected)
@@ -659,17 +688,17 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 	// 4 事务
 	var out Result
 	var value any
-	// 超阈值只记录不派发（健康类投递由 kernel/health 据该事件统一产出）。本人在 Web 的操作照常生效：深度照样沿用，
-	// 但本人就是熔断后的处理者，拦下他会让被熔断的事项既改不了也放弃不了。
-	if depth > x.MaxChainDepth && caller.Level != authz.LevelWeb {
-		if _, err := c.Emit(domain.Event{Type: domain.EvHealthAlert, Object: objectOrCommand(obj, spec),
-			Reason:  "chain depth exceeded",
-			Payload: mustJSON(map[string]any{"command": spec.Name, "chain_depth": depth, "threshold": x.MaxChainDepth})}); err != nil {
-			return Result{}, Commit{}, err
-		}
-		out.Suppressed = true
-		out.Version = cur
-	} else {
+	// 超阈值：命令不生效，返回明确的错误，健康告警（健康类投递由 kernel/health 据它统一产出）在独立事务里记。
+	// 本人在 Web 的操作照常生效：深度照样沿用，但本人就是熔断后的处理者，拦下他会让被熔断的事项既改不了也放弃不了。
+	if limit := x.ChainLimit(pol); depth > limit && caller.Level != authz.LevelWeb {
+		e := domain.NewError(domain.CodeConflict, fmt.Sprintf("chain depth %d is over the limit %d; nothing was written", depth, limit),
+			"stop and tell the owner; the limit is under Settings › Agent")
+		e.Reason = domain.ReasonChainDepthExceeded
+		return Result{}, Commit{}, &overDepth{err: e, ev: domain.Event{Type: domain.EvHealthAlert, Object: objectOrCommand(obj, spec), Actor: caller.Actor,
+			Reason: "chain depth exceeded", ChainDepth: depth, At: at, Basis: basis,
+			Payload: mustJSON(map[string]any{"command": spec.Name, "chain_depth": depth, "threshold": limit})}}
+	}
+	{
 		if value, err = spec.Apply(c); err != nil {
 			return Result{}, Commit{}, err
 		}

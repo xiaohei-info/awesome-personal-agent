@@ -347,9 +347,9 @@ func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome
 	if err != nil || !f.ready {
 		return Skipped, err
 	}
-	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发（§14.9）
+	if limit := f.pol.Limits.Chain(s.o.MaxChainDepth); f.depth > limit { // 与命令管线同一口径：超过阈值只记录不派发（§14.9）
 		return Skipped, s.audit(tx, f, domain.EvHealthAlert, "chain depth exceeded",
-			map[string]any{"chain_depth": f.depth, "threshold": s.o.MaxChainDepth})
+			map[string]any{"chain_depth": f.depth, "threshold": limit})
 	}
 	harness := f.selected.Card.Harness
 	var hl executors.Headless

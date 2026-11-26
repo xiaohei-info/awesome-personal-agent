@@ -475,35 +475,33 @@ func TestChainDepthInheritance(t *testing.T) {
 	}
 }
 
-func TestChainDepthOverThresholdOnlyRecords(t *testing.T) {
+// 链路深度超阈值（§14.9）：命令不生效、返回退出码 6（chain_depth_exceeded），健康告警另记一条；不再记成功。
+func TestChainDepthOverThresholdFails(t *testing.T) {
 	e := setup(t)
 	e.x.MaxChainDepth = 2
 	agent := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
 	prev := "o0"
-	var last Result
 	for i := 0; i < 4; i++ {
 		id := string(rune('a' + i))
 		ch := Chain{}
 		if i > 0 {
 			ch = Chain{Mode: ChainInherit, From: prev}
 		}
-		r, err := e.x.Do(bg, Request{Identity: agent, Command: "note.write", Input: in(noteIn{ID: id, Body: "b"}), Chain: ch})
-		if err != nil {
-			t.Fatal(err)
+		_, err := e.x.Do(bg, Request{Identity: agent, Command: "note.write", Input: in(noteIn{ID: id, Body: "b"}), Chain: ch})
+		var de *domain.Error
+		if i == 3 && (!errors.As(err, &de) || de.ExitCode() != domain.ExitConflict || de.Reason != domain.ReasonChainDepthExceeded) {
+			t.Fatalf("depth 3 > 2 must fail: %v", err)
 		}
-		prev, last = id, r
-		if i == 3 && !r.Suppressed {
-			t.Fatal("depth 3 > 2 must be suppressed")
+		if i < 3 && err != nil {
+			t.Fatalf("depth %d must run: %v", i, err)
 		}
-		if i < 3 && r.Suppressed {
-			t.Fatalf("depth %d must run", i)
-		}
+		prev = id
 	}
 	if e.noteCount(t) != 3 {
 		t.Fatalf("suppressed command must not write projection, notes=%d", e.noteCount(t))
 	}
 	ev := e.events(t)
-	if got := ev[len(ev)-1].Event; got.Type != domain.EvHealthAlert || got.ChainDepth != 3 || last.Seqs[0] != got.Seq {
+	if got := ev[len(ev)-1].Event; got.Type != domain.EvHealthAlert || got.ChainDepth != 3 {
 		t.Fatalf("health alert expected: %+v", got)
 	}
 }
@@ -556,12 +554,15 @@ func TestChainDepthResolvedByCaller(t *testing.T) {
 	// 超阈值：自动方被拦下，本人照常生效且深度不清零。
 	deep := Trusted(run)
 	deep.RunDepth = 4
-	if d, r := depthOf(deep, "note.write", "m"); !r.Suppressed || d != 5 {
-		t.Fatal("run over threshold must be suppressed")
+	if _, err := e.x.Do(bg, Request{Identity: deep, Command: "note.write", Input: in(noteIn{ID: "m", Body: "b"})}); exit(err) != domain.ExitConflict {
+		t.Fatalf("run over threshold must fail: %v", err)
+	}
+	if ev := e.events(t); ev[len(ev)-1].Event.ChainDepth != 5 {
+		t.Fatal("the alert carries the exceeded depth")
 	}
 	// 熔断记录本身带着超限深度（5），本人沿用它且照常生效。
-	if d, r := depthOf(owner, "note.write", "m"); r.Suppressed || d != 5 {
-		t.Fatalf("owner write over threshold: depth %d suppressed %v", d, r.Suppressed)
+	if d, _ := depthOf(owner, "note.write", "m"); d != 5 {
+		t.Fatalf("owner write over threshold: depth %d", d)
 	}
 }
 
@@ -892,4 +893,26 @@ func TestPreflightChecksAuthorizationButWritesNothing(t *testing.T) {
 func withProjects(c policy.Card, projects ...string) policy.Card {
 	c.DecideProjects = projects
 	return c
+}
+
+// 阈值进设置（§14.9）：策略的 limits.chain_depth 设了就取它，没设过才取运行配置的初值。
+func TestChainLimitFollowsTheSetting(t *testing.T) {
+	e := setup(t)
+	e.x.MaxChainDepth = 8
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.Limits.ChainDepth = 1; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
+	if _, err := e.x.Do(bg, Request{Identity: agent, Command: "note.write", Input: in(noteIn{ID: "a", Body: "b"})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.x.Do(bg, Request{Identity: agent, Command: "note.write", Input: in(noteIn{ID: "b", Body: "b"}), Chain: Chain{Mode: ChainInherit, From: "a"}}); err != nil {
+		t.Fatalf("depth 1 is within the limit: %v", err)
+	}
+	if _, err := e.x.Do(bg, Request{Identity: agent, Command: "note.write", Input: in(noteIn{ID: "c", Body: "b"}), Chain: Chain{Mode: ChainInherit, From: "b"}}); exit(err) != domain.ExitConflict {
+		t.Fatalf("depth 2 is over the setting: %v", err)
+	}
 }

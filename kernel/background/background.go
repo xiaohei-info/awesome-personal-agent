@@ -313,8 +313,8 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if f.busy {
 		return s.audit(ctx, c, f, EvSkipped, f.item.ID, "该事项已有在途运行，不重复拉起", nil)
 	}
-	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
-		return chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, f.item.ID, f.depth, s.o.MaxChainDepth)
+	if limit := f.pol.Limits.Chain(s.o.MaxChainDepth); f.depth > limit { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
+		return chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, f.item.ID, f.depth, limit)
 	}
 	harness := f.selected.Card.Harness
 	headless, ms := executors.Headless{}, executors.MainSession{}
@@ -412,7 +412,7 @@ func (s *Service) createChild(c rules.Call, parent domain.Item, executor string)
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(res.Value, &out); err != nil || out.ID == "" {
-		return "", fmt.Errorf("background: delegate.create returned no id (suppressed=%v): %v", res.Suppressed, err)
+		return "", fmt.Errorf("background: delegate.create returned no id: %v", err)
 	}
 	return out.ID, nil
 }

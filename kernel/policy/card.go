@@ -88,6 +88,19 @@ type Limits struct {
 	ChainDepth int `json:"chain_depth,omitempty"`
 }
 
+// Or 返回设置里的值，没设过（0）时取运行配置的初值 fallback。
+func limitOr(v, fallback int) int {
+	if v > 0 {
+		return v
+	}
+	return fallback
+}
+
+// Long、Short、Chain 是三项上限的生效值；fallback 是运行配置（config.yaml）的初值。
+func (l Limits) Long(fallback int) int  { return limitOr(l.LongRuns, fallback) }
+func (l Limits) Short(fallback int) int { return limitOr(l.ShortRuns, fallback) }
+func (l Limits) Chain(fallback int) int { return limitOr(l.ChainDepth, fallback) }
+
 // 三项上限的可调范围。
 const (
 	MaxRunsLimit       = 16

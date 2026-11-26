@@ -272,7 +272,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 // launchDepth 是规则拉起任务型与直接调用的链路深度，规则与后台运行同一处（chain.Next）；超过阈值只记录不派发，over 为真。
 func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, over bool, err error) {
 	depth = chain.Next(c.Depth)
-	if max := s.o.Exec.MaxChainDepth; depth > max {
+	if max := s.o.Exec.ChainLimitNow(ctx); depth > max {
 		object := "rule:" + c.Rule
 		if c.Item != nil {
 			object = c.Item.ID

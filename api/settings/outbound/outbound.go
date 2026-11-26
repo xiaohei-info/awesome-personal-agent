@@ -26,12 +26,12 @@ type api struct {
 	x  *command.Executor
 }
 
-// Routes 返回路由分组；x 须已由 registry.Register 与 projects.Register 登记命令。经 core.Deps.Groups 挂载。
 // gate：读这些设置按权限卡的"数据去向"组判（Web 本人直接放行），与命令同一条留痕路径（§14.3）。
 func gate(st *store.Store, h core.Handler) core.Handler {
 	return core.Gate(st, authz.GroupOutbound, "/sources", h)
 }
 
+// Routes 返回路由分组；x 须已由 registry.Register 与 projects.Register 登记命令。经 core.Deps.Groups 挂载。
 func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 	a := &api{st, x}
 	return func(r *core.Router) {

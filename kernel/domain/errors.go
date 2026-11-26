@@ -146,6 +146,8 @@ const (
 	ReasonReauthRequired = "reauth_required"
 	ReasonTierClosed     = "tier_closed"
 	ReasonOutOfScope     = "out_of_scope"
+	// ReasonChainDepthExceeded：连锁触发超过设置里的层数，命令不生效（退出码 6，§14.9）。
+	ReasonChainDepthExceeded = "chain_depth_exceeded"
 )
 
 // 旧模型授权单不可用的原因：内核不再产出，只供读旧的拒绝记录。

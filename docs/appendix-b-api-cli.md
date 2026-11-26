@@ -113,7 +113,7 @@
 | 只有本人 | `credential.issue`、`credential.revoke`、`credential.assign`、`credential.scope.set` | 退出码 20（`hard_line`），不论权限卡；Web 会话没刚输过口令为退出码 20（`reauth_required`） |
 | 系统内部 | `source.ingest`、`source.run_result`；`inbound.dispose`、`inbound.sweep`、`inbound.mark_pending`、`inbound.retry_rejected`、`inbound.requeue`、`inbound.expire`、`proposal.batch_log`；`followmsg.attach`、`followmsg.ack`、`followmsg.release`；`delegate.settle`；`followup.settle`；`retention.purge_content`、`retention.report`；`agents.render`；`revision.summarize`；`material.refresh`、`material.relocate` | 没有对外入口；Agent 凭据调用为退出码 20（`hard_line`） |
 
-不走命令的设置路由按段归组（主文档 §14.3）："改日常规则与提醒"是打扰与提醒（`disturb`）、人格与助手语言、渠道的登记属性（`channels`）、后台运行时限、同时运行数与连锁层数（`limits`）、不确定带与影子模式、抽检设置、暂停模型、信任的发件人（转发白名单）、来源的原文保留天数、跨来源合并的设置；"数据去向"是判断端点与生成端点（含测试连接）、笔记库、外发范围；"Agent 与执行者配置"是默认 Agent 与后台由谁干（`default_agent_id`、`main_agent_id`、`rule_agent`、`default_harness`）、启动方式（`main_session_launch`）；"渠道"是删除自写程序渠道与识别回答人；"只有本人"是权限卡（`agent_cards`，只读段；写走 `PUT /settings/agents/{agent}/card`）、渠道回答人、口令与会话。Agent 读设置路由时只看到它的权限卡开放了的组的段。
+不走命令的设置路由按段归组（主文档 §14.3）："改日常规则与提醒"是打扰与提醒（`disturb`）、人格与助手语言、渠道的登记属性（`channels`）、后台运行时限、同时运行数与连锁层数（`limits`：`{"long_runs", "short_runs", "chain_depth"}`，各 0 表示取运行配置的初值，同时运行数可设 1–16、层数 1–32；同时运行数在下次启动内核时生效）、不确定带与影子模式、抽检设置、暂停模型、信任的发件人（转发白名单）、来源的原文保留天数、跨来源合并的设置；"数据去向"是判断端点与生成端点（含测试连接）、笔记库、外发范围；"Agent 与执行者配置"是默认 Agent 与后台由谁干（`default_agent_id`、`main_agent_id`、`rule_agent`、`default_harness`）、启动方式（`main_session_launch`）；"渠道"是删除自写程序渠道与识别回答人；"只有本人"是权限卡（`agent_cards`，只读段；写走 `PUT /settings/agents/{agent}/card`）、渠道回答人、口令与会话。Agent 读设置路由时只看到它的权限卡开放了的组的段。
 
 钥匙范围外（observer 写入、worker 改别人的事项）为退出码 4（`out_of_scope`）；运行凭据的范围与 delegate 钥匙相同。三种拒绝都记 `command.rejected`，走同一条留痕路径。
 
@@ -230,6 +230,7 @@
 | | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}`（3a） | 读 observer；填 Web 登录，delegate 按档位 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | Agent | `GET /agents` | 卡片列表与选择预览（`rule`、`runner`、`schedule`、`item_agent`、`harness`），本人可见实例参数；每张卡带 `permission`：这个 Agent 的权限卡（`groups`、`decide_projects`、`tool`、`runs_all_messages`，主文档 §14.5；没设过为默认卡） | observer |
+| | `GET /agents/{agent}/limits` | 这个 Agent 当前受到的全部限制（主文档 §14.5）：`card`（权限卡）、`keys`（名下未吊销的钥匙：id 前 8 位、种类、受众、给了几个来源）、`executor_projects`（设了允许执行者名单的项目数）、`run_timeout_sec`、`long_runs`、`short_runs`、`chain_depth`（生效值）、`trusted_only`（后台运行只看信任发件人的消息）、`capture_off`（关了对话捕获的项目数）、`fixed_rules`（改不了的规则的类别码：`runs_not_captured`、`done_needs_evidence`、`same_account_host`）、`denied_week`（最近 7 天被拦下的次数）与 `denied`（最近至多 20 次，新的在前：`at`、`object`、`action`、`group`、`code`、`reason`、`exit`、`web_url`、`settings_url`、`owner_only`）。`agent` 为 `me` 时取调用者自己所属的 Agent；Agent 只能读自己的，读别的为 4 | Web 登录；Agent 读自己 |
 | 设置 | `POST /settings/agents` | 创建或更新卡片，更新时须带原 `id`、`harness` 和 `rev`（`agent.configure`，Agent 与执行者配置）。工具档位在权限卡上，不在这里改 | Web 登录；Agent 按权限卡 |
 | 事件 | `GET /events?cursor=` | JSON 长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
