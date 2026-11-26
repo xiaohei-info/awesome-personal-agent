@@ -207,7 +207,7 @@ var (
 
 // sourcePipelineSections 是设置 › 来源处理（§9.3，取代原合并设置）：执行 Agent、队列参数与两份可调提示词。
 var sourcePipelineSections = []section{
-	{key: "source_pipeline", group: rules, page: "/settings/source-pipeline",
+	{key: "source_pipeline", group: agents, page: "/settings/source-pipeline",
 		get: func(p *kpolicy.Policy) any { return p.SourcePipeline },
 		set: func(p *kpolicy.Policy, raw json.RawMessage) error {
 			var v kpolicy.SourcePipeline

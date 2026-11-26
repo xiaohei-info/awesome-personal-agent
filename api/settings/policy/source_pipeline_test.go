@@ -1,8 +1,12 @@
 package policy
 
 import (
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 func TestSourcePipelineEndpoint(t *testing.T) {
@@ -33,5 +37,34 @@ func TestSourcePipelineEndpoint(t *testing.T) {
 	// 旧的 /v1/settings/merge 路由已删除，返回 404。
 	if rec := e.do("GET", "/v1/settings/merge", "", e.web); rec.Code != 404 {
 		t.Fatalf("old /settings/merge = %d, want 404", rec.Code)
+	}
+}
+
+// 来源处理段决定谁来跑批处理、用什么指令，归"Agent 与执行者配置"：只开规则组的 Agent 改不了，开了 Agent 组的可以。
+func TestSourcePipelineNeedsAgentsGroup(t *testing.T) {
+	e := setup(t)
+	var secret string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, s, err := e.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_a", Harness: "h"})
+		secret = s
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
+	card := func(groups string) {
+		t.Helper()
+		if rec := e.do("PUT", "/v1/settings/agents/agent_a/card", `{"groups":{`+groups+`},"tool":"read"}`, e.web); rec.Code != http.StatusOK {
+			t.Fatalf("set card: %d %s", rec.Code, rec.Body)
+		}
+	}
+	body := `{"source_pipeline":{"batch_prompt":"x"}}`
+	card(`"view":{},"rules":{}`)
+	if rec := e.do("PUT", "/v1/settings/source-pipeline", body, agent); !refused(errCode(t, rec)) {
+		t.Fatalf("rules group must not change source_pipeline: %d %s", rec.Code, rec.Body)
+	}
+	card(`"view":{},"agents":{}`)
+	if rec := e.do("PUT", "/v1/settings/source-pipeline", body, agent); rec.Code != http.StatusOK {
+		t.Fatalf("agents group may change source_pipeline: %d %s", rec.Code, rec.Body)
 	}
 }
