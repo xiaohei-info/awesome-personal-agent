@@ -193,7 +193,8 @@ func TestFlowInboundPipeline(t *testing.T) {
 
 	k.step("ACT-INP-08 起草失败不挡路：生成端点报错时建议仍进入建议流", func(t *testing.T) {
 		k.screenCls("inp-draftfail", 0.90)
-		k.ModelStub.When("inp-draftfail 原始标题", failReply(500))
+		// 匹配事件正文而不是标题：标题会随 active_proposals 进后续事件的起草请求，坏回答会串到别的事件上。
+		k.ModelStub.When("正文 inp-draftfail", failReply(500))
 		k.clear()
 		k.emit("inp-draftfail-1", "inp-draftfail 原始标题", func(e *Ev) { e.Summary = "原始摘要" })
 		ev := k.waitEvent(inpSrc, "inp-draftfail-1", wait)
@@ -211,7 +212,7 @@ func TestFlowInboundPipeline(t *testing.T) {
 
 	k.step("ACT-INP-09 起草输出不合 schema 视同起草失败", func(t *testing.T) {
 		k.screenCls("inp-badschema", 0.90)
-		k.ModelStub.When("inp-badschema 原始标题", replyJSON(`{"kind":"foo","summary":"不该被采纳的摘要"}`))
+		k.ModelStub.When("正文 inp-badschema", replyJSON(`{"kind":"foo","summary":"不该被采纳的摘要"}`))
 		k.clear()
 		k.emit("inp-badschema-1", "inp-badschema 原始标题")
 		ev := k.waitEvent(inpSrc, "inp-badschema-1", wait)

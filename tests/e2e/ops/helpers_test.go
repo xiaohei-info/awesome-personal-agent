@@ -127,7 +127,7 @@ func (f *fx) grepHome(needle string) []string {
 	f.t.Helper()
 	var hits []string
 	err := filepath.Walk(f.Home, func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil || !info.Mode().IsRegular() { // 目录与 host/serve.sock 这类非普通文件读不出内容
 			return err
 		}
 		b, rerr := os.ReadFile(p)

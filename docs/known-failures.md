@@ -32,6 +32,17 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
 | `tests/e2e/inbound` `TestFlowInboundPipeline/ACT-INP-08` | 断言过期 | 否 | 已修（`8d525e43`） |
 | `tests/e2e/inbound` `TestFlowTriageFailure/ACT-TRI-02`（含 ACT-TRI-07 同一处） | 断言过期 | 否 | 已修（`8d525e43`） |
 | `tests/e2e/workbench` `TestFlowWebWorkbench/ACT-WBN-16` | 前两处断言过期（`8d525e43`），余下为真 bug（`1a8f717d`） | 否 | 已修（`8d525e43`、`1a8f717d`） |
+| `tests/e2e/agents` `TestFlowOutcallProc/ACT-OUT-06`；`tests/e2e/mapping` `TestInheritedFlows/flow-outcall-limits`（见第 7 条） | 断言过期 | 否 | 已修（`e20864242`） |
+| `tests/e2e/followup`、`tests/e2e/ops` `TestFlowHealth` 的「造出：外呼超时」「长时运行与短任务各自排队」（见第 8 条） | 断言过期 | 否 | 已修（`e20864242`） |
+| `tests/e2e/followup`、`tests/e2e/ops` `TestFlowHealth/ACT-HLT-01`、`ACT-HLT-02`（见第 9 条） | 断言不稳（依赖时序） | 否 | 已修（`d8085e45c`） |
+| `tests/e2e/followup` `TestFlowHealthWarnings/ACT-HLT-06`（见第 10 条） | 断言不稳（依赖时序） | 否 | 已修（`d4c33da02`） |
+| `tests/e2e/bgguards` `TestFlowBgGuards/ACT-BGG-05`（见第 11 条） | 用例隔离（依赖时刻） | 否 | 已修（`b359aa4e0`） |
+| `tests/e2e/ops` `TestFlowPurge/ACT-PRG-01`；`tests/e2e/materials` `TestOpsFlows/flow-purge`（见第 12 条） | 断言过期 | 否 | 已修（`0d22b9df0`） |
+| `tests/e2e/ops` `TestFlowRetention/*/ACT-RET-01`、`ACT-RET-02`；`tests/e2e/materials` `flow-retention`（见第 13 条） | 断言过期 | 否 | 已修（`802ba9463`、`b26f131e4`、`d880f8433`、`bcda9fdb4`） |
+| `tests/e2e/upgrade` `TestSchema8Upgrade/ACT-S8-01`（见第 14 条） | 断言过期 | 否 | 已修（`fdf60c821`） |
+| `tests/e2e/ledger` `TestFlowBootstrap/ACT-BOOT-03`、`ACT-BOOT-05`（见第 15 条） | 断言过期 | 否 | 已修（`8848a1600`、`dbc7d583e`） |
+| `tests/e2e/inbound` `TestFlowCapture/ACT-CAP-06`、`TestFlowInboundPipeline/ACT-INP-10`（见第 16 条） | 断言过期（模型替身串扰） | 否 | 已修（`9e3a6aa95`） |
+| `tests/e2e/extractalign` `TestFlowExtractAlign/ACT-XAL-04`、`ACT-XAL-06`（见第 17 条） | 断言过期 | 否 | 已修（`4ce8b3fae`） |
 
 ## 明细
 
@@ -90,6 +101,94 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
   - **根因**：`web/src/app/styles.css` 的手机断点（`@media (max-width: 820px)`）里 `.act-row > .actions { flex-wrap: nowrap }`、按钮 `white-space: nowrap`，注释写的是"行上四个快捷操作……占满一行并排放下，不收进「更多」"。`RowActions` 后来加了第五个按钮「更多」（`web/src/features/items/RowActions.tsx`），四个变五个后一行放不下，溢出的 41px 把整页撑宽。今天页（`TodayRow`）与事项列表共用这套行操作，所以两页都超。
   - **影响面**：360 像素宽度下今天页、事项列表出现横向滚动，与界面设计 §4.1/§web-ui 的"全部页面 360 宽度可读可操作、无横向滚动"不符；桌面与平板宽度不受影响，触控操作本身可用。
   - **处理**：已修（`1a8f717d`）。按用户口径在窄屏（`≤ 820px`）保持主操作（「排时间」、「完成」）直接可见，将次要动作（「交给 Agent」、「记进展」、「删除…」）收进「更多」弹出菜单（`role="menu"`，支持方向键/Home/End/Esc 键盘操作、点外部关闭、44px 触控高度），桌面宽屏保持原五按钮布局不变；同时在 `ACT-WBN-16` 补充了展开「更多」菜单时的 360px 边界与 Esc 关闭断言。重跑 `TestFlowWebWorkbench` 全部 17 个子步骤通过，14 页 `scrollWidth` 均为 `360`，无其它断言问题。
+
+### 7. `tests/e2e/agents` `TestFlowOutcallProc/ACT-OUT-06`；`tests/e2e/mapping` `TestInheritedFlows/flow-outcall-limits`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowOutcallProc`（`tests/e2e/agents`）、`TestInheritedFlows`（`tests/e2e/mapping`） 所在包的整个用例。
+- **现象**：`outcall_test.go:529: 等待超时（1m30s）：Run 超时`
+- **定性**：断言过期。任务型运行的时限取策略 `background_run_timeout_sec`（默认 4 小时），模板 `timeout` 不再生效（`f18efed04`）。
+- **是否阻塞上线**：否。
+- **处理**：已修（`e20864242`）。超时后拨测试时钟越过默认时限，去掉"不足 20 秒即过早"的旧假设。
+
+### 8. `tests/e2e/followup`、`tests/e2e/ops` `TestFlowHealth` 的「造出：外呼超时」「长时运行与短任务各自排队」
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowHealth`（两个包） 所在包的整个用例。
+- **现象**：`外呼超时进入健康视图（等待 1m0s 仍未出现）`；挂起的运行占住唯一长时额度时，下一步凑不出「1 在跑、2 排队」。
+- **定性**：断言过期。原因同第 7 条。
+- **是否阻塞上线**：否。
+- **处理**：已修（`e20864242`）。把策略时限临时调到下限 900 秒、拨 901 秒，再改回默认值。
+
+### 9. `tests/e2e/followup`、`tests/e2e/ops` `TestFlowHealth/ACT-HLT-01`、`ACT-HLT-02`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowHealth`（两个包） 所在包的整个用例。
+- **现象**：`信号 unjudged_backlog 应显示为异常并带原因 … OK:true Count:0`
+- **定性**：断言不稳（依赖时序）。拨测试时钟越过重判退避后内核重判积压（§9.3），重判中的事件短暂回到 pending；前面步骤修好后全流程变快，读信号恰落在这个窗口。
+- **是否阻塞上线**：否。
+- **处理**：已修（`d8085e45c`）。读信号前等未判定积压落回。
+
+### 10. `tests/e2e/followup` `TestFlowHealthWarnings/ACT-HLT-06`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowHealthWarnings` 所在包的整个用例。
+- **现象**：`health_test.go: 65 分钟后 clock_lag 恢复（等待 30s 仍未出现）`
+- **定性**：断言不稳（依赖时序）。失败时的 `health.alert` 审计记录显示每轮都新记迟到约 5.5–7.5 分钟：用例每 300 毫秒拨 4 分钟，而测试构建的拨表通知（`clock.Changed()`）是单个单缓冲 channel，`6735903d7` 起保留期清理也在接收；被它取走时时钟循环要等 1 秒的 tick，几次拨表合并成一次扫描。发布构建里该 channel 恒为 nil，不受影响。
+- **是否阻塞上线**：否。
+- **处理**：已修（`d4c33da02`）。拨表步进改为 1.5 秒。测试构建的通知改为广播属产品目录内代码，本次未改。
+
+### 11. `tests/e2e/bgguards` `TestFlowBgGuards/ACT-BGG-05`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowBgGuards` 所在包的整个用例。
+- **现象**：`guards_test.go: 等待超时（20s）：运行中`
+- **定性**：用例隔离（依赖时刻）。失败时的运行清单显示：拨表 4 小时后多出一个在跑的任务型运行（到点的定时安排，替身处于挂起模式），占住 `ACT-BGG-03b` 设下的唯一长时额度，本步运行停在 queued。是否拨过定时点取决于跑用例的时刻。
+- **是否阻塞上线**：否。
+- **处理**：已修（`b359aa4e0`）。`ACT-BGG-03b` 结束时恢复默认额度并重启内核。
+
+### 12. `tests/e2e/ops` `TestFlowPurge/ACT-PRG-01`；`tests/e2e/materials` `TestOpsFlows/flow-purge`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowPurge`（`tests/e2e/ops`）、`TestOpsFlows`（`tests/e2e/materials`） 所在包的整个用例。
+- **现象**：`purge_test.go:113: open …/host/serve.sock: no such device or address`
+- **定性**：断言过期。`77d4344c2` 起数据目录里有 unix socket，搜索辅助函数逐个读文件。
+- **是否阻塞上线**：否。
+- **处理**：已修（`0d22b9df0`）。跳过非普通文件。
+
+### 13. `tests/e2e/ops` `TestFlowRetention/*/ACT-RET-01`、`ACT-RET-02`；`tests/e2e/materials` `flow-retention`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowRetention`（`tests/e2e/ops`）、`TestOpsFlows`（`tests/e2e/materials`） 所在包的整个用例。
+- **现象**：`retention_test.go: 期外请求体被清理（等待 1m40s 仍未出现）`
+- **定性**：断言过期。清理改为启动时一次加每天 04:10，运行目录默认保留期由 14 天改为 30 天（`6735903d7`）。`ACT-RET-02` 此前执行不到：拨时钟后到点的简报也拉起任务型运行，按次数认运行会多数一个。
+- **是否阻塞上线**：否。
+- **处理**：已修（`802ba9463`、`b26f131e4`、`d880f8433`、`bcda9fdb4`）。`ACT-RET-01` 拨完账本时间后重启内核；`ACT-RET-02` 拨测试时钟越过 04:10，并按提示词模板认本步的运行。
+
+### 14. `tests/e2e/upgrade` `TestSchema8Upgrade/ACT-S8-01`
+
+- **复现**：按上文"复现前的准备"，跑 `TestSchema8Upgrade` 所在包的整个用例。
+- **现象**：`apa version 的 schema.ledger = 10，期望 9`
+- **定性**：断言过期。`13aa41570` 引入账本结构版本 10。
+- **是否阻塞上线**：否。
+- **处理**：已修（`fdf60c821`）。期望值取迁移登记表的最新版本。
+
+### 15. `tests/e2e/ledger` `TestFlowBootstrap/ACT-BOOT-03`、`ACT-BOOT-05`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowBootstrap` 所在包的整个用例。
+- **现象**：`Web 包里没有页面 "决策待办"`；修掉后露出 `建事项: 23 … tier_closed`
+- **定性**：断言过期。页面标题随术语改版更换（`2017557d3`、`f8290308f`）；未归属 Agent 的钥匙只能整理，`apa guide` 的退出码 20 写作 `hard line`（决定 84）。
+- **是否阻塞上线**：否。
+- **处理**：已修（`8848a1600`、`dbc7d583e`）。按现行标题检查；改建待确认事项；跟上退出码说明。
+
+### 16. `tests/e2e/inbound` `TestFlowCapture/ACT-CAP-06`、`TestFlowInboundPipeline/ACT-INP-10`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowCapture`、`TestFlowInboundPipeline`（`tests/e2e/inbound`） 所在包的整个用例。
+- **现象**：`disposition = proposed，期望 ignored`；`起草请求的结构化输入里应有含 T2 的候选清单`
+- **定性**：断言过期（模型替身串扰）。`29a5a0328` 起请求带 `active_proposals`（含早先步骤的标题），模型替身按子串首个命中。
+- **是否阻塞上线**：否。
+- **处理**：已修（`9e3a6aa95`）。匹配串改为只出现在本事件正文里的内容。
+
+### 17. `tests/e2e/extractalign` `TestFlowExtractAlign/ACT-XAL-04`、`ACT-XAL-06`
+
+- **复现**：按上文"复现前的准备"，跑 `TestFlowExtractAlign`（`tests/e2e/extractalign`） 所在包的整个用例。
+- **现象**：`清单外项目应丢弃，实际 "prj_inbox"`；`没有等到：对话增量触发预筛请求`
+- **定性**：断言过期。内置 Inbox 兜底（`13aa41570`）；预筛问句改写（`29a5a0328`）。
+- **是否阻塞上线**：否。
+- **处理**：已修（`4ce8b3fae`）。期望改为 `prj_inbox`；按问句开头认预筛请求。
 
 ## 维护约定
 

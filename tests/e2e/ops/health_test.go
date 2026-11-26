@@ -77,6 +77,12 @@ func quietWindow(t *testing.T) time.Duration {
 	return 30 * time.Second // shortcut: go test 默认 10 分钟超时容不下完整 10 分钟窗口，见上方说明
 }
 
+// waitUnjudged 等未判定积压在场：拨过测试时钟后内核会重判积压（§9.3），重判中的事件短暂回到 pending，模型仍故障时随即落回。
+func (f *fx) waitUnjudged() {
+	f.t.Helper()
+	f.waitFor("未判定积压在健康视图里", 60*time.Second, func() bool { return !f.health().sig("unjudged_backlog").OK })
+}
+
 // TestFlowHealth 对应验收文档 flow-health（ACT-HLT-01、ACT-HLT-02）。
 // 长时运行额度与短任务额度都调到 1，让两个队列都能排出队来。
 func TestFlowHealth(t *testing.T) {
@@ -187,9 +193,18 @@ event_rules:
 	})
 
 	step(t, "造出：外呼超时", func(t *testing.T) {
+		// 任务型运行的时限取策略 background_run_timeout_sec（模板 timeout 不再生效）：临时调到下限 15 分钟再拨测试时钟，
+		// 之后改回默认值，免得下一步的长时占用在后续拨时钟时跟着超时。
+		f.webOK("PUT", "/settings/policy", `{"background_run_timeout_sec":900}`, http.StatusOK)
 		f.auto("run-hang")
 		f.task("HLT 超时", "acc-hang")
-		f.waitFor("外呼超时进入健康视图", 60*time.Second, func() bool { return !f.health().sig("outcall").OK })
+		f.waitFor("挂起的运行在跑", 30*time.Second, func() bool { return f.health().sig("outcall").outcall(t).Long.Running == 1 })
+		f.TCAdvance(901)
+		f.waitFor("外呼超时进入健康视图", 60*time.Second, func() bool {
+			s := f.health().sig("outcall")
+			return !s.OK && len(s.outcall(t).Timeouts) > 0
+		})
+		f.webOK("PUT", "/settings/policy", `{"background_run_timeout_sec":14400}`, http.StatusOK)
 	})
 
 	step(t, "造出：长时运行与短任务各自排队", func(t *testing.T) {
@@ -210,6 +225,7 @@ event_rules:
 
 	var cli healthView
 	step(t, "ACT-HLT-01 十一类信号都显示，两端一致，每类有修复入口", func(t *testing.T) {
+		f.waitUnjudged()
 		cli = f.health()
 		web := f.webHealth()
 		if cli.Healthy {
@@ -286,6 +302,7 @@ event_rules:
 				t.Errorf("安静期间出现修复类 Event: seq=%d type=%s object=%s actor=%+v", e.Seq, e.Type, e.Object, e.Actor)
 			}
 		}
+		f.waitUnjudged()
 		// 十一类问题仍在：没有任何一类被自动修好。
 		for _, id := range signalIDs {
 			if f.health().sig(id).OK {

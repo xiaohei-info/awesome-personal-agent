@@ -109,6 +109,10 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 			rs := f.runsOf(second)
 			return len(rs) == 1 && rs[0].State != "queued" && rs[0].State != "running"
 		})
+		// 额度改回默认：下一步拨测试时钟会让到点的简报任务拉起，唯一的长时额度会被它占住。
+		f.StopKernel()
+		must(t, os.WriteFile(cfg, b, 0o644))
+		f.StartKernelAgain()
 	})
 
 	// 2026-11-20 改写：运行故障（失败、超时）是事件不是问题——事项阶段不变、不挂问题，只有一次 Run。
@@ -141,6 +145,12 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		f.mode("hang", preamble+`echo $PPID > "$OUT/stub.pid"
 `)
 		id := f.task("bgg-05", "acc-work", "acc-main")
+		t.Cleanup(func() {
+			if t.Failed() {
+				t.Logf("事项 %s stub.pid=%q\n全部运行: %s\n事项事件: %s\n通知: %+v\n服务日志: %s", id, f.outFile("stub.pid"),
+					f.apa(f.OBS, 0, "run", "list").Stdout, toJSON(f.events(id, "")), f.Notices(), f.ServiceLog())
+			}
+		})
 		f.waitFor("运行中", 20*time.Second, func() bool {
 			rs := f.runsOf(id)
 			return len(rs) == 1 && rs[0].State == "running" && f.outFile("stub.pid") != ""
