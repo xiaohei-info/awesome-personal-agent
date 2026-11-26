@@ -23,7 +23,7 @@ export const ROUTE = ["inject", "wake", "web"] as const;
 /** 被压成只留未读的原因：kernel/delivery/disturb.go Suppressed* */
 export const SUPPRESSED = ["daily_cap", "muted"] as const;
 /** 运行类别：kernel/domain/entities.go RunCategory */
-export const RUN_CATEGORY = ["judge", "generate", "task", "background", "source", "transform", "reader"] as const;
+export const RUN_CATEGORY = ["judge", "generate", "task", "background", "source_batch", "source", "transform", "reader"] as const;
 /** 运行状态：kernel/domain/entities.go RunState */
 export const RUN_STATE = ["queued", "running", "succeeded", "failed", "timeout"] as const;
 /** 运行者（§13.6，内核按字面量比较，无常量） */
