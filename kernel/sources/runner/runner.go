@@ -146,6 +146,14 @@ CREATE TABLE sources_runner_tombstone (
 ALTER TABLE sources_runner_event ADD COLUMN starts_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE sources_runner_event ADD COLUMN ends_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE sources_runner_event ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0;`,
+}, {
+	// 账本结构版本 11（§9.3）：来源处理线的队列状态。只增列，已有事件不在队列里（全为空）。
+	Version: 10, Ledger: 11, Name: "ledger-v11-event-queue",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN queue_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN queue_level TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN queue_run TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN queue_tries INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX sources_runner_event_queue ON sources_runner_event(queue_state, seq) WHERE queue_state <> '';`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -894,16 +902,16 @@ const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summar
 	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges,
 	metrics, merge_key, items, judgment,
 	COALESCE((SELECT CAST(content AS TEXT) FROM sources_runner_event_part p WHERE p.event_id = sources_runner_event.id AND p.part = 'messages'), messages),
-	prev_metrics, due_at, starts_at, ends_at, all_day`
+	prev_metrics, due_at, starts_at, ends_at, all_day, queue_state, queue_level`
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
 	return queryEvents(tx, `WHERE source_id = ?`, sourceID)
 }
 
-// Pending 按落盘顺序返回所有还没有处置的来源事件（disposition 为 pending），供入站流水线接手。
+// Pending 按落盘顺序返回所有还没有处置、也不在队列里的来源事件（disposition 为 pending），供入站流水线接手。
 func Pending(tx *store.Tx) ([]domain.SourceEvent, error) {
-	return queryEvents(tx, `WHERE disposition = ?`, string(domain.DispositionPending))
+	return queryEvents(tx, `WHERE disposition = ? AND queue_state = ''`, string(domain.DispositionPending))
 }
 
 // ByDisposition 按落盘顺序返回所有处于某处置的来源事件（简报的"知会"取 digest）。
@@ -1306,7 +1314,7 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 		e := &a.SourceEvent
 		if err := rows.Scan(&a.Seq, &e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
 			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev,
-			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay); err != nil {
+			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay, &e.Queue, &e.QueueLevel); err != nil {
 			return nil, err
 		}
 		e.AllDay = allDay != 0
@@ -1370,7 +1378,7 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 		)
 		if err := rows.Scan(&e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
 			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev,
-			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay); err != nil {
+			&e.DueAt, &e.StartsAt, &e.EndsAt, &allDay, &e.Queue, &e.QueueLevel); err != nil {
 			return nil, err
 		}
 		e.AllDay = allDay != 0
