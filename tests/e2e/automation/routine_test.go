@@ -149,7 +149,7 @@ func TestFlowRoutine(t *testing.T) {
 		if n := len(routineItems()) - before; n != 0 {
 			t.Errorf("停用后不应再建 routine 事项，实际新增 %d", n)
 		}
-		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; !contains(l, ci) || !strings.Contains(strings.ReplaceAll(l, " ", ""), `"enabled":false`) {
+		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; !contains(l, ci) || len(stillEnabled(t, l, ci)) > 0 {
 			t.Errorf("instance list 应显示该实例已停用: %s", l)
 		}
 	})
