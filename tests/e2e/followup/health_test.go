@@ -443,7 +443,9 @@ func TestFlowHealthWarnings(t *testing.T) {
 			f.webOK("PATCH", "/items/"+id, `{"deadline":"`+f.kernelNow().Add(time.Minute).UTC().Format(time.RFC3339)+`"}`, http.StatusOK)
 			for left := 10 * 60; left > 0; left -= 240 {
 				f.TCAdvance(int64(min(left, 240)))
-				time.Sleep(300 * time.Millisecond)
+				// 每步要长过内核时钟循环 1 秒的 tick：拨表通知只有一个接收者（可能被保留期清理取走），
+				// 步子太密时几次拨表合并成一次扫描，又记下迟到。
+				time.Sleep(1500 * time.Millisecond)
 			}
 			if round < 5 && f.health().sig("clock_lag").OK {
 				t.Fatalf("第 %d 轮（%d 分钟）时不应已清除：迟到只在连续一小时没有新迟到后才清除", round, (round+1)*10)
