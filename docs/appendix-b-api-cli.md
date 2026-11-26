@@ -50,8 +50,8 @@
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
 | `apa project list/show` | 读项目，含 repos 与允许的执行者 | observer | |
-| `apa project create/update` | 建项目、改基本信息（一档）；改对话捕获开关为 3a。`allowed_executors`、远程地址与外发范围是 3b，只在 Web | delegate | 20、23 |
-| `apa project repos add/remove` | 增改本机检出（一档）；远程地址是 3b，只在 Web | worker | 4、20 |
+| `apa project create/update` | 建项目、改基本信息（整理事项）；改对话捕获开关属"改日常规则与提醒"。`allowed_executors` 与远程地址属"Agent 与执行者配置"、外发范围属"数据去向"，各有自己的入口（`apa settings`、`apa project repos`），建项目时带 `allowed_executors` 为 2 | delegate | 2、23 |
+| `apa project repos add/remove` | 增改本机检出（整理事项）；远程地址属"Agent 与执行者配置"，这一组没开为 23 | worker | 4、23 |
 | **材料与规范** | | | |
 | `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design`。`apa material add --link <位置> --title <标题> [--project] [--kind]` 登记链接型材料（主文档 §12.8）：位置是 `vault:<库名>/<库内相对路径>` 或网址，kind 缺省 `reference`；同一项目内同一位置重复登记返回已有的那条。`apa material show` 对链接型只回位置与打开地址 | worker | 2、5 |
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
@@ -64,14 +64,14 @@
 | `apa agents sync` | 写入工作区；漂移时不覆盖并返回 6，本人选择"覆盖"后才写入 | observer | 6 |
 | **来源** | | | |
 | `apa source list/show` | 来源与统计 | observer | |
-| `apa source add` | 登记附带的拉取程序或 webhook source，可带 `--default-project`、`--name`（显示名；不带时取来源程序接入声明的名字，输出里给出；程序没有声明又不带时退出码 2；重名退出码 6）；登记来源是 3b，只在 Web；CLI 调用返回 20 | Web 登录 | 20 |
+| `apa source add` | 登记附带的拉取程序或 webhook source，可带 `--default-project`、`--name`（显示名；不带时取来源程序接入声明的名字，输出里给出；程序没有声明又不带时退出码 2；重名退出码 6）；登记来源属"接入来源"，这一组没开为 23 | delegate（"接入来源"开放时） | 2、6、23 |
 | `apa source auth <id>` | 以该来源登记的 `credentials_path` 启动附带拉取程序的认证模式（在本机运行 `<来源命令> auth <credentials_path>`，继承标准输入输出），凭据写在该路径；不是 pull 类型或未登记 `credentials_path` 的来源返回 2，工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地，经 API 读来源登记，需 observer | 2、5 |
 | `apa source rename <id> <名字>` | 改显示名（3a，主文档 §9.1）；空串改回接入声明的名字（没有声明时退出码 2）；重名退出码 6；记 `source.renamed` | delegate | 6、23 |
 | `apa source enable/disable` | 启停（3a） | delegate | 23 |
-| `apa source webhook create/rotate/revoke` | 创建、轮换、吊销 webhook 接收密钥（3b，只在 Web；CLI 调用返回 20） | Web 登录 | 20 |
+| `apa source webhook create/rotate/revoke` | 创建、轮换、吊销 webhook 接收密钥（属"接入来源"，这一组没开为 23） | delegate（"接入来源"开放时） | 4、23 |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
 | `apa source rejects <id> [--after N] [--limit N]` | 查看没有入账的输出行及原因（`next_after` 作为下一次的 `--after`） | observer | |
-| `apa source event <事件 id> [--part body\|original\|headers\|attachments\|messages]` | 读一条来源事件及其原文（主文档 §7.6）：不带 `--part` 输出事件、原文清单与正文，带时只输出那一部分。token 读到的内容按该来源对外部端点的外发范围裁剪，输出写明所用范围与裁剪量；运行凭据不可用 | observer | 4、5 |
+| `apa source event <事件 id> [--part body\|original\|headers\|attachments\|messages]` | 读一条来源事件及其原文（主文档 §7.6）：不带 `--part` 输出事件、原文清单与正文，带时只输出那一部分。token 读到的内容按该来源对外部端点的外发范围裁剪，输出写明所用范围与裁剪量；运行凭据与内部钥匙全文 | observer | 4、5 |
 | `apa source replay <入站记录>` | 重放 | delegate | |
 | `apa source backlog list [--source] [--sort score]` | 列出积压（未判定与已到期），旧原因 `undecided`、空原样返回；`--sort score` 按影子分数从高到低排（各来源合并后统一排序，同分保持来源顺序），每条带 `score`，没有分数的排最后 | observer | |
 | `apa source backlog rules [--source]` | 积压只跑规则：重走归属与确定性规则，能挂靠的挂靠、规则有明确出口的按出口处置，其余原样；不调模型，不受 `unjudged_rejudge_days` 限制，输出 `attached`、`disposed`、`remaining`（主文档 §9.3） | delegate | |
@@ -98,7 +98,7 @@
 | `apa run list/show` | 运行记录 | observer | |
 | `apa judgment stats [--use] [--template] [--source] [--since]` | 各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
 | `apa judgment show <id>` | 一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
-| `apa judgment spot-check` | 列出待抽检的条目；抽检结论只在 Web 填 | observer | |
+| `apa judgment spot-check` | 列出待抽检的条目；填结论属"改日常规则与提醒"（`POST /judgments/{id}/review`） | observer | |
 
 **权限卡的组**（主文档 §14.3）：每条登记命令固定属于下表的一组，不随调用者、对象归属或通道变化；少数命令按这一次的状态变化归到另一组（表内注明）。钥匙只决定能碰哪些对象（主文档 §14.2），权限卡决定 Agent 发起时能否直接生效：十组各自由本人在这个 Agent 的页面选"不允许"或"允许"（可带有效期，`PUT /settings/agents/{agent}/card`，"替我拍板"可限定项目）；只有本人的事任何设置都开放不了；系统内部命令没有对外入口。Web 上的本人不看权限卡，做第 6–10 组与只有本人的事须刚输过口令。判定顺序是只有本人的清单 → 钥匙范围 → 权限卡的组 → 项目允许的执行者。
 
@@ -211,7 +211,7 @@
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥（3b） | 只有 Web 登录 |
 | | `DELETE /sources/{id}/webhook` | 吊销该来源全部接收密钥，同时删除 HMAC 密钥文件（3b） | 只有 Web 登录 |
 | | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | Web 登录、内部钥匙与运行凭据；外部钥匙不能读入站记录（返回 403：原始请求体不按档位裁剪） |
-| | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 与其他来源一样，Web 登录、内部钥匙与运行凭据可读，外部钥匙读不到；外部钥匙按它对该来源的档位裁（见下），没给这个来源返回 403（退出码 4） | observer 及以上、有档位的导出 ext 密钥；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
+| | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 与其他来源一样，Web 登录、内部钥匙与运行凭据可读，外部钥匙读不到；外部钥匙按它对该来源的档位裁（见下），没给这个来源返回 403（退出码 4） | observer 及以上、运行凭据、有档位的导出 ext 密钥 |
 | | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；外部钥匙不可用（返回 403） |
 | | `POST /source-events/{id}/propose` | 把未判定事件或 digest 事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/split` | 把误并入一条建议的来源事件拆出来另成一条建议（`inbound.split`，主文档 §9.3）：请求体 `{"from": "<建议 id>"}`，返回 `{"item": "<新建议 id>"}` | Web 登录、delegate |
