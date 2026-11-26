@@ -85,7 +85,6 @@ type instParams struct {
 	AgentID     string `json:"agent_id"`
 	Mode        string `json:"mode"`
 	Instruction string `json:"instruction"`
-	Access      string `json:"access"` // 已取消（2026-11-26）：工具档位取权限卡，旧实例写了也不生效
 }
 
 func instanceParams(c rules.Call) (p instParams) {
