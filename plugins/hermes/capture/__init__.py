@@ -52,7 +52,9 @@ SESSION_HEADS = (("[IMPORTANT: You are running as a scheduled cron job", "cron_e
 TURN_HEADS = (("[Cronjob \"", "cron_echo"),
               ("[IMPORTANT: Background process ", "system_notice"),
               ("[ASYNC DELEGATION BATCH COMPLETE", "system_notice"),
-              ("[INTERNAL NOTIFICATION", "system_notice"))
+              ("[INTERNAL NOTIFICATION", "system_notice"),
+              # apa-wake 注入主会话的知会与唤醒（[APA 提醒]、[APA 简报]、[APA wake] 等）：那一轮是 APA 自己的话，再捕获会成环（§9.3）。
+              ("[APA", "apa_notice"))
 # 用户发图或发附件时 Hermes 在轮次开头插入的说明，后面往往还有本人的话：算外部人输入。
 ATTACHMENT = "[The user sent "
 

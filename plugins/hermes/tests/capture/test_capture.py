@@ -368,3 +368,13 @@ def test_attachment_turn_with_the_person_text_is_kept(hooks, kernel):
     hooks["on_session_end"](session_id="i")
     (r,) = posts(kernel, 1)
     assert r["body"]["capture_schema"] == 1 and "下周三前" in r["body"]["text"]
+
+
+def test_apa_notice_turn_is_not_captured_but_the_next_human_turn_is(hooks, kernel, tmp_path):
+    turn(hooks, "n", "[APA 提醒] 来源处理结果\n处理了 3 条：新建 1 条建议，并入 2 条。", "已转告")
+    turn(hooks, "n", "[APA wake] Background run run_1 woke this session for item it_1.", "ok")
+    turn(hooks, "n", HUMAN_TURN, "好")
+    hooks["on_session_end"](session_id="n")
+    (r,) = posts(kernel, 1)
+    assert HUMAN_TURN in r["body"]["text"] and "来源处理结果" not in r["body"]["text"] and "Background run" not in r["body"]["text"]
+    assert "apa_notice" in log_text(tmp_path)
