@@ -49,6 +49,8 @@ const (
 	RowHealth        = "health"
 	RowNewProposals  = "new_proposals"
 	RowSourceAlert   = "source_alert"
+	// RowSourceResult 是来源处理线的批处理结论（默认推给 Agent 马上、不推本人、唤醒不了时下次对话）。
+	RowSourceResult = "source_result"
 	// TaskOther 是 task_result:/task_failed: 后的"其他"：不是由内置定时任务类型产出的简报或任务。
 	TaskOther = "other"
 )
@@ -65,7 +67,7 @@ var FixedRows = func() []string {
 	for _, t := range append(slices.Clone(TaskTypes), TaskOther) {
 		out = append(out, RowTaskFailed+t)
 	}
-	return append(out, RowSourceFailing, RowRunFailed, RowHealth, RowNewProposals, RowSourceAlert)
+	return append(out, RowSourceFailing, RowRunFailed, RowHealth, RowNewProposals, RowSourceAlert, RowSourceResult)
 }()
 
 // Target 是一行的两层去处。Else 只在 Agent 为 main 时有意义：主会话唤醒不了时改送哪（next_chat、default、channel:<id>），
@@ -204,6 +206,8 @@ func DeriveDelivery(d Disturb, packs map[string]string) Delivery {
 		RowRunFailed:              pushRoute(PushRunFailed),
 		RowNewProposals:           pushRoute(PushNewProposals),
 		RowHealth:                 conv(d.Routes[string(domain.DeliveryHealth)]),
+		// 来源处理结果：默认推给 Agent 马上（进主会话），不推本人，唤醒不了时下次对话时带上（§9.3）。
+		RowSourceResult: Target{Agent: AgentMain, User: UserOff, Else: AgentNextChat},
 	}
 	for _, r := range reminderRows {
 		rows[r] = fromRoutes(string(domain.DeliveryReminder), conv)

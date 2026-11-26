@@ -110,6 +110,8 @@ func rowOf(tx *store.Tx, h held) (row, error) {
 		return one(policy.RowRuleReminder)
 	case strings.HasPrefix(id, schedPrefix), strings.HasPrefix(id, schedBatchPrefix):
 		return one(policy.RowScheduled)
+	case strings.HasPrefix(id, "task:push:"), strings.HasPrefix(id, "batch-result:"):
+		return one(policy.RowSourceResult)
 	case strings.HasPrefix(id, "push:proposals:"):
 		return one(policy.RowNewProposals)
 	case strings.HasPrefix(id, "push:source:"):

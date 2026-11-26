@@ -368,7 +368,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	k.rn.Attach(k.disp)
 	k.wh.Attach(k.disp)
-	k.in.AttachBatch(inbound.BatchOptions{RunsDir: l.Runs, APIURL: apiURL, Queue: k.disp})
+	k.in.AttachBatch(inbound.BatchOptions{RunsDir: l.Runs, APIURL: apiURL, Queue: k.disp,
+		Notify: func(ctx context.Context, run domain.Run, summary string) error {
+			return st.Update(ctx, func(tx *store.Tx) error { return att.SourceResult(tx, run.ID, summary) })
+		}})
 	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, WebBase: base,
 		OnError: func(run string, err error) { slog.Error("task run", "run", run, "err", err) }}); err != nil {
 		return nil, err

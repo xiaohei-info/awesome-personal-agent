@@ -322,7 +322,10 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 		return
 	}
 	if ok && s.o.Batch.Notify != nil {
-		summary := extractBatchSummary(res.Stdout)
+		summary := strings.TrimSpace(extractBatchSummary(res.Stdout))
+		if summary == "" {
+			summary = EmptyBatchOutputNotice
+		}
 		if err := s.o.Batch.Notify(ctx, res.Run, summary); err != nil && s.o.OnError != nil {
 			s.o.OnError(fmt.Errorf("inbound: notify batch %s: %w", res.Run.ID, err))
 		}
@@ -330,11 +333,7 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 }
 
 func extractBatchSummary(stdout []byte) string {
-	text := strings.TrimSpace(string(stdout))
-	if text == "" {
-		return EmptyBatchOutputNotice
-	}
-	return text
+	return string(stdout)
 }
 
 // RecoverBatches 在内核启动时检查仍停在 running 的事件：对应运行已不在队列或已结束（没有存活进程）的，
