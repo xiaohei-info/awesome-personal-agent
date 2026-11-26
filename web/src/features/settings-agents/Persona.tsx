@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLang, useT } from "../../app/i18n";
 import { useSession } from "../../app/session";
 import { LANG_NAMES } from "../../app/strings";
-import { Card, Seg, useDraft, type Doc, type Save } from "../settings-policy/shared";
+import { Card, Seg, useDraft, type Doc, type Save } from "../../app/policy-cards";
 import { strings } from "./strings";
 
 // 所有 Agent 共用：对我说话的语言与语气（人格，§6.13、§11.2）。存在策略里，只在 Web 改；上限约 400 token 由服务端判定，

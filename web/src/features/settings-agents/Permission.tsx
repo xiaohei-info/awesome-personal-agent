@@ -5,7 +5,7 @@ import { FIXED_RULE, GRAVE_GROUP, PERM, PERMISSION_GROUP, type PermissionGroup }
 import { useNamed } from "../../app/names";
 import { useSession } from "../../app/session";
 import { entryOf, useLabel } from "../../app/values";
-import { Card, useDraft } from "../settings-policy/shared";
+import { Card, useDraft } from "../../app/policy-cards";
 import type { Entry } from "./data";
 import { permission as strings } from "./strings";
 

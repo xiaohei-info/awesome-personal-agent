@@ -1,5 +1,5 @@
 import { useT } from "../../app/i18n";
-import { Card, reject, useDraft, type Doc, type Save } from "../settings-policy/shared";
+import { Card, reject, useDraft, type Doc, type Save } from "../../app/policy-cards";
 import { strings } from "./strings";
 
 // 所有 Agent 共用的后台运行时限（设计 §13.6、§6.13）：唯一语义是防卡死，不影响事项本身。

@@ -77,7 +77,7 @@ describe("事项 › 交给 Agent", () => {
     expect(screen.queryByRole("checkbox", { name: "交给 Agent 处理" })).not.toBeInTheDocument();
   });
 
-  const RULE_AT = "/rules#rule-" + encodeURIComponent(RULE);
+  const RULE_AT = "/settings/agents#rule-" + encodeURIComponent(RULE);
   it.each([
     ["规则关着", { mode: "off", declared: true }, "「我交给 Agent 的事自动开始」关着", "去打开", RULE_AT],
     ["试运行", { mode: "observe", declared: true }, "「我交给 Agent 的事自动开始」在试运行，只记录", "去打开", RULE_AT],

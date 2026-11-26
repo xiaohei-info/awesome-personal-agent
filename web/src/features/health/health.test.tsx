@@ -128,7 +128,7 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
     expect(within(gen).getByRole("link", { name: "去配置" })).toHaveAttribute("href", "/settings/models");
     expect(within(row(/3 条消息在等你选发给模型多少内容/)).getByRole("link", { name: "去选" })).toHaveAttribute("href", "/settings/models#endpoint-sources");
     expect(within(row(/2 条找回的消息等你放进建议/)).getByRole("link", { name: "去放开" })).toHaveAttribute("href", "/sources");
-    expect(within(row(/已退回试运行/)).getByRole("link", { name: "去重新打开" })).toHaveAttribute("href", "/settings/rules#rule-p%2Fevent_rules%2Frule-1");
+    expect(within(row(/已退回试运行/)).getByRole("link", { name: "去重新打开" })).toHaveAttribute("href", "/settings/agents#rule-p%2Fevent_rules%2Frule-1");
     const rc = row(/交回的结果被拒了 2 次/);
     expect(within(rc).getByRole("link", { name: "看被拒的原因" })).toHaveAttribute("href", "/audit");
     expect(within(rc).getByRole("link", { name: "看这个 Agent 的钥匙与档位" })).toHaveAttribute("href", "/settings/agents");

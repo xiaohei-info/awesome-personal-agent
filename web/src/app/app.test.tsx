@@ -212,9 +212,8 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
     ["/agent-changes", "诊断", "Agent 改动"], ["/rule-changes", "诊断", "规矩改动"], ["/runs", "诊断", "运行记录"],
     ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查"], ["/judgment", "消息来源", "筛选门槛"],
-    ["/rules", "设置", "自动规则"], ["/settings/rules", "设置", "自动规则"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],
-    ["/settings", "设置", "权限总览"], ["/settings/channels", "设置", "提醒渠道"], ["/settings/outward-api", "设置", "对外接口"], ["/settings-exec", "设置", "Agent"],
+    ["/settings/channels", "设置", "提醒渠道"], ["/settings/outward-api", "设置", "对外接口"], ["/settings-exec", "设置", "Agent"],
     ["/settings/grants", "设置", "Agent"], ["/settings/agents", "设置", "Agent"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
     ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与推送"], ["/settings/access", "设置", "Agent"], ["/settings/models", "设置", "模型"], ["/settings/note-vaults", "设置", "笔记库"], ["/settings/storage", "设置", "存储"],
   ];
@@ -237,12 +236,6 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
     await openAt("/pack-views?view=brief/brief");
     expect(await screen.findByRole("heading", { name: "事项 页面" })).toBeInTheDocument();
     expect(screen.getByTestId("at")).toHaveTextContent("/items?view=brief/brief");
-  });
-
-  it("原「自动规则 › 规则」地址 /rules 改写到设置 › 自动规则，保留锚点", async () => {
-    await openAt("/rules#rule-follow-up%2Fclock_rules%2Ffollow-up-interval");
-    expect(await screen.findByRole("heading", { name: "自动规则 页面" })).toBeInTheDocument();
-    expect(screen.getByTestId("at")).toHaveTextContent("/settings/rules#rule-follow-up%2Fclock_rules%2Ffollow-up-interval");
   });
 
   it("久未推进提醒的锚点保留", async () => {
@@ -342,7 +335,7 @@ describe("设置的分组（界面设计 §3.1）", () => {
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
     expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "Agent 与模型", "连接", "数据与安全"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与推送", "权限总览", "自动规则", "Agent", "模型", "来源处理", "提醒渠道", "笔记库", "对外接口", "登录与会话", "存储", "永久删除",
+      "通用", "提醒与推送", "Agent", "模型", "来源处理", "提醒渠道", "笔记库", "对外接口", "登录与会话", "存储", "永久删除",
     ]);
     expect(within(sub).getByRole("link", { name: "提醒与推送" })).toHaveAttribute("aria-current", "page");
   });

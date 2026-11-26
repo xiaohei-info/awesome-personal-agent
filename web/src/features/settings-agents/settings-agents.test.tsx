@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
-import { policyServer } from "../settings-policy/test-server";
+import { policyServer } from "../../app/test-policy-server";
 import { feature } from "./index";
 
 const PAGE = "/settings/agents/legacy:hermes";

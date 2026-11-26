@@ -1,5 +1,5 @@
 import type { Dict } from "../../app/i18n";
-import { shared } from "../settings-policy/strings";
+import { shared } from "../../app/strings";
 
 // 设置 › 来源处理（§9.3）：执行 Agent、队列参数、结果提醒、两份提示词、高级（重试/每日上限/不确定带）。
 const zh = {

@@ -1,5 +1,5 @@
 import type { Feature } from "../../app/registry";
-import type { Doc } from "../settings-policy/shared";
+import type { Doc } from "../../app/policy-cards";
 import { SettingsNotifyPage } from "./SettingsNotifyPage";
 import { strings } from "./strings";
 

@@ -7,14 +7,16 @@ import { EntityPick } from "../../app/names";
 import { useLabel } from "../../app/values";
 import { AddAgent } from "./AgentEditor";
 import { AgentPage, KeyList, KindChoice, Secret } from "./AgentPage";
+import { AutoAct } from "./AutoAct";
+import { PermissionOverview } from "./PermissionOverview";
 import { AudienceChoice, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 import { Persona } from "./Persona";
 import { RunTimeoutCard } from "./RunTimeout";
-import { PolicyPage, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
+import { PolicyPage, usePolicyDocs, type Doc, type Save } from "../../app/policy-cards";
 import { entries, hasKey, LEGACY, ready, useData, type Data, type Entry, type Rec } from "./data";
 import { strings } from "./strings";
 
-// 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表上：分工（日常 Agent、主 Agent）、Agent 一行一个（名字、分工标记、一句状态加按钮）、
+// 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表上：分工（日常 Agent、主 Agent）、Agent 一行一个（名字、分工标记、一句状态加按钮）、权限总览、替我动手、
 // 所有 Agent 共用的语言与语气、折叠的「很少用到」。一个 Agent 的全部属性只在它自己的页面（/settings/agents/<id>）改。
 // 判定都在服务端；本页只搬运选择并以服务端状态为准。
 
@@ -59,8 +61,10 @@ function AgentList() {
                 {!adding && <p><button type="button" onClick={() => setAdding(true)}>{t.add}</button></p>}
               </section>
               {adding && <AddAgent hosts={data.live.map((r) => r.declaration)} taken={list.map((e) => e.harness)} reload={load} onCancel={() => setAdding(false)} />}
+              <PermissionOverview agents={data.cards} />
             </>
           )}
+          <AutoAct pol={pol} save={save} />
           <h2>{t.common}</h2>
           <RunTimeoutCard doc={pol} save={save} />
           <Persona doc={pol} save={save} />

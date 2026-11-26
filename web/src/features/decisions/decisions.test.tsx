@@ -189,7 +189,7 @@ describe("被拒绝的替你回答（档位没放开，设计 §14.3）", () => 
     expect(note).toHaveTextContent("它的权限卡上这一组没开");
     expect(note).toHaveTextContent("the Agent's tier does not open this");
     expect(within(note).getByRole("link", { name: "你来处理" })).toHaveAttribute("href", "/items/a");
-    expect(within(note).getByRole("link", { name: "去看它的权限卡" })).toHaveAttribute("href", "/settings") // 权限总览;
+    expect(within(note).getByRole("link", { name: "去看它的权限卡" })).toHaveAttribute("href", "/settings/agents#permission-overview");
     expect(within(screen.getByRole("article", { name: "事项 b" })).queryByRole("note")).toBeNull();
   });
 

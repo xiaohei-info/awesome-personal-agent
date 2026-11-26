@@ -4,9 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
-import { feature as notify } from "../settings-notify";
+import { feature as notify } from ".";
 import { feature as agents } from "../settings-agents";
-import { deriveDelivery, policyServer } from "./test-server";
+import { deriveDelivery, policyServer } from "../../app/test-policy-server";
 
 // 改版前后 PUT 载荷逐字段一致（界面设计 §6.1）：「策略与人格」拆成「我来拍板 / 提醒与打扰 / 通用」（权限上限的载荷见 settings-agents.test）后，
 // 每张卡片「不改直接保存」与「做一次与改版前测试相同的编辑再保存」发出的请求体，都必须与改版前的组件

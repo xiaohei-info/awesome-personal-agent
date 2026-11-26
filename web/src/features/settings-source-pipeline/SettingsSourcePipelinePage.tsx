@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { PACK_BAND } from "../../app/ids";
-import { Card, PolicyPage, reject, useDraft } from "../settings-policy/shared";
+import { Card, PolicyPage, reject, useDraft } from "../../app/policy-cards";
 import { AgentPick } from "../settings-agents/AgentPick";
 import { Reminder, ReminderScope } from "../settings-notify/Reminder";
 import { withBand, type Band } from "../judgment/JudgmentPage";

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
-import { TagInput } from "../settings-policy/shared";
+import { TagInput } from "../../app/policy-cards";
 import { strings } from "./strings";
 import type { Source } from "./shared";
 

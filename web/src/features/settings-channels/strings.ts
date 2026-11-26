@@ -1,5 +1,5 @@
 import type { Dict } from "../../app/i18n";
-import { shared } from "../settings-policy/strings";
+import { shared } from "../../app/strings";
 
 // 设置 › 渠道：每个消息渠道一张卡（§4.1、§14.6）：只能发文字、谁能在这里替我回答、识别我的 ID。
 const zh = {

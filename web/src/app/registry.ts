@@ -29,7 +29,7 @@ export const SETTINGS: SectionId = "settings";
 export const DIAG: SectionId = "diag";
 /** 设置里的分组（界面设计 §3.1）：桌面上是设置页的第二列，手机上是「设置首页」列表。按页面 id 归组，没列出的页面排在最后一组。 */
 export const SETTINGS_GROUPS: { title: Text; ids: string[] }[] = [
-  { title: { zh: "日常", en: "Everyday" }, ids: ["settings-general", "settings-notify", "settings-policy", "rules"] },
+  { title: { zh: "日常", en: "Everyday" }, ids: ["settings-general", "settings-notify"] },
   { title: { zh: "Agent 与模型", en: "Agents and models" }, ids: ["settings-agents", "settings-models", "settings-source-pipeline"] },
   { title: { zh: "连接", en: "Connections" }, ids: ["settings-channels", "settings-vaults", "settings-outward-api"] },
   { title: { zh: "数据与安全", en: "Data and security" }, ids: ["settings-security", "settings-storage", "purge"] },
