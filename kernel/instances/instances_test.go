@@ -386,7 +386,7 @@ func TestDelegateManagesObserverDenied(t *testing.T) {
 	}
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_a"] = policy.AgentAllowance{Tier: policy.AllowRules}
+			p.AgentCards["agent_a"] = policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules)
 			return nil
 		})
 		return err

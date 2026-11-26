@@ -106,7 +106,7 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 	if r.ID == "" {
 		return Timeline{}, domain.NewError(domain.CodeInvalidRequest, "id is empty", "pass an item or run id")
 	}
-	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Tier: authz.TierRead, Object: authz.Object{ID: r.ID}}); d.Err != nil {
+	if d := authz.CanRead(authz.Request{Actor: r.Actor, Level: r.Level, Object: authz.Object{ID: r.ID}}); d.Err != nil {
 		return Timeline{}, d.Err
 	}
 	tl := Timeline{ID: r.ID, Steps: []Step{}}
@@ -233,7 +233,7 @@ func Audit(tx *store.Tx, p policy.Policy, r AuditRequest) ([]Step, error) {
 	if r.Limit == 0 {
 		r.Limit = 100
 	}
-	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Tier: authz.TierRead}); d.Err != nil {
+	if d := authz.CanRead(authz.Request{Actor: r.Actor, Level: r.Level}); d.Err != nil {
 		return nil, d.Err
 	}
 	steps := []Step{}

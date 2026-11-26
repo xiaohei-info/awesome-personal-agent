@@ -119,8 +119,8 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 	s := open(t)
 	steps := []func(*Policy) error{
 		func(p *Policy) error { p.Disturb.Routes["decision:urgent"] = "wake"; return nil },
-		func(p *Policy) error { p.AgentTier.ByAgent["agent_a"] = AgentAllowance{Tier: AllowDecide}; return nil },
-		func(p *Policy) error { p.PermissionCap.ByHarness["h1"] = PermEdit; return nil },
+		func(p *Policy) error { p.AgentCards["agent_a"] = DefaultCard().With(GroupDecide); return nil },
+		func(p *Policy) error { p.AgentCards["legacy:h1"] = DefaultCard().WithTool(PermEdit); return nil },
 		func(p *Policy) error {
 			p.GenerateEndpoint = GenerateEndpoint{URL: "http://127.0.0.1:9/v1", Model: "m", APIKey: "sk-secret"}
 			return nil
@@ -132,8 +132,8 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 		}
 	}
 	_, p := current(t, s)
-	if p.Disturb.Routes["decision:urgent"] != "wake" || p.Allowance("agent_a").Tier != AllowDecide ||
-		p.PermissionCap.ByHarness["h1"] != PermEdit || p.GenerateEndpoint.APIKey != "sk-secret" {
+	if p.Disturb.Routes["decision:urgent"] != "wake" || !p.Card("agent_a").Allows(GroupDecide, time.Now()) ||
+		p.Card("legacy:h1").Tool != PermEdit || p.GenerateEndpoint.APIKey != "sk-secret" {
 		t.Fatalf("policy = %+v", p)
 	}
 	es := events(t, s)
@@ -159,10 +159,10 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 		t.Fatalf("no-op bumped version=%d events=%d", v, len(events(t, s)))
 	}
 	for name, bad := range map[string]func(*Policy) error{
-		"cap":      func(p *Policy) error { p.PermissionCap.Default = "root"; return nil },
+		"cap":      func(p *Policy) error { p.AgentCards["a"] = Card{Tool: "root"}; return nil },
 		"route":    func(p *Policy) error { p.Disturb.Routes["mystery"] = "x"; return nil },
 		"priority": func(p *Policy) error { p.Disturb.Routes["decision:meh"] = "x"; return nil },
-		"tier":     func(p *Policy) error { p.AgentTier.ByAgent["a"] = AgentAllowance{Tier: "boss"}; return nil },
+		"group":    func(p *Policy) error { p.AgentCards["a"] = DefaultCard().With("boss"); return nil },
 		"url":      func(p *Policy) error { p.GenerateEndpoint.URL = "ftp://x"; return nil },
 		"mutate":   func(p *Policy) error { return errors.New("boom") },
 	} {
@@ -425,12 +425,12 @@ func TestSaveOverLegacyWritesNewFieldsAndKeepsOldVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 旧形状与已取消的段（初筛超时等）不再写进新版本。
-	for _, k := range []string{"model_endpoint", "screening_timeout_ms", "web_only", "material_write"} {
+	for _, k := range []string{"model_endpoint", "screening_timeout_ms", "web_only", "material_write", "agent_tier", "permission_cap"} {
 		if _, ok := m[k]; ok {
 			t.Fatalf("new version still has %s: %s", k, d[1])
 		}
 	}
-	for _, k := range []string{"judge_endpoint", "generate_endpoint", "agent_tier"} {
+	for _, k := range []string{"judge_endpoint", "generate_endpoint", "agent_cards"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("new version lacks %s: %s", k, d[1])
 		}

@@ -621,7 +621,7 @@ func (s *Service) Register() error {
 		}
 		return
 	}
-	return s.o.Exec.Register(command.Spec{Name: "followup.settle", Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
+	return s.o.Exec.Register(command.Spec{Name: "followup.settle", Action: authz.ActionUpdateOwn, Group: authz.GroupInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

@@ -51,7 +51,7 @@ func TestAttachRoute(t *testing.T) {
 	if e.phase(pc) != domain.PhaseProposed {
 		t.Fatal("a refused attach changed the proposal")
 	}
-	rec := e.do("POST", "/v1/items/"+pc+"/attach", `{"to":"`+target+`"}`, e.agent("agent_a", policy.AllowDecide))
+	rec := e.do("POST", "/v1/items/"+pc+"/attach", `{"to":"`+target+`"}`, e.agent("agent_a", policy.DefaultCard().With(policy.GroupDecide)))
 	if rec.Code != 200 {
 		t.Fatalf("attach: %d %s", rec.Code, rec.Body)
 	}
@@ -106,7 +106,7 @@ func TestBatchRoute(t *testing.T) {
 		}
 	}
 
-	rec = e.do("POST", "/v1/proposals/batch", plan, e.agent("agent_a", policy.AllowDecide))
+	rec = e.do("POST", "/v1/proposals/batch", plan, e.agent("agent_a", policy.DefaultCard().With(policy.GroupDecide)))
 	if rec.Code != 200 {
 		t.Fatalf("batch: %d %s", rec.Code, rec.Body)
 	}

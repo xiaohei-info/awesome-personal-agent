@@ -80,3 +80,51 @@ func TestAuthzSwitchIsPreviewableAndRunsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// 权限卡切换（§16.5）：已做过第二版切换的账本只做换算——兼容卡与名录里的 Agent 按映射表写卡（没设过档位的只整理），
+// 工具档位原值搬入，旧段去掉，不再撤授权单；只做一次，没有任何一组被自动放开。
+func TestCardsSwitchMapsTiersOnce(t *testing.T) {
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := time.Now()
+	if err := st.Update(ctx, func(tx *store.Tx) error {
+		doc, _ := policy.Sections(policy.Default())
+		delete(doc, "agent_cards")
+		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"legacy:hermes":{"tier":"rules"}}}`)
+		doc["permission_cap"] = json.RawMessage(`{"by_agent":{"agent_a":"edit"},"default":"read","by_harness":{"hermes":"full"}}`)
+		legacy, _ := json.Marshal(doc)
+		if _, err := tx.Exec(`INSERT INTO policy_version (version, doc, at) VALUES (1, ?, ?)`, string(legacy), now.UnixNano()); err != nil {
+			return err
+		}
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvAuthzSwitched, Object: policy.SwitchObject, Actor: authzSwitchActor, Payload: json.RawMessage(`{}`), At: now})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := switchAuthz(ctx, st, clock.Now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		es, _ := eventlog.Query(tx, eventlog.Filter{Type: domain.EvAuthzSwitched}, 0, 10)
+		left, _ := policy.LegacyKeys(tx)
+		_, p, err := policy.Stored(tx)
+		a, h := p.Card("agent_a"), p.Card("legacy:hermes")
+		if len(es) != 2 || len(left) != 0 || a.Tool != policy.PermEdit || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupOrganize, now) ||
+			h.Tool != policy.PermFull || !h.Allows(policy.GroupRules, now) || h.Allows(policy.GroupConnect, now) || h.RunsAllMessages {
+			t.Fatalf("switch: events %d legacy %v cards %+v", len(es), left, p.AgentCards)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

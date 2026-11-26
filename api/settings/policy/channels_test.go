@@ -202,7 +202,7 @@ func TestRemoveOwnChannelOwnerOnly(t *testing.T) {
 		t.Fatalf("seed: %d %s", rec.Code, rec.Body)
 	}
 	e.channelKey("keep")
-	if rec := e.do("DELETE", "/v1/settings/channels/keep", "", e.bearer(auth.Delegate)); rec.Code != 403 || errCode(t, rec) != domain.CodeWebOnly {
+	if rec := e.do("DELETE", "/v1/settings/channels/keep", "", e.bearer(auth.Delegate)); rec.Code != 403 || errCode(t, rec) != domain.CodeTierClosed {
 		t.Fatalf("token: %d %s", rec.Code, rec.Body)
 	}
 	if n := e.liveKeys("keep"); n != 1 {

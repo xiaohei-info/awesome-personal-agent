@@ -3,6 +3,7 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -44,6 +45,26 @@ type Card struct {
 // DefaultCard 是新 Agent 与没有归属的调用者的卡：前三组允许，工具只读，后台运行只看信任发件人的消息。
 func DefaultCard() Card {
 	return Card{Groups: map[string]GroupGrant{GroupView: {}, GroupOrganize: {}, GroupSourceEvents: {}}, Tool: PermRead}
+}
+
+// With 返回在 c 上再一直开放 groups 的副本（不改 c）。
+func (c Card) With(groups ...string) Card {
+	out := c
+	out.Groups = maps.Clone(c.Groups)
+	if out.Groups == nil {
+		out.Groups = map[string]GroupGrant{}
+	}
+	for _, g := range groups {
+		out.Groups[g] = GroupGrant{}
+	}
+	return out
+}
+
+// WithTool 返回把工具档位换成 tool 的副本。
+func (c Card) WithTool(tool string) Card {
+	c.Groups = maps.Clone(c.Groups)
+	c.Tool = tool
+	return c
 }
 
 // Allows 报告 now 时组 g 是否开放；到期即回到不允许，不需要后台任务。

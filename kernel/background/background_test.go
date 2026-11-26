@@ -354,7 +354,9 @@ func askIDs(it domain.Item) []string {
 // configure 是大多数用例的起点：hx 声明三档，上限 edit，默认 harness hx。
 func (e *env) configure(script string) {
 	e.harness("hx", script, "read", "edit", "full")
-	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx" })
+	e.setPolicy(func(p *policy.Policy) {
+		p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+	})
 }
 
 // ACT-BGM-02：observe 只记录"本来会做什么"，不拉起运行。
@@ -596,7 +598,7 @@ func TestPermissionTierGuards(t *testing.T) {
 	e.open(over)
 	e.refused(over, "上限")
 
-	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default = policy.PermFull })
+	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermFull) })
 	undeclared := e.newItem("b", []string{"full"}, nil)
 	e.open(undeclared)
 	e.refused(undeclared, "档位")
@@ -893,7 +895,9 @@ func TestProjectCheckoutCwd(t *testing.T) {
 // 不起进程不写运行目录；同一事务产出 class=wake 投递（带运行 id、不带凭据）。运行超时后按失败收尾，事项转 needs_input。
 func TestWakeDeclarationLaunchesWakeRun(t *testing.T) {
 	e := setup(t, 0)
-	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx" })
+	e.setPolicy(func(p *policy.Policy) {
+		p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+	})
 	path := filepath.Join(e.dir, "hx.sh")
 	_ = os.WriteFile(path, []byte("touch \"$2/ran\"\n"), 0o700)
 	e.must(owner, "executor.register", map[string]any{"harness": "hx", "main_session": map[string]any{"launch": "wake"},
@@ -972,7 +976,7 @@ func TestMainSessionLaunchChoice(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := setup(t, 0)
 			e.setPolicy(func(p *policy.Policy) {
-				p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx"
+				p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
 				if c.byHarness != "" {
 					p.MainSessionLaunch.ByHarness["hx"] = c.byHarness
 				}
@@ -1172,7 +1176,7 @@ func TestUnifiedDefaultTimeout4HoursIgnoresTemplateTimeout(t *testing.T) {
 	e.wakeHarness("hwake")
 	e.setPolicy(func(pol *policy.Policy) {
 		pol.DefaultHarness = "hwake"
-		pol.PermissionCap.ByHarness["hwake"] = policy.PermEdit
+		pol.AgentCards["legacy:hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
 	})
 	w1 := e.newItem("wake-runner", []string{"agent-ok"}, nil)
 	e.open(w1)
@@ -1211,7 +1215,7 @@ func TestTimeoutPolicyChangeAppliesImmediatelyToNewRunsNotInFlight(t *testing.T)
 	e.wakeHarness("hwake")
 	e.setPolicy(func(pol *policy.Policy) {
 		pol.DefaultHarness = "hwake"
-		pol.PermissionCap.ByHarness["hwake"] = policy.PermEdit
+		pol.AgentCards["legacy:hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
 	})
 	e.auto("main")
 
@@ -1275,7 +1279,7 @@ func TestTimeoutSettlePreservesWrittenProgressAndReports(t *testing.T) {
 		e.wakeHarness("hwake")
 		e.setPolicy(func(pol *policy.Policy) {
 			pol.DefaultHarness = "hwake"
-			pol.PermissionCap.ByHarness["hwake"] = policy.PermEdit
+			pol.AgentCards["legacy:hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
 			pol.BackgroundRunTimeoutSec = 1800
 		})
 		e.auto("main")

@@ -193,11 +193,11 @@ func TestAllowedExecutorsCannotBeWrittenThroughProjectRoutes(t *testing.T) {
 	id := e.create(dlg)
 	body := `{"name":"x","allowed_executors":["evil.host"]}`
 
-	if r := e.do(dlg, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "web_only" {
-		t.Fatalf("delegate PATCH with allowed_executors must be web_only: %d %s", r.Code, r.Body)
+	if r := e.do(dlg, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "tier_closed" {
+		t.Fatalf("delegate PATCH with allowed_executors needs the agents group: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(wrk, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "web_only" {
-		t.Fatalf("worker PATCH with allowed_executors hits the hard line before scope: %d %s", r.Code, r.Body)
+	if r := e.do(wrk, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "permission_denied" {
+		t.Fatalf("worker PATCH with allowed_executors is out of scope: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(dlg, "POST", "/v1/projects", `{"name":"y","allowed_executors":[]}`); r.Code != 403 || r.code() != "web_only" {
 		t.Fatalf("POST with allowed_executors: %d %s", r.Code, r.Body)
@@ -287,8 +287,8 @@ func TestReposWorkerEditsCheckoutsOwnerEditsRemotes(t *testing.T) {
 			t.Fatalf("worker %s: %d %s", body, r.Code, r.Body)
 		}
 	}
-	// 远程仓库是外部接入（3b）：Agent 钥匙一律硬线，只有 Web 本人能增删。
-	if r := e.do(dlg, "POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 403 || r.code() != "web_only" {
+	// 远程仓库属"Agent 与执行者配置"：没开这一组的 delegate 是 23，Web 本人能增删。
+	if r := e.do(dlg, "POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate add_remote: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 200 {
@@ -326,7 +326,7 @@ func TestReposWorkerEditsCheckoutsOwnerEditsRemotes(t *testing.T) {
 	if got := e.project(obs, id); len(got.Repos[0].Checkouts) != 0 {
 		t.Fatalf("checkout not removed: %+v", got.Repos)
 	}
-	if r := e.do(dlg, "POST", path, `{"op":"remove_remote","remote":"`+remote+`"}`); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(dlg, "POST", path, `{"op":"remove_remote","remote":"`+remote+`"}`); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate remove_remote: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", path, `{"op":"remove_remote","remote":"`+remote+`"}`); r.Code != 200 {

@@ -268,9 +268,9 @@ func TestSourceRegistrationContract(t *testing.T) {
 	if r := e.do(obs, "POST", "/v1/sources", hook); r.Code != 403 {
 		t.Fatalf("observer register: %d", r.Code)
 	}
-	// 登记来源是 3b：Agent 钥匙一律硬线（20），只有 Web 本人能登记。
-	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 403 || r.code() != "web_only" || !strings.Contains(r.Body.String(), `"reason":"hard_line"`) {
-		t.Fatalf("delegate register must hit the hard line: %d %s", r.Code, r.Body)
+	// 登记来源属"接入来源"：没开这一组的 delegate 是 23。
+	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 403 || r.code() != "tier_closed" || !strings.Contains(r.Body.String(), `"group":"connect"`) {
+		t.Fatalf("delegate register needs the connect group: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("web webhook register: %d %s", r.Code, r.Body)
@@ -321,8 +321,8 @@ func TestSourceRegistrationContract(t *testing.T) {
 			t.Fatalf("patch %s: %d %s", body, r.Code, r.Body)
 		}
 	}
-	// 改来源配置是 3b（硬线）；只启停是 3a，Agent 档位未放开为 23。
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"schedule":"2h"}`); r.Code != 403 || r.code() != "web_only" {
+	// 改来源配置属"接入来源"；只启停属"改日常规则与提醒"：两组都没开的 Agent 为 23。
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"schedule":"2h"}`); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate config patch: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"enabled":false}`); r.Code != 403 || r.code() != "tier_closed" {
@@ -343,10 +343,10 @@ func TestCustomCommandsRejectedForTokensAcceptedInWeb(t *testing.T) {
 	script := `{"id":"src_mail","name":"邮件","type":"script","command":"/opt/tool --json","schedule":"10m","timeout":30}`
 
 	r := e.do(dlg, "POST", "/v1/sources", script)
-	if r.Code != 403 || r.code() != "web_only" {
+	if r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate script register must be web_only: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(wrk, "POST", "/v1/sources", script); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(wrk, "POST", "/v1/sources", script); r.Code != 403 || r.code() != "permission_denied" {
 		t.Fatalf("worker script register hits the hard line before scope: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", "/v1/sources", `{"id":"src_x","type":"pull","command":"/bin/sh -c evil","schedule":"1h","timeout":5}`); r.Code != 400 {
@@ -366,7 +366,7 @@ func TestCustomCommandsRejectedForTokensAcceptedInWeb(t *testing.T) {
 		t.Fatalf("web script register: %d %s", r.Code, r.Body)
 	}
 	// 已有 script 来源：delegate 不能改命令，Web 可以；delegate 也不能把命令字段塞进 PATCH
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_mail", `{"command":"/opt/other"}`); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_mail", `{"command":"/opt/other"}`); r.Code != 403 || r.code() != "tier_closed" {
 		t.Fatalf("delegate script patch: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("PATCH", "/v1/sources/src_mail", `{"command":"/opt/other"}`); r.Code != 200 || !strings.Contains(r.Body.String(), "/opt/other") {
@@ -388,9 +388,9 @@ func TestWebhookKeyIngestsAndReplay(t *testing.T) {
 	e.web("POST", "/v1/sources", hook)
 	e.web("POST", "/v1/sources", pull)
 
-	// 发接收密钥是 3b：任何 Agent 钥匙都是硬线，只有 Web 本人能发。
+	// 发接收密钥属"接入来源"：没开这一组的 delegate 是 23，observer、worker 在钥匙范围外。
 	for name, tok := range map[string]string{"observer": obs, "worker": wrk, "delegate": dlg} {
-		if r := e.do(tok, "POST", "/v1/sources/src_hook/webhook", ""); r.Code != 403 || r.code() != "web_only" {
+		if r := e.do(tok, "POST", "/v1/sources/src_hook/webhook", ""); r.Code != 403 || r.code() != map[bool]string{true: "tier_closed", false: "permission_denied"}[name == "delegate"] {
 			t.Fatalf("%s: %d %s", name, r.Code, r.Body)
 		}
 	}
@@ -601,9 +601,9 @@ func TestRevokeWebhookKeyDeletesKeyFile(t *testing.T) {
 	e.web("POST", "/v1/sources/src_signed/webhook", "").into(&k2) // 轮换：宽限期内两把都有效
 	file := filepath.Join(e.keys, "src_signed")
 
-	for _, tok := range []string{obs, dlg} {
-		if r := e.do(tok, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 403 || r.code() != "web_only" {
-			t.Fatalf("revoking receive keys is 3b, Agent keys hit the hard line: %d %s", r.Code, r.Body)
+	for tok, want := range map[string]string{obs: "permission_denied", dlg: "tier_closed"} {
+		if r := e.do(tok, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 403 || r.code() != want {
+			t.Fatalf("revoking receive keys needs the connect group: %d %s", r.Code, r.Body)
 		}
 	}
 	if os.Geteuid() != 0 { // root 不受目录权限限制，无法制造删除失败

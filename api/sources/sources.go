@@ -167,10 +167,10 @@ type api struct {
 func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer, dc Declared) (core.RouteGroup, error) {
 	a := &api{st: st, x: x, rp: rp, pr: pr, au: au, dc: dc}
 	for _, s := range []command.Spec{
-		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Tier: authz.TierPower, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
-		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Tier: authz.TierPower, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
-		{Name: CmdReplay, Action: authz.ActionManageSource, Tier: authz.TierOrganize, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
-		{Name: CmdFetchAttachment, Action: authz.ActionManageSource, Tier: authz.TierOrganize, Object: idObject, KeepVersion: true,
+		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Group: authz.GroupConnect, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
+		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Group: authz.GroupConnect, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
+		{Name: CmdReplay, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
+		{Name: CmdFetchAttachment, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents, Object: idObject, KeepVersion: true,
 			Validate: a.validateFetch, Apply: a.applyFetch},
 	} {
 		if err := x.Register(s); err != nil {
@@ -379,7 +379,7 @@ func (a *api) selfSender(w http.ResponseWriter, r *http.Request, p *core.Princip
 // 非空返回 sender_unverifiable：名单在那里不会生效，不让人以为填了有用。
 func (a *api) trustedSenders(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	// 信任的发件人属 3a 改日常（§14.3）：Web 本人，或档位放开到 3a 的 Agent。
-	basis, err := apipolicy.Authorize(a.st, r, p, authz.TierRules, "/sources/"+r.PathValue("id"), "settings:/settings/sources/{id}/trusted-senders")
+	basis, err := apipolicy.Authorize(a.st, r, p, authz.GroupRules, "/sources/"+r.PathValue("id"), "settings:/settings/sources/{id}/trusted-senders")
 	if err != nil {
 		return err
 	}

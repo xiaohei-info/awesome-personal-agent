@@ -75,11 +75,11 @@ func TestFlowRoutine(t *testing.T) {
 	k.step("ACT-RTN-01 准备默认 harness 与替身", func(t *testing.T) {
 		h = k.declareHarness("acc-stub-rtn", "routine")
 		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub-rtn"}`, 200)
-		k.webOK("PUT", "/v1/settings/access-limits", `{"permission_cap":{"default":"read","by_harness":{"acc-stub-rtn":"read"}}}`, 200)
+		k.webOK("PUT", "/v1/settings/agents/legacy:acc-stub-rtn/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"read"}`, 200)
 		if p := packList(t, e); p["routine"].Name == "" {
 			t.Fatalf("pack list 应含内置 routine 包: %v", p)
 		}
-		if pol := k.webOK("GET", "/v1/settings/policy", "", 200) + k.webOK("GET", "/v1/settings/access-limits", "", 200); !contains(strings.ReplaceAll(pol, " ", ""), `"default_harness":"acc-stub-rtn"`, `"acc-stub-rtn":"read"`) {
+		if pol := k.webOK("GET", "/v1/settings/policy", "", 200) + k.webOK("GET", "/v1/settings/access-limits", "", 200); !contains(strings.ReplaceAll(pol, " ", ""), `"default_harness":"acc-stub-rtn"`, `"legacy:acc-stub-rtn":{"groups"`) {
 			t.Errorf("Web 设置应显示默认 harness 为 acc-stub-rtn、上限 read: %s", pol)
 		}
 		k.markModelBaseline()

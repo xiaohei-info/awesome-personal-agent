@@ -106,9 +106,9 @@ func TestFlowAuthzMatrix(t *testing.T) {
 			{k.DELO, "PUT", "/v1/settings/policy", `{"persona":"hijacked"}`, "tier_closed"},
 			{k.DELO, "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, "hard_line"},
 			{k.DEL, "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, "hard_line"},
-			{k.DEL, "PUT", "/v1/settings/projects/" + k.Projects["acc-work"] + "/allowed-executors", `{"executors":["` + otherHost + `"]}`, "hard_line"},
-			{k.DEL, "POST", "/v1/settings/purge", `{"object":"` + victim + `"}`, "hard_line"},
-			{k.DEL, "PUT", "/v1/settings/agents/" + k.AgentID + "/tier", `{"tier":"rules"}`, "hard_line"},
+			{k.DEL, "PUT", "/v1/settings/projects/" + k.Projects["acc-work"] + "/allowed-executors", `{"executors":["` + otherHost + `"]}`, "tier_closed"},
+			{k.DEL, "POST", "/v1/settings/purge", `{"object":"` + victim + `"}`, "tier_closed"},
+			{k.DEL, "PUT", "/v1/settings/agents/" + k.AgentID + "/card", `{"groups":{"purge":{"until":"2099-01-01T00:00:00Z"}}}`, "hard_line"},
 		}
 		for _, a := range attempts {
 			r := k.APIRaw(a.method, a.path, a.body, a.token)
@@ -186,10 +186,10 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		home := k.Projects["acc-home"]
 		const remote = "https://example.invalid/acc/home.git"
 		// 本机检出挂在已登记的远程地址上。远程地址是外部接入（3b）：任何钥匙都是 20，由本人在 Web 登记（2026-11-20）。
-		k.expect("DEL 增加远程地址", k.Apa(k.DEL, "", "project", "repos", "add", home, "--remote", remote), exitWebOnly)
+		k.expect("DEL 增加远程地址", k.Apa(k.DEL, "", "project", "repos", "add", home, "--remote", remote), exitTierClosed)
 		k.expect("本人增加远程地址", k.OwnerApa("", "project", "repos", "add", home, "--remote", remote), 0)
 		k.expect("WRK 增加本机检出", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", remote, "--path", "/srv/acc/home", "--host", "work-host"), 0)
-		k.expect("WRK 增加新的远程地址", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", "https://example.invalid/acc/other.git"), exitWebOnly)
+		k.expect("WRK 增加新的远程地址", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", "https://example.invalid/acc/other.git"), exitDenied)
 		show := k.Apa(k.OBS, "", "project", "show", home).Stdout
 		if !contains(show, remote, "/srv/acc/home") || strings.Contains(show, "other.git") {
 			t.Errorf("repos 状态不符: %s", show)

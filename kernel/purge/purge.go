@@ -76,7 +76,7 @@ func decode(raw json.RawMessage) (in, error) {
 // Register 在 x 上登记 purge.object；blobDir 是 <APA_HOME>/blobs。
 func Register(x *command.Executor, blobDir string) error {
 	return x.Register(command.Spec{
-		Name: Command, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/purge", // 物理删除只由本人做（裁决 3）
+		Name: Command, Action: authz.ActionChangeSettings, Group: authz.GroupPurge, Page: "/purge", // 物理删除只由本人做（裁决 3）
 		Object: func(_ *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := decode(raw)
 			return authz.Object{ID: v.Object}, err

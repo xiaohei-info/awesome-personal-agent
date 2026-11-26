@@ -183,7 +183,7 @@ func TestStateRuleWaitsForUsableAgent(t *testing.T) {
 	e := newEnv(t, "")
 	setCap := func(c string) {
 		if err := e.st.Update(bg, func(tx *store.Tx) error {
-			_, err := policy.Update(tx, owner.Actor, "t", func(p *policy.Policy) error { p.PermissionCap.Default = c; return nil })
+			_, err := policy.Update(tx, owner.Actor, "t", func(p *policy.Policy) error { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(c); return nil })
 			return err
 		}); err != nil {
 			t.Fatal(err)

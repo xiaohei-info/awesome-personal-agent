@@ -171,7 +171,7 @@ func (k *kernel) rulesAgent() string {
 		}
 		secret = s
 		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_r"] = policy.AgentAllowance{Tier: policy.AllowRules}
+			p.AgentCards["agent_r"] = policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules)
 			return nil
 		})
 		return err
@@ -239,7 +239,7 @@ func TestAddRejectsCustomCommandAndAcceptsBundledProgram(t *testing.T) {
 		{"source", "add", "--id", "src_evil", "--command", "/tmp/acc/evil.sh", "--schedule", "15m", "--timeout", "30"},
 		{"source", "add", "--id", "src_evil", "--type", "script", "--command", "/tmp/acc/evil.sh", "--schedule", "15m", "--timeout", "30"},
 	} {
-		if r := k.apa(dlg, args...); r.code != domain.ExitWebOnly || !strings.Contains(r.errOut, `"web_only"`) {
+		if r := k.apa(dlg, args...); r.code != domain.ExitTierClosed || !strings.Contains(r.errOut, `"tier_closed"`) {
 			t.Fatalf("%v: %+v", args, r)
 		}
 	}
@@ -252,8 +252,8 @@ func TestAddRejectsCustomCommandAndAcceptsBundledProgram(t *testing.T) {
 		t.Fatalf("rejected source was stored: %+v", list.Sources)
 	}
 
-	for _, tok := range []string{dlg, obs} {
-		if r := k.apa(tok, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"); r.code != domain.ExitWebOnly {
+	for tok, want := range map[string]int{dlg: domain.ExitTierClosed, obs: domain.ExitPermissionDenied} {
+		if r := k.apa(tok, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"); r.code != want {
 			t.Fatalf("Agent key registering a bundled source: %+v", r)
 		}
 	}
@@ -328,8 +328,8 @@ func TestWebhookCreateRotateIngestsReplay(t *testing.T) {
 	k.ownerOK("POST", "/v1/sources", `{"id":"src_hook","type":"webhook","config":{"scheme":"shared"}}`, nil)
 
 	for _, args := range [][]string{{"source", "webhook", "create", "src_hook"}, {"source", "webhook", "rotate", "src_hook"}} {
-		for _, tok := range []string{obs, dlg} {
-			if r := k.apa(tok, args...); r.code != domain.ExitWebOnly {
+		for tok, want := range map[string]int{obs: domain.ExitPermissionDenied, dlg: domain.ExitTierClosed} {
+			if r := k.apa(tok, args...); r.code != want {
 				t.Fatalf("%v by an Agent key: %+v", args, r)
 			}
 		}
@@ -418,8 +418,8 @@ func TestWebhookRevokeDropsEveryKey(t *testing.T) {
 		t.Fatal("both keys must work before revoke")
 	}
 	k.wh.Wait()
-	for _, tok := range []string{obs, dlg} {
-		if r := k.apa(tok, "source", "webhook", "revoke", "src_hook"); r.code != domain.ExitWebOnly {
+	for tok, want := range map[string]int{obs: domain.ExitPermissionDenied, dlg: domain.ExitTierClosed} {
+		if r := k.apa(tok, "source", "webhook", "revoke", "src_hook"); r.code != want {
 			t.Fatalf("Agent key revoke: %+v", r)
 		}
 	}
@@ -493,7 +493,7 @@ func TestSourceAddWithDefaultProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := []string{"source", "add", "--id", "src_rss", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"}
-	if r := k.apa(dlg, append(base, "--default-project", "acc-home")...); r.code != domain.ExitWebOnly {
+	if r := k.apa(dlg, append(base, "--default-project", "acc-home")...); r.code != domain.ExitTierClosed {
 		t.Fatalf("Agent key add: %+v", r)
 	}
 	reg := func(prj string) string {

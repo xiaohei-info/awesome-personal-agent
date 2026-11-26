@@ -169,7 +169,9 @@ func (e *env) harness(resume, gone bool) {
 		h["exit_output"] = map[string][]string{SessionMissing: {"no such session"}}
 	}
 	e.must(owner, "executor.register", map[string]any{"harness": "hx", "headless": h})
-	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx" })
+	e.setPolicy(func(p *policy.Policy) {
+		p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+	})
 }
 
 func (e *env) setPolicy(f func(*policy.Policy)) {
@@ -539,7 +541,7 @@ func TestPermissionCapLoweredIsRefused(t *testing.T) {
 	e.harness(true, false)
 	e.auto("main")
 	id := e.asked("agent-ok", nil)
-	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default = policy.PermRead })
+	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermRead) })
 	if out, err := e.svc.Resume(bg, id); err != nil || out != Refused {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}

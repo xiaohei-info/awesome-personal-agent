@@ -216,7 +216,7 @@ func add(src materials.PackSource) command.Spec {
 		return v, v.fill(tx)
 	}
 	return command.Spec{
-		Name: "material.add", Action: authz.ActionReviseMaterial, Tier: authz.TierOrganize,
+		Name: "material.add", Action: authz.ActionReviseMaterial, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(tx, in)
 			return authz.Object{Kind: v.Kind, Project: v.Project}, err
@@ -270,7 +270,7 @@ func refresh() command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "material.refresh", Action: authz.ActionReviseMaterial, Tier: authz.TierInternal,
+		Name: "material.refresh", Action: authz.ActionReviseMaterial, Group: authz.GroupInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -402,7 +402,7 @@ func relocate() command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "material.relocate", Action: authz.ActionReviseMaterial, Tier: authz.TierInternal,
+		Name: "material.relocate", Action: authz.ActionReviseMaterial, Group: authz.GroupInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

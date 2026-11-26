@@ -25,11 +25,11 @@ func agent(p string, lvl authz.Level) command.Trusted {
 }
 
 // setTier 以本人身份设 agent 的档位（3b 设置，测试里直接写策略）。
-func (e *env) setTier(t *testing.T, agent, tier string) {
+func (e *env) setTier(t *testing.T, agent string, tier policy.Card) {
 	t.Helper()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent[agent] = policy.AgentAllowance{Tier: tier}
+			p.AgentCards[agent] = tier
 			return nil
 		})
 		return err
@@ -199,7 +199,7 @@ func TestProposedKindQueuesForConfirmation(t *testing.T) {
 		t.Fatal("no proposed event")
 	}
 	// 放开二档后，同一个 Agent 的改动直接生效。
-	e.setTier(t, "agent_wrk", policy.AllowDecide)
+	e.setTier(t, "agent_wrk", policy.DefaultCard().With(policy.GroupDecide))
 	if d := e.must(t, worker, "", "material.commit", commitIn{ID: first.Material, Content: "v3", Reason: "再改", BasedOn: first.Revision}); d.State != StateCurrent {
 		t.Fatalf("edit with decide tier: state %s", d.State)
 	}
@@ -237,7 +237,7 @@ func TestConfirmSupersedesPreviousAndRejectKeepsContent(t *testing.T) {
 func TestRevisionsAreAppendOnlyWithProvenanceAndDiff(t *testing.T) {
 	e := setup(t)
 	r1 := e.newNote(t, "a\nb\nc")
-	e.setTier(t, "agent_wrk", policy.AllowDecide)
+	e.setTier(t, "agent_wrk", policy.DefaultCard().With(policy.GroupDecide))
 	r2 := e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "a\nB\nc", Reason: "二", BasedOn: r1.Revision})
 	r3 := e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "a\nB\nc\nd", Reason: "三", BasedOn: r2.Revision})
 	var h []Revision
@@ -266,7 +266,7 @@ func TestRevisionsAreAppendOnlyWithProvenanceAndDiff(t *testing.T) {
 func TestDirectBaselineMismatchConflicts(t *testing.T) {
 	e := setup(t)
 	r1 := e.newNote(t, "v1")
-	e.setTier(t, "agent_wrk", policy.AllowDecide)
+	e.setTier(t, "agent_wrk", policy.DefaultCard().With(policy.GroupDecide))
 	e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "v2", Reason: "一", BasedOn: r1.Revision})
 	_, err := e.do(worker, "", "material.commit", commitIn{ID: r1.Material, Content: "v2'", Reason: "二", BasedOn: r1.Revision})
 	code(t, err, domain.CodeConflict)
@@ -324,7 +324,7 @@ func TestProposedStaleBaselineNeedsExplicitChoice(t *testing.T) {
 func TestRevertIsWebOnlyAndAppendsRevision(t *testing.T) {
 	e := setup(t)
 	r1 := e.newNote(t, "原文")
-	e.setTier(t, "agent_wrk", policy.AllowDecide)
+	e.setTier(t, "agent_wrk", policy.DefaultCard().With(policy.GroupDecide))
 	r2 := e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "被 agent 改坏", Reason: "改", BasedOn: r1.Revision})
 	in := revertIn{ID: r1.Material, To: r1.Revision, Reason: "回退"}
 	_, err := e.do(delegate, "", "material.revert", in)
@@ -371,7 +371,7 @@ func TestGuidelineActivationIsWebOnly(t *testing.T) {
 	}
 	_, err := e.do(delegate, "", "revision.confirm", confirmIn{ID: r.Revision})
 	code(t, err, domain.CodeTierClosed)
-	e.setTier(t, "agent_dlg", policy.AllowDecide) // 二档放开也不够
+	e.setTier(t, "agent_dlg", policy.DefaultCard().With(policy.GroupDecide)) // 二档放开也不够
 	_, err = e.do(delegate, "", "revision.reject", rejectIn{ID: r.Revision})
 	code(t, err, domain.CodeTierClosed)
 	_, err = e.do(worker, "", "revision.confirm", confirmIn{ID: r.Revision})
@@ -390,7 +390,7 @@ func TestGuidelineActivationIsWebOnly(t *testing.T) {
 	if !hasEvent(e.events(t, r.Material), domain.EvGuidelineActivated) {
 		t.Fatal("no guideline.activated event")
 	}
-	e.setTier(t, "agent_dlg", policy.AllowRules)
+	e.setTier(t, "agent_dlg", policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules))
 	r2 := e.must(t, delegate, "", "material.commit", commitIn{ID: r.Material, Content: "## 处理规则\n先问再做", Reason: "改", BasedOn: r.Revision})
 	if r2.State != StateProposed {
 		t.Fatalf("guideline edit: state %s", r2.State)
@@ -411,7 +411,7 @@ func TestDelegateConfirmsNonGuidelineWithEvidenceOnly(t *testing.T) {
 	_, r := e.pending(t, "requirement")
 	_, err := e.do(delegate, "", "revision.confirm", confirmIn{ID: r.Revision})
 	code(t, err, domain.CodeTierClosed)
-	e.setTier(t, "agent_dlg", policy.AllowDecide)
+	e.setTier(t, "agent_dlg", policy.DefaultCard().With(policy.GroupDecide))
 	e.must(t, delegate, "", "revision.confirm", confirmIn{ID: r.Revision})
 	if m, _ := e.show(t, r.Material, ""); m.CurrentRev != r.Revision {
 		t.Fatal("not confirmed")

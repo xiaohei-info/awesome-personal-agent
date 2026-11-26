@@ -165,8 +165,8 @@ func TestAllowedExecutorsWebOnlyAndAudited(t *testing.T) {
 		t.Fatalf("each change must be recorded as an event, got %d", n)
 	}
 
-	// 非 Web 入口：项目允许的执行者是 3b，任何 Agent 钥匙都是硬线 web_only(403，先于范围)，名单不变。
-	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeWebOnly, auth.Worker: domain.CodeWebOnly, auth.Observer: domain.CodeWebOnly} {
+	// 非 Web 入口：项目允许的执行者属"Agent 与执行者配置"，没开这一组的 delegate 是 23，worker、observer 在钥匙范围外，名单不变。
+	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeTierClosed, auth.Worker: domain.CodePermissionDenied, auth.Observer: domain.CodePermissionDenied} {
 		r := e.do("PUT", path, `{"executors":null}`, e.token(kind))
 		if r.Code < 400 || code(t, r) != want {
 			t.Fatalf("%s PUT: %d %s, want %s", kind, r.Code, r.Body, want)
@@ -229,11 +229,11 @@ func TestDeclarationsAndCommandRegistration(t *testing.T) {
 	if r := e.web("GET", "/v1/settings/commands", ""); strings.Contains(r.Body.String(), "acme") {
 		t.Fatalf("pending declaration must not be an active command: %s", r.Body)
 	}
-	// 确认接入声明是 3b：worker 与 delegate 都得 web_only。
-	if r := e.do("POST", "/v1/settings/declarations/acme/1/confirm", "", plugin); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
+	// 确认接入声明属"Agent 与执行者配置"：worker 在钥匙范围外，没开这一组的 delegate 是 23。
+	if r := e.do("POST", "/v1/settings/declarations/acme/1/confirm", "", plugin); r.Code != 403 || code(t, r) != domain.CodePermissionDenied {
 		t.Fatalf("worker confirm: %d %s", r.Code, r.Body)
 	}
-	if r := e.do("POST", "/v1/settings/declarations/acme/1/confirm", "", e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
+	if r := e.do("POST", "/v1/settings/declarations/acme/1/confirm", "", e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeTierClosed {
 		t.Fatalf("delegate confirm: %d %s", r.Code, r.Body)
 	}
 	if r := e.do("GET", "/v1/settings/declarations", "", plugin); r.Code != 403 {
@@ -261,7 +261,7 @@ func TestDeclarationsAndCommandRegistration(t *testing.T) {
 
 	// 直接登记命令：delegate 被拒（web_only），没有副作用；Web 登记立即生效。
 	other := strings.Replace(declJSON, "acme", "evil", -1)
-	if r := e.do("POST", "/v1/settings/commands", other, e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
+	if r := e.do("POST", "/v1/settings/commands", other, e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeTierClosed {
 		t.Fatalf("delegate register: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("GET", "/v1/settings/commands", ""); strings.Contains(r.Body.String(), "evil") {
@@ -292,7 +292,7 @@ func TestExecutorPutIsWebOnly(t *testing.T) {
 	if len(e.events(kexec.EvChanged)) != 2 || !e.listed("a.cli") || !e.listed("b.cli") {
 		t.Fatal("list changes must be recorded")
 	}
-	if r := e.do("POST", "/v1/settings/executors", `{"id":"c.cli","kind":"external-cli"}`, e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
+	if r := e.do("POST", "/v1/settings/executors", `{"id":"c.cli","kind":"external-cli"}`, e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeTierClosed {
 		t.Fatalf("delegate put: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", "/v1/settings/executors", `not json`); r.Code != 400 {

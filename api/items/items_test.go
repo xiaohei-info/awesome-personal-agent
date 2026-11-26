@@ -143,7 +143,7 @@ func (e *env) token(kind auth.Kind, executor string) func(*http.Request) {
 }
 
 // agent 签一把归属 Agent id 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier。
-func (e *env) agent(id, tier string) func(*http.Request) {
+func (e *env) agent(id string, tier policy.Card) func(*http.Request) {
 	e.t.Helper()
 	var secret string
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
@@ -153,7 +153,7 @@ func (e *env) agent(id, tier string) func(*http.Request) {
 		}
 		secret = s
 		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent[id] = policy.AgentAllowance{Tier: tier}
+			p.AgentCards[id] = tier
 			return nil
 		})
 		return err

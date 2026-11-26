@@ -44,15 +44,15 @@ type Options struct {
 // delegate 得到退出码 20（硬线），其余钥匙得到退出码 4（范围外）。
 func Register(x *command.Executor, o Options) error {
 	for _, s := range []command.Spec{
-		{Name: "agent.configure", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: noObject, Apply: saveCard},
-		{Name: "executor.list", Action: authz.ActionRead, Tier: authz.TierRead, Object: noObject, Apply: o.list},
-		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Tier: authz.TierOrganize, Object: declObject, Apply: apply(declare)},
-		{Name: "executor.pending", Action: authz.ActionSubmitPlugin, Tier: authz.TierRead, Object: noObject, Apply: pending},
-		{Name: "executor.confirm", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: refObject, Apply: apply2(confirm)},
-		{Name: "executor.reject", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: refObject, Apply: apply2(reject)},
-		{Name: "executor.register", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: declObject, Apply: apply(register)},
-		{Name: "executor.put", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/executors", Object: putObject, Apply: put},
-		{Name: "executor.remove", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/executors", Object: idObject, Apply: remove},
+		{Name: "agent.configure", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/settings/agents", Object: noObject, Apply: saveCard},
+		{Name: "executor.list", Action: authz.ActionRead, Group: authz.GroupView, Object: noObject, Apply: o.list},
+		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Group: authz.GroupOrganize, Object: declObject, Apply: apply(declare)},
+		{Name: "executor.pending", Action: authz.ActionSubmitPlugin, Group: authz.GroupView, Object: noObject, Apply: pending},
+		{Name: "executor.confirm", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/settings/agents", Object: refObject, Apply: apply2(confirm)},
+		{Name: "executor.reject", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/settings/agents", Object: refObject, Apply: apply2(reject)},
+		{Name: "executor.register", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/settings/agents", Object: declObject, Apply: apply(register)},
+		{Name: "executor.put", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/executors", Object: putObject, Apply: put},
+		{Name: "executor.remove", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/executors", Object: idObject, Apply: remove},
 	} {
 		if err := x.Register(s); err != nil {
 			return err

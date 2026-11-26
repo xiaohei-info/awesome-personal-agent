@@ -71,7 +71,7 @@ func registerRepair(x *command.Executor) error {
 		}
 		return v, nil
 	}
-	return x.Register(command.Spec{Name: CmdRepair, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, KeepVersion: true,
+	return x.Register(command.Spec{Name: CmdRepair, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal, KeepVersion: true,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return authz.Object{ID: v.Item, Assignee: systemPrinc}, err // 内核整理自己建的建议，同 inbound.sweep

@@ -179,9 +179,9 @@ func TestReposAuthorizationByCredentialLevel(t *testing.T) {
 	p := k.mustCreate(dlg, "--name", "Code")
 	const remote = "https://github.com/o/r.git"
 
-	for _, tk := range []string{wrk, obs, dlg} {
-		if r := k.apa(tk, "project", "repos", "add", p.ID, "--remote", remote); r.code != 20 {
-			t.Fatalf("Agent keys adding a remote must exit 20: %+v", r)
+	for tk, want := range map[string]int{wrk: 4, obs: 4, dlg: 23} {
+		if r := k.apa(tk, "project", "repos", "add", p.ID, "--remote", remote); r.code != want {
+			t.Fatalf("adding a remote needs the agents group: %+v", r)
 		}
 	}
 	k.owner("project.repo.add", map[string]string{"id": p.ID, "remote": remote})
@@ -198,13 +198,13 @@ func TestReposAuthorizationByCredentialLevel(t *testing.T) {
 		t.Fatalf("observer checkout must exit 4: %+v", r)
 	}
 	// worker 删不了远程地址，但能删自己的检出。
-	if r := k.apa(wrk, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 20 {
-		t.Fatalf("worker remove remote must exit 20: %+v", r)
+	if r := k.apa(wrk, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 4 {
+		t.Fatalf("worker remove remote is out of scope: %+v", r)
 	}
 	if r := k.apa(wrk, "project", "repos", "remove", p.ID, "--remote", remote, "--host", "box1", "--path", "/src/r"); r.code != 0 || len(r.project(t).Repos[0].Checkouts) != 0 {
 		t.Fatalf("worker remove checkout: %+v", r)
 	}
-	if r := k.apa(dlg, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 20 {
+	if r := k.apa(dlg, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 23 {
 		t.Fatalf("delegate remove remote must exit 20: %+v", r)
 	}
 }
@@ -216,7 +216,7 @@ func TestAllowedExecutorsRejectedOnBothPaths(t *testing.T) {
 	p := k.mustCreate(dlg, "--name", "P")
 
 	r := k.apa(dlg, "project", "update", p.ID, "--allowed-executors", "ex1,ex2")
-	if r.code != 20 || !strings.Contains(r.errOut, `"web_only"`) {
+	if r.code != 23 || !strings.Contains(r.errOut, `"tier_closed"`) {
 		t.Fatalf("CLI path must exit 20 web_only: %+v", r)
 	}
 	if k.rejections(p.ID) != 1 {
@@ -240,7 +240,7 @@ func TestAllowedExecutorsRejectedOnBothPaths(t *testing.T) {
 		t.Fatalf("create with allowed_executors must exit 20: %+v", c)
 	}
 	// 硬线先于范围：worker 同样是 20。
-	if w := k.apa(k.token(auth.Worker), "project", "update", p.ID, "--allowed-executors", "x"); w.code != 20 {
+	if w := k.apa(k.token(auth.Worker), "project", "update", p.ID, "--allowed-executors", "x"); w.code != 4 {
 		t.Fatalf("worker must exit 20: %+v", w)
 	}
 }

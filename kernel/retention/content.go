@@ -47,7 +47,7 @@ type ContentResult struct {
 // registerContent 登记 retention.purge_content；blobDir 是 <APA_HOME>/blobs。
 func registerContent(x *command.Executor, blobDir string) error {
 	return x.Register(command.Spec{
-		Name: CmdPurgeContent, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
+		Name: CmdPurgeContent, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal,
 		Object: func(_ *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			var in contentIn
 			if err := json.Unmarshal(raw, &in); err != nil {

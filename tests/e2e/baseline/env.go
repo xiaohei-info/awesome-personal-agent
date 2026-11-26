@@ -249,10 +249,12 @@ func (e *Env) OpenDelegateTier(tier string) {
 	e.AgentID, e.DELO, e.DEL = card.ID, e.DEL, out.Secret
 }
 
-// SetTier 在 Web 设一个 Agent 的档位（organize / decide / rules）。
+// SetTier 在 Web 按旧档位的说法设一个 Agent 的权限卡（§16.5 映射表）：organize 只开前三组，decide 再开替我拍板，
+// rules 再开改日常规则与提醒。
 func (e *Env) SetTier(agent, tier string) {
 	e.T.Helper()
-	e.webOK("PUT", "/v1/settings/agents/"+agent+"/tier", `{"tier":"`+tier+`"}`, 200)
+	groups := map[string]string{"organize": "", "decide": `,"decide":{}`, "rules": `,"decide":{},"rules":{}`}[tier]
+	e.webOK("PUT", "/v1/settings/agents/"+agent+"/card", `{"groups":{"view":{},"organize":{},"source_events":{}`+groups+`},"tool":"read"}`, 200)
 }
 
 func (e *Env) fatal(format string, a ...any) {

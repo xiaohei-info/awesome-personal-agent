@@ -126,7 +126,7 @@ func newEnv(t *testing.T, taskExecutor string) *env {
 		"access": map[string][]string{"read": {}, "edit": {}}}})
 	if err := st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "t", func(p *policy.Policy) error {
-			p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx"
+			p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
 			return nil
 		})
 		return err

@@ -69,7 +69,7 @@ func setup(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	must(Spec{Name: "note.write", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Object: object,
+	must(Spec{Name: "note.write", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Object: object,
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			if parse(in).Body == "" {
 				return domain.NewError(domain.CodeInvalidRequest, "body required", "add body")
@@ -92,33 +92,33 @@ func setup(t *testing.T) *env {
 			}
 			return map[string]string{"id": n.ID}, nil
 		}})
-	must(Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
+	must(Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Group: authz.GroupDecide,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			return authz.Object{ID: parse(in).ID, Project: parse(in).Body}, nil
 		},
 		Apply: func(c *Ctx) (any, error) { e.applied++; return "ok", nil }})
-	must(Spec{Name: "rule.change", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/rules", Object: object,
+	must(Spec{Name: "rule.change", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/rules", Object: object,
 		Apply: func(c *Ctx) (any, error) {
 			e.applied++
 			_, err := c.Emit(domain.Event{Type: domain.EvItemUpdated, Object: c.Object.ID, Payload: json.RawMessage(`{}`)})
 			return nil, err
 		}})
-	must(Spec{Name: "key.issue", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: object,
+	must(Spec{Name: "key.issue", Action: authz.ActionChangeSettings, Group: authz.GroupOwner, Page: "/settings/agents", Object: object,
 		Apply: func(c *Ctx) (any, error) {
 			e.applied++
 			_, err := c.Emit(domain.Event{Type: domain.EvItemUpdated, Object: c.Object.ID, Payload: json.RawMessage(`{}`)})
 			return nil, err
 		}})
-	must(Spec{Name: "item.assign", Action: authz.ActionReassign, Tier: authz.TierOrganize,
+	must(Spec{Name: "item.assign", Action: authz.ActionReassign, Group: authz.GroupOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			return authz.Object{ID: parse(in).ID, Executor: "stranger", ProjectInfo: &domain.Project{AllowedExecutors: []string{"a"}}}, nil
 		},
 		Apply: func(c *Ctx) (any, error) { e.applied++; return nil, nil }})
-	must(Spec{Name: "ext.ping", Action: authz.ActionSubmitPlugin, Tier: authz.TierOrganize, Kinds: []auth.Kind{auth.Ext}, Object: object,
+	must(Spec{Name: "ext.ping", Action: authz.ActionSubmitPlugin, Group: authz.GroupOrganize, Kinds: []auth.Kind{auth.Ext}, Object: object,
 		Apply: func(c *Ctx) (any, error) { return "pong", nil }})
-	must(Spec{Name: "ext.nokind", Action: authz.ActionSubmitPlugin, Tier: authz.TierOrganize, Object: object,
+	must(Spec{Name: "ext.nokind", Action: authz.ActionSubmitPlugin, Group: authz.GroupOrganize, Object: object,
 		Apply: func(c *Ctx) (any, error) { return nil, nil }})
-	must(Spec{Name: "note.versioned", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Object: object, RequireVersion: true,
+	must(Spec{Name: "note.versioned", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Object: object, RequireVersion: true,
 		Apply: func(c *Ctx) (any, error) { return nil, nil }})
 	return e
 }
@@ -142,10 +142,10 @@ func (e *env) bearer(t *testing.T, s auth.Spec) Bearer {
 var owner = Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
 
 // setTier 以本人身份写 agent 的档位（3b 设置，测试里直接写策略）。
-func (e *env) setTier(t *testing.T, agent string, a policy.AgentAllowance) {
+func (e *env) setTier(t *testing.T, agent string, a policy.Card) {
 	t.Helper()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.AgentTier.ByAgent[agent] = a; return nil })
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.AgentCards[agent] = a; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -513,7 +513,7 @@ func TestChainDepthOverThresholdOnlyRecords(t *testing.T) {
 func TestChainDepthResolvedByCaller(t *testing.T) {
 	e := setup(t)
 	e.x.MaxChainDepth = 4
-	if err := e.x.Register(Spec{Name: "note.delegate", Action: authz.ActionDelegate, Tier: authz.TierOrganize,
+	if err := e.x.Register(Spec{Name: "note.delegate", Action: authz.ActionDelegate, Group: authz.GroupOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			return authz.Object{ID: parse(in).ID}, nil
 		},
@@ -570,7 +570,7 @@ func TestRegisterValidationAndTrustedLevel(t *testing.T) {
 	if err := e.x.Register(Spec{Name: "note.write"}); err == nil {
 		t.Fatal("incomplete spec must be rejected")
 	}
-	if err := e.x.Register(Spec{Name: "note.write", Tier: authz.TierOrganize, Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil }, Apply: func(*Ctx) (any, error) { return nil, nil }}); err == nil {
+	if err := e.x.Register(Spec{Name: "note.write", Group: authz.GroupOrganize, Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil }, Apply: func(*Ctx) (any, error) { return nil, nil }}); err == nil {
 		t.Fatal("duplicate must be rejected")
 	}
 	if err := e.x.Register(Spec{Name: "no.tier", Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil }, Apply: func(*Ctx) (any, error) { return nil, nil }}); err == nil {
@@ -625,7 +625,7 @@ func TestMultipleActionsAllMustPass(t *testing.T) {
 		"ok":     {authz.ActionUpdateOwn, authz.ActionRead},
 		"checks": {authz.ActionRead, authz.ActionReassign},
 	} {
-		if err := e.x.Register(Spec{Name: "multi." + name, Action: authz.ActionRead, Tier: authz.TierOrganize, Actions: acts(as...), Object: obj,
+		if err := e.x.Register(Spec{Name: "multi." + name, Action: authz.ActionRead, Group: authz.GroupOrganize, Actions: acts(as...), Object: obj,
 			Apply: func(*Ctx) (any, error) { applied++; return nil, nil }}); err != nil {
 			t.Fatal(err)
 		}
@@ -689,7 +689,7 @@ func TestTiersAreDecidedInThePipeline(t *testing.T) {
 		t.Fatal("closed tiers must be 23")
 	}
 	// 放开二档，限定项目 p1：p1 上放行并记 allowance，别的项目仍 23；3a 仍 23。
-	e.setTier(t, "agent_a", policy.AgentAllowance{Tier: policy.AllowDecide, Projects: []string{"p1"}})
+	e.setTier(t, "agent_a", withProjects(policy.DefaultCard().With(policy.GroupDecide), "p1"))
 	if err := do(me, "decision.answer", noteIn{ID: "q", Body: "p1"}); err != nil {
 		t.Fatalf("decide on p1: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestTiersAreDecidedInThePipeline(t *testing.T) {
 		t.Fatal("project limit and 3a must still refuse")
 	}
 	// 全部放开：二档、3a 放行；3b 仍是硬线 20，带设置页链接。
-	e.setTier(t, "agent_a", policy.AgentAllowance{Tier: policy.AllowRules})
+	e.setTier(t, "agent_a", policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules))
 	if err := do(me, "rule.change", noteIn{ID: "r"}); err != nil || lastBasis() != domain.BasisAllowance {
 		t.Fatalf("rules open: %v", err)
 	}
@@ -735,7 +735,7 @@ func TestTiersAreDecidedInThePipeline(t *testing.T) {
 
 func TestOnRejectRunsInTheRejectionTransaction(t *testing.T) {
 	e := setup(t)
-	if err := e.x.Register(Spec{Name: "tier.decide", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Receipt: true,
+	if err := e.x.Register(Spec{Name: "tier.decide", Action: authz.ActionUpdateOwn, Group: authz.GroupDecide, Receipt: true,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			return authz.Object{ID: parse(in).ID}, nil
 		},
@@ -787,7 +787,7 @@ func TestOnRejectRunsInTheRejectionTransaction(t *testing.T) {
 func TestReceiptCommandRejectionsRecordHealthAlert(t *testing.T) {
 	e := setup(t)
 	reg := func(name string, receipt bool) {
-		if err := e.x.Register(Spec{Name: name, Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: receipt,
+		if err := e.x.Register(Spec{Name: name, Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Receipt: receipt,
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				return authz.Object{ID: parse(in).ID}, nil
 			},
@@ -847,7 +847,7 @@ func TestReceiptCommandRejectionsRecordHealthAlert(t *testing.T) {
 // 提交后回调只看到"现场"事件：导入事件写进账本，但不出现在 Commit.Seqs。
 func TestCommitSeqsExcludeImportedEvents(t *testing.T) {
 	e := setup(t)
-	if err := e.x.Register(Spec{Name: "note.import", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+	if err := e.x.Register(Spec{Name: "note.import", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) { return authz.Object{ID: "n1"}, nil },
 		Apply: func(c *Ctx) (any, error) {
 			for _, batch := range []string{"imp_1", ""} {
@@ -887,4 +887,9 @@ func TestPreflightChecksAuthorizationButWritesNothing(t *testing.T) {
 	if e.applied != 0 || e.noteCount(t) != 0 {
 		t.Fatal("denied preflight must not apply")
 	}
+}
+
+func withProjects(c policy.Card, projects ...string) policy.Card {
+	c.DecideProjects = projects
+	return c
 }

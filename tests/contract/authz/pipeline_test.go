@@ -154,8 +154,8 @@ func TestDelegateReceiptsAndDoneEvidence(t *testing.T) {
 	}
 }
 
-// 原「只接受本人原话」的项目写入按后果分开：建项目、改项目信息是一档，delegate 直接写；加远程仓库是外部接入（3b），
-// Agent 钥匙一律硬线 20、账本只多一条 command.rejected；本人在 Web 照常写。
+// 原「只接受本人原话」的项目写入按组分开：建项目、改项目信息是"整理事项"，delegate 直接写；加远程仓库属"Agent 与执行者配置"，
+// 没开这一组的 delegate 为 23、账本只多一条 command.rejected；本人在 Web 照常写。
 func TestProjectWritesFollowTheirTier(t *testing.T) {
 	e := setup(t)
 	n := 0
@@ -172,7 +172,7 @@ func TestProjectWritesFollowTheirTier(t *testing.T) {
 	}{
 		{"project.create", "POST", "/v1/projects", `{"name":"new{n}"}`, 0},
 		{"project.update", "PATCH", "/v1/projects/{p}", `{"intro":"s"}`, 0},
-		{"project.repo.add", "POST", "/v1/projects/{p}/repos", `{"op":"add_remote","remote":"https://example.com/r{n}.git"}`, domain.ExitWebOnly},
+		{"project.repo.add", "POST", "/v1/projects/{p}/repos", `{"op":"add_remote","remote":"https://example.com/r{n}.git"}`, domain.ExitTierClosed},
 	} {
 		path, body := fresh(w.path), fresh(w.body)
 		head, rej := e.head(), e.rejected()
@@ -182,8 +182,8 @@ func TestProjectWritesFollowTheirTier(t *testing.T) {
 				t.Fatalf("%s (tier one): %d %s", w.name, rec.Code, rec.Body)
 			}
 		} else {
-			if de := wantReject(t, rec, w.exit); de.Reason != domain.ReasonHardLine || e.head() != head+1 || e.rejected() != rej+1 {
-				t.Fatalf("%s: a hard-line refusal appends exactly one command.rejected: %+v", w.name, de)
+			if de := wantReject(t, rec, w.exit); de.Reason != domain.ReasonTierClosed || e.head() != head+1 || e.rejected() != rej+1 {
+				t.Fatalf("%s: a refusal appends exactly one command.rejected: %+v", w.name, de)
 			}
 		}
 		if rec := e.web(w.method, fresh(w.path), fresh(w.body)); rec.Code >= 300 {

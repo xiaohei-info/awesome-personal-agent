@@ -75,19 +75,17 @@ func (a *api) agents(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	}); err != nil {
 		return err
 	}
-	// 每张卡带它的档位（§14.3）：判定读的就是这一份，页面照它显示。
+	// 每张卡带它的权限卡（§14.5）：判定读的就是这一份，页面照它显示。
 	type agentOut struct {
 		kexec.Card
-		Tier     string   `json:"tier"`
-		Projects []string `json:"tier_projects"`
+		Permission policy.Card `json:"permission"`
 	}
 	out := make([]agentOut, len(cards))
 	for i, c := range cards {
 		if !p.Web {
 			c.Values = nil
 		}
-		al := pol.Allowance(c.ID)
-		out[i] = agentOut{Card: c, Tier: al.Tier, Projects: append([]string{}, al.Projects...)}
+		out[i] = agentOut{Card: c, Permission: pol.Card(c.ID)}
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"agents": out, "selected": selected.Snapshot, "reason": selected.Reason})
 }

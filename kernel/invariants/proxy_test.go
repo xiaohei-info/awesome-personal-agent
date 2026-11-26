@@ -131,7 +131,7 @@ func TestInv11ProxyDecisionsNeedWordsAndSession(t *testing.T) {
 	}
 	if err := st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_dlg"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			p.AgentCards["agent_dlg"] = policy.DefaultCard().With(policy.GroupDecide)
 			return nil
 		})
 		return err

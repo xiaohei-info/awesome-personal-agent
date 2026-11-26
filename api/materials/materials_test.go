@@ -100,7 +100,7 @@ func setup(t *testing.T) *env {
 	// dlgD 归属 agent_d，本人把它放开到「也替我拍板」；dlg 没有归属，只整理。
 	if err := st.Update(context.Background(), func(tx *store.Tx) error {
 		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_d"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			p.AgentCards["agent_d"] = policy.DefaultCard().With(policy.GroupDecide)
 			return nil
 		})
 		return err

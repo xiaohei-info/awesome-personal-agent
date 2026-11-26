@@ -257,12 +257,12 @@ func (e *env) api(name, method, path, body string) *httptest.ResponseRecorder {
 }
 
 // agent 签一把名为 name、归属 Agent agentID 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier（organize/decide/rules）。
-func (e *env) agent(name, agentID, tier string) {
+func (e *env) agent(name, agentID string, tier policy.Card) {
 	e.t.Helper()
 	e.issue(name, auth.Spec{Kind: auth.Delegate, AgentID: agentID, Harness: "h"})
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent[agentID] = policy.AgentAllowance{Tier: tier}
+			p.AgentCards[agentID] = tier
 			return nil
 		})
 		return err

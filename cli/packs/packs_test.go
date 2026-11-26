@@ -117,7 +117,7 @@ func (k *kernel) rulesAgent() string {
 		}
 		secret = s
 		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_r"] = policy.AgentAllowance{Tier: policy.AllowRules}
+			p.AgentCards["agent_r"] = policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules)
 			return nil
 		})
 		return err

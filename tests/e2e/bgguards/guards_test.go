@@ -178,7 +178,7 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 			"session": map[string]any{"extract": "$.session_id"},
 			"access":  map[string]any{"read": []string{"--access=read"}},
 		})
-		f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"read","by_harness":{"acc-read-only":"full"}}}`, 200)
+		f.webOK("PUT", "/settings/agents/legacy:acc-read-only/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"full"}`, 200)
 		f.auto("ro-edit")
 		id := f.task("bgg-07", "acc-work", "acc-ro")
 		// 2026-11-20 改写：同 ACT-BGG-06，原等待事项转 needs_input。

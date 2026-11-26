@@ -18,7 +18,7 @@ import (
 func TestInv1LedgerChangeAndEventCommitTogether(t *testing.T) {
 	e := newLedger(t)
 	err := e.x.Register(command.Spec{
-		Name: "invariants.emit_then_fail", Action: authz.ActionEditAnyItem, Tier: authz.TierOrganize,
+		Name: "invariants.emit_then_fail", Action: authz.ActionEditAnyItem, Group: authz.GroupOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var p struct{ ID string }
 			_ = json.Unmarshal(in, &p)

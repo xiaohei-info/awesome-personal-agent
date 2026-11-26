@@ -88,7 +88,7 @@ func (a *answerer) load(tx *store.Tx, in json.RawMessage) (answerIn, domain.Deli
 }
 
 func (a *answerer) answer() command.Spec {
-	return command.Spec{Name: CmdAnswer, Action: authz.ActionChannelAnswer, Tier: authz.TierDecide, Kinds: []auth.Kind{auth.Ext},
+	return command.Spec{Name: CmdAnswer, Action: authz.ActionChannelAnswer, Group: authz.GroupDecide, Kinds: []auth.Kind{auth.Ext},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			_, d, err := a.load(tx, in)
 			if err != nil {

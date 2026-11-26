@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -55,8 +57,7 @@ type RejudgedEvent struct {
 type AgentRow struct {
 	ID, Name, Harness string
 	Enabled           bool
-	ToolCap           string `json:"tool_cap"`
-	TierAfter         string `json:"tier_after"`
+	Card              policy.Card `json:"card"` // 切换后的权限卡
 }
 
 type KeyRow struct {
@@ -238,11 +239,11 @@ func inventory(tx *store.Tx, pv *Preview) error {
 		return err
 	}
 	for _, c := range cards {
-		after := pol.Allowance(c.ID).Tier
-		if t, ok := pv.Plan.AgentTier[c.ID]; ok {
-			after = t
+		card := pol.Card(c.ID)
+		if pc, ok := pv.Plan.Cards[c.ID]; ok {
+			card = pc
 		}
-		pv.Agents = append(pv.Agents, AgentRow{ID: c.ID, Name: c.Name, Harness: c.Harness, Enabled: c.Enabled, ToolCap: pol.PermissionCap.ByAgent[c.ID], TierAfter: after})
+		pv.Agents = append(pv.Agents, AgentRow{ID: c.ID, Name: c.Name, Harness: c.Harness, Enabled: c.Enabled, Card: card})
 	}
 	creds, err := auth.New(nil).List(tx)
 	if err != nil {
@@ -289,8 +290,8 @@ func inventory(tx *store.Tx, pv *Preview) error {
 func renderPreview(pv Preview) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "switched: %v\n", pv.Switched)
-	fmt.Fprintf(&b, "switch plan: revoke %d grants, clear %d questions, drop policy sections %v, write tier for %d agents, %d projects with match rules\n",
-		len(pv.Plan.Grants), len(pv.Plan.Asks), pv.Plan.LegacyPolicy, len(pv.Plan.AgentTier), len(pv.Plan.MatchProjects))
+	fmt.Fprintf(&b, "switch plan: revoke %d grants, clear %d questions, drop policy sections %v, write permission cards for %d agents, %d projects with match rules\n",
+		len(pv.Plan.Grants), len(pv.Plan.Asks), pv.Plan.LegacyPolicy, len(pv.Plan.Cards), len(pv.Plan.MatchProjects))
 	for _, g := range pv.Plan.Grants {
 		fmt.Fprintf(&b, "  grant %s agent=%s actions=%v background=%v\n", g.ID, g.Grantee.Agent, g.Actions, g.Grantee.Background)
 	}
@@ -300,7 +301,7 @@ func renderPreview(pv Preview) string {
 		fmt.Fprintf(&b, "  #%d %s %s %s → %s (%s) %s\n", d.Seq, d.At.Format(time.RFC3339), d.Actor, d.Command, d.Outcome, d.Tier, d.Note)
 	}
 	for _, a := range pv.Agents {
-		fmt.Fprintf(&b, "agent %s %q harness=%s tool_cap=%s tier_after=%s\n", a.ID, a.Name, a.Harness, a.ToolCap, a.TierAfter)
+		fmt.Fprintf(&b, "agent %s %q harness=%s tool=%s groups=%v decide_projects=%v\n", a.ID, a.Name, a.Harness, a.Card.Tool, slices.Sorted(maps.Keys(a.Card.Groups)), a.Card.DecideProjects)
 	}
 	for _, k := range pv.Keys {
 		fmt.Fprintf(&b, "key %s kind=%s label=%q agent=%s revoked=%v → %s\n", k.ID, k.Kind, k.Label, k.AgentID, k.Revoked, k.After)

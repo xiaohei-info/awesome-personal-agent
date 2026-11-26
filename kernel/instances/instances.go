@@ -287,14 +287,14 @@ func existing(tx *store.Tx, id string) (authz.Object, error) {
 }
 
 // agentTier：安排的新建与修改是 3a（改日常）；改了参数里的 agent_id（后台由谁干）是 3b（§14.3）。
-func agentTier(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.RawMessage) (authz.Tier, error) {
+func agentTier(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.RawMessage) (authz.Group, error) {
 	var change struct {
 		ID     string
 		Params json.RawMessage
 	}
 	_ = json.Unmarshal(raw, &change)
 	if len(change.Params) == 0 {
-		return authz.TierRules, nil
+		return authz.GroupRules, nil
 	}
 	agent := func(params json.RawMessage) string {
 		var v struct {
@@ -307,14 +307,14 @@ func agentTier(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.RawMes
 	if change.ID != "" {
 		in, err := Get(tx, obj.ID)
 		if err != nil {
-			return authz.TierPower, err
+			return authz.GroupAgents, err
 		}
 		old = agent(in.Params)
 	}
 	if agent(change.Params) != old {
-		return authz.TierPower, nil
+		return authz.GroupAgents, nil
 	}
-	return authz.TierRules, nil
+	return authz.GroupRules, nil
 }
 
 func (s *svc) create() command.Spec {
@@ -325,7 +325,7 @@ func (s *svc) create() command.Spec {
 	instance := func(id string, v createIn) Instance {
 		return Instance{ID: id, Pack: v.Pack, Project: v.Project, Params: v.Params, Enabled: v.Enabled == nil || *v.Enabled}
 	}
-	return command.Spec{Name: "instance.create", Action: authz.ActionManageSource, Tier: authz.TierRules, TierFor: agentTier, Page: "/rules",
+	return command.Spec{Name: "instance.create", Action: authz.ActionManageSource, Group: authz.GroupRules, GroupFor: agentTier, Page: "/rules",
 		Object: func(_ *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			if _, err := parse(raw); err != nil {
 				return authz.Object{}, err
@@ -377,7 +377,7 @@ func (s *svc) update() command.Spec {
 		}
 		return in, nil
 	}
-	return command.Spec{Name: "instance.update", Action: authz.ActionManageSource, Tier: authz.TierRules, TierFor: agentTier, Page: "/rules",
+	return command.Spec{Name: "instance.update", Action: authz.ActionManageSource, Group: authz.GroupRules, GroupFor: agentTier, Page: "/rules",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -429,7 +429,7 @@ func (s *svc) toggle() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/rules",
+	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/rules",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -464,7 +464,7 @@ func (s *svc) run() command.Spec {
 		var v ref
 		return v, decode(raw, &v)
 	}
-	return command.Spec{Name: "instance.run", Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/rules",
+	return command.Spec{Name: "instance.run", Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/rules",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {

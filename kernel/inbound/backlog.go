@@ -76,7 +76,7 @@ func ownObject(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 
 func (s *Service) registerBacklog(x *command.Executor) error {
 	return errors.Join(
-		x.Register(command.Spec{Name: CmdRequeue, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, Object: ownObject,
+		x.Register(command.Spec{Name: CmdRequeue, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal, Object: ownObject,
 			Apply: func(c *command.Ctx) (any, error) {
 				v, _ := parseBacklog(c.Input)
 				requeue := runner.Requeue
@@ -95,12 +95,12 @@ func (s *Service) registerBacklog(x *command.Executor) error {
 		x.Register(scoreSpec(s)),
 		x.Register(rejudgeSpec()),
 		x.Register(restoreSpec()),
-		x.Register(command.Spec{Name: CmdExpire, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, Object: ownObject,
+		x.Register(command.Spec{Name: CmdExpire, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal, Object: ownObject,
 			Apply: func(c *command.Ctx) (any, error) {
 				v, _ := parseBacklog(c.Input)
 				return nil, settle(c, v.Event, domain.DispositionExpired, v.Reason)
 			}}),
-		x.Register(command.Spec{Name: CmdIgnoreUnjudged, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+		x.Register(command.Spec{Name: CmdIgnoreUnjudged, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				v, err := parseBacklog(in)
 				return authz.Object{ID: v.Event}, err
@@ -294,7 +294,7 @@ func parseRules(in json.RawMessage) (rulesIn, error) {
 }
 
 func rulesSpec() command.Spec {
-	return command.Spec{Name: CmdBacklogRules, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+	return command.Spec{Name: CmdBacklogRules, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseRules(in)
 			return authz.Object{ID: v.Event}, err

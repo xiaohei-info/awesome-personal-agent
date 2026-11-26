@@ -537,7 +537,7 @@ func RegisterWith(x *command.Executor, src PackSource) error {
 }
 
 // writeMode 返回一次提交的写入方式（§12.4）：规范恒留待确认；新建材料直接生效；改已有材料，Web 本人直接生效，
-// Agent 看档位（放开二档且项目在范围内才直接生效），内核自己按能力包声明的默认，没有声明留待确认。
+// Agent 看权限卡（开放"替我拍板"且项目在范围内才直接生效），内核自己按能力包声明的默认，没有声明留待确认。
 func writeMode(c *command.Ctx, p policy.Policy, m Material, isNew bool, packDefault string) string {
 	switch {
 	case m.Kind == KindGuideline:
@@ -549,7 +549,7 @@ func writeMode(c *command.Ctx, p policy.Policy, m Material, isNew bool, packDefa
 			return packDefault
 		}
 		return policy.WriteProposed
-	case authz.DecideOpen(p.Allowance(c.Caller.Agent()), m.Project):
+	case authz.DecideOpen(p.Card(c.Caller.Agent()), m.Project, c.Now()):
 		return policy.WriteDirect
 	}
 	return policy.WriteProposed
@@ -579,7 +579,7 @@ func hostedConflict(m Material) error {
 
 func commit(src PackSource) command.Spec {
 	return command.Spec{
-		Name: "material.commit", Action: authz.ActionReviseMaterial, Tier: authz.TierOrganize,
+		Name: "material.commit", Action: authz.ActionReviseMaterial, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v commitIn
 			if err := decode(in, &v); err != nil {
@@ -700,11 +700,11 @@ func commit(src PackSource) command.Spec {
 }
 
 // revisionTier：确认或拒绝修订是二档；规范的修订是规范生效，属 3a（§14.3）。
-func revisionTier(_ *store.Tx, _ command.Caller, o authz.Object, _ json.RawMessage) (authz.Tier, error) {
+func revisionTier(_ *store.Tx, _ command.Caller, o authz.Object, _ json.RawMessage) (authz.Group, error) {
 	if o.Kind == KindGuideline {
-		return authz.TierRules, nil
+		return authz.GroupRules, nil
 	}
-	return authz.TierDecide, nil
+	return authz.GroupDecide, nil
 }
 
 func orNone(s string) string {
@@ -716,7 +716,7 @@ func orNone(s string) string {
 
 func confirm() command.Spec {
 	return command.Spec{
-		Name: "revision.confirm", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, TierFor: revisionTier, Page: "/materials",
+		Name: "revision.confirm", Action: authz.ActionAnswerDecision, Group: authz.GroupDecide, GroupFor: revisionTier, Page: "/materials",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v confirmIn
 			if err := decode(in, &v); err != nil {
@@ -785,7 +785,7 @@ func confirm() command.Spec {
 
 func reject() command.Spec {
 	return command.Spec{
-		Name: "revision.reject", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, TierFor: revisionTier, Page: "/materials",
+		Name: "revision.reject", Action: authz.ActionAnswerDecision, Group: authz.GroupDecide, GroupFor: revisionTier, Page: "/materials",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v rejectIn
 			if err := decode(in, &v); err != nil {
@@ -831,7 +831,7 @@ func reject() command.Spec {
 
 func revert() command.Spec {
 	return command.Spec{
-		Name: "material.revert", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/materials",
+		Name: "material.revert", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/materials",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v revertIn
 			if err := decode(in, &v); err != nil {
@@ -905,7 +905,7 @@ func summarize() command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "revision.summarize", Action: authz.ActionReviseMaterial, Tier: authz.TierInternal,
+		Name: "revision.summarize", Action: authz.ActionReviseMaterial, Group: authz.GroupInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

@@ -23,7 +23,7 @@ func newReceiptEnv(t *testing.T) *receiptEnv {
 	e := &receiptEnv{env: setup(t), now: t0}
 	e.x = command.New(e.st, func() time.Time { return e.now })
 	for _, name := range []string{"delegate.report", "inbound.capture"} {
-		err := e.x.Register(command.Spec{Name: name, Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: true,
+		err := e.x.Register(command.Spec{Name: name, Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Receipt: true,
 			Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil },
 			Apply: func(c *command.Ctx) (any, error) {
 				var in struct{ Exit int }

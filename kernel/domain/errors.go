@@ -134,9 +134,13 @@ type Error struct {
 	// Reason 是同一个码之下更细的稳定原因（如授权单不可用的具体原因 GrantReason*），展示层据它说人话；空表示只看 Code。
 	Reason string  `json:"reason,omitempty"`
 	WebURL *string `json:"web_url"`
+	// Group 与 SettingsURL 只随退出码 23 返回：没开的那一组（组键）与这个 Agent 权限卡的页面（§14.3）。
+	Group       string  `json:"group,omitempty"`
+	SettingsURL *string `json:"settings_url,omitempty"`
 }
 
-// 拒绝的三种口径（Error.Reason，§14.3）：硬线、档位未放开、钥匙范围外；reauth_required 是硬线下 Web 会话还没再输口令。
+// 拒绝的三种口径（Error.Reason，§14.3）：只有本人（hard_line）、权限卡没开（tier_closed）、钥匙范围外；
+// reauth_required 是 Web 会话做后果较大的事还没再输口令。
 const (
 	ReasonHardLine       = "hard_line"
 	ReasonReauthRequired = "reauth_required"

@@ -269,7 +269,7 @@ func TestPurgeOnlyOwnerOnWeb(t *testing.T) {
 	for _, c := range []struct {
 		id   command.Identity
 		want int
-	}{{delegate, domain.ExitWebOnly}, {worker, domain.ExitWebOnly}} {
+	}{{delegate, domain.ExitTierClosed}, {worker, domain.ExitPermissionDenied}} {
 		if _, err := e.do(c.id, Command, map[string]any{"object": id}); exit(err) != c.want {
 			t.Fatalf("exit %d want %d (%v)", exit(err), c.want, err)
 		}

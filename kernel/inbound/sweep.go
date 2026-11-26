@@ -1048,7 +1048,7 @@ func emitWrite(c *command.Ctx, w items.Write, reason string) error {
 }
 
 func registerSweep(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdSweep, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, KeepVersion: true,
+	return x.Register(command.Spec{Name: CmdSweep, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal, KeepVersion: true,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseSweep(in)
 			return authz.Object{ID: v.Item, Assignee: systemPrinc}, err // 内核整理自己建的建议，同 inbound.dispose
@@ -1323,7 +1323,7 @@ func unmergeable(tx *store.Tx, v unmergeIn) (domain.Item, error) {
 }
 
 func registerUnmerge(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdUnmerge, Action: authz.ActionManageSource, Tier: authz.TierOrganize, KeepVersion: true, Page: "/proposals",
+	return x.Register(command.Spec{Name: CmdUnmerge, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents, KeepVersion: true, Page: "/proposals",
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseUnmerge(in)
 			return authz.Object{ID: v.Item}, err

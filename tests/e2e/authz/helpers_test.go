@@ -19,15 +19,16 @@ import (
 
 // 退出码（附录 B.1）。
 const (
-	exitInvalid   = 2
-	exitAuth      = 3
-	exitDenied    = 4
-	exitNotFound  = 5
-	exitWebOnly   = 20
-	exitNotAllow  = 21
-	workHost      = "work-host.cli"
-	otherHost     = "other-host.cli"
-	ownerExecutor = "owner"
+	exitInvalid    = 2
+	exitAuth       = 3
+	exitDenied     = 4
+	exitNotFound   = 5
+	exitWebOnly    = 20
+	exitNotAllow   = 21
+	exitTierClosed = 23
+	workHost       = "work-host.cli"
+	otherHost      = "other-host.cli"
+	ownerExecutor  = "owner"
 )
 
 type kit struct {

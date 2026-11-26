@@ -343,12 +343,18 @@ func TestAllowlistsDriveKernelForwardDecision(t *testing.T) {
 	}
 }
 
-// 运行权限上限：Web 设置后读回；model-endpoints：API 密钥写入账本但读取和事件里都不出现。
+// 权限卡：Web 设置后在 access-limits 读回，旧的 permission_cap 段不再接受；model-endpoints：API 密钥写入账本但读取和事件里都不出现。
 func TestAccessLimitsAndModelEndpointSecret(t *testing.T) {
 	e := setup(t)
-	rec := e.do("PUT", routes[3], `{"permission_cap":{"default":"read","by_harness":{"hermes":"edit"}}}`, e.web)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"hermes":"edit"`) {
+	if rec := e.do("PUT", "/v1/settings/agents/agent_h/card", `{"groups":{"view":{}},"tool":"edit"}`, e.web); rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	rec := e.do("GET", routes[3], "", e.web)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"agent_h":{"groups":{"view":{}},"tool":"edit"}`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("PUT", routes[3], `{"permission_cap":{"default":"full"}}`, e.web); rec.Code != 400 {
+		t.Fatalf("the old tool cap section is gone: %d %s", rec.Code, rec.Body)
 	}
 
 	// 随旧权限模型取消的段：带上就是 400，不写新版本。

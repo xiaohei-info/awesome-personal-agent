@@ -265,7 +265,7 @@ func (o Options) dispatch() command.Spec {
 		}
 		return v, v.check()
 	}
-	return command.Spec{Name: "delegate.dispatch", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: true, KeepVersion: true,
+	return command.Spec{Name: "delegate.dispatch", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Receipt: true, KeepVersion: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -350,7 +350,7 @@ func (o Options) dispatchUpdate() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "delegate.dispatch_update", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: true, KeepVersion: true,
+	return command.Spec{Name: "delegate.dispatch_update", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Receipt: true, KeepVersion: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -420,7 +420,7 @@ type dispatchListIn struct {
 
 // dispatchList 是只读命令：列委派记录（Web 的执行者视图、apa 读取）。
 func dispatchList() command.Spec {
-	return command.Spec{Name: "delegate.dispatch_list", Action: authz.ActionRead, Tier: authz.TierRead,
+	return command.Spec{Name: "delegate.dispatch_list", Action: authz.ActionRead, Group: authz.GroupView,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v dispatchListIn
 			return authz.Object{}, decode(in, &v)
