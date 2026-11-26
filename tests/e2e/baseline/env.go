@@ -567,6 +567,24 @@ func (e *Env) IssueCredentials() {
 	e.DEL = issue("/v1/settings/tokens", `{"kind":"delegate","audience":"internal","label":"DEL"}`)
 	e.CHAN = issue("/v1/settings/ext-keys", `{"label":"CHAN","scope":"channel.acc-chan"}`)
 	e.OpenDelegateTier("rules")
+	e.pauseDefaultSchedules()
+}
+
+// pauseDefaultSchedules 停用开箱默认安排（简报工作日 08:30、复盘周五 17:30）：它们按墙钟加测试时钟偏移到点，
+// 用例跨过时刻就多出运行与模型请求。此刻环境里只有默认实例；要测定时安排的用例自己建实例。
+func (e *Env) pauseDefaultSchedules() {
+	e.T.Helper()
+	var l struct {
+		Instances []struct {
+			ID string `json:"id"`
+		} `json:"instances"`
+	}
+	if err := json.Unmarshal([]byte(e.webOK("GET", "/v1/instances", "", 200)), &l); err != nil || len(l.Instances) == 0 {
+		e.fatal("读默认安排: %v（%d 个）", err, len(l.Instances))
+	}
+	for _, in := range l.Instances {
+		e.webOK("PATCH", "/v1/instances/"+in.ID, `{"enabled":false}`, 200)
+	}
 }
 
 // CreateProjects 新建 acc-work（repos=[LOCAL_REPO]）、acc-open、acc-empty、acc-home，并设置允许的执行者。
