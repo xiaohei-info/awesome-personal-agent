@@ -171,7 +171,7 @@ webhook_mappings:
 | `create_item` | 建事项或子事项 | 指定 `assignee` 时校验项目允许的执行者 |
 | `create_timer` | 为触发事项建提醒 Timer：`after`（时长）或 `at`（RFC 3339）一次性，`schedule`（固定间隔）周期；到期经触达提醒（主文档 §6.8） | 需要触发事项，时钟规则不可用 |
 | `call_agent` | 调专属 agent，指定提示词模板。实例驱动的规则里，实例参数 `mode` 为 `create_item` 时不执行（只建事项，不调模型、不需要 harness，主文档 §13.5）。判断型的答案由发起它的内置处理器使用（如回执核实门控，主文档 §7.5）；通用规则里判断型的答案只留痕，不单独改状态 | 形态校验 |
-| `start_background_run` | 拉起后台运行：`runner`、`prompt`、`access`、`cwd`，可选 `harness`（默认用 Web 设置的默认 harness）；`runner: task` 时再加 `executor`，内核先把子事项委派给该执行者（与 `apa delegate` 同一路径），运行者在子事项上回执 | §13.6 的前置校验 |
+| `start_background_run` | 拉起后台运行：`runner`、`prompt`、`cwd`，可选 `harness`（默认用 Web 设置的默认 harness）；`runner: task` 时再加 `executor`，内核先把子事项委派给该执行者（与 `apa delegate` 同一路径），运行者在子事项上回执 | §13.6 的前置校验 |
 
 规则动作产生的 Event 不再触发规则。规则内容 hash 记入账本，动作类规则内容变化后回到 `observe`，提醒类规则保持本人上一次的选择（主文档 §14.8）。
 
@@ -180,7 +180,7 @@ webhook_mappings:
 - 求值：规则引擎每一轮（每条命令提交后，以及维护循环的每次周期）按 `phase` 取出候选事项，用它们的当前状态匹配其余条件；不看事件流，也不区分状态是谁改出来的。`when` 必须写 `phase`，只能用 `phase`、`kind`、`tag`、`tag_any`、`project`、`assignee`、`source`、`agent_ready`；写 `event`、`to_phase`、`from_phase` 的包被拒绝。
 - 一次性：幂等键是（规则, 事项）。`auto` 命中时先在事项上记一条 `rule.fired`（`trigger: state`），再执行 `do[]`；该事项上已有这条规则的 `rule.fired` 或 `background.launched` 时不再自动执行，执行失败也不重试。`observe` 对每件事只记一条 `rule.observed`。`off` 不求值。
 - 本人“现在开工”不受一次性限制：每次记一条 `trigger: manual` 的 `rule.fired`，`background.launched` 带 `manual: true`；这条记录同样让状态规则之后不再自动为这件事开工。
-- `agent_ready: true`：只能写 `true`，`do[]` 要有 `start_background_run`。按拉起时同一口径选出的 Agent 存在、未停用、有已确认的无头声明、权限上限够这次的 `access`，且事项没有在途运行，才算满足。不满足时这一轮不命中、不留记录，条件成立后的下一轮照常命中。“现在开工”不看它，由动作处理器照旧拒绝并告警。
+- `agent_ready: true`：只能写 `true`，`do[]` 要有 `start_background_run`。按拉起时同一口径选出的 Agent 存在、未停用、有已确认的无头声明、声明里有权限卡上那一档工具（主文档 §14.5），且事项没有在途运行，才算满足。不满足时这一轮不命中、不留记录，条件成立后的下一轮照常命中。“现在开工”不看它，由动作处理器照旧拒绝并告警。
 - 链路：状态规则也会看到规则动作改出来的状态；拉起的运行取事项当前的链路深度加一，与每事项一次的记录共同防止回环。
 - 切到 `auto` 的那一轮就会对此刻全部满足条件、还没记录的事项动作；切换前可在 `observe` 的记录里看到会动哪些事。
 
@@ -203,7 +203,7 @@ front matter 二选一：`agent` 声明专属 agent 类别，或 `run_as` 声明
 | `relay_to` | 生成型 | 信息不足时接力的任务型模板。未声明时取该用途的默认处置 |
 | `event_stats` | 判断型、生成型 | 要附带的 Event 统计，当前只有 `proposal_outcome`：同一来源、kind、项目下，建议被本人接受和丢弃的次数，默认统计最近 90 天（主文档 §8.4）。web_only 初筛不附带统计 |
 | `timeout` | 判断型、生成型 | 单次模型调用的超时。后台运行（`agent: task` 与 `run_as: main_session` 的模板、规则动作）不读它：后台运行的时限统一取策略 `background_run_timeout_sec`（主文档 §13.6）。判断型走分类端点时以判断端点的 `timeout_ms` 为准 |
-| `access` | 任务型 | 经 `call_agent` 调用任务型时需要的权限档位。后台运行以规则动作里的声明为准 |
+| ~~`access`~~ | ~~任务型~~ | **已取消（2026-11-26）**：后台运行与任务型的工具档位一律取所属 Agent 权限卡上的 `tool`（主文档 §14.5），模板、规则动作 `start_background_run` 与例行任务实例参数里的 `access` 都不再生效；旧包写了照常加载、读时忽略。理由：模板把简报、例行任务一律压成只读，设置页看不到，是隐藏的限制 |
 | `cwd` | 任务型 | 工作目录：`run_dir`（默认）或 `project_checkout`（项目在 APA 主机上的检出，即检出的 Host 等于 APA 主机名）。没有这样的检出时不拉起，记带类别码的告警写明原因；规则建的事项转 `dropped`，本人的事项阶段不变（主文档 §8.7）。后台运行同样解析，规则动作的 `cwd` 优先 |
 | `result_fields` | 任务型 | 结果写在目标事项 `spec` 里时要写全的字段，每项是顶层键（`period`）或数组元素的键（`sections[].body`：数组非空，每个元素的这个键都有内容）。写全后内核代为转 `done`，没写全转 `needs_input` 并写明缺哪些字段（主文档 §8.4） |
 | `default_instruction` | 任务型 | 实例没写 `instruction` 时写进 `instruction_path` 文件的默认内容要求，不超过 2000 字。正文必须用 `instruction_path`。随发行更新，不写进账本；Web 经 `GET /packs` 的 `default_instruction` 显示它（主文档 §13.5）。它只放组织方式、排序与取舍这类可由本人改写的要求；事实规则（什么能写成已结束、时间与原文怎么取、覆盖怎么说）写在正文里，个人偏好留给实例的 `instruction` |
@@ -371,7 +371,6 @@ event_rules:
       - action: start_background_run
         runner: main_session
         prompt: handle-item
-        access: edit
         cwd: run_dir
 ```
 
@@ -430,7 +429,6 @@ clock_rules:
 ```markdown
 ---
 agent: task
-access: read
 materials: [context, prior, schedule, decisions, due_waiting, planned, activity, proposals, digest, spot_check]
 result_fields:
   - period
@@ -465,4 +463,4 @@ default_instruction: |-
 | `agents-md` | AGENTS.md 渲染模板 |
 | `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`reminder-open`（没有到期日的提醒事项 `reminder.open`，`proposed`；只在来源配了 `undated_lists` 时才有这类事件）、`reminder-status`（离开未完成集合的提醒：核实已完成的 `reminder.completed`，与只是移出拉取范围或读不到的 `reminder.out_of_view`；`ignore`，`on_update: attach`：挂到这条提醒建出的事项上，不关闭它，附录 D.2）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠，并刷新它建出的事项）、`pr-discussion`（PR 上的评论与评审，`ignore`，`on_update: attach`）、`issue-comment`（issue 上的评论，`screen`，`on_update: attach`）；评论与评审挂到已有事项时只记为挂靠消息，不改事项的标题、正文与摘要；issue 更新没有规则，交初筛。webhook 校验方案与字段映射（`github-issues`，以及评论与评审的 `github-issue-comments`、`github-pr-reviews`、`github-pr-review-comments`）。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"；问"这一轮有没有尚未完成、未与所列清单重复的新事项，或与未关闭事项有关的新进展"，判据写明闲聊、本轮已修好/验证/上线/答复/本人否决的事、当场已派发的即时任务、纯助手汇报与顺口附带的建议、与三份清单重复的同一件事都不抽）；跨来源合并的批量归类 `merge-batch`（生成型，一批一次调用，超时 300s；先输出 `groups[]`：`group`、`topic`、`members[]`；再输出 `decisions[]`：`new`、`group`、`step`（1 并入事项、2 批内整合、3 保留）、`action`（`attach`/`merge`/`duplicate`/`keep`）、`target`、`reason`、`confident`；第 2 步的整合在 `combined[]`：`merge`、`group`、`members[]`、`title`、`summary`；正文即设置 › 跨来源合并里的内置默认提示词，本人改的只换正文、不换输出结构，主文档 §9.3）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置、`urgent`）与 `triage-extract`（一段内容抽出零到多条候选，每条与起草同一组字段并带 `refs`；正文列出四类不抽的内容并收紧 `decision` 的用法，不再"宁可多抽"）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型提示词 `delegation-screen`（是非题"这份回执需要本人核实吗"，下限 0.20，未定取"是"）。命中后在父事项上生成决策请求交本人；拉起任务型用工具查证不在本版（主文档 §20.5） |
-| `routine` | kind `routine`（`spec.result`）；实例参数（`schedule`、`mode`、`title`、`instruction`、`access`、`output`；归属项目是实例自己的字段，见 C.10）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型；`mode: create_item` 时 `call_agent` 不执行）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`）；列表与卡片视图 |
+| `routine` | kind `routine`（`spec.result`）；实例参数（`schedule`、`mode`、`title`、`instruction`、`output`；归属项目是实例自己的字段，见 C.10）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型；`mode: create_item` 时 `call_agent` 不执行）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`）；列表与卡片视图 |
