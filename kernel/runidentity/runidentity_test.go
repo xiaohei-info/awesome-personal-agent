@@ -222,6 +222,50 @@ func TestRunCredentialFollowsAgentTier(t *testing.T) {
 	}
 }
 
+// 来源批处理运行的目标不是事项（固定的 source_batch）也能签；凭据只带运行与 Agent 身份，权限只按所属 Agent 的权限卡判。
+func TestSourceBatchRunGetsIdentityOnlyCredential(t *testing.T) {
+	e := setup(t)
+	var secret, runID string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		// shortcut: source_batch 的运行队列由 B 在 proc 里登记，这里先按 background 入队再改类别；B 变基后可直接入队。
+		r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{AgentSnapshot: &domain.AgentSnapshot{AgentID: "agent_b", ConfigRev: 1},
+			Category: domain.RunBackground, Target: "source_batch", TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, now)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE outcall_run SET category = ? WHERE id = ?`, string(domain.RunSourceBatch), r.ID); err != nil {
+			return err
+		}
+		runID = r.ID
+		secret, err = Issue(tx, r.ID, now)
+		return err
+	}); err != nil {
+		t.Fatalf("source batch run must get a credential: %v", err)
+	}
+	var c command.Caller
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { c, err = e.as(secret).Authenticate(tx); return }); err != nil {
+		t.Fatal(err)
+	}
+	want := command.Caller{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:" + runID, Via: domain.ViaCLI, Run: runID},
+		Level: authz.LevelRun, RunAgentID: "agent_b"}
+	if c.Actor != want.Actor || c.Level != want.Level || c.RunAgentID != want.RunAgentID || c.Kind != "" || c.CredentialAgentID != "" || c.SourceScopes != nil {
+		t.Fatalf("caller = %+v, want identity only %+v", c, want)
+	}
+	// 权限随 agent_b 的权限卡：默认卡不能接受建议，开了"替我拍板"之后能。
+	prop := e.newItem(t, map[string]any{"phase": "proposed"})
+	e.want(t, domain.ExitTierClosed, e.as(secret), "proposal.accept", map[string]any{"id": prop})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "card", func(p *policy.Policy) error {
+			p.AgentCards["agent_b"] = policy.DefaultCard().With(policy.GroupDecide)
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.must(t, e.as(secret), "proposal.accept", map[string]any{"id": prop})
+}
+
 // ACT-BGG-02：运行凭据委派给项目名单外的执行者是退出码 21，没有名单外子事项。
 func TestRunCredentialDelegationHonoursAllowedExecutors(t *testing.T) {
 	e := setup(t)
@@ -319,8 +363,10 @@ func TestIssueValidatesRun(t *testing.T) {
 			return err
 		})
 	}
-	if exitOf(issue(domain.Run{Category: domain.RunSource, Target: "src_1", TimeoutSec: 5})) != domain.ExitUsage {
-		t.Fatal("a source pull is not an agent run and gets no credential")
+	for _, c := range []domain.RunCategory{domain.RunSource, domain.RunJudge, domain.RunGenerate, domain.RunTransform, domain.RunReader} {
+		if exitOf(issue(domain.Run{Category: c, Target: "src_1", TimeoutSec: 5})) != domain.ExitUsage {
+			t.Fatalf("a %s run is not an agent run and gets no credential", c)
+		}
 	}
 	if err := issue(domain.Run{Category: domain.RunBackground, Target: "batch:src_1", TimeoutSec: 5}); err != nil {
 		t.Fatalf("a run whose target is not an item still gets a credential: %v", err)

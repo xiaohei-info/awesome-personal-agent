@@ -74,13 +74,14 @@ func agentRun(tx *store.Tx, runID string) (proc.Record, error) {
 	if err != nil {
 		return rec, err
 	}
-	if c := rec.Run.Category; c != domain.RunTask && c != domain.RunBackground {
-		return rec, invalid("only task and background runs get a run credential")
+	// 来源批处理（source_batch）的目标不是事项，凭据同样只带运行与 Agent 身份（共享契约的接缝）。
+	if c := rec.Run.Category; c != domain.RunTask && c != domain.RunBackground && c != domain.RunSourceBatch {
+		return rec, invalid("only task, background and source batch runs get a run credential")
 	}
 	return rec, nil
 }
 
-// Issue 在 tx 内为运行签发凭据并返回明文（唯一一次可见）。运行必须是未结束的 task 或 background 运行。
+// Issue 在 tx 内为运行签发凭据并返回明文（唯一一次可见）。运行必须是未结束的 task、background 或 source_batch 运行；目标不必是事项。
 // 重复签发替换旧凭据。调用方应与 Run 入队放在同一事务（§13.6 拉起流程第 3 步）。
 func Issue(tx *store.Tx, runID string, now time.Time) (string, error) {
 	return issue(tx, runID, now, time.Time{})
