@@ -336,7 +336,7 @@ func plain(s string) string {
 func (k *kit) generateAbout(mark string) []string {
 	var out []string
 	for _, r := range k.ModelStub.Requests()[k.modOff:] {
-		if baseline.IsJudgeRequest(r) {
+		if !baseline.IsJudgeRequest(r) { // 送资料给生成端点的只剩对话端点的判断题（摘要请求不算）
 			continue
 		}
 		if p := plain(r.BodyText); strings.Contains(p, mark) {

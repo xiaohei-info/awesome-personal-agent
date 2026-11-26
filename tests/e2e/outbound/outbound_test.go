@@ -247,8 +247,9 @@ func TestOutboundScope(t *testing.T) {
 				t.Fatalf("%s: unjudged_backlog 应是 warning、outbound_unset ≥ 1、next 指向来源页: %+v", name, sig)
 			}
 		}
-		if h := healthHealthy(t, k.APIRaw("GET", "/v1/health", "", k.OBS).Body); !h {
-			t.Fatalf("提醒级信号不应影响 healthy")
+		// 本环境没有渠道领取投递（批处理结论停在待发），那一项不看；其余提醒级信号不应是 error。
+		if bad := errorSignals(t, k.APIRaw("GET", "/v1/health", "", k.OBS).Body, "delivery_backlog"); len(bad) != 0 {
+			t.Fatalf("提醒级信号不应影响 healthy: %v", bad)
 		}
 		s := k.sourceShow(rssID) // 来源页读的就是这份登记：external 为空 = "未选择"并有去选的入口（PUT /settings/sources/{id}/outbound）
 		if s.Outbound.External != nil {

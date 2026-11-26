@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
@@ -441,6 +442,8 @@ case "$BODY" in
 *) "$APA" source ignore "$EV" >/dev/null ;;
 esac`, seen, target, open.ID, open.ID))
 		defer e.BatchAgent("")
+		// 进行中事项会请求一句话摘要；给个合法回答，免得留下一条要等同模板成功才清除的起草失败。
+		e.ModelStub.SetDefault(modelstub.Reply{Content: `{"insufficient_info":true}`})
 		for _, s := range []string{"接缝并入", "接缝挂靠", "接缝忽略"} {
 			f.pYes(s, 0.9)
 		}
@@ -520,24 +523,7 @@ esac`, seen, target, open.ID, open.ID))
 		var health string
 		if !e.WaitFor(waitMax, func() bool { health = f.apa(e.OBS, 0, "health").Stdout; return !unavailable(health) }) {
 			ev, _ := src.find("irl-s2")
-			var d struct {
-				Signals []struct {
-					Detail struct {
-						Judgements []struct{ Object string } `json:"judgements"`
-					} `json:"detail"`
-					ID string `json:"id"`
-				} `json:"signals"`
-			}
-			_ = json.Unmarshal([]byte(health), &d)
-			for _, sg := range d.Signals {
-				if sg.ID != "model_unavailable" {
-					continue
-				}
-				for _, j := range sg.Detail.Judgements {
-					t.Logf("起草失败的事项: %s\n%s", f.apa(e.OBS, 0, "item", "show", j.Object).Stdout, f.apa(e.OBS, 0, "why", j.Object).Stdout)
-				}
-			}
-			t.Fatalf("model_unavailable 没有恢复: irl-s2=%+v", ev)
+			t.Fatalf("model_unavailable 没有恢复: irl-s2=%+v\n%s", ev, health)
 		}
 	})
 }

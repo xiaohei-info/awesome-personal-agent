@@ -499,15 +499,25 @@ func healthSignal(t *testing.T, raw, id string) signal {
 	return signal{}
 }
 
-func healthHealthy(t *testing.T, raw string) bool {
+// errorSignals 是健康视图里除 except 之外、不通过且为 error 级的信号。
+func errorSignals(t *testing.T, raw, except string) (out []string) {
 	t.Helper()
 	var h struct {
-		Healthy bool `json:"healthy"`
+		Signals []struct {
+			ID       string `json:"id"`
+			OK       bool   `json:"ok"`
+			Severity string `json:"severity"`
+		} `json:"signals"`
 	}
 	if err := json.Unmarshal([]byte(raw), &h); err != nil {
 		t.Fatal(err)
 	}
-	return h.Healthy
+	for _, s := range h.Signals {
+		if !s.OK && s.Severity == "error" && s.ID != except {
+			out = append(out, s.ID)
+		}
+	}
+	return
 }
 
 type doctorDetail struct {

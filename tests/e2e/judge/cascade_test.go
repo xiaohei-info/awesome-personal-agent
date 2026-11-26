@@ -274,7 +274,7 @@ func TestFlowAgentCascade(t *testing.T) {
 				}
 			}
 		}
-		if len(seen) != 1 || seen[0]["accepted"] != 2.0 || seen[0]["dismissed"] != 3.0 {
+		if len(seen) != 2 || seen[0]["accepted"] != 2.0 || seen[0]["dismissed"] != 3.0 { // 两道题各带一份
 			t.Fatalf("input.stats 应为 {accepted:2, dismissed:3}，实际 %v", seen)
 		}
 		e6, _ := f.srcEvent("cas-st-6")
