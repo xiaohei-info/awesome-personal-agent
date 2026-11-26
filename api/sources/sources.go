@@ -205,7 +205,6 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/split", MaxBody: 1 << 10, Handler: a.split})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/unmerge", MaxBody: 1 << 10, Handler: a.unmerge})
-		r.Handle(core.Route{Method: "GET", Path: "/merge/activity", Handler: readable(a.mergeActivity)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rejudge", MaxBody: 1 << 10, Handler: a.backlogRejudge})

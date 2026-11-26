@@ -57,15 +57,13 @@ type fakeSecrets struct{}
 func (fakeSecrets) Secrets(*store.Tx, string) ([][]byte, error) { return [][]byte{[]byte(secret)}, nil }
 func (fakeSecrets) Keep(*store.Tx, string, string) error        { return nil }
 
-type failJudge struct{ t *testing.T }
+type stubJudge struct{}
 
-func (j failJudge) Judge(context.Context, direct.JudgeCall) (direct.Verdict, error) {
-	j.t.Error("judge must not be called")
-	return direct.Verdict{}, nil
+func (stubJudge) Judge(context.Context, direct.JudgeCall) (direct.Verdict, error) {
+	return direct.Verdict{Answer: "no", DecidedBy: "default"}, nil
 }
 
-func (j failJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
-	j.t.Error("judge must not be called")
+func (stubJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
 	return direct.Outcome{}, nil
 }
 
@@ -148,7 +146,7 @@ func (e *env) wire(st *store.Store, x *command.Executor) {
 	if err := rn.Register(x); err != nil {
 		t.Fatal(err)
 	}
-	in, err := inbound.New(inbound.Options{Store: st, Exec: x, Packs: e.pk, Judge: failJudge{t}, Owner: "owner"})
+	in, err := inbound.New(inbound.Options{Store: st, Exec: x, Packs: e.pk, Judge: stubJudge{}, Owner: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +250,7 @@ func code(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 	}
 }
 
-// ACT-HOOK-02：签名正确的请求落盘后回 2xx，原始 payload 与校验结果可查，事件进入同一流水线生成 proposed。
+// ACT-HOOK-02：签名正确的请求落盘后回 2xx，原始 payload 与校验结果可查，事件进入同一流水线入队待批处理。
 func TestSignedPostIsPersistedAndReachesPipeline(t *testing.T) {
 	e := newEnv(t, 0, 0)
 	e.register("src_hook", m{"scheme": "gh", "mappings": []string{"issues"}})
@@ -264,8 +262,8 @@ func TestSignedPostIsPersistedAndReachesPipeline(t *testing.T) {
 		t.Fatalf("ingests = %+v", gs)
 	}
 	evs := e.events("src_hook")
-	if len(evs) != 1 || evs[0].Disposition != domain.DispositionProposed || evs[0].Item == "" || e.itemCount() != 1 {
-		t.Fatalf("pipeline did not propose an item: %+v", evs)
+	if len(evs) != 1 || evs[0].Queue != runner.QueueQueued {
+		t.Fatalf("pipeline did not queue event: %+v", evs)
 	}
 }
 
@@ -302,8 +300,8 @@ func TestRedeliveryIsIdempotent(t *testing.T) {
 	other := issueBody(2)
 	code(t, e.ghPost("src_hook", "", other, sign(secret, other)), 200)
 	code(t, e.ghPost("src_hook", "", other, sign(secret, other)), 200)
-	if len(e.ingests()) != 2 || len(e.events("src_hook")) != 2 || e.itemCount() != 2 {
-		t.Fatalf("ingests=%d events=%d items=%d", len(e.ingests()), len(e.events("src_hook")), e.itemCount())
+	if len(e.ingests()) != 2 || len(e.events("src_hook")) != 2 {
+		t.Fatalf("ingests=%d events=%d", len(e.ingests()), len(e.events("src_hook")))
 	}
 }
 
@@ -334,7 +332,7 @@ func TestAcknowledgedEventSurvivesCrashBeforeProcessing(t *testing.T) {
 	if err := restarted.Recover(bg); err != nil {
 		t.Fatal(err)
 	}
-	if gs := e.ingests(); gs[0].State != webhook.StateProcessed || len(e.events("src_hook")) != 1 || e.itemCount() != 1 {
+	if gs := e.ingests(); gs[0].State != webhook.StateProcessed || len(e.events("src_hook")) != 1 || e.events("src_hook")[0].Queue != runner.QueueQueued {
 		t.Fatalf("after recover: %+v", gs)
 	}
 }

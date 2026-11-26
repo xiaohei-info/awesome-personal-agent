@@ -91,7 +91,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(packYAML)}}
-	for _, name := range []string{"capture-prescreen", "triage-extract"} { // 用内置包随发行的模板
+	for _, name := range []string{"triage-screen"} { // 用内置包随发行的统一判断模板
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
 			t.Fatal(err)
@@ -202,7 +202,7 @@ func (e *env) body(rec *httptest.ResponseRecorder, wantStatus int) map[string]an
 	return m
 }
 
-// ACT-CAP-03：worker 凭据在开启捕获的项目里提交增量，立即得到 captured；候选在后台抽出并进该项目的 proposed。
+// ACT-CAP-03：worker 凭据在开启捕获的项目里提交增量，立即得到 captured；事件经统一 judge 后进入来源处理队列。
 func TestCaptureEndpointProposesCandidate(t *testing.T) {
 	e := setup(t)
 	m := e.body(e.post(e.token(auth.Worker, ""), `{"project":"`+e.proj+`","text":"用户：别忘了把发布脚本补上"}`), 200)
@@ -211,20 +211,13 @@ func TestCaptureEndpointProposesCandidate(t *testing.T) {
 	}
 	var ev domain.SourceEvent
 	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		if evs := e.events(); len(evs) == 1 && evs[0].Disposition == domain.DispositionProposed {
+		if evs := e.events(); len(evs) == 1 && evs[0].Queue == runner.QueueQueued {
 			ev = evs[0]
 			break
 		}
 	}
-	if ev.Item == "" {
-		t.Fatalf("no candidate proposed: %+v", e.events())
-	}
-	var it domain.Item
-	if err := e.st.View(bg, func(tx *store.Tx) (err error) { it, err = items.Get(tx, ev.Item); return }); err != nil {
-		t.Fatal(err)
-	}
-	if it.Phase != domain.PhaseProposed || it.Project != e.proj {
-		t.Fatalf("item %+v", it)
+	if ev.Queue != runner.QueueQueued || ev.SourceID != "capture:"+e.proj {
+		t.Fatalf("event not queued: %+v", e.events())
 	}
 }
 
@@ -273,7 +266,7 @@ func TestCaptureEndpointErrors(t *testing.T) {
 	}
 }
 
-// ACT-CAP-01 / §14.5 第一档：delegate 凭据提交候选捕获是 agent 自己的工作，不带本人原话也放行，候选只进 proposed。
+// ACT-CAP-01 / §14.5 第一档：delegate 凭据提交候选捕获是 agent 自己的工作，不带本人原话也放行，事件入队待批处理。
 func TestCaptureByDelegateNeedsNoWords(t *testing.T) {
 	e := setup(t)
 	m := e.body(e.post(e.token(auth.Delegate, ""), `{"project":"`+e.proj+`","text":"用户：周五前把发布脚本补上"}`), 200)
@@ -281,15 +274,11 @@ func TestCaptureByDelegateNeedsNoWords(t *testing.T) {
 		t.Fatalf("response %v", m)
 	}
 	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		if evs := e.events(); len(evs) == 1 && evs[0].Disposition == domain.DispositionProposed {
-			var it domain.Item
-			if err := e.st.View(bg, func(tx *store.Tx) (err error) { it, err = items.Get(tx, evs[0].Item); return }); err != nil || it.Phase != domain.PhaseProposed {
-				t.Fatalf("candidate = %+v %v", it, err)
-			}
+		if evs := e.events(); len(evs) == 1 && evs[0].Queue == runner.QueueQueued {
 			return
 		}
 	}
-	t.Fatalf("no candidate proposed: %+v", e.events())
+	t.Fatalf("no event queued: %+v", e.events())
 }
 
 // 来源标注（附录 B.2、B.6）：外部人发起的轮次照常捕获；不是的过滤为 200 captured:false（不是错误），
@@ -325,7 +314,7 @@ func TestCaptureEndpointFiltersNonExternalOrigins(t *testing.T) {
 	}
 	// 放行的这一条异步走完流水线再结束，免得测试关账本时它还在写。
 	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		if evs := e.events(); len(evs) == 1 && evs[0].Disposition != domain.DispositionPending {
+		if evs := e.events(); len(evs) == 1 && evs[0].Queue == runner.QueueQueued {
 			return
 		}
 	}

@@ -33,7 +33,7 @@ type Classifier interface {
 
 // 各内置判断模板的用途（§6.16）；其他判断型模板的用途取模板名。
 var builtinUse = map[string]string{
-	"triage-screen": "inbound_screen", "capture-prescreen": "capture_prescreen", "web-only-screening": "risk_screen",
+	"triage-screen": "inbound_screen", "web-only-screening": "risk_screen",
 	"delegation-screen": "verify_gate",
 }
 

@@ -217,7 +217,7 @@ func healthy(t *testing.T) (*env, *modelstub.ClsStub, *modelstub.Stub) {
 	cls, gen := modelstub.NewCls(), modelstub.New()
 	t.Cleanup(cls.Close)
 	t.Cleanup(gen.Close)
-	gen.SetDefault(modelstub.Reply{Content: `{"title":"Send the quarterly report","kind":"task"}`})
+	gen.SetDefault(modelstub.Reply{Content: `{"prompt":"请选择发布窗口","options":[{"id":"A","label":"今晚发布","consequence":"今晚生效"},{"id":"B","label":"明天上午发布","consequence":"明天生效"}],"insufficient_info":false}`})
 	e.setPolicy(func(p *policy.Policy) {
 		p.JudgeEndpoint = &policy.JudgeEndpoint{URL: cls.URL(), Protocol: policy.ProtocolProbability, Locality: "local"}
 		p.GenerateEndpoint = policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}
@@ -526,7 +526,7 @@ func TestDoctorProbesEndpointsWithBuiltInSamples(t *testing.T) {
 	if d := find(t, r, kdoctor.ModelEndpoint).Details[1]; r.OK || d.Status != kdoctor.Error || d.Code != kdoctor.CodeDraftSchema || d.Data["shape"] != "markdown_fence" {
 		t.Fatalf("draft template failure not reported: %+v", d)
 	}
-	gen.SetDefault(modelstub.Reply{Content: `{"title":"Send the quarterly report","kind":"task"}`})
+	gen.SetDefault(modelstub.Reply{Content: `{"prompt":"请选择发布窗口","options":[{"id":"A","label":"今晚发布","consequence":"今晚生效"},{"id":"B","label":"明天上午发布","consequence":"明天生效"}],"insufficient_info":false}`})
 	cls.SetFault(modelstub.ClsFault{Source: "self_reported"})
 	if r := Run(bg, e.input()); r.OK || find(t, r, kdoctor.ModelEndpoint).Status != kdoctor.Error {
 		t.Fatalf("self_reported must fail")
