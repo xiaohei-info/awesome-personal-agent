@@ -677,8 +677,8 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		}()
 		maintain := func() {
 			report("inbound", k.in.Process(ctx))
-			report("inbound queue", k.in.TickQueue(ctx)) // 来源处理线唯一的定时驱动：立即与攒批（§9.3）
 			report("inbound rejudge", k.in.Rejudge(ctx)) // 模型恢复后重判积压、到期的转 expired（§9.3）
+			report("inbound queue", k.in.TickQueue(ctx)) // 来源处理线唯一的定时驱动：立即与攒批（§9.3）
 			report("webhook", k.wh.Process(ctx))
 			report("wake receipts", k.wk.Settle(ctx, k.st, k.result)) // 补上重启前漏掉的回执，先于调度器的超时判定
 			report("dispatch", k.disp.Dispatch(ctx))

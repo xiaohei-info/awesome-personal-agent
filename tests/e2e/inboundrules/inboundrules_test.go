@@ -520,7 +520,24 @@ esac`, seen, target, open.ID, open.ID))
 		var health string
 		if !e.WaitFor(waitMax, func() bool { health = f.apa(e.OBS, 0, "health").Stdout; return !unavailable(health) }) {
 			ev, _ := src.find("irl-s2")
-			t.Fatalf("model_unavailable 没有恢复: irl-s2=%+v\n%s", ev, health)
+			var d struct {
+				Signals []struct {
+					Detail struct {
+						Judgements []struct{ Object string } `json:"judgements"`
+					} `json:"detail"`
+					ID string `json:"id"`
+				} `json:"signals"`
+			}
+			_ = json.Unmarshal([]byte(health), &d)
+			for _, sg := range d.Signals {
+				if sg.ID != "model_unavailable" {
+					continue
+				}
+				for _, j := range sg.Detail.Judgements {
+					t.Logf("起草失败的事项: %s\n%s", f.apa(e.OBS, 0, "item", "show", j.Object).Stdout, f.apa(e.OBS, 0, "why", j.Object).Stdout)
+				}
+			}
+			t.Fatalf("model_unavailable 没有恢复: irl-s2=%+v", ev)
 		}
 	})
 }
