@@ -16,7 +16,7 @@ import (
 
 const day = 24 * time.Hour
 
-// sweepWait 是等内核定时清理的上限（内核每分钟清理一次）。
+// sweepWait 是等内核清理的上限。内核启动时清一次，之后每天 04:10 清一次（§6.15）；时钟循环最多睡一分钟就复查。
 const sweepWait = 100 * time.Second
 
 type ingestRec struct {
@@ -94,7 +94,8 @@ func (f *fx) sqlExec(query string, args ...any) {
 	}
 }
 
-func ago(d time.Duration) int64 { return time.Now().Add(-d).UnixNano() }
+// ago 是内核时间（真实时间加测试时钟偏移 off）往前 d 的时刻。
+func ago(off, d time.Duration) int64 { return time.Now().Add(off - d).UnixNano() }
 
 type runRec struct {
 	ID     string `json:"id"`
@@ -155,8 +156,10 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 		outside = f.postIngest("src_acc_ret", secret, "d-out", `{"id":"d-out","title":"保留期外"}`)
 		fresh = f.postIngest("src_acc_ret", secret, "d-new", `{"id":"d-new","title":"刚到的"}`)
 		// 一份落在保留期之内（差 1 天到期），一份落在之外（已超 1 天）。
-		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(time.Duration(ingestDays-1)*day+12*time.Hour), inside.ID)
-		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(time.Duration(ingestDays+1)*day), outside.ID)
+		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(0, time.Duration(ingestDays-1)*day+12*time.Hour), inside.ID)
+		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(0, time.Duration(ingestDays+1)*day), outside.ID)
+		f.StopKernel() // 重启触发启动时的那次清理
+		f.StartKernelAgain()
 
 		f.waitFor("期外请求体被清理", sweepWait, func() bool { return f.ingestByID("src_acc_ret", outside.ID).Body == nil })
 		got := f.ingestByID("src_acc_ret", outside.ID)
@@ -176,6 +179,14 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 	})
 
 	step(t, "ACT-RET-02 运行目录过期清理，Run 记录和在途目录不动", func(t *testing.T) {
+		// 先把测试时钟拨到下一个 04:05，造好数据后再越过 04:10 触发每日清理；跨度只有几分钟，在途运行不会超时。
+		now := time.Now()
+		before := time.Date(now.Year(), now.Month(), now.Day(), 4, 5, 0, 0, time.Local)
+		if !before.After(now) {
+			before = before.AddDate(0, 0, 1)
+		}
+		off := before.Sub(now).Truncate(time.Second)
+		f.TCAdvance(int64(off / time.Second))
 		ids := f.finishedRuns(3)
 		in, out, newest := ids[0], ids[1], ids[2]
 		for _, id := range ids {
@@ -195,10 +206,11 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 			return false
 		})
 		// 期内的差 1 天到期、期外的已超 1 天；在途运行的开始时间拨到远超保留期，目录也必须留着。
-		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(time.Duration(runDays-1)*day+12*time.Hour), in)
-		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(time.Duration(runDays+1)*day), out)
-		f.sqlExec(`UPDATE outcall_run SET started_at = ? WHERE id = ?`, ago(time.Duration(runDays+30)*day), live)
+		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(off, time.Duration(runDays-1)*day+12*time.Hour), in)
+		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(off, time.Duration(runDays+1)*day), out)
+		f.sqlExec(`UPDATE outcall_run SET started_at = ? WHERE id = ?`, ago(off, time.Duration(runDays+30)*day), live)
 
+		f.TCAdvance(6 * 60)
 		f.waitFor("期外的运行目录被清理", sweepWait, func() bool { return !f.dirExists(f.runDir(out)) })
 		for name, id := range map[string]string{"期内": in, "刚结束": newest, "在途": live} {
 			if !f.dirExists(f.runDir(id)) {
