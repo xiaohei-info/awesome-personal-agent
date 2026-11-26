@@ -172,10 +172,10 @@ func TestFlowAllowedExecutors(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-ALW-08 只在 Web 改名单", func(t *testing.T) {
+	k.step("ACT-ALW-08 名单属 Agent 与执行者配置，没开时 Agent 改不了", func(t *testing.T) {
 		listBefore := k.allowed("acc-work")
 		r := k.Apa(k.DEL, "", "project", "update", work, "--allowed-executors", otherHost)
-		k.expect("CLI 改名单", r, exitWebOnly)
+		k.expect("CLI 改名单", r, exitTierClosed)
 		w := k.APIRaw("PATCH", "/v1/projects/"+work, `{"allowed_executors":["`+otherHost+`"]}`, k.DEL)
 		if w.Code != http.StatusForbidden {
 			t.Errorf("PATCH /v1/projects/{id} 带 allowed_executors: HTTP %d，期望 403 %s", w.Code, w.Body)

@@ -175,7 +175,7 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		for _, name := range []string{"TestEntryMatrixIdentityByTier", "TestWebLevelCannotBeClaimedByAgent", "TestMatrixRunIDExchange",
 			"TestSettingsRejectEveryBearerAndAcceptWebSession", "TestObserverReadsAndProposesOnly", "TestWorkerCanOnlyUpdateOwnItems",
 			"TestDelegateEditsAnyItemOnTierOne", "TestDelegateReceiptsAndDoneEvidence", "TestProjectWritesFollowTheirTier",
-			"TestRegisteredTiersMatchAppendixB1"} {
+			"TestRegisteredGroupsMatchAppendixB1"} {
 			if !passed[name] {
 				t.Errorf("契约测试 %s 没有通过（或没有运行）", name)
 			}

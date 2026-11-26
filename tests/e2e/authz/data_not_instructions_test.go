@@ -267,7 +267,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 				r := k.Apa(k.DEL, "", "item", "update", parent, "--summary", "stale", "--reason", "r", "--version", "1")
 				return r.Code, r.Stdout + r.Stderr
 			}},
-			{20, "project update（3b 硬线）", func() (int, string) {
+			{23, "project update（Agent 与执行者配置没开）", func() (int, string) {
 				r := k.Apa(k.DEL, "", "project", "update", prj, "--allowed-executors", "evil.cli")
 				return r.Code, r.Stdout + r.Stderr
 			}},
