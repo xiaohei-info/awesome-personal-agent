@@ -249,9 +249,11 @@ func TestFlowCapture(t *testing.T) {
 		eq(t, "MODEL_LOG 含 cap-run 的请求", k.modelAny("cap-run"), 0)
 	})
 
-	k.step("ACT-CAP-11 捕获的原文只对 Web 登录可见", func(t *testing.T) {
+	// 2026-11-26 改写（权限卡，§14.6）：对话捕获与其他来源一样，Web 登录与内部受众的钥匙可读，外部受众的钥匙读不到。
+	k.step("ACT-CAP-11 捕获的原文对内部受众可见，外部钥匙读不到", func(t *testing.T) {
 		path := "/v1/sources/capture:" + open + "/events"
-		eq(t, "OBS 读内部来源", k.APIRaw("GET", path, "", k.OBS).Code, 404)
+		eq(t, "OBS（内部钥匙）读内部来源", k.APIRaw("GET", path, "", k.OBS).Code, 200)
+		eq(t, "CHAN（外部 ext 密钥）读内部来源", k.APIRaw("GET", path, "", k.CHAN).Code, 403)
 		w := k.Web("GET", path, "")
 		if w.Code != 200 || !strings.Contains(w.Body, "events") {
 			t.Errorf("Web 登录应读到事件列表: %d %s", w.Code, w.Body)
