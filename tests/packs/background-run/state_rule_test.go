@@ -178,7 +178,7 @@ func TestStateRuleWaitingBackToOpenStarts(t *testing.T) {
 	}
 }
 
-// 选中的 Agent 不可用（权限上限不够 access=edit）时不开工、不留记录；可用之后下一轮扫描开工。
+// 选中的 Agent 不可用（权限卡上的工具档位不在它的声明里）时不开工、不留记录；可用之后下一轮扫描开工。
 func TestStateRuleWaitsForUsableAgent(t *testing.T) {
 	e := newEnv(t, "")
 	setCap := func(c string) {
@@ -189,7 +189,7 @@ func TestStateRuleWaitsForUsableAgent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	setCap(policy.PermRead)
+	setCap(policy.PermFull) // 声明只有 read、edit
 	e.auto(mainRule)
 	id := e.createOpen("Agent 还不行", []string{"agent-ok"})
 	e.drain(2)

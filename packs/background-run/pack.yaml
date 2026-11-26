@@ -15,5 +15,4 @@ event_rules:
       - action: start_background_run
         runner: main_session
         prompt: handle-item
-        access: edit
         cwd: run_dir

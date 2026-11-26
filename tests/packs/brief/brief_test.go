@@ -153,8 +153,8 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("do[]: %v", acts)
 	}
 	w, ok := p.Prompts["write-brief"]
-	if !ok || w.Meta.Agent != "task" || w.Meta.Access != "read" {
-		t.Fatalf("write-brief must be a read-only task prompt: %+v", w.Meta)
+	if !ok || w.Meta.Agent != "task" || w.Meta.Access != "" {
+		t.Fatalf("write-brief must be a task prompt without access (the tool comes from the card): %+v", w.Meta)
 	}
 	if !strings.Contains(w.Body, "{item_id}") || !strings.Contains(w.Body, "{materials_path}") {
 		t.Fatalf("write-brief body: %s", w.Body)

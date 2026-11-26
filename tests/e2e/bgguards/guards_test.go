@@ -158,18 +158,12 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		eq(t, "Run 数", len(f.runsOf(id)), 1)
 	})
 
-	f.step("ACT-BGG-06 权限档位超过上限不拉起", func(t *testing.T) {
+	// 2026-11-26 改写（权限卡）：规则里的 access 已取消，工具档位一律取权限卡，规则写 edit 也按卡上的只读拉起。
+	f.step("ACT-BGG-06 工具档位取权限卡，规则写的 access 不生效", func(t *testing.T) {
 		f.auto("main-edit")
 		id := f.task("bgg-06", "acc-work", "acc-edit")
-		// 2026-11-20 改写：原等待事项转 needs_input；没拉起是事件：事项留在 open、不挂问题，诊断页有 background_refused 通知。
-		// Run 数为 0、拒绝记录写明档位两条不变。
-		f.waitFor("诊断页记下没拉起", 20*time.Second, func() bool { return f.notified(id, "background_refused") })
-		eq(t, "事项阶段（不转 needs_input）", f.phase(id), "open")
-		eq(t, "Run 数", len(f.runsOf(id)), 0)
-		ev := f.events(id, "background.refused")
-		if len(ev) != 1 || !strings.Contains(ev[0].Reason+toJSON(ev[0].Payload), "edit") {
-			t.Errorf("应有说明档位超限的拒绝记录: %+v", ev)
-		}
+		f.waitFor("拉起运行", 20*time.Second, func() bool { return len(f.runsOf(id)) == 1 })
+		eq(t, "运行的工具档位", f.runsOf(id)[0].Access, "read")
 	})
 
 	f.step("ACT-BGG-07 声明未覆盖档位时不拉起", func(t *testing.T) {
@@ -214,12 +208,12 @@ $APA ask "$ITEM" --question 选哪个 --option A=甲 --option B=乙 --resume-not
 	})
 }
 
-// TestBgGuardsDefaultCap 对应 ACT-BGG-08：全新数据目录上每个 harness 的权限上限默认 read。
+// TestBgGuardsDefaultCap 对应 ACT-BGG-08（2026-11-26 改写）：全新数据目录上没有任何权限卡，Agent 一律取默认卡（工具只读）。
 func TestBgGuardsDefaultCap(t *testing.T) {
 	e := baseline.New(t)
 	e.StartKernel()
 	body := e.Web("GET", "/v1/settings/access-limits", "")
-	if body.Code != 200 || !strings.Contains(body.Body, `"default":"read"`) || !strings.Contains(body.Body, `"by_harness":{}`) {
-		t.Fatalf("默认上限应为 read 且没有按 harness 的放宽: %d %s", body.Code, body.Body)
+	if body.Code != 200 || !strings.Contains(body.Body, `"agent_cards":{`) || strings.Contains(body.Body, `"tool":"full"`) || strings.Contains(body.Body, `"tool":"edit"`) {
+		t.Fatalf("全新数据目录不应有放宽的权限卡: %d %s", body.Code, body.Body)
 	}
 }

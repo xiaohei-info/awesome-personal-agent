@@ -535,17 +535,19 @@ func TestRuleSwitchedBackToObserveIsRefused(t *testing.T) {
 	}
 }
 
-// 档位上限被调低、声明被撤走同样按当前策略拒绝。
-func TestPermissionCapLoweredIsRefused(t *testing.T) {
+// 续接是新进程：工具档位取权限卡现在的值（§14.5）；卡上调低后续接照常，用调低后的那一档。
+func TestResumeUsesTheCardToolNow(t *testing.T) {
 	e := setup(t)
 	e.harness(true, false)
 	e.auto("main")
 	id := e.asked("agent-ok", nil)
 	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermRead) })
-	if out, err := e.svc.Resume(bg, id); err != nil || out != Refused {
+	if out, err := e.svc.Resume(bg, id); err != nil || out != Resumed {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
-	e.refusedNotice(id, "上限") // 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"
+	if rs := e.runList(); rs[len(rs)-1].Run.Access != policy.PermRead {
+		t.Fatalf("resumed with %q", rs[len(rs)-1].Run.Access)
+	}
 }
 
 // 不是等待续接的已回答决策：没有后台运行、没有 resume_note、还没回答，都跳过且不改事项。

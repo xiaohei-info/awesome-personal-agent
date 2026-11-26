@@ -156,7 +156,7 @@ func (s Selected) AccessReason(request string) string {
 		return "无头运行声明未提供权限档位：" + request
 	}
 	if ranks[request] == 0 || ranks[request] > ranks[s.Snapshot.PermissionCap] {
-		return fmt.Sprintf("权限档位超过 Web 设置的上限：需要 %s，%s 只能 %s", request, s.Card.Name, s.Snapshot.PermissionCap)
+		return fmt.Sprintf("权限卡上的工具档位已调低：这次运行要 %s，%s 现在是 %s", request, s.Card.Name, s.Snapshot.PermissionCap)
 	}
 	return ""
 }

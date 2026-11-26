@@ -85,7 +85,7 @@ type instParams struct {
 	AgentID     string `json:"agent_id"`
 	Mode        string `json:"mode"`
 	Instruction string `json:"instruction"`
-	Access      string `json:"access"`
+	Access      string `json:"access"` // 已取消（2026-11-26）：工具档位取权限卡，旧实例写了也不生效
 }
 
 func instanceParams(c rules.Call) (p instParams) {
@@ -251,7 +251,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	}
 	ip := instanceParams(c)
 	harness, _ := c.Action["harness"].(string)
-	t := Task{Selection: executors.Selection{Rule: c.Rule, Schedule: ip.AgentID}, Harness: harness, Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
+	t := Task{Selection: executors.Selection{Rule: c.Rule, Schedule: ip.AgentID}, Harness: harness, Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
 		Digest: digest, Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:

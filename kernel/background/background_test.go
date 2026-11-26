@@ -438,7 +438,7 @@ func asErr(err error, target **domain.Error) bool {
 	return ok
 }
 
-// ACT-INJ-03：事件内容（标题、标签）里写的 harness、access、cwd、executor 不影响 Run；access 来自规则，harness 来自 Web 默认。
+// ACT-INJ-03：事件内容（标题、标签）里写的 harness、access、cwd、executor 不影响 Run；工具档位来自权限卡，harness 来自 Web 默认。
 func TestEventContentCannotOverrideRunParameters(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("silent")
@@ -446,7 +446,7 @@ func TestEventContentCannotOverrideRunParameters(t *testing.T) {
 	e.open(e.newItem(injection, []string{"readonly"}, map[string]any{"spec": map[string]any{"harness": "evil", "access": "full", "cwd": "/etc"}}))
 	e.waitResult()
 	rs := e.runList()
-	if len(rs) != 1 || rs[0].Run.Access != "read" || rs[0].Run.Harness != "hx" || rs[0].Spec.Dir != filepath.Join(e.runs, rs[0].Run.ID) {
+	if len(rs) != 1 || rs[0].Run.Access != policy.PermEdit || rs[0].Run.Harness != "hx" || rs[0].Spec.Dir != filepath.Join(e.runs, rs[0].Run.ID) {
 		t.Fatalf("runs = %+v", rs)
 	}
 }
@@ -586,18 +586,13 @@ func TestInFlightRunSkipsSecondTrigger(t *testing.T) {
 	e.waitResult()
 }
 
-// ACT-BGG-06、ACT-BGG-07：档位超过 Web 上限、声明未提供该档位：都不拉起，有拒绝记录。
-// 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"/"档位"；改为事项不变、告警原因含同样的词。
+// ACT-BGG-07：权限卡上的工具档位不在声明里：不拉起，有拒绝记录。规则写的 access 已取消（2026-11-26），没有"超过上限"一说。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含"档位"；改为事项不变、告警原因含同样的词。
 func TestPermissionTierGuards(t *testing.T) {
 	e := setup(t, 0)
 	e.harness("hx", "silent", "read", "edit")
-	e.setPolicy(func(p *policy.Policy) { p.DefaultHarness = "hx" }) // 上限保持默认 read
-	e.auto("main")
+	e.setPolicy(func(p *policy.Policy) { p.DefaultHarness = "hx" })
 	e.auto("full")
-	over := e.newItem("a", []string{"agent-ok"}, nil)
-	e.open(over)
-	e.refused(over, "上限")
-
 	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermFull) })
 	undeclared := e.newItem("b", []string{"full"}, nil)
 	e.open(undeclared)
@@ -605,7 +600,7 @@ func TestPermissionTierGuards(t *testing.T) {
 	if n := len(e.runList()); n != 0 {
 		t.Fatalf("runs = %d", n)
 	}
-	if n := len(e.ofType(EvRefused)); n != 2 {
+	if n := len(e.ofType(EvRefused)); n != 1 {
 		t.Fatalf("refusals = %d", n)
 	}
 }
@@ -1105,7 +1100,7 @@ func TestLoopThroughRunCredentialTripsAtThreshold(t *testing.T) {
 	})
 }
 
-// 本人"现在开工"（item.start，§13.6）：规则仍是试运行也拉起，复核照旧（权限上限超出转 needs_input）；
+// 本人"现在开工"（item.start，§13.6）：规则仍是试运行也拉起，复核照旧（声明里没有权限卡那一档工具时不拉起）；
 // 只有 Web 登录能发起，事项须是 open；没有规则能为它拉起时记告警，不假装成功。
 func TestOwnerStartNow(t *testing.T) {
 	e := setup(t, 0)
@@ -1129,10 +1124,12 @@ func TestOwnerStartNow(t *testing.T) {
 	// 本协程的 Drain 只打标记就返回，start_requested 交给那个协程稍后处理，紧接着读告警就读不到（CI 上的偶发失败）。
 	e.waitResult()
 
-	over := e.newItem("over", []string{"full"}, nil) // full 超出上限 edit
+	e.harness("hx", "silent", "read", "edit") // 声明撤走 full，而权限卡要 full：现在开工照样复核，不拉起
+	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermFull) })
+	over := e.newItem("over", []string{"agent-ok"}, nil)
 	e.open(over)
 	e.must(owner, "item.start", map[string]any{"id": over})
-	e.refused(over, "上限") // 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"
+	e.refused(over, "档位")
 
 	// 不在 open 的事项不能"现在开工"。2026-11-20 改写：原来靠上一步把事项转成 needs_input 制造这个前提，
 	// 没拉起不再改阶段，这里显式把它转 dropped 再验同一条拒绝。

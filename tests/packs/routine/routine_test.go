@@ -316,7 +316,7 @@ func TestRoutinePackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("do[]: %v", acts)
 	}
 	r, ok := p.Prompts["run-routine"]
-	if !ok || r.Meta.Agent != "task" || r.Meta.Access != "read" {
+	if !ok || r.Meta.Agent != "task" || r.Meta.Access != "" {
 		t.Fatalf("run-routine must be a read-only task prompt: %+v", r.Meta)
 	}
 	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "apa material commit --kind minutes"} {
@@ -505,19 +505,14 @@ func (e *env) dropReason(id string) (reason string) {
 	return reason
 }
 
-// ACT-RTN-09：access 高于 Web 设置的上限时不以高档位运行：没有 Run，事项转 dropped 并指出超出上限。
-// 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"；改为转 dropped、理由含"上限"。
-func TestRunModeNeverRunsAboveThePermissionCap(t *testing.T) {
+// ACT-RTN-09（2026-11-26 改写）：实例的 access 已取消，工具档位取权限卡；实例写了 edit 也按卡上的只读运行。
+func TestRunModeToolFollowsTheCard(t *testing.T) {
 	e := newEnv(t)
-	e.harness("receipt") // acc-stub 声明了 read、edit，上限仍是 read
+	e.harness("receipt") // acc-stub 声明了 read、edit；权限卡是默认卡（只读）
 	e.instance("", map[string]any{"schedule": "24h", "mode": "run", "instruction": "x", "access": "edit"})
 	e.tick(t0.Add(24 * time.Hour))
-	items := e.routineItems()
-	if len(items) != 1 || len(e.runList()) != 0 {
-		t.Fatalf("items %d runs %d", len(items), len(e.runList()))
-	}
-	if it := e.item(items[0].ID); it.Phase != domain.PhaseDropped || it.Ask != nil || !strings.Contains(e.dropReason(it.ID), "上限") {
-		t.Fatalf("item: %s %+v", it.Phase, it.Ask)
+	if rs := e.runList(); len(rs) != 1 || rs[0].Run.Access != "read" {
+		t.Fatalf("runs %+v", rs)
 	}
 }
 

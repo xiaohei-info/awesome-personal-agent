@@ -140,8 +140,6 @@ type Task struct {
 	Target string
 	// Harness 只来自规则与 Web 设置，不来自事件内容（§14.10）；为空时用 Web 设置的默认 harness。
 	Harness string
-	// Access 是实例要求的权限档位（例行任务的 access 参数）；为空取模板声明的档位。它仍受 harness 声明和 Web 设置的上限约束。
-	Access string
 	// Instruction 是实例里本人写的任务说明；非空时写成运行目录里的 instruction.txt，经 {instruction_path} 交给运行者。
 	// 它是本人的要求，不是外部资料，不进提示词正文。
 	Instruction string
@@ -192,13 +190,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	if strings.TrimSpace(t.Instruction) == "" { // 实例没写内容要求时用模板的默认要求，随发行更新（C.7）
 		t.Instruction = pr.Meta.DefaultInstruction
 	}
-	access := pr.Meta.Access
-	if t.Access != "" {
-		access = t.Access
-	}
-	if access == "" {
-		access = "read"
-	}
+	var access string // 工具档位取所属 Agent 权限卡上的值（§14.5），选出 Agent 后才知道
 	var hl executors.Headless
 	var selected executors.Selected
 	var forwarded, ran bool
@@ -243,6 +235,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	}
 
 	out := Outcome{Item: t.Target}
+	access = selected.Snapshot.PermissionCap
 	cwd := pr.Meta.Cwd
 	if cwd == "" {
 		cwd = selected.Card.Values["cwd"]

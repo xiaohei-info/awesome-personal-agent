@@ -1,6 +1,5 @@
 ---
 agent: task
-access: read
 result_fields:
   - result
 ---
