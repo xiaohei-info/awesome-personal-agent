@@ -565,7 +565,7 @@ func (e *Env) IssueCredentials() {
 	e.DEL = issue("/v1/settings/tokens", `{"kind":"delegate","audience":"internal","label":"DEL"}`)
 	e.CHAN = issue("/v1/settings/ext-keys", `{"label":"CHAN","scope":"channel.acc-chan"}`)
 	e.OpenDelegateTier("rules")
-	// e.pauseDefaultSchedules() // DIAG
+	e.pauseDefaultSchedules()
 }
 
 // pauseDefaultSchedules 停用开箱默认安排（简报工作日 08:30、复盘周五 17:30）：它们按墙钟加测试时钟偏移到点，
