@@ -1,5 +1,5 @@
 import type { Dict } from "../../app/i18n";
-import { shared } from "../settings-policy/strings";
+import { shared } from "../../app/strings";
 
 // 设置 › 笔记库：每个库一行，登记库名与「打开方式」（默认 Obsidian；自定义 URL 模板在高级里，占位符 {vault}、{path}）。
 const zh = {

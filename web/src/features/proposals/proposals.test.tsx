@@ -204,7 +204,7 @@ describe("被拒绝的处理（ACT-PROP-05、flow-proposal-triage）", () => {
     const a = await screen.findByRole("article", { name: "建议 a" });
     const note = within(a).getByRole("note", { name: "被拒绝的处理" });
     expect(note).toHaveTextContent("no basis for dismiss");
-    expect(within(note).getByRole("link", { name: "去看它的权限卡" })).toHaveAttribute("href", "/settings") // 档位在「我来拍板」;
+    expect(within(note).getByRole("link", { name: "去看它的权限卡" })).toHaveAttribute("href", "/settings/agents#permission-overview");
     expect(within(screen.getByRole("article", { name: "建议 b" })).queryByRole("note")).toBeNull();
     expect(within(a).getByRole("button", { name: "接受" })).toBeEnabled();
   });
@@ -354,7 +354,7 @@ describe("接受并交给 Agent", () => {
     const card = (await screen.findByText("建议 a")).closest("article")!;
     await userEvent.click(within(card).getByRole("button", { name: "接受并交给 Agent" }));
     const receipt = (await screen.findByText(/已接受，还没交给 Agent/)).closest("li")!;
-    expect(within(receipt).getByRole("link", { name: "去打开" })).toHaveAttribute("href", "/rules#rule-" + encodeURIComponent(RULE));
+    expect(within(receipt).getByRole("link", { name: "去打开" })).toHaveAttribute("href", "/settings/agents#rule-" + encodeURIComponent(RULE));
     expect(w.order).toEqual(["POST /v1/items/a/accept {}"]);
   });
 });

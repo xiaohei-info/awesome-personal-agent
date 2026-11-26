@@ -1,12 +1,12 @@
 import type { Dict } from "../../app/i18n";
-import { shared } from "../settings-policy/strings";
+import { shared } from "../../app/strings";
 
-// 设置 › 提醒与推送：只留全局项（暂停所有提醒、默认渠道、安静时段、每天上限；更多里是暂停名单与合并窗口）与只读总览；到点提醒的展开区（Proactive）在自动规则页用。
+// 设置 › 提醒与推送：只留全局项（暂停所有提醒、默认渠道、安静时段、每天上限；更多里是暂停名单与合并窗口）、拍板与自动规则两组提醒单选、只读总览。
 const zh = {
   ...shared.zh,
   title: "提醒与推送",
   summary: (cap: number, muted: number, all?: boolean) => (all ? "已暂停所有提醒" : (cap ? `每天最多 ${cap} 条` : "每天不限条数") + (muted ? ` · 暂停 ${muted} 个` : "")),
-  lede: "所有提醒都遵守的几条规矩；每类提醒送到哪，在它自己的页面上改。",
+  lede: "提醒的全局规矩，以及拍板和自动规则怎么提醒你。",
   pushTo: (name: string) => `发到 ${name}`,
   pushToOff: (name: string) => `发到 ${name}（已停用，先放在今天页）`,
   pushToGone: "发到已删除的渠道（先放在今天页）",
@@ -30,7 +30,10 @@ const zh = {
   colData: "按当前数据",
   colWhere: "在哪改",
   overviewOff: "不提醒",
-  homes: { decide: "权限总览", rules: "自动规则", schedule: "定时安排", sources: "来源", pipeline: "来源处理", agents: "Agent", proposals: "建议", status: "状态" } as Record<string, string>,
+  homes: { decide: "拍板通知", rules: "自动规则", schedule: "定时安排", sources: "来源", pipeline: "来源处理", agents: "Agent", proposals: "建议", status: "状态" } as Record<string, string>,
+  notifyCard: "有事要你拍板时怎么告诉你",
+  autoRules: "自动规则",
+  remindWhen: "什么时候提醒",
   hostCron: "其他工具自己的定时任务",
   hostCronWhy: "不经 APA，推送在那个工具里配；定时安排页也看不到它们",
   capHead: "每天最多推几条",
@@ -105,7 +108,7 @@ const en: typeof zh = {
   ...shared.en,
   title: "Reminders and pushes",
   summary: (cap, muted, all) => (all ? "All reminders paused" : (cap ? `At most ${cap} a day` : "No daily limit") + (muted ? ` · ${muted} paused` : "")),
-  lede: "Rules every reminder follows; where each kind goes is set on its own page.",
+  lede: "Global reminder rules, plus how decisions and automatic rules reach you.",
   pushTo: (name) => `Push to ${name}`,
   pushToOff: (name) => `Push to ${name} (disabled, Web unread for now)`,
   pushToGone: "Push to a removed channel (Web unread for now)",
@@ -129,7 +132,10 @@ const en: typeof zh = {
   colData: "From current data",
   colWhere: "Change it in",
   overviewOff: "Off",
-  homes: { decide: "Permissions", rules: "Automatic rules", schedule: "Schedules", sources: "Sources", pipeline: "Source handling", agents: "Agents", proposals: "Proposals", status: "Status" },
+  homes: { decide: "Decisions", rules: "Automatic rules", schedule: "Schedules", sources: "Sources", pipeline: "Source handling", agents: "Agents", proposals: "Proposals", status: "Status" },
+  notifyCard: "How you hear about decisions",
+  autoRules: "Automatic rules",
+  remindWhen: "When it reminds",
   hostCron: "Other tools' own scheduled jobs",
   hostCronWhy: "Not run by APA; their pushes are set in that tool, and Schedules does not list them",
   capHead: "Push at most per day",

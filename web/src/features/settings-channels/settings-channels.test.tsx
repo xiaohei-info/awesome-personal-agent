@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setChoice } from "../../app/i18n";
 import { App } from "../../app/App";
 import { feature } from "./index";
-import { policyServer } from "../settings-policy/test-server";
+import { policyServer } from "../../app/test-policy-server";
 
 // 测试边界替身：策略三条路由用 policyServer；另按 api/settings/policy 与 api/channel 的契约应答
 // PUT /settings/channels/{名}/answerers（只改这一个键）与识别（只在内存里，不写名单）。

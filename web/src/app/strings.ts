@@ -149,3 +149,20 @@ export function rejudgeHint(lang: Lang, reason: string, days: number | undefined
 // 不随界面语言变的固定写法：品牌字形与各语言的自称（语言选项总用该语言自己的名字）。
 export const BRAND_MARK = "决";
 export const LANG_NAMES = { zh: "中文", en: "English" } as const;
+
+// 设置里几张策略卡片共用的文案（policy-cards.tsx）。
+const sharedZh = {
+  ...common.zh,
+  saveCard: (title: string) => `保存${title}`,
+  removeTag: (v: string) => `去掉 ${v}`,
+  del: "删除",
+  any: "任意",
+};
+const sharedEn: typeof sharedZh = {
+  ...common.en,
+  saveCard: (title) => `Save ${title}`,
+  removeTag: (v) => `Remove ${v}`,
+  del: "Delete",
+  any: "Any",
+};
+export const shared: Dict<typeof sharedZh> = { zh: sharedZh, en: sharedEn };

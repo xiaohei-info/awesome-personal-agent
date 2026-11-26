@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { features } from "../../app/registry";
-import { policyServer, v28Overview } from "../settings-policy/test-server";
+import { policyServer, v28Overview } from "../../app/test-policy-server";
 import { EDITORS, HOME_PATH, kindOf, type Home } from "./reminders";
 
 // 防遗漏（设计 v2 §5 第 1 条）：每一类提醒都必须有一个编辑位置。

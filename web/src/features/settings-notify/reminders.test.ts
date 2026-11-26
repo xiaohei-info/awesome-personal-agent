@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { V28 } from "../settings-policy/test-server";
+import { V28 } from "../../app/test-policy-server";
 import { apply, choicesFor, current, type State } from "./reminders";
 
 // 单选与存储字段的对应（设计 v2 §3.2、§6.2）：读出当前项、选一项写哪些字段；存储形状不变，未显示的字段（else、by_priority、类型行）原样保留。

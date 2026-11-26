@@ -46,7 +46,7 @@ export function RejectionNote({ rejection, what, item }: { rejection?: Rejection
         <code className={raw ? "raw-id" : undefined}>{rejection.why}</code>
       </details>{" "}
       {self && <Go className="quiet" to={self}>{t.goSelf}</Go>}{" "}
-      {reason === "out_of_scope" ? <Go className="quiet" to="/settings/agents">{t.goKeys}</Go> : reason !== "hard_line" && <Go className="quiet" to="/settings">{t.goTier}</Go>}
+      {reason === "out_of_scope" ? <Go className="quiet" to="/settings/agents">{t.goKeys}</Go> : reason !== "hard_line" && <Go className="quiet" to="/settings/agents#permission-overview">{t.goTier}</Go>}
     </p>
   );
 }

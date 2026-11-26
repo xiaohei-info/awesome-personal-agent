@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
-import { Card, useDraft, type Doc } from "../settings-policy/shared";
+import { Card, useDraft, type Doc } from "../../app/policy-cards";
 import { strings } from "./strings";
 
-// 到点提醒（§7.4）：策略 disturb.proactive 的时间规则；它是自动规则 › 提醒我 ›「到点提醒」单选下的"什么时候提醒"折叠。
+// 到点提醒（§7.4）：策略 disturb.proactive 的时间规则；它是提醒与推送 › 自动规则 ›「到点提醒」单选下的"什么时候提醒"折叠。
 // 开不开、送到哪由那个单选决定（不提醒即 proactive.on 为假），这里不再有开关，保存时 on 原样带回；预览按草稿、假设开着算。
 // 静默时段沿用设置 › 提醒与推送的「安静时段」，不另设一份。开启时刻（since）由服务端记，页面不发。
 

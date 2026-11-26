@@ -325,7 +325,7 @@ func (s *svc) create() command.Spec {
 	instance := func(id string, v createIn) Instance {
 		return Instance{ID: id, Pack: v.Pack, Project: v.Project, Params: v.Params, Enabled: v.Enabled == nil || *v.Enabled}
 	}
-	return command.Spec{Name: "instance.create", Action: authz.ActionManageSource, Group: authz.GroupRules, GroupFor: agentTier, Page: "/rules",
+	return command.Spec{Name: "instance.create", Action: authz.ActionManageSource, Group: authz.GroupRules, GroupFor: agentTier, Page: "/briefs/schedule",
 		Object: func(_ *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			if _, err := parse(raw); err != nil {
 				return authz.Object{}, err
@@ -377,7 +377,7 @@ func (s *svc) update() command.Spec {
 		}
 		return in, nil
 	}
-	return command.Spec{Name: "instance.update", Action: authz.ActionManageSource, Group: authz.GroupRules, GroupFor: agentTier, Page: "/rules",
+	return command.Spec{Name: "instance.update", Action: authz.ActionManageSource, Group: authz.GroupRules, GroupFor: agentTier, Page: "/briefs/schedule",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -429,7 +429,7 @@ func (s *svc) toggle() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/rules",
+	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/briefs/schedule",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -464,7 +464,7 @@ func (s *svc) run() command.Spec {
 		var v ref
 		return v, decode(raw, &v)
 	}
-	return command.Spec{Name: "instance.run", Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/rules",
+	return command.Spec{Name: "instance.run", Action: authz.ActionManageSource, Group: authz.GroupRules, Page: "/briefs/schedule",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {

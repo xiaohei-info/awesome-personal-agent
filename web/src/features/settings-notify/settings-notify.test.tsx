@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
-import { policyServer } from "../settings-policy/test-server";
+import { policyServer } from "../../app/test-policy-server";
 
 // 设置 › 提醒与推送（设计 v2 §3.1、§5）：只有全局项与一张只读总览。数据取线上 v28 的形状（test-server 的 V28）。
 function mount(fetchImpl: typeof fetch, at = "/settings/notify") {
@@ -22,7 +22,7 @@ const options = (el: HTMLElement) => within(el).getAllByRole("option").map((o) =
 
 beforeEach(() => sessionStorage.clear());
 
-describe("设置 › 提醒与推送：只留全局项", () => {
+describe("设置 › 提醒与推送：全局项与总览", () => {
   it("首屏是暂停所有提醒、默认渠道、安静时段（含临近截止照发）、每天上限；暂停名单与合并窗口收在「更多」；没有矩阵、产生开关、模型判断开关与内核词", async () => {
     mount(policyServer({ v28: true }).impl);
     for (const name of ["暂停所有提醒", "默认渠道", "安静时段", "每天最多推几条", "所有提醒一览"]) await section(name);
@@ -31,7 +31,9 @@ describe("设置 › 提醒与推送：只留全局项", () => {
     expect(within(more).getByRole("region", { name: "暂停名单" })).toBeInTheDocument();
     expect(within(more).getByRole("region", { name: "不急的提醒合成一条" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "每类提醒送到哪" })).toBeNull();
-    expect(screen.queryAllByRole("radiogroup")).toEqual([]); // 各类提醒的单选不在这页
+    // 这页只有拍板与自动规则两组提醒单选
+    const here = ["有事要你拍板时怎么告诉你", "自动规则"].flatMap((name) => within(screen.getByRole("region", { name })).queryAllByRole("radiogroup"));
+    expect(screen.queryAllByRole("radiogroup")).toEqual(here);
     const main = screen.getByRole("main");
     expect(main).not.toHaveTextContent(/产生|让模型判断|推给 Agent|Agent 收不到时|跟随类型|节流|主会话|inject|channel:/);
     expect(screen.getByRole("checkbox", { name: "临近截止的问题照样发" })).toBeChecked();
@@ -85,8 +87,8 @@ describe("设置 › 提醒与推送：只留全局项", () => {
     await waitFor(() => expect(o.getAllByRole("row").length).toBeGreaterThan(2));
     const rows = o.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
     expect(rows).toEqual([
-      ["有问题等你决定时", "手机和对话都发（iPhone）", "近 7 天 5 个问题，按现在的设置响了 10 次；现在待你决定 0 个", "权限总览 ›"],
-      ["Agent 替你答了", "在对话里马上告诉我", "近 7 天 0 次", "权限总览 ›"],
+      ["有问题等你决定时", "手机和对话都发（iPhone）", "近 7 天 5 个问题，按现在的设置响了 10 次；现在待你决定 0 个", "拍板通知 ›"],
+      ["Agent 替你答了", "在对话里马上告诉我", "近 7 天 0 次", "拍板通知 ›"],
       ["到点提醒", "在对话里马上告诉我", "接下来 24 小时没有要提醒的", "自动规则 ›"],
       ["截止已过", "在对话里马上告诉我", "现在没有带截止的事项，开着也暂时不会提醒", "自动规则 ›"],
       ["等待到期跟进", "在对话里马上告诉我", "现在没有在等的事项", "自动规则 ›"],
@@ -102,7 +104,7 @@ describe("设置 › 提醒与推送：只留全局项", () => {
       ["其他工具自己的定时任务", "不经 APA，推送在那个工具里配；定时安排页也看不到它们"],
     ]);
     const links = o.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(links).toContain("/settings#reminder-decision");
+    expect(links).toContain("/settings/notify#reminder-decision");
     expect(links).toContain("/briefs/schedule#reminder-instance_failed:ins_fe17");
     expect(links).toContain("/health#reminder-health");
     expect(o.queryByText(/规则到点时|规则命中时|非内置类型/)).toBeNull(); // 线上没有产生方的行不列

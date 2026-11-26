@@ -9,8 +9,8 @@ export type Choice = "phone" | "chat_now" | "chat_next" | "both" | "off";
 /** 每类提醒唯一可编辑的页面（§4）。 */
 export type Home = "decide" | "rules" | "schedule" | "sources" | "pipeline" | "agents" | "proposals" | "status";
 export const HOME_PATH: Record<Home, string> = {
-  decide: "/settings",
-  rules: "/settings/rules",
+  decide: "/settings/notify",
+  rules: "/settings/notify",
   schedule: "/briefs/schedule",
   sources: "/sources",
   pipeline: "/settings/source-pipeline",

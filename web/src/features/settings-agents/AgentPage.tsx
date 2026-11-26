@@ -6,7 +6,7 @@ import { useRaw } from "../../app/raw";
 import { Val } from "../../app/values";
 import { Basics } from "./AgentEditor";
 import { Permission } from "./Permission";
-import { PolicyPage, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
+import { PolicyPage, useDraft, usePolicyDocs, type Doc, type Save } from "../../app/policy-cards";
 import { AGENT_KINDS, entries, hasKey, LEGACY, useData, type Credential, type Declaration, type Entry } from "./data";
 import { useEntryName } from "./SettingsAgentsPage";
 import { strings } from "./strings";
@@ -48,7 +48,7 @@ export function AgentPage() {
             <p className="sub">{t.keysScope}</p>
             <Keys e={e} reload={load} onError={setError} />
           </section>
-          <Permission e={e} version={Number(pol.version)} />
+          <Permission e={e} version={Number(pol.version)} onSaved={loadPol} />
           {e.live && <Launch e={e} name={name} pol={pol} save={save} />}
           <UsedBy e={e} pol={pol} />
           <Records e={e} />
@@ -259,7 +259,7 @@ function UsedBy({ e, pol }: { e: Entry; pol: Doc }) {
     return () => { live = false; };
   }, [api, e.id]);
   const lines = [
-    rules > 0 && <li key="r"><Link to="/rules">{t.usedRules(rules)}</Link></li>,
+    rules > 0 && <li key="r"><Link to="/settings/agents#auto-action">{t.usedRules(rules)}</Link></li>,
     !!counts?.schedules && <li key="s"><Link to="/briefs/schedule">{t.usedSchedules(counts.schedules)}</Link></li>,
     !!counts?.items && <li key="i"><Link to="/items">{t.usedItems(counts.items)}</Link></li>,
   ].filter(Boolean);

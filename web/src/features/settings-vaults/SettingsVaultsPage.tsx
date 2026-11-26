@@ -3,7 +3,7 @@ import { PageHead } from "../../app/page";
 import { errorText } from "../../app/i18n";
 import { useT } from "../../app/i18n";
 import { useSession } from "../../app/session";
-import { Card, reject, useDraft } from "../settings-policy/shared";
+import { Card, reject, useDraft } from "../../app/policy-cards";
 import { strings } from "./strings";
 
 // 设置 › 笔记库：GET/PUT /settings/note-vaults（附录 B.2），PUT 整体替换。协议白名单、重名与模板合法性由服务端判定，被拒绝时原因原样显示、草稿保留。

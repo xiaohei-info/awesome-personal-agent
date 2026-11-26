@@ -6,7 +6,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
 
 export const SECTIONS: Record<string, string[]> = {
-  "/v1/settings/policy": ["disturb", "persona", "persona_lang", "background_run_timeout_sec", "channels", "default_harness", "main_session_launch"],
+  "/v1/settings/policy": ["disturb", "persona", "persona_lang", "background_run_timeout_sec", "channels", "default_harness", "main_session_launch", "rule_agent"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
   "/v1/settings/access-limits": ["agent_cards"],
 };

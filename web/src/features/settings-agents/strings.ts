@@ -1,7 +1,7 @@
 import type { Dict } from "../../app/i18n";
-import { shared } from "../settings-policy/strings";
+import { common, shared } from "../../app/strings";
 
-// 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表是分工、Agent 一行一个、所有 Agent 共用的语言与语气、很少用到的钥匙；
+// 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表是分工、Agent 一行一个、权限总览、替我动手、所有 Agent 共用的语言与语气、很少用到的钥匙；
 // 一个 Agent 一页：接入清单、基本信息、钥匙、权限卡与限制清单、在哪里做、被谁使用、高级。
 const zh = {
   ...shared.zh,
@@ -124,6 +124,12 @@ const zh = {
     observer: { name: "只读的程序（脚本、看板）", can: "能看事项和材料、提一条等你确认的新事项；不能改事项" },
   } as Record<string, { name: string; can: string }>,
   rarely: "很少用到：给脚本和执行者的钥匙",
+  overview: "权限总览",
+  overviewHint: "每个 Agent 能替你做什么。点名字去它的页面改。",
+  allowed: "允许",
+  denied: "不允许",
+  allowedUntil: (at: string) => `允许到 ${at}`,
+  ownerOnly: "只有你本人能做：改权限卡、发和收回钥匙、改登录口令、指定谁能在渠道里代你回答。",
   executorsHint: "Agent 把活再派出去的对象登记在执行者名录里。",
   executorsLink: "打开执行者名录",
   otherKeys: "给脚本和执行者的钥匙",
@@ -289,6 +295,12 @@ const en: typeof zh = {
     observer: { name: "A read-only program (script, dashboard)", can: "May read items and materials and propose a new item for you to confirm; cannot change items" },
   },
   rarely: "Rarely needed: keys for scripts and executors",
+  overview: "Permissions",
+  overviewHint: "What each Agent may do for you. Open an Agent to change it.",
+  allowed: "Allowed",
+  denied: "Not allowed",
+  allowedUntil: (at) => `Allowed until ${at}`,
+  ownerOnly: "Only you can: change permission cards, issue and revoke keys, change the login password, pick who may answer for you in a channel.",
   executorsHint: "Whoever an Agent hands work on to is listed in the executor roster.",
   executorsLink: "Open the executor roster",
   otherKeys: "Keys for scripts and executors",
@@ -420,3 +432,36 @@ const permissionEn: typeof permissionZh = {
   details: "Details",
 };
 export const permission: Dict<typeof permissionZh> = { zh: permissionZh, en: permissionEn };
+
+// 「替我动手」（AutoAct.tsx）。
+const autoActZh = {
+  ...common.zh,
+  groups: { action: "替我动手", other: "其他" } as Record<string, string>,
+  hint: "试运行只记录，不动手。",
+  none: "还没有加载任何规则",
+  mode: (name: string) => `${name}：开关`,
+  week: (n: number) => (n ? `本周本来会做 ${n} 次 ›` : "本周还没触发"),
+  hide: "收起",
+  observations: (name: string) => `${name}：本来会做的事`,
+  noObservations: "还没有记录",
+  observed: (title: string, at: string) => `${at} · ${title}`,
+  launchOf: (name: string) => `${name}：Agent 在哪里做`,
+  launchHow: { inherit: "跟随默认", headless: "单独在后台做", wake: "在对话里接着做" } as Record<string, string>,
+};
+
+const autoActEn: typeof autoActZh = {
+  ...common.en,
+  groups: { action: "Act for me", other: "Other" },
+  hint: "Trial only records; it does nothing.",
+  none: "No rules are loaded yet",
+  mode: (name) => `${name}: switch`,
+  week: (n) => (n ? `Would have run ${n}× this week ›` : "Not triggered this week"),
+  hide: "Hide",
+  observations: (name) => `${name}: what it would have done`,
+  noObservations: "Nothing recorded yet",
+  observed: (title, at) => `${at} · ${title}`,
+  launchOf: (name) => `${name}: where the Agent works`,
+  launchHow: { inherit: "Follow the default", headless: "On its own in the background", wake: "Continue in your chat" },
+};
+
+export const autoAct: Dict<typeof autoActZh> = { zh: autoActZh, en: autoActEn };

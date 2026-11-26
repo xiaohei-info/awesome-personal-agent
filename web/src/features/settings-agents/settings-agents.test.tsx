@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
-import { policyServer } from "../settings-policy/test-server";
+import { policyServer } from "../../app/test-policy-server";
 import { feature } from "./index";
 
 const PAGE = "/settings/agents/legacy:hermes";
@@ -372,5 +372,47 @@ describe("设置 › Agent › 所有 Agent 共用 › Agent 后台运行时限"
     // 恢复默认按钮回到 4 小时
     await userEvent.click(within(card).getByRole("button", { name: "恢复默认" }));
     expect(input).toHaveValue(4);
+  });
+});
+
+describe("设置 › Agent：同页多处保存共用的策略版本号", () => {
+  // 按内核的乐观并发：带了过期 version 的写入 409；每次写策略（含权限卡）版本号加一。
+  function versioned(o: Opts) {
+    const s = server(o);
+    let version = 1;
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      const card = url.endsWith("/card");
+      if (url !== "/v1/settings/policy" && !card) return s.impl(url, init);
+      const write = init.method === "PUT";
+      const sent = write ? JSON.parse(init.body as string).version : undefined;
+      if (sent !== undefined && sent !== version) return json(409, { code: "conflict", why: "settings changed", next: "reload" });
+      const r = await s.impl(url, init);
+      if (write) version++;
+      return json(r.status, { ...(await r.json()), version });
+    }) as unknown as typeof fetch;
+    return impl;
+  }
+
+  it("改了「Agent 运行失败」提醒之后，分工仍能保存", async () => {
+    mount(versioned({ live: [hermes(1, "active")] }));
+    const failed = within(await screen.findByRole("radiogroup", { name: "Agent 运行失败时" }));
+    await userEvent.click(failed.getByRole("radio", { name: /不提醒/ }));
+    await screen.findByText("已保存");
+    const roles = within(screen.getByRole("region", { name: "分工" }));
+    await userEvent.selectOptions(roles.getByRole("combobox", { name: /日常 Agent/ }), "legacy:hermes");
+    expect(await roles.findByText("已保存")).toBeInTheDocument();
+    expect(roles.queryByRole("alert")).toBeNull();
+  });
+
+  it("权限卡连着保存两次都成功", async () => {
+    mount(versioned({ live: [hermes(1, "active")] }), PAGE);
+    const perm = within(await (await card()).findByRole("region", { name: "权限" }));
+    const save = perm.getByRole("button", { name: "保存权限" });
+    for (const choice of ["允许", "不允许"]) {
+      await userEvent.click(within(perm.getByRole("group", { name: "替我拍板" })).getByRole("radio", { name: choice }));
+      await userEvent.click(save);
+      await waitFor(() => expect(save).toBeDisabled()); // 存好后草稿与服务端一致
+      expect(perm.queryByRole("alert")).toBeNull();
+    }
   });
 });

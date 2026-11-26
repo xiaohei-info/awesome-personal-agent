@@ -1,0 +1,43 @@
+import { Link } from "react-router-dom";
+import { useT } from "../../app/i18n";
+import { PERMISSION_GROUP } from "../../app/ids";
+import { useLabel } from "../../app/values";
+import type { Agent } from "./AgentPick";
+import { strings } from "./strings";
+
+/** 权限总览（设计 §14.5）：每个 Agent 的权限卡一览，只看，点名字去它自己的页面改——权限卡只在那一页改。没有 Agent 时不显示。 */
+export function PermissionOverview({ agents }: { agents: Agent[] }) {
+  const t = useT(strings);
+  const label = useLabel();
+  if (!agents.length) return null;
+  const cell = (until: string | undefined, on: boolean) =>
+    !on ? t.denied : until ? (new Date(until) < new Date() ? t.denied : t.allowedUntil(new Date(until).toLocaleString())) : t.allowed;
+  return (
+    <section aria-label={t.overview} className="panel" id="permission-overview">
+      <h2>{t.overview}</h2>
+      <p className="sub">{t.overviewHint}</p>
+      <table>
+        <thead>
+          <tr>
+            <th />
+            {agents.map((a) => (
+              <th key={a.id} scope="col"><Link to={"/settings/agents/" + encodeURIComponent(a.id) + "#permissions"}>{a.name || a.harness}</Link></th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {PERMISSION_GROUP.map((g) => (
+            <tr key={g}>
+              <th scope="row">{label("permissionGroup", g)}</th>
+              {agents.map((a) => {
+                const gr = a.permission?.groups[g];
+                return <td key={a.id}>{cell(gr?.until, !!gr)}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="sub">{t.ownerOnly}</p>
+    </section>
+  );
+}

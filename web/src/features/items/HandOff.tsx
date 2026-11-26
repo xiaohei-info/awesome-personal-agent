@@ -13,7 +13,7 @@ import type { Item } from "./ItemsPage";
 /** 标签的显示名：交给 Agent 的标签不露出英文名。 */
 export const tagName = (tag: string, handoff: string) => (tag === HANDOFF_TAG ? handoff : tag);
 
-const RULE_AT = "/rules#rule-" + encodeURIComponent(HANDOFF_RULE);
+const RULE_AT = "/settings/agents#rule-" + encodeURIComponent(HANDOFF_RULE);
 
 /** 交给 Agent 的前提（读 GET /rules 与 GET /agents 的选择预览，判定都在服务端）：规则模式、会用哪个 Agent、它能不能在后台运行。 */
 export function useHandoff(itemAgent?: string, on = true) {

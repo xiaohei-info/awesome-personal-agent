@@ -1,25 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
-import { PageHead } from "../../app/page";
 import { locale, useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useItemTitle } from "../../app/names";
+import type { Doc, Save } from "../../app/policy-cards";
 import { useRaw } from "../../app/raw";
 import { entryOf } from "../../app/values";
 import { RULE_MODE } from "../../app/ids";
-import { strings } from "./strings";
+import { AgentPick } from "./AgentPick";
+import { autoAct as strings } from "./strings";
 
-// 设置 › 自动规则（界面设计 §3.1、§6.1；设计 v2 §4）：上面「提醒我」一组是提醒类的单选（到点、截止已过、跟进、14 天没动静），
-// 下面只列动作类与其他规则；提醒类规则（class: reminder）的模式由「提醒我」里的单选写（不提醒即关），不在列表里重复。
-// 规则自带提醒（create_timer、then: alert、notify_urgent）时，那一行提醒挂在那条规则下面。
+// 设置 › Agent ›「替我动手」（界面设计 §6.1）：动作类与其他规则，只切模式、选 Agent，不编辑规则内容。
+// 提醒类规则（class: reminder）的模式由提醒与推送 › 自动规则的单选写（不提醒即关），不在这里重复。
 // 模式、用哪个 Agent、在哪里做都是即改即存，旁边写「已保存」；用哪个 Agent 默认收起成一行。
 // 形状对应 GET /v1/rules（含 class）、PATCH /v1/rules/{id}/mode（附录 B.2）、GET /v1/packs 与 GET /v1/audit/events（§14.8）。
-// 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择，被拒绝时模式保持原值。只改模式，不编辑规则内容。
+// 谁能切、切到什么、观察记录怎么产生都由服务端判定；被拒绝时模式保持原值。
 // 以 Agent 本人身份运行的规则（runner=main_session）另可覆盖 Agent 在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
-// 按 Agent 的设置原样带回；没覆盖就沿用 Agent 设置（§13.6）。
-import { AgentPick } from "../settings-agents/AgentPick";
-import { Reminder, ReminderScope, WhenReady, useReminderScope } from "../settings-notify/Reminder";
-import { ProactiveCard } from "../settings-notify/Proactive";
+// 按 Agent 的设置原样带回；没覆盖就沿用 Agent 设置（§13.6）。策略文档与本页其他卡片共用（pol、save），版本号不各记一份。
 
 interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action"; runner?: string }
 interface Launch { by_harness?: Record<string, string>; by_rule?: Record<string, string> }
@@ -92,7 +89,7 @@ function LaunchPick({ name, value, onChange }: { name: string; value: string; on
   );
 }
 
-export function RulesPage() {
+export function AutoAct({ pol, save }: { pol: Doc; save: Save }) {
   const { api } = useSession();
   const lang = useLang();
   const raw = useRaw();
@@ -100,6 +97,9 @@ export function RulesPage() {
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [packs, setPacks] = useState<Pack[]>([]);
   const [error, setError] = useState<unknown>(null);
+  const [saved, setSaved] = useState<string | null>(null); // 即改即存：刚存好的那条规则旁短暂写「已保存」
+  const ruleAgents = (pol.rule_agent ?? {}) as Record<string, string>;
+  const launch = pol.main_session_launch as Launch | undefined;
 
   const load = useCallback(async () => {
     try {
@@ -112,28 +112,27 @@ export function RulesPage() {
   }, [api]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { api.get<{ packs: Pack[] }>("/packs").then((r) => setPacks(r.packs), () => setPacks([])); }, [api]);
-  const [ruleAgents, setRuleAgents] = useState<Record<string,string>>({});
-  const [version, setVersion] = useState<number>();
-  const [launch, setLaunch] = useState<Launch | null>(null);
-  const [saved, setSaved] = useState<string | null>(null); // 即改即存：刚存好的那条规则旁短暂写「已保存」
-  useEffect(() => { api.get<{ version:number; rule_agent?:Record<string,string>; main_session_launch?: Launch }>("/settings/policy").then((p) => {setRuleAgents(p.rule_agent ?? {}); setVersion(p.version); setLaunch(p.main_session_launch ?? {});}, () => setLaunch(null)); }, [api]);
 
-  async function setAgent(key: string, id: string) {
-    const next = {...ruleAgents}; if (id) next[key] = id; else delete next[key];
-    try {const p = await api.put<{rule_agent: Record<string,string>; version:number}>("/settings/policy", {rule_agent:next, version}); setRuleAgents(p.rule_agent ?? {});setVersion(p.version);setSaved(key);} catch(e) {setError(e);}
-  }
-  async function setRuleLaunch(r: Rule, v: string) {
-    const by_rule = { ...(launch?.by_rule ?? {}) };
-    if (v) by_rule[r.key] = v;
-    else delete by_rule[r.key];
+  async function write(key: string, body: unknown) {
     try {
-      const next = await api.put<{ main_session_launch: Launch; version:number }>("/settings/policy", { main_session_launch: { ...launch, by_harness: launch?.by_harness ?? {}, by_rule } });
-      setLaunch(next.main_session_launch);setVersion(next.version);
+      await save("policy", body);
       setError(null);
-      setSaved(r.key);
+      setSaved(key);
     } catch (e) {
       setError(e); // 选择框的值仍是服务端未改动的原值
     }
+  }
+  function setAgent(key: string, id: string) {
+    const next = { ...ruleAgents };
+    if (id) next[key] = id;
+    else delete next[key];
+    return write(key, { rule_agent: next, version: pol.version });
+  }
+  function setRuleLaunch(r: Rule, v: string) {
+    const by_rule = { ...(launch?.by_rule ?? {}) };
+    if (v) by_rule[r.key] = v;
+    else delete by_rule[r.key];
+    return write(r.key, { main_session_launch: { ...launch, by_harness: launch?.by_harness ?? {}, by_rule } });
   }
 
   async function setMode(r: Rule, mode: string) {
@@ -154,15 +153,12 @@ export function RulesPage() {
     .filter((x) => x.list.length);
 
   return (
-    <main>
-      <PageHead>{t.title}</PageHead>
+    <>
       {error != null && <ErrorNote error={error} />}
       {!rules && error == null && <p role="status">{t.loading}</p>}
       {rules && !groups.length && <p className="empty">{t.none}</p>}
-      <ReminderScope>
-      <WhenReady><RemindMe /></WhenReady>
       {groups.map(({ g, list }) => (
-        <section key={g} aria-label={t.groups[g]} className="panel">
+        <section key={g} aria-label={t.groups[g]} className="panel" id={"auto-" + g}>
           <h2>{t.groups[g]}</h2>
           <ul className="rows">
             {list.map((r) => {
@@ -177,8 +173,7 @@ export function RulesPage() {
                     </p>
                     {r.mode === "observe" && <Trial rule={r} name={name} />}
                     {r.runner && <AgentPick collapsed inheritRule={false} main={r.runner === "main_session"} value={ruleAgents[r.key] ?? ""} onChange={id => void setAgent(r.key,id)} />}
-                    {r.runner === "main_session" && launch && <LaunchPick name={name} value={launch.by_rule?.[r.key] ?? ""} onChange={(v) => void setRuleLaunch(r, v)} />}
-                    <WhenReady><RuleReminder rule={r.key} /></WhenReady>
+                    {r.runner === "main_session" && <LaunchPick name={name} value={launch?.by_rule?.[r.key] ?? ""} onChange={(v) => void setRuleLaunch(r, v)} />}
                   </div>
                   <div>
                     <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />
@@ -188,37 +183,9 @@ export function RulesPage() {
               );
             })}
           </ul>
-          {(g === "action" || g === "other") && <p className="sub">{t.hint}</p>}
+          <p className="sub">{t.hint}</p>
         </section>
       ))}
-      </ReminderScope>
-    </main>
+    </>
   );
-}
-
-/** 「提醒我」：提醒类的四个单选；到点提醒的时间规则收在"什么时候提醒"里（开关就是单选本身）。 */
-function RemindMe() {
-  const t = useT(strings);
-  const { doc, putDisturb } = useReminderScope();
-  return (
-    <section aria-label={t.remindMe} className="panel stack" id="remind-me">
-      <h2>{t.remindMe}</h2>
-      <Reminder row="scheduled">
-        <details>
-          <summary>{t.when}</summary>
-          <ProactiveCard doc={doc} put={putDisturb} />
-        </details>
-      </Reminder>
-      <Reminder row="overdue" />
-      <Reminder row="followup" />
-      <Reminder row="stale" />
-    </section>
-  );
-}
-
-/** 规则自带的提醒（规则设的提醒、来源即时提醒）挂在产生它的那条规则下面；线上没有这种规则时什么都不显示。 */
-function RuleReminder({ rule }: { rule: string }) {
-  const { overview } = useReminderScope();
-  const row = overview?.rows.find((x) => (x.key === "rule_reminder" || x.key === "source_alert") && x.rules?.includes(rule));
-  return row ? <Reminder row={row.key} /> : null;
 }

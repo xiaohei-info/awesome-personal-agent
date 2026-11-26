@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
-import { Card, PolicyPage, TagInput, useDraft, usePolicyDocs, type Doc } from "../settings-policy/shared";
+import { Card, PolicyPage, TagInput, useDraft, usePolicyDocs, type Doc } from "../../app/policy-cards";
 import { strings } from "./strings";
 import { Connections, time } from "./Connections";
 

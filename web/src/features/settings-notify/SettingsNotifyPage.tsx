@@ -6,15 +6,17 @@ import { MUTE_SCOPE } from "../../app/ids";
 import { EntityPick, useItemTitle } from "../../app/names";
 import { Pick } from "../../app/values";
 import { PageHead } from "../../app/page";
-import { Card, reject, useDraft } from "../settings-policy/shared";
+import { Card, reject, useDraft } from "../../app/policy-cards";
 import type { Delivery } from "./matrix";
 import { EDITORS, HOME_PATH, current, kindOf, targetOf, type Choice } from "./reminders";
-import { ReminderScope, WhenReady, useInstanceName, usePreview, useReminderScope, useScopeReady, type OverviewRow } from "./Reminder";
+import { ProactiveCard } from "./Proactive";
+import { Reminder, ReminderScope, WhenReady, useInstanceName, usePreview, useReminderScope, useScopeReady, type OverviewRow } from "./Reminder";
 import { rstrings, strings } from "./strings";
 
-// 设置 › 提醒与推送（设计 v2 §3.1、§5）：只留全局规矩——暂停所有提醒、默认渠道、安静时段（含临近截止照发）、每天上限；
-// 「更多」里是暂停名单与合并窗口。各类提醒送到哪在它自己的页面上改（定时安排卡、自动规则、来源、权限总览、Agent、建议、状态），
-// 这里只有一张只读总览：行表取自服务端（GET /settings/notify/overview，与内核选去处同一张行表），每行一句话加「去改」。
+// 设置 › 提醒与推送（设计 v2 §3.1、§5）：全局规矩——暂停所有提醒、默认渠道、安静时段（含临近截止照发）、每天上限，
+// 「更多」里是暂停名单与合并窗口；「有事要你拍板时怎么告诉你」与「自动规则」两组提醒单选也在这里。
+// 其余各类提醒送到哪在它自己的页面上改（定时安排卡、来源、来源处理、Agent、建议、状态）。
+// 末尾一张只读总览：行表取自服务端（GET /settings/notify/overview，与内核选去处同一张行表），每行一句话加「去改」。
 // 每一节各自保存，发整段 disturb：已保存的原样带回，只换这一节改过的字段。
 const MERGE_MIN = [0, 15, 30, 60];
 
@@ -25,7 +27,12 @@ export function SettingsNotifyPage() {
       <PageHead lede={t.lede}>{t.title}</PageHead>
       <ReminderScope>
         <Loading />
-        <WhenReady><Globals /></WhenReady>
+        <WhenReady>
+          <Globals />
+          <Decisions />
+          <AutoRules />
+          <OverviewTable />
+        </WhenReady>
       </ReminderScope>
     </main>
   );
@@ -53,8 +60,40 @@ function Globals() {
         <Mutes doc={doc} put={putDisturb} />
         <Merge doc={doc} put={putDisturb} />
       </details>
-      <OverviewTable />
     </>
+  );
+}
+
+function Decisions() {
+  const t = useT(strings);
+  return (
+    <section aria-label={t.notifyCard} className="panel stack" id="notify">
+      <h2>{t.notifyCard}</h2>
+      <Reminder row="decision" />
+      <Reminder row="agent_answered" />
+    </section>
+  );
+}
+
+/** 「自动规则」：到点、截止已过、跟进、停滞四个单选（到点的时间规则收在"什么时候提醒"里），以及规则自带的提醒（线上没有这种规则时不显示）。 */
+function AutoRules() {
+  const t = useT(strings);
+  const { doc, putDisturb, overview } = useReminderScope();
+  const own = (overview?.rows ?? []).filter((x) => (x.key === "rule_reminder" || x.key === "source_alert") && x.rules?.length);
+  return (
+    <section aria-label={t.autoRules} className="panel stack" id="auto-rules">
+      <h2>{t.autoRules}</h2>
+      <Reminder row="scheduled">
+        <details>
+          <summary>{t.remindWhen}</summary>
+          <ProactiveCard doc={doc} put={putDisturb} />
+        </details>
+      </Reminder>
+      <Reminder row="overdue" />
+      <Reminder row="followup" />
+      <Reminder row="stale" />
+      {own.map((x) => <Reminder key={x.key} row={x.key} />)}
+    </section>
   );
 }
 
