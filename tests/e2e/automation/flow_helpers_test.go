@@ -394,7 +394,9 @@ func (h *accHarness) RunRecords() []string {
 	})
 	var out []string
 	for _, e := range ents {
-		out = append(out, e.Name())
+		if !strings.HasPrefix(e.Name(), ".") { // 点开头的是还在写的记录
+			out = append(out, e.Name())
+		}
 	}
 	return out
 }

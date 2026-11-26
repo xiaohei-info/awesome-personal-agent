@@ -39,7 +39,8 @@ func main() {
 	}
 	mode := strings.TrimSpace(string(raw))
 	run := filepath.Base(runDir)
-	out := filepath.Join(rec, run)
+	// 输入先写进点开头的临时目录再整体改名：测试看到记录目录时文件已经写全。
+	out := filepath.Join(rec, "."+run)
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		die(2, "%v", err)
 	}
@@ -57,6 +58,16 @@ func main() {
 		die(2, "%v", err)
 	}
 	save("materials.json", mat)
+	if p := instrRe.FindString(prompt); mode == "routine" && p != "" {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			die(4, "读任务说明 %s: %v", p, err)
+		}
+		save("instruction.txt", b)
+	}
+	if err := os.Rename(out, filepath.Join(rec, run)); err != nil {
+		die(2, "%v", err)
+	}
 	item := itemRe.FindString(prompt)
 
 	update := func(spec any) {
@@ -105,13 +116,6 @@ func main() {
 		update(map[string]any{"period": "acc", "sections": sections})
 		summary()
 	case "routine":
-		if p := instrRe.FindString(prompt); p != "" {
-			b, err := os.ReadFile(p)
-			if err != nil {
-				die(4, "读任务说明 %s: %v", p, err)
-			}
-			save("instruction.txt", b)
-		}
 		update(map[string]any{"result": "周报草稿 " + run})
 		var m struct {
 			Item      struct{ Project string }

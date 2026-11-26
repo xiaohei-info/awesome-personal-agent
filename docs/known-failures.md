@@ -43,6 +43,8 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
 | `tests/e2e/ledger` `TestFlowBootstrap/ACT-BOOT-03`、`ACT-BOOT-05`（见第 15 条） | 断言过期 | 否 | 已修（`8848a1600`、`dbc7d583e`） |
 | `tests/e2e/inbound` `TestFlowCapture/ACT-CAP-06`、`TestFlowInboundPipeline/ACT-INP-10`（见第 16 条） | 断言过期（模型替身串扰） | 否 | 已修（`9e3a6aa95`） |
 | `tests/e2e/extractalign` `TestFlowExtractAlign/ACT-XAL-04`、`ACT-XAL-06`（见第 17 条） | 断言过期 | 否 | 已修（`4ce8b3fae`） |
+| `tests/e2e/followup`、`tests/e2e/ops` `TestFlowHealth` 的「长时运行与短任务各自排队」；`tests/e2e/agents` `TestFlowGuidelineDraft/ACT-DRF-04`；`tests/e2e/automation` `TestFlowRoutine/ACT-RTN-02`（见第 18 条） | 用例隔离（依赖时刻） | 否 | 已修（`ec4acf532`、`1db9ac5fb`） |
+| `tests/e2e/automation` `TestFlowDigestAlert/ACT-DGA-15`（见第 19 条） | 断言不稳（测试替身竞态） | 否 | 已修（`1db9ac5fb`） |
 
 ## 明细
 
@@ -189,6 +191,23 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
 - **定性**：断言过期。内置 Inbox 兜底（`13aa41570`）；预筛问句改写（`29a5a0328`）。
 - **是否阻塞上线**：否。
 - **处理**：已修（`4ce8b3fae`）。期望改为 `prj_inbox`；按问句开头认预筛请求。
+
+### 18. 默认定时安排在用例运行中到点
+
+- **用例**：`tests/e2e/followup`、`tests/e2e/ops` `TestFlowHealth` 的「长时运行与短任务各自排队」；`TestFlowGuidelineDraft/ACT-DRF-04`；`TestFlowRoutine/ACT-RTN-02`。
+- **复现**：内核时钟（真实时间加测试时钟偏移）在用例运行中跨过工作日 08:30（本机时区，CI 为 UTC）时跑对应整个用例；run 45782997702、45783003732。
+- **现象**：`长时运行 1 个在跑、2 个排队…（等待 1m0s 仍未出现）`；`没有新的运行 = 2，期望 1`；`MODEL_LOG 出现 routine 执行路径上的模型请求`（事项标题 `brief 2026-11-26 08:30`）。
+- **定性**：用例隔离。开箱默认安排（简报 `30 8 * * 1-5`、复盘 `30 17 * * 5`，§7.3）在每个验收环境里启用，到点后多出任务型运行、简报事项与模型请求。把默认简报改到用例运行当中到点，三处全部复现（run 45787011945）；同样条件下停用默认安排后通过（run 45787097461）。
+- **是否阻塞上线**：否。
+- **处理**：已修（`ec4acf532`、`1db9ac5fb`）。`baseline.Env.IssueCredentials` 停用默认安排，要测定时安排的用例自己建实例；`TestDefaultSchedulesPaused` 拨过一周验证，再启用后反向验证。不经 `IssueCredentials` 建的环境仍保留默认安排。
+
+### 19. `TestFlowDigestAlert/ACT-DGA-15` 读到未写全的运行记录
+
+- **复现**：跑 `TestFlowDigestAlert`（`tests/e2e/automation`），偶发；run 45787097461。
+- **现象**：`digestalert_test.go:377: 不是预期的 JSON: unexpected end of JSON input`
+- **定性**：断言不稳（测试替身竞态）。替身 `accharness` 先建记录目录、后写 `materials.json`，用例看到目录就读文件。
+- **是否阻塞上线**：否。
+- **处理**：已修（`1db9ac5fb`）。输入写进点开头的临时目录后整体改名，`RunRecords` 跳过点开头的目录。
 
 ## 维护约定
 
