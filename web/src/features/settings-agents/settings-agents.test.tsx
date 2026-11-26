@@ -33,7 +33,7 @@ function hermes(rev: number, state: string, access = ["read", "edit", "full"]) {
 interface Opts { pending?: any[]; live?: any[]; tokens?: any[]; cards?: any[] }
 function server(o: Opts = {}) {
   const s = policyServer();
-  const st = { pending: o.pending ?? [], live: o.live ?? [], tokens: o.tokens ?? [], cards: o.cards ?? [] };
+  const st = { pending: o.pending ?? [], live: o.live ?? [], tokens: o.tokens ?? [], cards: o.cards ?? [], perm: {} as Record<string, any> };
   const calls: { method: string; url: string; body?: any }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -56,10 +56,19 @@ function server(o: Opts = {}) {
       return json(200, { credential: st.tokens.find((c) => c.id === m![1]) });
     }
     if (url === "/v1/agents") return json(200, { agents: st.cards, selected: {}, reason: "" });
-    m = /^\/v1\/settings\/agents\/([^/]+)\/tier$/.exec(url);
+    m = /^\/v1\/agents\/([^/]+)\/limits$/.exec(url);
     if (m) {
-      st.cards = st.cards.map((c) => (c.id === m![1] ? { ...c, tier: body.tier, tier_projects: body.projects } : c));
-      return json(200, { version: 2 });
+      const id = decodeURIComponent(m[1]);
+      const card = st.perm[id] ?? { groups: { view: {}, organize: {}, source_events: {} }, tool: "read" };
+      return json(200, { card, keys: [], executor_projects: 3, run_timeout_sec: 14400, long_runs: 4, short_runs: 2, chain_depth: 8,
+        trusted_only: !card.runs_all_messages, capture_off: 2, fixed_rules: ["runs_not_captured", "done_needs_evidence", "same_account_host"],
+        denied_week: 1, denied: [{ at: "2030-01-01T00:00:00Z", object: "itm_1", group: "purge", code: "tier_closed", reason: "tier_closed", exit: 23, web_url: "/purge" }] });
+    }
+    m = /^\/v1\/settings\/agents\/([^/]+)\/card$/.exec(url);
+    if (m && method === "PUT") {
+      const { version, ...card } = body;
+      st.perm[decodeURIComponent(m[1])] = card;
+      return json(200, { version: 2, card });
     }
     if (url.startsWith("/v1/audit/events")) return json(200, { events: [{ seq: 1, type: "item.phase_changed", object: "it_1", at: "2030-01-01T00:00:00Z" }] });
     if (url === "/v1/executors") return json(200, { executors: [] });
@@ -93,8 +102,7 @@ describe("设置 › Agent", () => {
     expect(connect.getByText("给它一把钥匙")).toBeInTheDocument();
     await userEvent.click(connect.getByRole("button", { name: "查看并允许" }));
     expect(c.getByText("hermes chat --oneshot")).toBeInTheDocument();
-    expect(c.getByRole("button", { name: "可改文件" })).toBeDisabled();
-    expect(c.getAllByText("先允许 APA 在后台启动它").length).toBeGreaterThan(0);
+    expect(await c.findByRole("radio", { name: /可改文件/ })).toBeDisabled();
 
     await userEvent.click(c.getByRole("button", { name: "归给它" }));
     await waitFor(() => expect(writes(s, "/settings/tokens/")).toEqual([{ method: "PATCH", url: "/v1/settings/tokens/k1", body: { harness: "hermes" } }]));
@@ -106,31 +114,27 @@ describe("设置 › Agent", () => {
     expect(c.getByText("已接好，可以用了")).toBeInTheDocument();
   });
 
-  it("T13：档位下列出声明里这一档的工具；没声明的档位置灰", async () => {
+  it("权限卡：工具档位列出声明里这一档的工具，没声明的置灰；十组按卡显示，高风险五组折叠；保存只调一次权限卡路由", async () => {
     const s = server({ live: [hermes(1, "active", ["read", "edit"])] });
     mount(s.impl, PAGE);
     const c = await card();
-    expect(c.getByTestId("tools-hermes")).toHaveTextContent("APA · 网页");
-    await userEvent.click(c.getByRole("button", { name: "可改文件" }));
-    expect(c.getByTestId("tools-hermes")).toHaveTextContent("APA · 网页 · 文件 · 终端 · 委派");
-    expect(c.getByRole("button", { name: /完全放开/ })).toBeDisabled();
-    expect(c.getByRole("button", { name: /完全放开/ })).toHaveTextContent("它没提供");
-  });
-
-  it("补充 C：完全放开先预览（含终端与不再逐项问你），确认后才选上；保存只改这个 Agent 的上限", async () => {
-    const s = server({ live: [hermes(1, "active")] });
-    s.doc.permission_cap = { default: "read", by_harness: { other: "edit" } };
-    mount(s.impl, PAGE);
-    const c = await card();
-    await userEvent.click(c.getByRole("button", { name: "完全放开" }));
-    const pv = c.getByRole("group", { name: "完全放开会给它：" });
-    expect(pv).toHaveTextContent("终端");
-    expect(pv).toHaveTextContent("不再逐项问你");
-    expect(c.getByRole("button", { name: "完全放开" })).toHaveAttribute("aria-pressed", "false");
-    await userEvent.click(within(pv).getByRole("button", { name: "确认完全放开" }));
-    expect(c.getByRole("button", { name: "完全放开" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(c.getByRole("button", { name: "保存后台权限" }));
-    await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: { other: "edit", hermes: "full" } } } }));
+    const perm = within(await c.findByRole("region", { name: "权限" }));
+    expect(perm.getByText(/APA · 网页/)).toBeInTheDocument();
+    await userEvent.click(perm.getByRole("radio", { name: /可改文件/ }));
+    expect(perm.getByText(/APA · 网页 · 文件 · 终端 · 委派/)).toBeInTheDocument();
+    expect(perm.getByRole("radio", { name: /完全放开/ })).toBeDisabled();
+    expect(within(perm.getByRole("group", { name: "替我拍板" })).getByRole("radio", { name: "不允许" })).toBeChecked();
+    expect(within(perm.getByRole("group", { name: "整理事项" })).getByRole("radio", { name: "允许" })).toBeChecked();
+    await userEvent.click(within(perm.getByRole("group", { name: "替我拍板" })).getByRole("radio", { name: "允许" }));
+    const purge = within(perm.getByRole("group", { name: "物理删除" }));
+    expect(purge.getByRole("combobox")).not.toHaveTextContent("一直");
+    await userEvent.click(purge.getByRole("radio", { name: "允许" }));
+    await userEvent.click(perm.getByRole("button", { name: "保存权限" }));
+    await waitFor(() => expect(writes(s, "/card")).toHaveLength(1));
+    const put = writes(s, "/card")[0];
+    expect(put.url).toBe("/v1/settings/agents/legacy%3Ahermes/card");
+    expect(put.body).toMatchObject({ tool: "edit", groups: { view: {}, organize: {}, source_events: {}, decide: {} }, version: 1 });
+    expect(put.body.groups.purge.until).toBeTruthy();
   });
 
   it("以 Agent 本人身份做事：声明不支持唤醒时「在对话里」不可选并说明；默认单独在后台做", async () => {
@@ -194,13 +198,16 @@ describe("设置 › Agent", () => {
     expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeChecked();
   });
 
-  it("档位只读一行并链到「我来拍板」，页上不再有档位卡；「它做过什么」直达按这个 Agent 筛好的记录", async () => {
-    const card1 = { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1, tier: "decide", tier_projects: [] };
+  it("限制清单列出权限卡之外影响它的设置、改不了的规则与最近被拦下的次数；「它做过什么」直达按这个 Agent 筛好的记录", async () => {
+    const card1 = { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1 };
     mount(server({ live: [hermes(1, "active")], cards: [card1] }).impl, "/settings/agents/agent_1");
     const c = await card("日常");
-    expect(c.queryByRole("region", { name: /能做到哪一档/ })).toBeNull();
-    expect(c.getByText("能替你做到：也替我拍板")).toBeInTheDocument();
-    expect(c.getByRole("link", { name: "在「我来拍板」改" })).toHaveAttribute("href", "/settings#tier-agent_1");
+    const others = within(await c.findByRole("region", { name: "还有这些设置会影响它" }));
+    expect(others.getByText("各项目允许的执行者：3 个项目设了名单")).toBeInTheDocument();
+    expect(others.getByText("8 层，超过后停下并告诉它")).toBeInTheDocument();
+    expect(others.getByText("只看信任发件人的")).toBeInTheDocument();
+    expect(others.getByText("报「完成」必须带结果证据")).toBeInTheDocument();
+    expect(others.getByText(/最近 7 天被拦下 1 次/)).toBeInTheDocument();
     const rec = within(c.getByRole("region", { name: "它做过什么" }));
     expect(rec.getByRole("link", { name: /Agent 改动/ })).toHaveAttribute("href", "/agent-changes?agent=agent_1");
     expect(rec.getByRole("link", { name: /规矩改动/ })).toHaveAttribute("href", "/rule-changes?agent=agent_1");

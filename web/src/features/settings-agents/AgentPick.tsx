@@ -4,12 +4,13 @@ import { errorText, useT } from "../../app/i18n";
 import { Go } from "../../app/page";
 import { useRaw } from "../../app/raw";
 
+import type { PermissionCardDoc } from "./Permission";
 import { strings } from "./strings";
 
 export interface Agent {
   id: string; harness: string; name: string; enabled: boolean; rev: number; values?: Record<string, string>;
-  /** 档位与二档的项目范围（GET /agents，设计 §14.3）；缺省是只整理。 */
-  tier?: string; tier_projects?: string[];
+  /** 这个 Agent 的权限卡（GET /agents，设计 §14.5）；没设过是默认卡。 */
+  permission?: PermissionCardDoc;
 }
 export interface AgentView {
   agents: Agent[];

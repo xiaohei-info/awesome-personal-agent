@@ -57,7 +57,8 @@ export interface Vocab {
   doctorCheck: Closed<typeof I.DOCTOR_CHECK>;
   grantReason: Closed<typeof I.GRANT_REASON>;
   rejectReason: Closed<typeof I.REJECT_REASON>;
-  agentTier: Closed<typeof I.AGENT_TIER>;
+  permissionGroup: Closed<typeof I.PERMISSION_GROUP>;
+  fixedRule: Closed<typeof I.FIXED_RULE>;
   revertWhy: Closed<typeof I.REVERT_WHY>;
   event: Closed<typeof I.EVENT> & Closed<typeof I.EVENT_INTERNAL>;
   materialKind: Closed<typeof I.MATERIAL_KIND> & Open;
@@ -219,13 +220,26 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   rejectReason: {
     hard_line: { label: "只有你本人能做" },
     reauth_required: { label: "要再输一次口令" },
-    tier_closed: { label: "等你确认：它的档位没放开" },
+    tier_closed: { label: "它的权限卡上这一组没开" },
     out_of_scope: { label: "超出它的钥匙能碰的范围" },
+    chain_depth_exceeded: { label: "连锁触发超过了设置的层数" },
   },
-  agentTier: {
-    organize: { label: "只整理", hint: "改事项、记进展、提建议，都能撤回" },
-    decide: { label: "也替我拍板", hint: "立项、回答问题、确认修改，你在改动页能撤回" },
-    rules: { label: "连日常规矩也替我改", hint: "安排、提醒、来源启停这类改得回来的设置" },
+  permissionGroup: {
+    view: { label: "查看事项、材料和来源原文", hint: "读事项、项目、材料、来源原文（含对话）、运行与判断记录" },
+    organize: { label: "整理事项", hint: "建议、改标题时间优先级项目、写进展、提问、委派、建项目、提交材料，都能撤回" },
+    source_events: { label: "处理来源事件", hint: "事件转建议或并入建议、忽略、拆分、撤销合并、重放、积压处理" },
+    decide: { label: "替我拍板", hint: "回答问题、接受或丢弃建议、直接立项、确认材料修订；你在改动页能撤回" },
+    rules: { label: "改日常规则与提醒", hint: "规则开关、定时安排、打扰与静音、判断阈值、来源启停、信任发件人" },
+    connect: { label: "接入来源", hint: "登记和修改来源（含脚本）、webhook 密钥" },
+    outbound: { label: "数据去向", hint: "来源与对话送到哪个模型、送多少，模型端点，笔记库" },
+    channels: { label: "渠道", hint: "渠道连接的增删改启停" },
+    agents: { label: "Agent 与执行者配置", hint: "执行者与接入声明、项目允许的执行者、项目仓库、默认与主 Agent、拉起方式" },
+    purge: { label: "物理删除", hint: "彻底删除事项、材料及其来源事件，删了找不回来" },
+  },
+  fixedRule: {
+    runs_not_captured: { label: "Agent 后台运行里的对话不会被记成新的来源事件" },
+    done_needs_evidence: { label: "报「完成」必须带结果证据" },
+    same_account_host: { label: "它和 APA 在同一台电脑上运行时，有终端就能直接碰到数据文件" },
   },
   revertWhy: {
     run_started: { label: "已拉起的运行撤不回" },
@@ -612,13 +626,26 @@ const en: typeof zh = {
   rejectReason: {
     hard_line: { label: "Only you can do this" },
     reauth_required: { label: "Needs your password again" },
-    tier_closed: { label: "Waiting for you: its tier isn't open" },
+    tier_closed: { label: "This group is not allowed on its permission card" },
     out_of_scope: { label: "Outside what its key can reach" },
+    chain_depth_exceeded: { label: "Chained triggers went past the set depth" },
   },
-  agentTier: {
-    organize: { label: "Organize only", hint: "Edit items, log progress, suggest; all undoable" },
-    decide: { label: "Also decide for me", hint: "Commit to items, answer questions, confirm edits; undoable on Changes" },
-    rules: { label: "Also change everyday rules", hint: "Schedules, reminders, source on/off and other settings you can change back" },
+  permissionGroup: {
+    view: { label: "View items, materials and source content", hint: "Read items, projects, materials, source content (incl. chats), runs and judgments" },
+    organize: { label: "Organize items", hint: "Suggest, edit title, time, priority, project, log progress, ask, delegate, create projects, submit materials; undoable" },
+    source_events: { label: "Handle source events", hint: "Turn events into or merge them into proposals, ignore, split, unmerge, replay, backlog" },
+    decide: { label: "Decide for me", hint: "Answer questions, accept or dismiss proposals, commit items, confirm revisions; undoable on Changes" },
+    rules: { label: "Change everyday rules and reminders", hint: "Rule modes, schedules, interruptions and mutes, judgment thresholds, sources on/off, trusted senders" },
+    connect: { label: "Connect sources", hint: "Register and change sources (incl. scripts), webhook keys" },
+    outbound: { label: "Data outbound", hint: "Which model gets source and chat content and how much, model endpoints, note vaults" },
+    channels: { label: "Channels", hint: "Add, change, turn on or off, remove channel connections" },
+    agents: { label: "Agents and executors", hint: "Executors and declarations, allowed executors, project repos, default and main Agent, how runs start" },
+    purge: { label: "Permanent deletion", hint: "Delete items, materials and their source events for good" },
+  },
+  fixedRule: {
+    runs_not_captured: { label: "Chats inside background runs are not recorded as new source events" },
+    done_needs_evidence: { label: "Reporting done needs result evidence" },
+    same_account_host: { label: "When it runs on the same computer as APA, a terminal can reach the data files directly" },
   },
   revertWhy: {
     run_started: { label: "A run that already started can't be undone" },

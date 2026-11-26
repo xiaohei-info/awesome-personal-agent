@@ -20,7 +20,7 @@ export interface Rejection {
 
 const isReason = (r?: string): r is (typeof REJECT_REASON)[number] => !!r && (REJECT_REASON as readonly string[]).includes(r);
 
-/** 谁的什么操作被拒、按三种口径说为什么、事项未被修改，以及下一步：你来处理，或去放开它的档位 / 看它的钥匙。英文原因只在显示原始值里。 */
+/** 谁的什么操作被拒、按三种口径说为什么、事项未被修改，以及下一步：你来处理，或去看它的权限卡 / 它的钥匙。英文原因只在显示原始值里。 */
 export function RejectionNote({ rejection, what, item }: { rejection?: Rejection; what: "answer" | "handle" | "edit"; item?: string }) {
   const t = useT(strings);
   const label = useLabel();

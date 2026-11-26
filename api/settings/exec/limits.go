@@ -20,7 +20,9 @@ import (
 type Fallback struct{ Long, Short, Chain int }
 
 // 改不了的规则（§14.5），稳定类别码，Web 按词表说明。
-var fixedRules = []string{"runs_not_captured", "done_needs_evidence", "same_account_host"}
+var fixedRules = []string{
+	"runs_not_captured", "done_needs_evidence", "same_account_host",
+}
 
 // deniedWindow 是"最近被拦下"的统计窗口；deniedShown 是随清单返回的明细条数上限。
 const (
