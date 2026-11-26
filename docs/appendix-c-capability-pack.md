@@ -59,23 +59,23 @@ kinds:
 
 能力包只声明来源事件怎样变成事项，不登记来源：来源的命令、周期、超时、`credentials_path` 都在 Source 登记里（主文档 §6.10），由内核经 stdin 交给来源进程（主文档 §9.2），能力包不能声明或改写。
 
-**source_rules**：确定性规则，能判定的不调模型。规则只处理没有被跟进消息归属挂靠的事件：同一来源对象的更新（如日程改标题）在规则之前写回它建出、仍未关闭的事项（主文档 §9.4），规则不必为更新写特例。没有任何规则命中的事件按 `then: screen` 处理。
+**source_rules**：确定性规则，能判定的不调模型。规则只处理没有被跟进消息归属挂靠的事件：同一来源对象的更新（如日程改标题）在规则之前写回它建出、仍未关闭的事项（主文档 §9.4），规则不必为更新写特例。没有任何规则命中的事件按 `then: process`（旧名 `screen`）处理。
 
 | 字段 | 语义 |
 |---|---|
 | `id` | 规则 id，包内唯一。规则模式按（包，规则 id）记在账本里，改 id 等于新规则 |
 | `match` | 来源类型（Source 登记的 `source_type`，如 `mail`、`calendar`、`reminder`，不随具体工具变化）或来源 id、事件类型、发送者，平铺的相等或成员判断 |
 | `where[]` | 字段条件，逐条都成立才命中。每条 `{field, op, value}`：`field` 是标准事件的顶层字段，或 `metrics.<指标名>`；`op` 取 `eq`、`ne`、`in`、`gt`、`gte`、`lt`、`lte`、`changed`、`crosses_above`、`crosses_below`。后三种只用于 `metrics`，与同一序列的上一次取值比较（主文档 §9.2），序列第一次出现时不成立；`changed` 不带 `value`。不支持表达式、嵌套、正则 |
-| `then` | 出口：`proposed`（默认）、`ignore`、`screen`、`extract`、`digest`、`alert`（主文档 §9.3）。`judge` 是 `screen` 的旧名，仍被接受 |
-| `kind` | `proposed` 出口直接映射的 kind；`screen`、`extract` 出口由起草决定，这里给出时作为缺省 |
-| `project_by` | `repo_remote`（按仓库远程地址归项目）、`fixed:<项目>`、`draft`（由起草从活动项目清单里选，可以选"无"）、`none`（规则不指定）。规则没有给出项目时取来源登记的默认项目，再没有则不归项目 |
+| `then` | 出口：`ignore`（不用看）、`digest`（汇入简报）、`alert`（直接提醒）、`process`（交给统一 judge 与批处理队列，旧名 `screen`、`extract`、`judge` 兼容为同义）、`proposed`（默认，结构化事件跳过 judge 第一题直通队列）（主文档 §9.3） |
+| `kind` | 规则直通时的缺省 kind |
+| `project_by` | `repo_remote`（按仓库远程地址归项目）、`fixed:<项目>`、`none`（规则不指定）。规则没有给出项目时取来源登记的默认项目，再没有则不归项目；旧值 `draft` 兼容读取并忽略 |
 | `on_update` | 关联键命中本人名下未委派、未关闭的事项时怎样处理：`refresh`（默认，用新事件刷新原事项）或 `attach`（作为挂靠消息记在原事项上，等待中的事项回到 `open`），见主文档 §9.4 |
 | `correlation_keys` | 从事件字段得到关联键的模板；来源程序已给出时可省略。关联键标识来源对象，同一对象的各版本应得到同一个键 |
 | `merge_key` | 合并键模板；省略时内核按链接或"标题加发送者"推导（主文档 §9.3） |
-| `screen`、`draft`、`prescreen`、`extract` | 各步所用的提示词模板名，省略时依次取内置的 `triage-screen`、`triage-draft`、`capture-prescreen`、`triage-extract`。`prescreen` 另可取保留字 `none`：`extract` 出口跳过预筛，直接抽取，不产生预筛的判断记录（主文档 §9.3）；包里不能有名为 `none` 的提示词模板 |
-| `notify_urgent` | `true` 时，这条规则产生的新建议即时提醒本人，起草或抽取判为"可以等"的与没有给出判断的不提醒（主文档 §9.3）。只用于 `then: screen` 与 `then: extract`。声明它的规则是动作类，`mode` 可省略（初始 `observe`） |
+| `screen` | 统一 judge 所用的判断型提示词模板名，省略时取内置的 `triage-screen`。~~`draft`、`prescreen`、`extract`~~ **已取消（2026-11-26）**：起草、预筛与抽取已由后台 Agent 批处理取代，旧包里仍声明这些字段时加载器兼容忽略 |
+| ~~`notify_urgent`~~ | **已取消（2026-11-26）**：紧急度由统一 judge 第二题判定并经立即队列处理，旧包里的声明兼容忽略 |
 | `accept` | 接受方式，默认 `manual`。声明 `auto` 的规则是动作类，`mode` 可省略（初始 `observe`） |
-| `mode` | `accept: auto`、`then: alert` 与 `notify_urgent: true` 的规则需要：它们是动作类规则，初始只能是 `off` 或 `observe`（缺省 `observe`）。`observe` 时只记录"本来会自动接受"或"本来会提醒"，在 Web 切 `auto` 后才生效。`alert` 规则必须带 `where[]` |
+| `mode` | `accept: auto` 与 `then: alert` 的规则需要：它们是动作类规则，初始只能是 `off` 或 `observe`（缺省 `observe`）。`observe` 时只记录"本来会自动接受"或"本来会提醒"，在 Web 切 `auto` 后才生效。`alert` 规则必须带 `where[]` |
 
 ```yaml
 source_rules:
