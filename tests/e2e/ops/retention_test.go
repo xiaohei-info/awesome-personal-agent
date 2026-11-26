@@ -118,25 +118,25 @@ func (f *fx) runDir(id string) string { return filepath.Join(f.Home, "runs", id)
 
 func (f *fx) dirExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// finishedRuns 触发 n 次一次性任务型运行（回执后结束），返回它们的 Run id。只认本次事项上的运行：
-// 拨测试时钟后到点的简报等定时安排也会拉起任务型运行。
+// promptHas 报告运行目录里的提示词含 marker（按模板认运行：任务型运行的目标是内核另建的事项，对不上触发事项）。
+func (f *fx) promptHas(id, marker string) bool {
+	b, _ := os.ReadFile(filepath.Join(f.runDir(id), "prompt.md"))
+	return strings.Contains(string(b), marker)
+}
+
+// finishedRuns 触发 n 次一次性任务型运行（回执后结束），返回等到结束的新 Run id。
+// 拨测试时钟后到点的简报也会拉起任务型运行，所以只认 acc-loop 模板的。
 func (f *fx) finishedRuns(n int) []string {
 	f.t.Helper()
-	targets := map[string]bool{}
+	known := f.runs()
 	for i := 0; i < n; i++ {
-		targets[f.task(fmt.Sprintf("RET 一次性运行 %d", i), "acc-once")] = true
+		f.task(fmt.Sprintf("RET 一次性运行 %d", i), "acc-once")
 	}
 	var ids []string
-	f.t.Cleanup(func() {
-		if f.t.Failed() && len(ids) < n {
-			f.t.Logf("本步事项 %v\n全部运行: %s\n审计事件: %s\n服务日志: %s", targets, f.apa(f.OBS, 0, "run", "list").Stdout,
-				f.webOK("GET", "/audit/events?limit=500", "", http.StatusOK), f.ServiceLog())
-		}
-	})
 	f.waitFor("一次性运行结束", 30*time.Second, func() bool {
 		ids = ids[:0]
 		for id, r := range f.runs() {
-			if targets[r.Target] && r.State == "succeeded" {
+			if _, old := known[id]; !old && r.State == "succeeded" && f.promptHas(id, "ACCLOOP") {
 				ids = append(ids, id)
 			}
 		}
@@ -201,11 +201,11 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 				t.Fatalf("运行目录应存在: %s", id)
 			}
 		}
-		hold := f.task("RET 在途运行", "acc-hold")
+		f.task("RET 在途运行", "acc-hold")
 		var live string
 		f.waitFor("在途运行开始", 30*time.Second, func() bool {
 			for id, r := range f.runs() {
-				if r.Target == hold && r.State == "running" {
+				if r.State == "running" && f.promptHas(id, "ACCHOLD") {
 					live = id
 					return true
 				}
