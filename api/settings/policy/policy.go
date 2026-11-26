@@ -202,24 +202,19 @@ var (
 	}
 )
 
-// mergeSections 是设置 › 跨来源合并（§9.3）：执行合并的 Agent（same、off；空即 same）与合并任务本身的设置。
-// 提示词的校验在内核（缺段、空段、少结论词、超长都是 400，不生效）；prompt_at 只读，提示词有变化时由这里记下保存时刻。
-var mergeSections = []section{
-	sect("merge_judge", rules, "/settings/merge", func(p *kpolicy.Policy) *string { return &p.MergeJudge }),
-	{key: "merge", tier: rules, page: "/settings/merge",
-		get: func(p *kpolicy.Policy) any { return p.Merge },
+// sourcePipelineSections 是设置 › 来源处理（§9.3，取代原跨来源合并设置）：执行 Agent、队列参数与两份可调提示词。
+var sourcePipelineSections = []section{
+	{key: "source_pipeline", tier: rules, page: "/settings/source-pipeline",
+		get: func(p *kpolicy.Policy) any { return p.SourcePipeline },
 		set: func(p *kpolicy.Policy, raw json.RawMessage) error {
-			var v kpolicy.MergeSettings
+			var v kpolicy.SourcePipeline
 			if err := strictDecode(raw, &v); err != nil {
 				return err
 			}
-			v.Prompt = strings.TrimSpace(v.Prompt)
-			v.PromptAt = p.Merge.PromptAt
-			if v.Prompt != p.Merge.Prompt {
-				now := clock.Now().UTC()
-				v.PromptAt = &now
-			}
-			p.Merge = v
+			v.Agent = strings.TrimSpace(v.Agent)
+			v.JudgePrompt = strings.TrimSpace(v.JudgePrompt)
+			v.BatchPrompt = strings.TrimSpace(v.BatchPrompt)
+			p.SourcePipeline = v
 			return nil
 		}},
 }
@@ -354,7 +349,7 @@ func Routes(st *store.Store, a *auth.Auth) core.RouteGroup {
 			"/settings/access-limits":   accessLimitSections,
 			"/settings/judgment":        judgmentSections,
 			"/settings/note-vaults":     noteVaultSections,
-			"/settings/merge":           mergeSections,
+			"/settings/source-pipeline": sourcePipelineSections,
 		} {
 			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, path, secs)})
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})

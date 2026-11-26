@@ -183,10 +183,9 @@ func TestV01OverridePackRejectedBuiltinWinsThenRepaired(t *testing.T) {
 	data := t.TempDir()
 	v01 := "---\nagent: judge\nquestion_type: yes_no\nconfidence_threshold: 0.7\nescalate_to: triage-draft\n---\n这条值得看吗 {item_id}\n"
 	writePack(t, data, map[string]string{
-		"inbound-triage/pack.yaml":                 mustBuiltin(t, "inbound-triage/pack.yaml"),
-		"inbound-triage/prompts/triage.md":         v01,
-		"inbound-triage/prompts/triage-draft.md":   mustBuiltin(t, "inbound-triage/prompts/triage-draft.md"),
-		"inbound-triage/prompts/triage-extract.md": mustBuiltin(t, "inbound-triage/prompts/triage-extract.md"),
+		"inbound-triage/pack.yaml":                mustBuiltin(t, "inbound-triage/pack.yaml"),
+		"inbound-triage/prompts/triage.md":        v01,
+		"inbound-triage/prompts/source-batch.md":  mustBuiltin(t, "inbound-triage/prompts/source-batch.md"),
 	})
 	var reported []Rejection
 	l, rej := load(t, Options{Builtin: rootpacks.FS, DataDir: data, Kinds: newKinds(), OnReject: func(r Rejection) { reported = append(reported, r) }})

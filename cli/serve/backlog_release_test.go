@@ -60,7 +60,10 @@ func TestBacklogRejudgeOnUpgradedFixture(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, b
 	}
-	type event struct{ ID, Subject, Disposition string }
+	type event struct {
+		ID, Subject, Disposition string
+		Queue                    string `json:"queue"`
+	}
 	sources := func() (ids []string) {
 		_, b := do("GET", "/sources", m.Tokens["observer"], nil, "")
 		var srcs struct{ Sources []struct{ ID string } }
@@ -152,13 +155,13 @@ func TestBacklogRejudgeOnUpgradedFixture(t *testing.T) {
 	}
 	res := rejudge(`{}`)
 	var fresh []event
-	for _, e := range events("proposed") {
-		if !proposedBefore[e.ID] {
+	for _, e := range events("pending") {
+		if e.Queue != "" {
 			fresh = append(fresh, e)
 		}
 	}
 	if len(fresh) != 5 {
-		t.Fatalf("%d new suggestions, want exactly 5: %+v", len(fresh), fresh)
+		t.Fatalf("%d newly queued events, want exactly 5: %+v", len(fresh), fresh)
 	}
 	for _, e := range fresh {
 		if !strings.Contains(e.Subject, "[FX-HIGH]") {
@@ -205,7 +208,7 @@ func TestBacklogRejudgeOnUpgradedFixture(t *testing.T) {
 	// 同一天再放开：只推迟，不放行。
 	for _, body := range []string{`{}`, `{"limit":3}`} {
 		again := rejudge(body)
-		if again.Requeued != 0 || again.Deferred != remaining || len(events("unjudged,expired")) != remaining || len(events("proposed")) != len(proposedBefore)+5 {
+		if again.Requeued != 0 || again.Deferred != remaining || len(events("unjudged,expired")) != remaining || len(events("proposed")) != len(proposedBefore) {
 			t.Fatalf("same day %s: %+v", body, again)
 		}
 	}

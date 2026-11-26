@@ -8,6 +8,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 )
 
@@ -22,7 +23,7 @@ func (e *env) disposition(source, id string) domain.SourceEvent {
 	return domain.SourceEvent{}
 }
 
-// ACT-IRL-02：then: proposed 省略 kind 也直接成为 task 建议，不调模型。
+// ACT-IRL-02：then: proposed 省略 kind 也直接成为 task 建议，跳过第一题，只问第二题（不调生成端点）。
 func TestProposedExitDefaultsToTaskWithoutModel(t *testing.T) {
 	e := newEnv(t, true)
 	e.emit("src_x", "exits", ev("p1", "x.prop", "续办证件", nil))
@@ -33,8 +34,8 @@ func TestProposedExitDefaultsToTaskWithoutModel(t *testing.T) {
 	if it := e.item(d.Item); it.Phase != domain.PhaseProposed || it.Kind != "task" || it.Title != "续办证件" {
 		t.Fatalf("item %+v", it)
 	}
-	if n := len(e.stub.Requests()); n != 0 {
-		t.Fatalf("model called %d times", n)
+	if n := len(e.cls.Batches()); n != 1 || e.cls.Batches()[0].Questions != 1 {
+		t.Fatalf("classifier batches %+v, want 1 batch with 1 urgent question", e.cls.Batches())
 	}
 }
 
@@ -64,7 +65,7 @@ func TestWhereEqAndIn(t *testing.T) {
 			t.Errorf("%s: %s, want %s", id, got, disp)
 		}
 	}
-	if n := questions(e); n != 2 { // 只有 w2、w6 经过判断
+	if n := questions(e); n != 6 { // w1/w5 规则直通只问 1 题（急不急），w2/w6 走完整 judge 问 2 题
 		t.Fatalf("model called %d times", n)
 	}
 }
@@ -134,17 +135,14 @@ func TestProjectByFixedNoneAndSourceDefault(t *testing.T) {
 	}
 }
 
-// extract 出口交给注入的处理器。
-func TestExtractExitRoutesToHandler(t *testing.T) {
+// 旧名 then: extract 与 process 同义，统一走 judge 与队列，不调用生成端点抽取。
+func TestExtractExitNormalizesToProcess(t *testing.T) {
 	e := newEnv(t, true)
-	var routed []string
-	e.svc.o.Extract = func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error {
-		routed = append(routed, ev.ID+"@"+rule)
-		return e.svc.dispose(ctx, nil, ev, disposeIn{Event: ev.ID, Rule: rule, Disposition: domain.DispositionIgnored})
-	}
+	e.screen(0.9)
 	e.emit("src_x", "exits", ev("c1", "x.chat", "群聊", nil))
-	if len(routed) != 1 || !strings.HasSuffix(routed[0], "@inbound-triage/source_rules/x-chat") {
-		t.Fatalf("routed %v", routed)
+	got := e.disposition("src_x", "c1")
+	if got.Judgment == "" || got.QueueLevel != runner.LevelUrgent || len(e.stub.Requests()) != 0 {
+		t.Fatalf("got %+v requests %d", got, len(e.stub.Requests()))
 	}
 }
 
@@ -264,7 +262,8 @@ func TestInboundScreenSubmitsInBatches(t *testing.T) {
 	for _, b := range e.cls.Batches() {
 		got = append(got, b.Questions)
 	}
-	if len(got) != 2 || got[0]+got[1] != 40 || got[0] > 32 || got[1] > 32 {
-		t.Fatalf("classifier batches %v, want 32+8", got)
+	// 40 条事件 × 2 题 = 80 题，按 max_batch=32 分成 3 批（32+32+16）。
+	if len(got) != 3 || got[0]+got[1]+got[2] != 80 || got[0] > 32 || got[1] > 32 || got[2] > 32 {
+		t.Fatalf("classifier batches %v, want 32+32+16", got)
 	}
 }

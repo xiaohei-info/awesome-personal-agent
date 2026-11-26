@@ -97,7 +97,7 @@ func TestBatchSelectedAcceptMergesSameObjectAndUndoes(t *testing.T) {
 	if e.item(a).Phase != domain.PhaseOpen || e.item(c).Phase != domain.PhaseOpen || e.item(b).Phase != domain.PhaseDropped || e.item(d).Phase != domain.PhaseProposed {
 		t.Fatalf("phases: a=%s b=%s c=%s d=%s", e.item(a).Phase, e.item(b).Phase, e.item(c).Phase, e.item(d).Phase)
 	}
-	if sw := e.item(b).Proposal.Sweep; sw.By != domain.SweepByBulk || sw.Action != domain.SweepMerge || sw.Target != a || sw.Batch != batch || sw.Prev == nil || sw.Prev.State != "pending" {
+	if sw := e.item(b).Proposal.Sweep; sw == nil || sw.By != domain.SweepByBulk || sw.Action != domain.SweepMerge || sw.Target != a || sw.Batch != batch {
 		t.Fatalf("b's fold record: %+v", sw)
 	}
 	pa := e.item(a).Proposal
@@ -143,7 +143,7 @@ func TestBatchSelectedAcceptMergesSameObjectAndUndoes(t *testing.T) {
 			t.Errorf("%s not back to proposed: %s", id, e.item(id).Phase)
 		}
 	}
-	if got := e.item(b).Proposal; got.Sweep == nil || got.Sweep.State != "pending" || got.Sweep.By != "" || slices.Contains(got.NotSame, a) {
+	if got := e.item(b).Proposal; got.Sweep != nil || slices.Contains(got.NotSame, a) {
 		t.Fatalf("b's record must be restored, without not_same: %+v", got)
 	}
 	if got := e.item(a).Proposal; len(got.Absorbed) != 0 || !slices.Equal(got.Sources, aBefore.Proposal.Sources) || slices.Contains(got.NotSame, b) {
@@ -219,7 +219,7 @@ func TestBatchSelectedConflictsDuringRunAreSkipped(t *testing.T) {
 	if r := resultOf(res, a); r.OK || r.Skip != SkipHandled {
 		t.Fatalf("a: %+v", res)
 	}
-	if r := resultOf(res, b); !r.OK || r.Do != "accept" || e.item(b).Phase != domain.PhaseOpen || e.item(b).Proposal.Sweep.By == domain.SweepByBulk {
+	if r := resultOf(res, b); !r.OK || r.Do != "accept" || e.item(b).Phase != domain.PhaseOpen || (e.item(b).Proposal.Sweep != nil && e.item(b).Proposal.Sweep.By == domain.SweepByBulk) {
 		t.Fatalf("b should be pulled back out of a and accepted on its own: %+v %+v", r, e.item(b).Proposal.Sweep)
 	}
 	if r := resultOf(res, d); r.OK || r.Skip != SkipHandled || !resultOf(res, c).OK {

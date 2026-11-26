@@ -24,14 +24,13 @@ const (
 	probeTimeout = 30 * time.Second
 )
 
-// 起草建议的模板：生成端点的真实用途。自检用它的结构约束与提示词探测，端点只答得了小样例却答不了它时才看得出来。
-// 与 kernel/inbound 的 DefaultPack、DraftTemplate 同值（inbound 的测试对照）。输入形状同入站起草：项目与候选清单为空。
+// 决策卡片文案的模板：生成端点的真实用途（§8）。自检用它的结构约束与提示词探测，端点只答得了小样例却答不了它时才看得出来。
 const (
-	DraftPack     = "inbound-triage"
-	DraftTemplate = "triage-draft"
+	DraftPack     = "decision-card"
+	DraftTemplate = "decision-card-copy"
 
-	sampleDraftInput    = `{"source":"doctor-sample","source_type":"cli","event_type":"mail.received","subject":"Send the quarterly report by Friday","link":"","sender":"sample@example.com","sender_verified":false,"occurred_at":"2026-01-01T00:00:00Z","correlation_hint":"","projects":[],"candidates":[],"today":"2026-01-01"}`
-	sampleDraftMaterial = "Please send the quarterly report to finance by Friday."
+	sampleDraftInput    = `{"item_id":"itm_doctor_sample","title":"选择发布时间","options":[{"id":"A","label":"今晚发布"},{"id":"B","label":"明天上午发布"}]}`
+	sampleDraftMaterial = "服务已完成灰度验证，请选择正式发布窗口：A 今晚 20:00，B 明天上午 10:00。"
 )
 
 // draftProbe 取生效中的起草模板，组出探测请求；包或模板不可用（包被拒载、不是生成型）返回 false，由调用方退回内置小样例。

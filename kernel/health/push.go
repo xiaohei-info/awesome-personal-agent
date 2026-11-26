@@ -120,9 +120,6 @@ func (p *Pusher) notice(tx *store.Tx, pol policy.Policy, e domain.Event, fresh *
 		switch {
 		case e.Type == domain.EvItemCreated && pl.Item.Phase == domain.PhaseProposed:
 			*fresh++
-			if pol.MergeJudge != policy.MergeOff {
-				return attention.Notice{}, false, nil
-			}
 		case e.Type == domain.EvItemPhaseChanged && pl.Op == "merge.fold":
 			*fresh = max(*fresh-1, 0)
 			return attention.Notice{}, false, nil

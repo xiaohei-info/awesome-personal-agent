@@ -12,6 +12,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -47,6 +48,12 @@ func registerPropose(x *command.Executor) error {
 			if err := applyMerge(c, v.Event, v.Item, v.mergeFields); err != nil {
 				return nil, err
 			}
+			if v.WouldAccept {
+				p, _ := json.Marshal(map[string]any{"rule": v.Rule, "item": v.Item, "would_do": "accept"})
+				if _, err := c.Emit(domain.Event{Type: rules.EvObserved, Object: v.Item, Reason: "observe: would auto-accept by " + v.Rule, Payload: p}); err != nil {
+					return nil, err
+				}
+			}
 			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionProposed, "item": v.Item, "merged": v.Merge})
 			_, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p})
 			return nil, err
@@ -68,10 +75,12 @@ func (s *Service) ProposeInto(ctx context.Context, id command.Identity, event, i
 		return domain.SourceEvent{}, err
 	}
 	var (
-		item string
-		mf   mergeFields
-		ev   domain.SourceEvent
-		err  error
+		item       string
+		mf         mergeFields
+		ev         domain.SourceEvent
+		autoRule   string
+		autoMode   string
+		err        error
 	)
 	if strings.TrimSpace(into) != "" {
 		into = strings.TrimSpace(into)
@@ -100,7 +109,7 @@ func (s *Service) ProposeInto(ctx context.Context, id command.Identity, event, i
 			},
 		}
 	} else {
-		if item, mf, err = s.draftProposal(ctx, id, event, true); err != nil {
+		if item, mf, autoRule, autoMode, err = s.draftProposal(ctx, id, event, true); err != nil {
 			return ev, err
 		}
 	}
@@ -108,9 +117,17 @@ func (s *Service) ProposeInto(ctx context.Context, id command.Identity, event, i
 	if strings.TrimSpace(into) != "" {
 		reason = "merged into proposal " + into
 	}
-	d := disposeIn{Event: event, Item: item, Reason: reason, mergeFields: mf}
-	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
+	d := disposeIn{Event: event, Item: item, Rule: autoRule, WouldAccept: autoRule != "" && autoMode == rules.ModeObserve && !mf.Merge, Reason: reason, mergeFields: mf}
+	if _, err := s.do(ctx, id, autoRule, "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
 		return ev, err
+	}
+	if autoRule != "" && autoMode == rules.ModeAuto && !mf.Merge {
+		rule := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + autoRule, Via: domain.ViaRule, OnBehalfOf: s.o.Owner}, Level: authz.LevelDelegate}
+		if _, err := s.do(ctx, rule, autoRule, "inbound:accept:"+event, "item.transition",
+			map[string]any{"id": item, "to": domain.PhaseOpen, "reason": "rule " + autoRule + " auto accept"},
+			command.Chain{Mode: command.ChainInherit, From: item}); err != nil {
+			return ev, err
+		}
 	}
 	err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, event); return })
 	return ev, err
@@ -122,12 +139,12 @@ func (s *Service) DraftProposal(ctx context.Context, id command.Identity, event 
 	s.proposing.Lock()
 	defer s.proposing.Unlock()
 	// 调用方的命令不带合并信息，所以这里不并入已有建议，只新建。
-	item, _, err := s.draftProposal(ctx, id, event, false)
+	item, _, _, _, err := s.draftProposal(ctx, id, event, false)
 	return item, err
 }
 
 // draftProposal 的 merge 为真时按合并键找已有建议（§9.3），返回的 mergeFields 由调用方带进处置命令。
-func (s *Service) draftProposal(ctx context.Context, id command.Identity, event string, merge bool) (string, mergeFields, error) {
+func (s *Service) draftProposal(ctx context.Context, id command.Identity, event string, merge bool) (string, mergeFields, string, string, error) {
 	var (
 		sn snapshot
 		ev domain.SourceEvent
@@ -139,26 +156,26 @@ func (s *Service) draftProposal(ctx context.Context, id command.Identity, event 
 		return sn.loadFacts(tx, s.o.Now())
 	})
 	if err != nil {
-		return "", mergeFields{}, err
+		return "", mergeFields{}, "", "", err
 	}
 	if item, made := sn.made[event]; made {
-		return item, s.resumeFields(ctx, ev), nil
+		return item, s.resumeFields(ctx, ev), "", "", nil
 	}
 	return s.proposeItem(ctx, id, sn, ev, merge)
 }
 
-func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent, merge bool) (string, mergeFields, error) {
+func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent, merge bool) (string, mergeFields, string, string, error) {
 	src, err := sn.source(ev.SourceID)
 	if err != nil {
-		return "", mergeFields{}, err
+		return "", mergeFields{}, "", "", err
 	}
 	m, err := s.match(src, ev)
 	if err != nil {
-		return "", mergeFields{}, err
+		return "", mergeFields{}, "", "", err
 	}
 	project, err := s.project(sn, src, ev, m)
 	if err != nil {
-		return "", mergeFields{}, err
+		return "", mergeFields{}, "", "", err
 	}
 	if project == "" {
 		project = sn.inboxID
@@ -167,12 +184,21 @@ func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snaps
 	if m != nil && m.rule.Kind != "" {
 		kind = domain.Kind(m.rule.Kind)
 	}
+	var autoRule, autoMode string
+	if m != nil && m.rule.Accept == rules.ModeAuto {
+		autoRule = m.key()
+		autoMode = sn.modes[autoRule]
+		if autoMode == "" {
+			autoMode = rules.ModeObserve
+		}
+	}
 	p := proposal{kind: kind, title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "manually proposed from the source page"}
 	if !merge {
 		item, err := s.createItem(ctx, id, "", src, ev, p, project)
-		return item, mergeFields{}, err
+		return item, mergeFields{}, autoRule, autoMode, err
 	}
-	return s.place(ctx, id, "", src, ev, p, project)
+	item, mf, err := s.place(ctx, id, "", src, ev, p, project)
+	return item, mf, autoRule, autoMode, err
 }
 
 // ---- 合并键（§9.3 第 6 步）：同一件事从两个来源来时只成为一条建议 ----
@@ -226,11 +252,6 @@ func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 			p.Sources = append(p.Sources, ev.ID)
 		}
 		p.MergeKey = m.MergeKey
-		if cur.Phase == domain.PhaseProposed { // 规则已自动接受的不再归类
-			if err := markPending(c.Tx, &p, ev.SourceID); err != nil {
-				return err
-			}
-		}
 		if m.AttachTo != "" { // 命中已接受事项：推荐固定为补到它，覆盖起草的推荐
 			if _, err := items.Get(c.Tx, m.AttachTo); err != nil {
 				return err

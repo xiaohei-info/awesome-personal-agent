@@ -52,6 +52,7 @@ func (c *spyChat) Complete(_ context.Context, _ policy.GenerateEndpoint, req mod
 func setupUnifiedJudgeEnv(t *testing.T, cls *spyClassifier, chat *spyChat, extraPackYAML string, judgePrompt string) *env {
 	t.Helper()
 	e := newEnv(t, false)
+	e.noAutoBatch = true
 	// 用真实的内置 inbound-triage 包，外加可选自定义包（如 chat-patrol）
 	userDir := ""
 	if extraPackYAML != "" {

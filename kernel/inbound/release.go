@@ -95,12 +95,12 @@ func dayWindow(now time.Time) (time.Time, time.Time) {
 	return start, start.AddDate(0, 0, 1)
 }
 
-// releasedToday 是今天从积压放开进入建议流的来源事件数：今天被放开重判、现在处置为 proposed 的。
+// releasedToday 是今天从积压放开进入处理线/建议流的来源事件数：今天被放开重判、已入队或已成建议的。
 func releasedToday(tx *store.Tx, now time.Time) (int, error) {
 	from, to := dayWindow(now)
 	r, err := tx.Query(`SELECT COUNT(DISTINCT e.object) FROM eventlog_event e
 		JOIN sources_runner_event r ON r.id = e.object
-		WHERE e.type = ? AND e.tombstone = 0 AND e.at >= ? AND e.at < ? AND e.payload LIKE '%"release":true%' AND r.disposition = 'proposed'`,
+		WHERE e.type = ? AND e.tombstone = 0 AND e.at >= ? AND e.at < ? AND e.payload LIKE '%"release":true%' AND (r.disposition = 'proposed' OR r.queue_state != '')`,
 		EvRequeued, from.UnixNano(), to.UnixNano())
 	if err != nil {
 		return 0, err

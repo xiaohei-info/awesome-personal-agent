@@ -1,28 +1,17 @@
-// Package inbound 是入站流水线（设计 §9.3、§5.6）：把落盘后 disposition 为 pending 的来源事件依次送过
-// 确定性规则（能力包 source_rules）、初筛（判断型是非题）、起草（生成型），最后落成 proposed 事项。
+// Package inbound 是来源处理线（设计 §9.3、§5.6）：把落盘后 disposition 为 pending 的来源事件依次送过
+// 跟进消息归属（§9.4）、来源规则（能力包 source_rules）、统一两题 judge（要不要处理、急不急），通过的事件进待处理队列，
+// 由队列节拍按批拉起无头后台 Agent（source_batch）用 apa CLI 统一落账并知会主会话。
 //
-//   - 规则 then: proposed 直接映射 kind 与项目，不调模型；then: ignore 只记 ignored；then: digest 只记 digest；
-//     then: screen（旧名 judge）以及没有任何规则命中的事件交初筛；then: extract 先预筛再抽取多条候选。
-//   - 初筛是一道是非题（默认模板 triage-screen，规则的 screen 可换）：分类端点先答，不确定带内由对话端点重答同一题，
-//     各级都未定取保守默认"是"并标"把握低"（级联在 kernel/agents/direct）。否：忽略并留痕，不起草；是：起草。
-//   - 起草（默认模板 triage-draft，规则的 draft 可换）给全标题、摘要、类别、项目、日期和推荐处置。"补到已有事项"只能从内核给的
-//     候选清单（同项目或同发送者、标题相近的未关闭事项）里选，清单外的 id、未登记的项目、不合 schema 的输出都不采纳；
-//     起草失败（端点不可用、输出不合 schema）不挡路：标题取来源事件的标题，摘要留空。
-//   - 两个端点都不可用（未配置或持续失败）、规则又判不了的事件记 unjudged 并记下原因，留在来源页，不进建议流，也不当作失败；
-//     其他错误（模板缺失）原样返回，事件保持 pending。
-//   - 因模型不可用而未判定的事件在模型恢复后自动重判（backlog.go）：放回 pending 再走一遍本流水线；超出时限的转 expired。
-//   - accept: auto 的规则：observe 档事项照常以 proposed 进入，只记一条"本来会自动接受"；auto 档（只在 Web 切换）
-//     直接进 open，Event 记策略版本与规则 id；off 档按普通规则处理。
-//   - 事项与处置都经命令模型写入，每个来源事件的写入幂等，崩溃后重跑不产生重复事项。
-//   - 积压（unjudged、expired）由本人手动转建议（propose.go，只走"进入 proposed"这一步，不再判断、不自动接受）或忽略（backlog.go）。
+//   - 规则出口只剩四种含义：ignore（不用看）、digest（汇入简报）、alert（直接提醒）、process（交给处理，含旧名 screen/judge/extract）。
+//     then: proposed（日历、提醒等结构化规则直通）跳过"要不要处理"，可判时只问"急不急"后直接进队列。
+//   - 统一 judge 一次批量提交两道是非题（默认模板 triage-screen）；不处理记 ignored，未定按处理/不急，模型不可用或外发未选记 unjudged。
+//   - 起草（triage-draft）、抽取（triage-extract）、预筛（capture-prescreen）、批量归类（sweep）与紧急建议提醒均已取消（2026-11-26）。
+//   - 积压（unjudged、expired）由本人显式放开或手动转建议/忽略/挂靠；批处理 Agent 同样通过 propose/ignore/attach 三个命令落账。
 //
-// 跟进消息归属（§9.4）不在本包：它在判断之前拦截事件，由 kernel-followmsg 负责，经 Options.Intercept 接入；
-// 命中的挂靠后结束，没命中但有关联线索的，线索随判断输入与事项理由带走。
-// 本包不起子进程、不调网络；模型调用只经注入的 Judge。
+// 本包不起子进程、不调网络；模型调用只经注入的 Judge，后台运行只经外呼队列。
 package inbound
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -44,7 +33,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -60,13 +48,9 @@ const (
 	// EvDisposed 是处置的审计记录，不在对外稳定的事件类型表里。
 	EvDisposed = "inbound.disposed"
 
-	// DefaultPack 与 Template 是没有规则命中时判断型取用的包与模板名。
+	// DefaultPack 与 Template 是没有规则命中时统一 judge 取用的包与模板名。
 	DefaultPack = "inbound-triage"
-	// Template 是初筛的默认模板，DraftTemplate、PrescreenTemplate、ExtractTemplate 是起草、对话预筛与抽取的默认模板（规则的 screen、draft、prescreen、extract 可换）。
-	Template          = "triage-screen"
-	DraftTemplate     = "triage-draft"
-	PrescreenTemplate = "capture-prescreen"
-	ExtractTemplate   = "triage-extract"
+	Template    = "triage-screen"
 
 	// ChoiceIgnore 是 verdict 里表示"不值得建议"的取值（选择题的枚举 ignore 同义）。
 	ChoiceIgnore = "ignore"
@@ -119,16 +103,11 @@ type Options struct {
 	BacklogReleasePerDay int
 	// Series 是变化类字段条件（changed、crosses_*）取同一序列上一次取值的来源；可为空（此时这类条件恒不成立）。
 	Series rules.Series
-	// Extract 可替换 then: extract 的内置处理（测试用）；Alert 产出 then: alert 的提醒（kernel/metrics）。
-	// Alert 没注入时命中 alert 出口的事件保持 pending 并报错，不假装处理。
-	Extract Exit
-	Alert   *metrics.Alerter
+	// Alert 产出 then: alert 的提醒（kernel/metrics）；没注入时命中 alert 出口的事件保持 pending 并报错，不假装处理。
+	Alert *metrics.Alerter
 	// Batch 配置来源处理线的队列调度、批处理运行与结论投递（§9.3、§13.6）。
 	Batch BatchOptions
 }
-
-// Exit 处理一个出口：命中规则 m 的事件 ev 由它写完处置（经命令模型）。
-type Exit func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error
 
 // Service 消费 pending 的来源事件。
 type Service struct {
@@ -140,14 +119,8 @@ type Service struct {
 	// rejudging 让同一时刻只有一轮自动重判；probe 是模型仍不可用时的退避（只在内存，重启后立即再探一次）。
 	rejudging sync.Mutex
 	probe     probeState
-	// sweeping 让同一时刻只有一批合并归类；sweepAfter 是模型调用失败后的退避（只在内存）。
-	sweeping   sync.Mutex
-	sweepAfter time.Time
 	// batching 串行化队列节拍，避免并发重复取批。
 	batching sync.Mutex
-	// sweepCap 非零时是本进程里一批的条数上限：某批同样大小两次回答都不完整后降到 batch_size 的一半。
-	// shortcut: 只在内存，重启后回到策略批量；要长期降就在设置里把批量改小。
-	sweepCap atomic.Int32
 	// captures 跟踪捕获触发的后台处理；测试在关账本前等它们退出，否则提交后钩子会撞上已关闭的连接。
 	captures sync.WaitGroup
 }
@@ -194,37 +167,7 @@ type disposeIn struct {
 	Conditions []metrics.Condition `json:"conditions,omitempty"`
 	Alert      bool                `json:"alert,omitempty"`
 	WouldAlert bool                `json:"would_alert,omitempty"`
-	// Placed 是 extract 出口里每条候选各自的合并信息（Item 是它落在的事项）；其余出口用上面内嵌的 mergeFields。
-	Placed []placed `json:"placed,omitempty"`
-	// notify_urgent（§9.3）：NotifyUrgent 为真（规则开启）时，这次新建的建议里 proposal.urgent 为真且仍是 proposed 的在同一事务内产出提醒；
-	// WouldNotify 为真（规则在观察档）时只为它们各记一条 rule.observed“本来会提醒”。
-	NotifyUrgent bool `json:"notify_urgent,omitempty"`
-	WouldNotify  bool `json:"would_notify,omitempty"`
-	// Draft 是第 5 步起草的结果，只在初筛后进建议流的处置上有（处置载荷的 draft，§9.3）。
-	Draft *Draft `json:"draft,omitempty"`
-	// Material 是起草或抽取这次调用送给生成端点的资料裁剪量：送出字符数、裁剪前字符数与方式（§8.4）。没有调用过的处置没有；
-	// 升级前的处置也没有。
-	Material *budget.Trace `json:"material,omitempty"`
 }
-
-// Draft 是起草的结果：Outcome 为 ok、failed 或 skipped；Code 说明没成的原因。
-type Draft struct {
-	Outcome string `json:"outcome"`
-	Code    string `json:"code,omitempty"`
-}
-
-// 起草的结果与原因（处置载荷 draft，附录 B.6）。
-const (
-	DraftOK      = "ok"
-	DraftFailed  = "failed"
-	DraftSkipped = "skipped"
-
-	DraftCodeOutbound    = "outbound"    // 外发范围不含生成端点
-	DraftCodeUnavailable = "unavailable" // 生成端点不可用
-	DraftCodeSchema      = "schema"      // 输出不合起草的格式
-	DraftCodeUnsettled   = "unsettled"   // 模型没给出结论
-	DraftCodeModel       = "model"       // 其他调用错误
-)
 
 func parseDispose(in json.RawMessage) (disposeIn, error) {
 	var v disposeIn
@@ -264,11 +207,6 @@ func (s *Service) Register(x *command.Executor) error {
 			if err := applyMerge(c, v.Event, v.Item, v.mergeFields); err != nil {
 				return nil, err
 			}
-			for _, pl := range v.Placed {
-				if err := applyMerge(c, v.Event, pl.Item, pl.mergeFields); err != nil {
-					return nil, err
-				}
-			}
 			payload := map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
 				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment, "merged": v.Merge}
 			if v.QueueLevel != "" {
@@ -277,12 +215,6 @@ func (s *Service) Register(x *command.Executor) error {
 			}
 			if len(v.Items) > 0 {
 				payload["items"] = v.Items
-			}
-			if v.Draft != nil {
-				payload["draft"] = v.Draft
-			}
-			if v.Material != nil {
-				payload["material"] = v.Material
 			}
 			if v.Judgment != "" { // 并入结论：记录过了保留期，apa why 仍从这里读出答案与定案者（§6.16）
 				rec, err := record.Get(c.Tx, v.Judgment)
@@ -313,11 +245,6 @@ func (s *Service) Register(x *command.Executor) error {
 			if v.WouldAlert {
 				return nil, s.observeAlert(c, v)
 			}
-			if v.NotifyUrgent || v.WouldNotify {
-				if err := s.urgent(c, v); err != nil {
-					return nil, err
-				}
-			}
 			if v.WouldAccept {
 				p, _ := json.Marshal(map[string]any{"rule": v.Rule, "item": v.Item, "would_do": "accept"})
 				_, err := c.Emit(domain.Event{Type: rules.EvObserved, Object: v.Item, Reason: "observe: would auto-accept by " + v.Rule, Payload: p})
@@ -335,18 +262,6 @@ func (s *Service) Register(x *command.Executor) error {
 		return err
 	}
 	if err := registerSplit(x); err != nil {
-		return err
-	}
-	if err := registerSweep(x); err != nil {
-		return err
-	}
-	if err := registerRepair(x); err != nil {
-		return err
-	}
-	if err := registerMarkPending(x); err != nil {
-		return err
-	}
-	if err := registerRetryRejected(x); err != nil {
 		return err
 	}
 	if err := registerUnmerge(x); err != nil {
@@ -393,12 +308,7 @@ type snapshot struct {
 	projs   []domain.Project
 	inboxID string
 	policy  int
-	locs    []string   // 入站初筛与起草实际会调用的端点的位置：外发范围按它们取
-	open    []openItem // 未关闭的事项：预筛、起草、抽取共用清单的来源（§9.3）
-	// recentDone 与 activeProposals 是抽取前的去重清单（§9.3）：最近 7 天已完成的事项、当前仍待处理的建议。
-	// 模型看不到它们就会把刚做完、刚抽过的事再抽一遍。
-	recentDone      []recentItem
-	activeProposals []recentItem
+	locs    []string // 统一 judge 实际会调用的端点的位置：外发范围按它们取
 }
 
 func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
@@ -412,7 +322,7 @@ func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
 }
 
 // loadFacts 读事件之外的账本事实。
-func (sn *snapshot) loadFacts(tx *store.Tx, now time.Time) error {
+func (sn *snapshot) loadFacts(tx *store.Tx, _ time.Time) error {
 	srcs, err := registry.List(tx)
 	if err != nil {
 		return err
@@ -443,28 +353,8 @@ func (sn *snapshot) loadFacts(tx *store.Tx, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	cutoff := now.Add(-recentDoneWindow)
 	sn.made = map[string]string{}
 	for _, it := range its {
-		if it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting || it.Phase == domain.PhaseNeedsInput {
-			c := openItem{ID: it.ID, Title: it.Title, Project: it.Project, updated: it.UpdatedAt}
-			if it.Origin != nil {
-				c.sender, c.source = it.Origin.Actor, it.Origin.Source
-			}
-			if it.WaitingOn != nil {
-				c.waitingOn, c.external = it.WaitingOn.Ref, it.WaitingOn.Kind == domain.WaitingExternal
-			}
-			sn.open = append(sn.open, c)
-		}
-		// 去重清单不看 brief 与 routine：它们不进建议流，列上只是占预算。
-		if it.Kind != domain.KindBrief && it.Kind != "routine" {
-			switch {
-			case it.Phase == domain.PhaseDone && it.UpdatedAt.After(cutoff):
-				sn.recentDone = append(sn.recentDone, recentItem{ID: it.ID, Title: it.Title, Project: it.Project, source: originOf(it), at: it.UpdatedAt})
-			case it.Phase == domain.PhaseProposed:
-				sn.activeProposals = append(sn.activeProposals, recentItem{ID: it.ID, Title: it.Title, Project: it.Project, source: originOf(it), at: it.CreatedAt})
-			}
-		}
 		var x struct {
 			SourceEvent string `json:"source_event"`
 		}
@@ -601,21 +491,18 @@ func matchFlat(m map[string]any, src domain.Source, ev domain.SourceEvent) (bool
 	return true, nil
 }
 
-// proposal 是要建成事项的内容。
+// proposal 是要建成事项的内容（供手动转建议、拆出建议与积压只跑规则使用）。
 type proposal struct {
 	kind           domain.Kind
 	title, summary string
 	reason         string
-	// 以下由起草或初筛给出，手动转建议与规则直出时为零值。
-	project    string
-	deadline   *time.Time
-	plannedFor string
-	slot       string
-	rec        *domain.Proposal
-	body       string        // 非空时作事项正文，否则用来源事件的正文（抽取按 refs 取）
-	judgment   string        // 初筛的判断记录 id
-	draft      *Draft        // 起草的结果；没有起草（规则直出、手动转建议）时为空
-	material   *budget.Trace // 起草送出的资料的裁剪量；没有起草时为空
+	project        string
+	deadline       *time.Time
+	plannedFor     string
+	slot           string
+	rec            *domain.Proposal
+	body           string
+	judgment       string
 }
 
 func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) error {
@@ -813,66 +700,6 @@ func (s *Service) alert(ctx context.Context, sn snapshot, ev domain.SourceEvent,
 	return s.dispose(ctx, m, ev, d)
 }
 
-// urgentMode 按 notify_urgent 规则此刻的模式决定这次处置带不带提醒：auto 提醒，off 什么都不做，其余（含规则状态还没对账）只观察。
-// 规则没声明 notify_urgent 时两个都为假。
-func (s *Service) urgentMode(sn snapshot, m *matched) (notify, would bool, err error) {
-	if m == nil || !m.rule.NotifyUrgent {
-		return false, false, nil
-	}
-	switch sn.modes[m.key()] {
-	case rules.ModeAuto:
-		if s.o.Alert == nil {
-			return false, false, fmt.Errorf("source rule %s declares notify_urgent but no alert handler is configured", m.key())
-		}
-		return true, false, nil
-	case rules.ModeOff:
-		return false, false, nil
-	}
-	return false, true, nil
-}
-
-// urgent 在处置命令里处理这次新建的建议（并入已有建议的不算新）：只有 proposal.urgent 为真（没给判断的不提醒）且仍是 proposed
-// （本人已处置的不提醒）的才提醒或记观察。投递 id 取事项 id，重复处置不会重复提醒。
-func (s *Service) urgent(c *command.Ctx, v disposeIn) error {
-	var ids []string
-	if v.New {
-		ids = append(ids, v.Item)
-	}
-	for _, pl := range v.Placed {
-		if pl.New {
-			ids = append(ids, pl.Item)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	ev, err := runner.Event(c.Tx, v.Event)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		it, err := items.Get(c.Tx, id)
-		if err != nil {
-			return err
-		}
-		if it.Phase != domain.PhaseProposed || it.Proposal == nil || it.Proposal.Urgent == nil || !*it.Proposal.Urgent {
-			continue
-		}
-		if v.NotifyUrgent {
-			if _, err := s.o.Alert.DeliverUrgent(c.Tx, ev, it, v.Rule); err != nil {
-				return err
-			}
-			continue
-		}
-		p, _ := json.Marshal(map[string]any{"rule": v.Rule, "event": v.Event, "item": id, "would_do": "notify_urgent"})
-		if _, err := eventlog.Append(c.Tx, domain.Event{Type: rules.EvObserved, Object: id, Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + v.Rule, Via: domain.ViaRule},
-			Basis: c.Basis, ChainDepth: c.ChainDepth, Reason: "observe: would notify urgent by " + v.Rule, Payload: p, At: s.o.Now()}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // observeAlert 记 observe 档 alert 规则“本来会提醒”：对象是来源事件，操作者是规则本身，Web 规则设置页按它筛选观察记录。
 func (s *Service) observeAlert(c *command.Ctx, v disposeIn) error {
 	p, _ := json.Marshal(map[string]any{"rule": v.Rule, "event": v.Event, "would_do": "alert", "conditions": v.Conditions})
@@ -1042,50 +869,6 @@ func eventInput(src domain.Source, ev domain.SourceEvent, hint string, extra map
 }
 
 // asked 是一道判断题的结论：no 为 true 表示不值得；unavailable 非空是未判定的原因前缀文本。
-type asked struct {
-	no          bool
-	low         bool
-	judgment    string
-	unavailable string
-}
-
-// ask 经级联问一道是非题（初筛、对话预筛）：分类端点先答，不确定带内由对话端点重答，各级未定取模板的保守默认。
-// withList 在资料正文之后附"未关闭事项"一节（预筛用，§9.3）；清单按接收端点的位置过滤，随资料一起计入预算。
-func withList(base func(string) (budget.Source, bool), list func(locality string) lists) func(string) (budget.Source, bool) {
-	return func(locality string) (budget.Source, bool) {
-		src, ok := base(locality)
-		if !ok {
-			return budget.Source{}, false
-		}
-		src.Suffix = list(locality).section()
-		return src, true
-	}
-}
-
-// ask 的 list 非空时（对话预筛、抽取预筛）在资料后附未关闭事项清单。
-func (s *Service) ask(ctx context.Context, src domain.Source, ev domain.SourceEvent, pack, tmpl, hint string, o domain.Outbound, list func(string) lists) (asked, error) {
-	mat := materialSource(ev, o)
-	if list != nil {
-		mat = withList(mat, list)
-	}
-	v, err := s.o.Judge.Judge(ctx, direct.JudgeCall{Pack: pack, Template: tmpl, Input: eventInput(src, ev, hint, nil),
-		MaterialSource: mat, Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
-	if err != nil {
-		return asked{}, err
-	}
-	if v.Paused {
-		return asked{unavailable: pausedPrefix + "the owner paused the models in settings"}, nil
-	}
-	if v.Unavailable {
-		return asked{unavailable: unavailablePrefix + "no judge endpoint or chat endpoint answered"}, nil
-	}
-	a := asked{no: v.Answer == "no" || v.Answer == ChoiceIgnore, low: v.LowConfidence}
-	if v.Written {
-		a.judgment = v.Record.ID
-	}
-	return a, nil
-}
-
 // outboundGate 先看外发控制：可用端点都被排除时不问模型。reason 非空即不可发。
 func outboundGate(o domain.Outbound, pol policy.Policy, src domain.Source) string {
 	switch registry.Decide(o, endpointLocalities(pol)...).Block {
@@ -1095,509 +878,6 @@ func outboundGate(o domain.Outbound, pol policy.Policy, src domain.Source) strin
 		return outboundNonePrefix + "no endpoint may receive content from source " + src.ID
 	}
 	return ""
-}
-
-// screenAndDraft 走第 4、5 步：初筛，是（或未定标把握低）则起草。返回的 verdict 非空表示不建事项：ChoiceIgnore 是不值得，其余是未判定的原因。
-func (s *Service) screenAndDraft(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint, project string) (proposal, string, error) {
-	var sr, dr string
-	if m != nil {
-		sr, dr = m.rule.Screen, m.rule.Draft
-	}
-	screenPack, screen := m.tmpl(sr, Template)
-	draftPack, draft := m.tmpl(dr, DraftTemplate)
-	// 外发控制（§14.14）：范围在每次调用前重读；裁剪后的内容才进请求与输入指纹。
-	o, pol, err := s.freshOutbound(ctx, src)
-	if err != nil {
-		return proposal{}, "", err
-	}
-	if why := outboundGate(o, pol, src); why != "" {
-		return proposal{}, why, nil
-	}
-	a, err := s.ask(ctx, src, ev, screenPack, screen, hint, o, nil)
-	if err != nil {
-		return proposal{}, "", err
-	}
-	if a.unavailable != "" {
-		return proposal{}, a.unavailable, nil
-	}
-	if a.no {
-		return proposal{judgment: a.judgment}, ChoiceIgnore, nil
-	}
-	kind := defaultKind
-	if m != nil && m.rule.Kind != "" {
-		kind = domain.Kind(m.rule.Kind)
-	}
-	reason := "screened in"
-	if a.low {
-		reason = "screened in with low confidence"
-	}
-	p := proposal{kind: kind, title: orElse(ev.Subject, ev.Type), reason: reason, judgment: a.judgment, project: project,
-		rec: &domain.Proposal{LowConfidence: a.low, Sources: []string{ev.ID}}}
-	if err := s.draft(ctx, sn, src, ev, draftPack, draft, hint, o, pol, &p); err != nil {
-		return proposal{}, "", err
-	}
-	return p, "", nil
-}
-
-// fieldsOut 是起草（triage-draft）的输出，也是抽取里每条候选的字段（§9.3）：两者同一组字段。
-type fieldsOut struct {
-	Title      string `json:"title"`
-	Summary    string `json:"summary"`
-	Kind       string `json:"kind"`
-	Project    string `json:"project"`
-	Deadline   string `json:"deadline"`
-	PlannedFor string `json:"planned_for"`
-	Slot       string `json:"planned_slot"`
-	Recommend  string `json:"recommend"`
-	AttachTo   string `json:"attach_to"`
-	Reason     string `json:"reason"`
-	Urgent     *bool  `json:"urgent"` // 今天不处理是否有后果；缺失按"可以等"对待（只供 notify_urgent 规则使用，§9.3）
-}
-
-// draft 是第 5 步。起草失败不挡路：保留 p 里来源事件的标题，摘要留空，失败原因记进理由；只有模板缺失这类配置错误和取消才返回错误。
-func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, pack, tmpl, hint string, o domain.Outbound, pol policy.Policy, p *proposal) error {
-	gen := pol.GenerateEndpoint
-	locality := policy.EffectiveLocality(gen.Locality)
-	bs, allowed := materialSource(ev, o)(locality)
-	if !allowed {
-		p.reason += "; draft skipped: outbound scope excludes the generate endpoint"
-		p.draft = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}
-		return nil
-	}
-	res := budget.Fit(bs, gen.MaterialChars()) // 先外发范围，后预算
-	p.material = &res.Trace
-	list := func(loc string) lists { return sn.lists(ev, p.project, loc) }
-	in := eventInput(src, ev, hint, s.listInput(list(locality)))
-	var out direct.Outcome
-	var err error
-	for attempt := 0; ; attempt++ { // 调用时端点位置变了，Judge 拒绝发送：按新位置重裁剪再来
-		out, err = s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: res.Text, RequireLocality: locality,
-			Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
-		if !errors.Is(err, direct.ErrLocalityChanged) || attempt >= 3 {
-			break
-		}
-		if o, pol, err = s.freshOutbound(ctx, src); err != nil {
-			return err
-		}
-		locality = policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
-		in = eventInput(src, ev, hint, s.listInput(list(locality)))
-		if bs, allowed = materialSource(ev, o)(locality); !allowed {
-			p.reason += "; draft skipped: outbound scope excludes the generate endpoint"
-			p.draft, p.material = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}, nil
-			return nil
-		}
-		res = budget.Fit(bs, pol.GenerateEndpoint.MaterialChars())
-		p.material = &res.Trace
-	}
-	switch {
-	case errors.Is(err, direct.ErrBadTemplate), ctx.Err() != nil:
-		if err == nil {
-			err = ctx.Err()
-		}
-		return err
-	case err != nil:
-		p.reason += "; draft failed: " + err.Error()
-		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeModel}
-		switch {
-		case errors.Is(err, model.ErrSchema):
-			p.draft.Code = DraftCodeSchema
-		case errors.Is(err, direct.ErrUnavailable):
-			p.draft.Code = DraftCodeUnavailable
-		}
-		return nil
-	case !out.Settled:
-		p.reason += "; draft failed: " + orElse(out.Reason, "unsettled")
-		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeUnsettled}
-		return nil
-	}
-	var d fieldsOut
-	if json.Unmarshal(out.Final().Result, &d) != nil || d.Title == "" || !validKind(d.Kind) {
-		p.reason += "; draft failed: output does not fit the draft schema"
-		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeSchema}
-		return nil
-	}
-	p.draft = &Draft{Outcome: DraftOK}
-	s.fill(sn, p, d, list(locality))
-	return nil
-}
-
-// fill 把起草或抽取候选的一组字段写进 p。模型只能从清单里选：清单之外的项目不归项目，
-// 清单之外的补到目标使推荐作废，都不报错（§9.3）。
-func (s *Service) fill(sn snapshot, p *proposal, d fieldsOut, l lists) {
-	p.title, p.summary, p.kind = d.Title, d.Summary, domain.Kind(d.Kind)
-	if sn.hasProject(d.Project) {
-		p.project = d.Project
-	}
-	if t, ok := parseDay(d.Deadline); ok {
-		end := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, s.o.Now().Location())
-		p.deadline = &end
-	}
-	if _, ok := parseDay(d.PlannedFor); ok {
-		p.plannedFor = d.PlannedFor
-		if _, _, ok := domain.ParseSlot(d.Slot); ok { // 时段只跟着计划日期给，格式不对就丢（§9.3）
-			p.slot = d.Slot
-		}
-	}
-	switch d.Recommend {
-	case "accept", "dismiss":
-		p.rec.Recommend = d.Recommend
-	case "attach":
-		if slices.ContainsFunc(l.OpenItems, func(c listItem) bool { return c.ID == d.AttachTo }) {
-			p.rec.Recommend, p.rec.AttachTo = "attach", d.AttachTo
-		}
-	}
-	p.rec.Reason = d.Reason
-	p.rec.Urgent = d.Urgent
-}
-
-// validKind：起草的 kind 只能是内置模板 schema 里列出的值，未知值视同输出不合 schema。
-func validKind(k string) bool {
-	return slices.Contains([]string{"task", "note", "commitment", "decision"}, k)
-}
-
-func parseDay(s string) (time.Time, bool) {
-	t, err := time.Parse(time.DateOnly, s)
-	return t, err == nil
-}
-
-func (sn *snapshot) hasProject(id string) bool {
-	return id != "" && slices.ContainsFunc(sn.projs, func(p domain.Project) bool { return p.ID == id && p.Status == domain.ProjectActive })
-}
-
-// openItem 是未关闭事项（open、waiting、needs_input）在清单里的来源；source 是它出自的来源。
-type openItem struct {
-	ID, Title, Project string
-	sender, source     string
-	waitingOn          string
-	external           bool // 在等外部回音
-	updated            time.Time
-	score              float64
-}
-
-// listItem 是送给模型的一条未关闭事项。
-type listItem struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Project   string `json:"project,omitempty"`
-	WaitingOn string `json:"waiting_on,omitempty"`
-}
-
-// maxOpenItems 是清单里未关闭事项的上限（§9.3）。
-const maxOpenItems = 100
-
-// 去重清单的上限与时间范围（§9.3）：最近 7 天已完成的事项至多 30 条，当前仍待处理的建议至多 50 条。
-const (
-	recentDoneWindow = 7 * 24 * time.Hour
-	maxRecentDone    = 30
-	maxActiveProps   = 50
-)
-
-// recentItem 是去重清单里的一条事项：id、标题、项目、出自的来源与用于排序的时刻（完成时间或建立时间）。
-type recentItem struct {
-	ID, Title, Project, source string
-	at                         time.Time
-}
-
-// originOf 是事项出自的来源 id；本人或 Agent 直接提的没有来源。
-func originOf(it domain.Item) string {
-	if it.Origin != nil {
-		return it.Origin.Source
-	}
-	return ""
-}
-
-// lists 是预筛、起草、抽取共用的清单：活动项目，以及按相关度排序、至多 maxOpenItems 条的未关闭事项，
-// 还有抽取前的去重清单（最近已完成的事项与当前仍待处理的建议）。
-// Total 是过滤后的事项总数，被截掉时才写进输入。
-type lists struct {
-	Projects        []map[string]string
-	OpenItems       []listItem
-	Total           int
-	RecentDone      []listItem
-	ActiveProposals []listItem
-}
-
-// lists 组出送往 locality 位置端点的清单。事项标题是工作现场的内容（§14.14）：出自外发范围未选择或为 none 的来源的事项不进清单。
-// 相关度：同项目、同发送者、标题相近、正在等外部回音的排前，其余按更新时间。
-// 去重清单同一把尺子：范围外的不同，同项目的排前，再按时间新到旧截到上限。
-func (sn *snapshot) lists(ev domain.SourceEvent, project, locality string) lists {
-	l := lists{Projects: []map[string]string{}, RecentDone: []listItem{}, ActiveProposals: []listItem{}}
-	for _, pr := range sn.projs {
-		if pr.Status == domain.ProjectActive && !pr.IsInbox() {
-			l.Projects = append(l.Projects, map[string]string{"id": pr.ID, "name": pr.Name})
-		}
-	}
-	var open []openItem
-	for _, c := range sn.open {
-		if !sn.inScope(c.source, locality) {
-			continue
-		}
-		c.score = similarity(c.Title, ev.Subject)
-		if project != "" && c.Project == project {
-			c.score += 0.2
-		}
-		if ev.Sender != "" && c.sender == ev.Sender {
-			c.score += 0.2
-		}
-		if c.external {
-			c.score += 0.2
-		}
-		open = append(open, c)
-	}
-	slices.SortStableFunc(open, func(a, b openItem) int {
-		if c := cmp.Compare(b.score, a.score); c != 0 {
-			return c
-		}
-		return b.updated.Compare(a.updated)
-	})
-	l.Total = len(open)
-	for _, c := range open[:min(len(open), maxOpenItems)] {
-		l.OpenItems = append(l.OpenItems, listItem{ID: c.ID, Title: c.Title, Project: c.Project, WaitingOn: c.waitingOn})
-	}
-	l.RecentDone = sn.pickRecent(sn.recentDone, project, locality, maxRecentDone)
-	l.ActiveProposals = sn.pickRecent(sn.activeProposals, project, locality, maxActiveProps)
-	return l
-}
-
-// inScope 报告出自 source 的事项能否随这次调用外发：不在登记表里的（手动建的、内部来源）不受来源范围约束。
-func (sn *snapshot) inScope(source, locality string) bool {
-	src, err := sn.source(source)
-	if err != nil {
-		return true
-	}
-	sc := registry.ScopeFor(src.Outbound, locality)
-	return sc != "" && sc != registry.ScopeNone
-}
-
-// pickRecent 取去重清单：先按外发范围过滤，同项目的排前，再按时间新到旧，最后截到 limit 条。
-func (sn *snapshot) pickRecent(list []recentItem, project, locality string, limit int) []listItem {
-	var xs []recentItem
-	for _, x := range list {
-		if sn.inScope(x.source, locality) {
-			xs = append(xs, x)
-		}
-	}
-	slices.SortStableFunc(xs, func(a, b recentItem) int {
-		same := func(x recentItem) int {
-			if project != "" && x.Project == project {
-				return 1
-			}
-			return 0
-		}
-		return cmp.Or(cmp.Compare(same(b), same(a)), b.at.Compare(a.at))
-	})
-	out := make([]listItem, 0, min(len(xs), limit))
-	for _, x := range xs[:min(len(xs), limit)] {
-		out = append(out, listItem{ID: x.ID, Title: x.Title, Project: x.Project})
-	}
-	return out
-}
-
-// section 是预筛资料正文后附的三节：未关闭事项，以及抽取前去重的两份清单（§9.3）。
-func (l lists) section() string {
-	var b strings.Builder
-	b.WriteString("未关闭事项")
-	if l.Total > len(l.OpenItems) {
-		fmt.Fprintf(&b, "（共 %d 条，只列前 %d 条）", l.Total, len(l.OpenItems))
-	}
-	b.WriteString("：")
-	sectionItems(&b, l.OpenItems)
-	b.WriteString("\n\n最近 7 天已完成事项（同类不重抽）：")
-	sectionItems(&b, l.RecentDone)
-	b.WriteString("\n\n当前待处理建议（同类不重抽）：")
-	sectionItems(&b, l.ActiveProposals)
-	return b.String()
-}
-
-func sectionItems(b *strings.Builder, items []listItem) {
-	if len(items) == 0 {
-		b.WriteString("无")
-	}
-	for _, c := range items {
-		fmt.Fprintf(b, "\n- %s %s", c.ID, c.Title)
-	}
-}
-
-// listInput 是起草与抽取的结构化输入里的清单与日期；模板不能改它们的形状（C.7）。
-func (s *Service) listInput(l lists) map[string]any {
-	in := map[string]any{"projects": l.Projects, "open_items": l.OpenItems, "recent_done": l.RecentDone, "active_proposals": l.ActiveProposals,
-		"today": s.o.Now().Format(time.DateOnly)}
-	if l.Total > len(l.OpenItems) {
-		in["open_items_total"] = l.Total
-	}
-	return in
-}
-
-// similarity 是两个标题按相邻字符对算出的 Dice 系数（0 到 1）。
-func similarity(a, b string) float64 {
-	pa, pb := bigrams(a), bigrams(b)
-	if len(pa) == 0 || len(pb) == 0 {
-		return 0
-	}
-	n := 0
-	for g := range pa {
-		if pb[g] {
-			n++
-		}
-	}
-	return 2 * float64(n) / float64(len(pa)+len(pb))
-}
-
-func bigrams(s string) map[[2]rune]bool {
-	r := []rune(strings.ToLower(s))
-	out := map[[2]rune]bool{}
-	for i := 0; i+1 < len(r); i++ {
-		out[[2]rune{r[i], r[i+1]}] = true
-	}
-	return out
-}
-
-// extractOut 是 triage-extract 的输出：每条候选与起草同一组字段，另有 refs（§9.3）。除 title 与 kind 外都可缺，旧的三字段输出仍被接受。
-type extractOut struct {
-	Candidates []struct {
-		fieldsOut
-		Refs []int `json:"refs"`
-	} `json:"candidates"`
-}
-
-const maxExtracted = 20
-
-// placed 是 extract 出口里一条候选落在哪个事项上，以及随处置写入的合并信息。
-type placed struct {
-	Item string `json:"item"`
-	mergeFields
-}
-
-// refBody 是候选事项的正文：refs 指到的那几条消息；越界的下标丢弃，没有可用的下标时返回空，由调用方用来源正文。
-func refBody(ev domain.SourceEvent, refs []int) string {
-	var b strings.Builder
-	seen := map[int]bool{}
-	for _, r := range refs {
-		if r < 0 || r >= len(ev.Messages) || seen[r] {
-			continue
-		}
-		seen[r] = true
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		fmt.Fprintf(&b, "%s: %s", ev.Messages[r].Sender, ev.Messages[r].Body())
-	}
-	return b.String()
-}
-
-// extract 是 extract 出口：先预筛"要不要抽取"（规则写 prescreen: none 时跳过，对话候选捕获除外），再由生成型抽出零到多条候选，
-// 每条候选走与起草结果相同的第 6 步：合并键取规范化标题加发送者，并入 7 天内已有的建议或新建 proposed 事项。
-// 事项的幂等键带候选序号，崩溃后重跑不产生重复事项（模型结果按输入指纹复用）。
-func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched) error {
-	var pr, ex string
-	if m != nil {
-		pr, ex = m.rule.Prescreen, m.rule.Extract
-	}
-	prescreenPack, prescreen := m.tmpl(pr, PrescreenTemplate)
-	extractPack, extract := m.tmpl(ex, ExtractTemplate)
-	o, pol, err := s.freshOutbound(ctx, src)
-	if err != nil {
-		return err
-	}
-	if why := outboundGate(o, pol, src); why != "" {
-		return s.withdraw(ctx, m, ev, proposal{}, why)
-	}
-	project, err := s.project(sn, src, ev, m)
-	if err != nil {
-		return err
-	}
-	// 主会话兜底进入内置 Inbox 的对话捕获：不把未关闭事项排序偏置到 Inbox，并允许抽取模型识别具体业务项目；
-	// 显式指定或命中仓库目录的具体项目捕获仍锁定原项目（§9.3）。
-	fromInbox := IsCaptureSource(src.ID) && sn.inboxID != "" && project == sn.inboxID
-	listProject := project
-	if fromInbox {
-		listProject = ""
-	}
-	list := func(loc string) lists { return sn.lists(ev, listProject, loc) }
-	var a asked
-	if pr != packs.NoPrescreen || IsCaptureSource(src.ID) {
-		if a, err = s.ask(ctx, src, ev, prescreenPack, prescreen, "", o, list); err != nil {
-			return err
-		}
-	}
-	if a.unavailable != "" {
-		return s.withdraw(ctx, m, ev, proposal{}, a.unavailable)
-	}
-	if a.no {
-		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, ChoiceIgnore)
-	}
-	locality := policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
-	bs, allowed := materialSource(ev, o)(locality)
-	if !allowed {
-		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, outboundUnsetPrefix+"the generate endpoint is excluded by the outbound scope")
-	}
-	mat := budget.Fit(bs, pol.GenerateEndpoint.MaterialChars()) // 先外发范围，后预算
-	l := list(locality)
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", s.listInput(l)), Material: mat.Text, RequireLocality: locality,
-		Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
-	if errors.Is(err, model.ErrPaused) {
-		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, pausedPrefix+err.Error())
-	}
-	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, direct.ErrUnavailable) {
-		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, unavailablePrefix+err.Error())
-	}
-	if err != nil {
-		return err
-	}
-	var x extractOut
-	if !out.Settled || json.Unmarshal(out.Final().Result, &x) != nil {
-		return fmt.Errorf("extract template %s/%s gave no usable candidates", extractPack, extract)
-	}
-	var ids []string
-	var places []placed
-	seen := map[string]bool{} // 同一条事件里标题相同的候选只取一条
-	for i, c := range x.Candidates {
-		if i == maxExtracted {
-			break
-		}
-		if strings.TrimSpace(c.Title) == "" || !validKind(c.Kind) {
-			continue
-		}
-		key := titleKey(c.Title, ev.Sender)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		into, attachTo, err := s.planMerge(ctx, key)
-		if err != nil {
-			return err
-		}
-		p := proposal{reason: "extracted from " + ev.ID, judgment: a.judgment, body: refBody(ev, c.Refs),
-			rec: &domain.Proposal{LowConfidence: a.low, Sources: []string{ev.ID}}}
-		s.fill(sn, &p, c.fieldsOut, l)
-		cp := p.project
-		if project != "" && !fromInbox { // 规则、来源或具体项目捕获给了项目就锁定；Inbox 兜底捕获允许模型识别具体项目
-			cp = project
-		}
-		if cp == "" {
-			cp = sn.inboxID
-		}
-		trace := &domain.ProposalMerge{Title: p.title, Summary: p.summary, Kind: p.kind, Project: cp, By: "merge_key"}
-		if into != "" {
-			ids, places = append(ids, into), append(places, placed{into, mergeFields{MergeKey: key, Merge: true, Trace: trace}})
-			continue
-		}
-		id, err := s.createItemKeyed(ctx, system, m.key(), fmt.Sprintf("inbound:item:%s:%d", ev.ID, i), src, ev, p, cp)
-		if err != nil {
-			return err
-		}
-		ids, places = append(ids, id), append(places, placed{id, mergeFields{MergeKey: key, New: true, AttachTo: attachTo}})
-	}
-	d := disposeIn{Event: ev.ID, Rule: m.key(), Judgment: a.judgment, Material: &mat.Trace}
-	if len(ids) == 0 {
-		d.Disposition, d.Reason = domain.DispositionIgnored, "extract found no candidate"
-		return s.dispose(ctx, m, ev, d)
-	}
-	d.Disposition, d.Item, d.Items, d.Placed, d.Reason = domain.DispositionProposed, ids[0], ids, places, fmt.Sprintf("extracted %d candidate(s)", len(ids))
-	if d.NotifyUrgent, d.WouldNotify, err = s.urgentMode(sn, m); err != nil {
-		return err
-	}
-	return s.dispose(ctx, m, ev, d)
 }
 
 func orElse(ss ...string) string {
@@ -1646,15 +926,6 @@ func (s *Service) repoProject(sn snapshot, src domain.Source, ev domain.SourceEv
 		}
 	}
 	return "", nil
-}
-
-// propose 建 proposed 事项，按需自动接受，再记处置。每步的幂等键都含来源事件 id。
-func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, p proposal, project string) error {
-	item, mf, err := s.place(ctx, system, m.key(), src, ev, p, project)
-	if err != nil {
-		return err
-	}
-	return s.finish(ctx, sn, m, ev, item, p.reason, p.judgment, nil, mf, p.draft, p.material)
 }
 
 // createItem 以 id 的身份为来源事件建 proposed 事项；ext.source_event 记下来源事件，供重入时找回已建事项。
@@ -1719,33 +990,6 @@ func (s *Service) applyEventTime(p *proposal, ev domain.SourceEvent, ext map[str
 			ext["model_planned_slot"] = p.slot
 		}
 	}
-}
-
-// finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。
-func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason, judgment string, items []string, mf mergeFields, draft *Draft, mat *budget.Trace) error {
-	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, Judgment: judgment, Items: items, mergeFields: mf, Draft: draft, Material: mat}
-	if m != nil && m.rule.Accept == "auto" && !mf.Merge { // 并入已有建议：它的处置早已定过，不再替它自动接受
-		mode := sn.modes[m.key()]
-		if mode == "" {
-			mode = rules.ModeObserve // 规则状态还没对账：按默认的观察档，不自动接受
-		}
-		switch mode {
-		case rules.ModeAuto:
-			rule := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + m.key(), Via: domain.ViaRule, OnBehalfOf: s.o.Owner}, Level: authz.LevelDelegate}
-			if _, err := s.do(ctx, rule, m.key(), "inbound:accept:"+ev.ID, "item.transition",
-				map[string]any{"id": item, "to": domain.PhaseOpen, "reason": "rule " + m.key() + " auto accept"},
-				command.Chain{Mode: command.ChainInherit, From: item}); err != nil {
-				return err
-			}
-		case rules.ModeObserve:
-			d.WouldAccept = true
-		}
-	}
-	var err error
-	if d.NotifyUrgent, d.WouldNotify, err = s.urgentMode(sn, m); err != nil {
-		return err
-	}
-	return s.dispose(ctx, m, ev, d)
 }
 
 func (s *Service) dispose(ctx context.Context, m *matched, ev domain.SourceEvent, d disposeIn) error {

@@ -214,83 +214,14 @@ func (s SourcePipeline) Retries() int {
 	return *s.MaxRetries
 }
 
-// 执行跨来源合并的 Agent（MergeJudge 的取值）：same 与生成事项和建议相同（写作模型，整批一次调用）；off 关闭合并，只走规则。
 const (
-	MergeSame = "same"
-	MergeOff  = "off"
-)
-
-// MergeSettings 是跨来源合并任务本身的设置（§9.3）。零值即默认：全部来源参与、纳入已有事项与被忽略记录、
-// 攒够 100 条或最早一条等了 30 分钟成批、一批资料至多 DefaultMergeBudgetTokens、用内置提示词。用排除名单而不是勾选名单，以后新接的来源默认参与。
-type MergeSettings struct {
-	ExcludeSources []string `json:"exclude_sources"`
-	SkipExisting   bool     `json:"skip_existing"`
-	BatchSize      int      `json:"batch_size"`   // 0 取默认
-	WaitMinutes    int      `json:"wait_minutes"` // 0 取默认
-	// BudgetTokens 是一批打包给模型的资料上限（按 CharsPerToken 估算的 token）；没有这个键取默认，给了就必须在范围内（0 也拒绝）。
-	BudgetTokens *int       `json:"budget_tokens,omitempty"`
-	Prompt       string     `json:"prompt"` // 空串用内置提示词
-	PromptAt     *time.Time `json:"prompt_at,omitempty"`
-	// Similarity 已不参与判定（规则检索改为只按分数排序取前 Candidates 条，不设下限）；只为旧策略文档读取兼容而保留，原样往返。
-	Similarity string `json:"similarity,omitempty"`
-	// Candidates 是规则检索给每条待归类建议至多带几条已有事项（按分数从高到低）；0 取默认。
-	Candidates int `json:"candidates,omitempty"`
-	// BodyMaxBytes 是批内整合后正文（要点清单 + 来源原文）的总长上限（字节）；0 取默认。超限时要点清单整段保留，来源原文按成员均分余下的额度。
-	BodyMaxBytes int `json:"body_max_bytes,omitempty"`
-}
-
-// Cands 是生效的每条候选条数。
-func (m MergeSettings) Cands() int { return cmp.Or(m.Candidates, DefaultMergeCandidates) }
-
-// BodyMax 是生效的整合正文总长上限（字节）。
-func (m MergeSettings) BodyMax() int { return cmp.Or(m.BodyMaxBytes, DefaultMergeBodyBytes) }
-
-// 合并批量参数的默认值与范围。
-const (
-	DefaultMergeBatch = 100
-	MaxMergeBatch     = 100
-	DefaultMergeWait  = 30
-	MaxMergePrompt    = 8000
-	// 每条待归类建议带的候选条数：缺省 20，可设 1–50。
-	DefaultMergeCandidates = 20
-	MaxMergeCandidates     = 50
-	// 整合正文总长上限（字节）：缺省 32 KiB。单条建议正文至多 budget.ProposalBodyChars（4000）个字符，中文约 12 KB；
-	// 线上建议正文 p95 约 4.9 KB、p99 约 7.4 KB，32 KiB 能让 3–4 个成员的原文在常见长度下原样附全。可设 4 KiB–256 KiB。
-	DefaultMergeBodyBytes = 32 << 10
-	MinMergeBodyBytes     = 4 << 10
-	MaxMergeBodyBytes     = 256 << 10
-
-	// CharsPerToken 是资料预算的 token 估算系数：每这么多个字符记 1 个 token（向上取整）。合并与写作两处预算共用它。
-	// 模型由本人配置、分词各家不同，内核不带 tokenizer，按这个明写的系数估算（§9.3）。
+	// CharsPerToken 是资料预算的 token 估算系数：每这么多个字符记 1 个 token（向上取整）。写作预算使用它。
+	// 模型由本人配置、分词各家不同，内核不带 tokenizer，按这个明写的系数估算（§8.4）。
 	CharsPerToken = 1.5
-	// DefaultMergeBudgetTokens 与改动前借用的写作预算 24000 字等价：24000 ÷ 1.5 = 16000。
-	DefaultMergeBudgetTokens = 16000
-	// MinBudgetTokens 装得下一条新建议带满 5 条候选（标题、摘要各按上限）。
-	// MaxBudgetTokens 取 1M 上下文窗口的一半，给提示词与输出留余地；它不是技术上限，超出所配模型的上下文时那次调用会失败。
-	// 合并与写作两处预算共用这一对范围，设置页与服务端必须一致。
+	// MinBudgetTokens 与 MaxBudgetTokens 是写作资料预算的范围，设置页与服务端必须一致。
 	MinBudgetTokens = 2000
 	MaxBudgetTokens = 500000
 )
-
-// MergePromptSections 是合并提示词必须有的段落；MergeActions 是提示词必须写到的结论词（输出结构只认这四个）。
-var (
-	MergePromptSections = []string{"## 任务", "## 四种结论", "## 判定依据", "## 不许做的事"}
-	MergeActions        = []string{"attach", "merge", "duplicate", "keep"}
-)
-
-// Batch 与 Wait 是生效的批量参数（未设取默认）。
-func (m MergeSettings) Batch() int { return cmp.Or(m.BatchSize, DefaultMergeBatch) }
-func (m MergeSettings) Wait() time.Duration {
-	return time.Duration(cmp.Or(m.WaitMinutes, DefaultMergeWait)) * time.Minute
-}
-
-// Budget 是生效的资料上限（估算 token，未设取默认）。
-func (m MergeSettings) Budget() int {
-	if m.BudgetTokens == nil {
-		return DefaultMergeBudgetTokens
-	}
-	return *m.BudgetTokens
-}
 
 // TokensOfChars 按 CharsPerToken 把字符数估成 token 数，向上取整。
 func TokensOfChars(chars int) int { return int(math.Ceil(float64(chars) / CharsPerToken)) }
@@ -305,41 +236,6 @@ func CheckBudgetTokens(field string, n int) error {
 
 // TokenChars 是 TokensOfChars 的反向：token 预算最多装下多少个字符（向下取整，保证估出的 token 数不超预算）。
 func TokenChars(tokens int) int { return int(math.Floor(float64(tokens) * CharsPerToken)) }
-
-// Includes 报告来源是否参与合并。没有来源的记录（本人或 Agent 直接建的）总是参与。
-func (m MergeSettings) Includes(source string) bool {
-	return source == "" || !slices.Contains(m.ExcludeSources, source)
-}
-
-// CheckMergePrompt 校验本人改过的合并提示词：四段齐全且各段有内容、四个结论词都写到、不超长。空串表示用内置的，合法。
-func CheckMergePrompt(body string) error {
-	if strings.TrimSpace(body) == "" {
-		return nil
-	}
-	if n := len([]rune(body)); n > MaxMergePrompt {
-		return invalid("merge prompt is %d characters; keep it within %d", n, MaxMergePrompt)
-	}
-	for i, h := range MergePromptSections {
-		at := strings.Index(body, h)
-		if at < 0 {
-			return invalid("merge prompt is missing the section %q", h)
-		}
-		rest := body[at+len(h):]
-		end := len(rest)
-		if j := strings.Index(rest, "\n## "); j >= 0 {
-			end = j
-		}
-		if strings.TrimSpace(rest[:end]) == "" {
-			return invalid("merge prompt section %q is empty", MergePromptSections[i])
-		}
-	}
-	for _, a := range MergeActions {
-		if !strings.Contains(body, a) {
-			return invalid("merge prompt never mentions the conclusion %q", a)
-		}
-	}
-	return nil
-}
 
 // Mute 的 Scope 取值。
 const (
@@ -535,12 +431,7 @@ type Policy struct {
 	// ModelsPaused 为真时两个端点的配置与密钥原样保留，但内核按两者都未配置运行（Current 给出的就是这个视图，§8.7）。
 	// 没有任何端点时规整为假。只在 Web 改。
 	ModelsPaused bool `json:"models_paused"`
-	// MergeJudge 是执行跨来源合并的 Agent（§9.3）：same（缺省，与生成事项和建议相同：写作模型，整批一次调用）、
-	// off（关闭，只按来源幂等键与合并键去重）。旧文档没有此键读作 same。
-	MergeJudge string `json:"merge_judge,omitempty"`
-	// Merge 是合并任务本身的设置；旧文档没有此键读作全部默认。
-	Merge MergeSettings `json:"merge"`
-	// SourcePipeline 是来源处理线的设置（§9.3）；旧文档没有此键读作全部默认。
+	// SourcePipeline 是来源处理线的设置（§9.3）；旧文档没有此键读作全部默认，旧键 merge_judge/merge 读取时忽略。
 	SourcePipeline SourcePipeline `json:"source_pipeline"`
 	// NoteVaults 是笔记库登记（§6.13、§12.8）：名字在实例内唯一，OpenURL 是"在笔记应用打开"的 URL 模板。
 	// 已存的策略版本没有这个键，读作没有登记，不改写。只在 Web 改。
@@ -722,29 +613,6 @@ func oneOf(v string, set ...string) bool {
 
 // normalize 校验并规整 p；失败返回 ErrInvalid。
 func normalize(p Policy) (Policy, error) {
-	if !oneOf(p.MergeJudge, "", MergeSame, MergeOff) {
-		return p, invalid("merge_judge %q: use same or off", p.MergeJudge)
-	}
-	if m := p.Merge; m.BatchSize != 0 && (m.BatchSize < 2 || m.BatchSize > MaxMergeBatch) {
-		return p, invalid("merge batch_size %d: use 2 to %d", m.BatchSize, MaxMergeBatch)
-	}
-	if m := p.Merge; m.WaitMinutes != 0 && (m.WaitMinutes < 5 || m.WaitMinutes > 1440) {
-		return p, invalid("merge wait_minutes %d: use 5 to 1440", m.WaitMinutes)
-	}
-	if b := p.Merge.BudgetTokens; b != nil {
-		if err := CheckBudgetTokens("merge budget_tokens", *b); err != nil {
-			return p, err
-		}
-	}
-	if err := CheckMergePrompt(p.Merge.Prompt); err != nil {
-		return p, err
-	}
-	if c := p.Merge.Candidates; c < 0 || c > MaxMergeCandidates {
-		return p, invalid("merge candidates %d: use 1 to %d, or 0 for the default", c, MaxMergeCandidates)
-	}
-	if b := p.Merge.BodyMaxBytes; b != 0 && (b < MinMergeBodyBytes || b > MaxMergeBodyBytes) {
-		return p, invalid("merge body_max_bytes %d: use %d to %d, or 0 for the default", b, MinMergeBodyBytes, MaxMergeBodyBytes)
-	}
 	if p.BackgroundRunTimeoutSec == 0 {
 		p.BackgroundRunTimeoutSec = DefaultBackgroundRunTimeoutSec
 	}

@@ -137,7 +137,7 @@ func newEnv(t *testing.T) *env {
 	e.issue("DEL", auth.Spec{Kind: auth.Delegate})
 
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(packYAML)}}
-	for _, name := range []string{"triage-screen", "triage-draft"} { // 用内置包随发行的模板
+	for _, name := range []string{"triage-screen"} { // 用内置包随发行的模板
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
 			t.Fatal(err)

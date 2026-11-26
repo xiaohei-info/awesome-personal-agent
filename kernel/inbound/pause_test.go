@@ -55,7 +55,7 @@ func TestPausedModelsLeaveEventUnjudgedAsPaused(t *testing.T) {
 			fresh = d
 		}
 	}
-	if fresh.Disposition != domain.DispositionProposed || e.item(fresh.Item).Title != "恢复后起草" {
+	if fresh.Disposition != domain.DispositionProposed || fresh.Item == "" || e.item(fresh.Item).Proposal == nil {
 		t.Fatalf("event after resume %+v", fresh)
 	}
 }

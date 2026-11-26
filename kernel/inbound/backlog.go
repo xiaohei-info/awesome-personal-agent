@@ -260,7 +260,7 @@ func (s *Service) Rejudge(ctx context.Context) error {
 		if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { got, err = runner.Event(tx, ev.ID); return }); err != nil {
 			return errors.Join(append(errs, err)...)
 		}
-		if got.Disposition == domain.DispositionPending { // 正在运行的另一轮接手了，或处理出错留在 pending：下一轮再看
+		if got.Disposition == domain.DispositionPending && got.Queue == "" { // 处理出错留在 pending：下一轮再看
 			break
 		}
 		if got.Disposition == domain.DispositionUnjudged && (got.UnjudgedReason == domain.UnjudgedModelUnavailable || got.UnjudgedReason == domain.UnjudgedModelsPaused) {
