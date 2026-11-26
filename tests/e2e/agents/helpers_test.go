@@ -54,7 +54,7 @@ agent: task
 access: read
 timeout: 1m
 ---
-ACCTIMEOUT 事项 {item_id}：本模板超时 1 分钟。
+ACCTIMEOUT 事项 {item_id}：挂起直到超时。
 `,
 	"prompts/acc-gen.md": `---
 agent: generate

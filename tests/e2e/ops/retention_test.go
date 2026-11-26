@@ -16,7 +16,7 @@ import (
 
 const day = 24 * time.Hour
 
-// sweepWait 是等内核定时清理的上限（内核每分钟清理一次）。
+// sweepWait 是等内核清理的上限。内核启动时清一次，之后每天 04:10 清一次（§6.15）；时钟循环最多睡一分钟就复查。
 const sweepWait = 100 * time.Second
 
 type ingestRec struct {
@@ -94,7 +94,8 @@ func (f *fx) sqlExec(query string, args ...any) {
 	}
 }
 
-func ago(d time.Duration) int64 { return time.Now().Add(-d).UnixNano() }
+// ago 是内核时间（真实时间加测试时钟偏移 off）往前 d 的时刻。
+func ago(off, d time.Duration) int64 { return time.Now().Add(off - d).UnixNano() }
 
 type runRec struct {
 	ID     string `json:"id"`
@@ -117,7 +118,14 @@ func (f *fx) runDir(id string) string { return filepath.Join(f.Home, "runs", id)
 
 func (f *fx) dirExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// newRuns 触发 n 次一次性任务型运行（回执后结束），返回等到结束的新 Run id。
+// promptHas 报告运行目录里的提示词含 marker（按模板认运行：任务型运行的目标是内核另建的事项，对不上触发事项）。
+func (f *fx) promptHas(id, marker string) bool {
+	b, _ := os.ReadFile(filepath.Join(f.runDir(id), "prompt.md"))
+	return strings.Contains(string(b), marker)
+}
+
+// finishedRuns 触发 n 次一次性任务型运行（回执后结束），返回等到结束的新 Run id。
+// 拨测试时钟后到点的简报也会拉起任务型运行，所以只认 acc-loop 模板的。
 func (f *fx) finishedRuns(n int) []string {
 	f.t.Helper()
 	known := f.runs()
@@ -128,7 +136,7 @@ func (f *fx) finishedRuns(n int) []string {
 	f.waitFor("一次性运行结束", 30*time.Second, func() bool {
 		ids = ids[:0]
 		for id, r := range f.runs() {
-			if _, old := known[id]; !old && r.State == "succeeded" {
+			if _, old := known[id]; !old && r.State == "succeeded" && f.promptHas(id, "ACCLOOP") {
 				ids = append(ids, id)
 			}
 		}
@@ -138,7 +146,7 @@ func (f *fx) finishedRuns(n int) []string {
 }
 
 // retentionCase 在一个环境里跑 ACT-RET-01、ACT-RET-02：
-// ingestDays/runDays 是该环境生效的保留天数（默认环境 30/14，调小后的环境 1/1），
+// ingestDays/runDays 是该环境生效的保留天数（默认环境 30/30，调小后的环境 1/1），
 // 数据按"保留期之内/之外"各拨一份过去的时间，外加一份刚到的与一个在途运行。
 func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 	f := opsFx(t, cfg)
@@ -155,8 +163,10 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 		outside = f.postIngest("src_acc_ret", secret, "d-out", `{"id":"d-out","title":"保留期外"}`)
 		fresh = f.postIngest("src_acc_ret", secret, "d-new", `{"id":"d-new","title":"刚到的"}`)
 		// 一份落在保留期之内（差 1 天到期），一份落在之外（已超 1 天）。
-		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(time.Duration(ingestDays-1)*day+12*time.Hour), inside.ID)
-		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(time.Duration(ingestDays+1)*day), outside.ID)
+		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(0, time.Duration(ingestDays-1)*day+12*time.Hour), inside.ID)
+		f.sqlExec(`UPDATE webhook_ingest SET received_at = ? WHERE id = ?`, ago(0, time.Duration(ingestDays+1)*day), outside.ID)
+		f.StopKernel() // 重启触发启动时的那次清理
+		f.StartKernelAgain()
 
 		f.waitFor("期外请求体被清理", sweepWait, func() bool { return f.ingestByID("src_acc_ret", outside.ID).Body == nil })
 		got := f.ingestByID("src_acc_ret", outside.ID)
@@ -176,6 +186,14 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 	})
 
 	step(t, "ACT-RET-02 运行目录过期清理，Run 记录和在途目录不动", func(t *testing.T) {
+		// 先把测试时钟拨到下一个 04:05，造好数据后再越过 04:10 触发每日清理；跨度只有几分钟，在途运行不会超时。
+		now := time.Now()
+		before := time.Date(now.Year(), now.Month(), now.Day(), 4, 5, 0, 0, time.Local)
+		if !before.After(now) {
+			before = before.AddDate(0, 0, 1)
+		}
+		off := before.Sub(now).Truncate(time.Second)
+		f.TCAdvance(int64(off / time.Second))
 		ids := f.finishedRuns(3)
 		in, out, newest := ids[0], ids[1], ids[2]
 		for _, id := range ids {
@@ -187,7 +205,7 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 		var live string
 		f.waitFor("在途运行开始", 30*time.Second, func() bool {
 			for id, r := range f.runs() {
-				if r.State == "running" {
+				if r.State == "running" && f.promptHas(id, "ACCHOLD") {
 					live = id
 					return true
 				}
@@ -195,10 +213,11 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 			return false
 		})
 		// 期内的差 1 天到期、期外的已超 1 天；在途运行的开始时间拨到远超保留期，目录也必须留着。
-		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(time.Duration(runDays-1)*day+12*time.Hour), in)
-		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(time.Duration(runDays+1)*day), out)
-		f.sqlExec(`UPDATE outcall_run SET started_at = ? WHERE id = ?`, ago(time.Duration(runDays+30)*day), live)
+		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(off, time.Duration(runDays-1)*day+12*time.Hour), in)
+		f.sqlExec(`UPDATE outcall_run SET finished_at = ? WHERE id = ?`, ago(off, time.Duration(runDays+1)*day), out)
+		f.sqlExec(`UPDATE outcall_run SET started_at = ? WHERE id = ?`, ago(off, time.Duration(runDays+30)*day), live)
 
+		f.TCAdvance(6 * 60)
 		f.waitFor("期外的运行目录被清理", sweepWait, func() bool { return !f.dirExists(f.runDir(out)) })
 		for name, id := range map[string]string{"期内": in, "刚结束": newest, "在途": live} {
 			if !f.dirExists(f.runDir(id)) {
@@ -227,12 +246,12 @@ func (f *fx) addWebhookSource(id string) {
 
 // TestFlowRetention 对应验收文档 flow-retention（ACT-RET-01、ACT-RET-02）。
 // 内核的保留期以整天为单位（ingest_retention_days、run_retention_days，最小 1 天），无法配成"1 分钟"，
-// 所以：默认环境验证默认值（30 天、14 天）的边界；调小环境把两项都配成 1 天并验证按新值清理。
+// 所以：默认环境验证默认值（请求体、运行目录各 30 天）的边界；调小环境把两项都配成 1 天并验证按新值清理。
 // 两个环境互相独立，并行执行；"过期"靠把账本里的时间拨到过去实现。
 func TestFlowRetention(t *testing.T) {
-	t.Run("默认保留期 30 天与 14 天", func(t *testing.T) {
+	t.Run("默认保留期各 30 天", func(t *testing.T) {
 		t.Parallel()
-		retentionCase(t, "", 30, 14)
+		retentionCase(t, "", 30, 30)
 	})
 	t.Run("配置调小为 1 天", func(t *testing.T) {
 		t.Parallel()
