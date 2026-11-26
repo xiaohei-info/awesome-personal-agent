@@ -3335,7 +3335,8 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 | 来源 | `apa source`（含 `auth`、`webhook create/rotate`、`ingests`、`rejects`、`replay`、`backlog rules/score/rejudge/restore`、`event`） |
 | 对外 | `apa events --follow`、`apa ext run/check`、`apa connection list`（只读） |
 | 自动化 | `apa instance`、`apa pack` |
-| 可观测 | `apa why`、`apa health`、`apa run`、`apa judgment stats/spot-check` |
+| 设置 | `apa settings get/put/post/delete`（Web 能做的设置都有 CLI 入口，按权限卡判）、`apa purge`、`apa connection add/configure/rename/enable/disable/remove` |
+| 可观测 | `apa why`、`apa why denied`（最近被拦下的四行说明）、`apa health`、`apa run`、`apa judgment stats/spot-check` |
 
 ### 17.3 退出码
 

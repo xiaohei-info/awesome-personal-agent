@@ -84,12 +84,16 @@
 | `apa ext run <名>` | 本机启动 ext | ext 密钥（由 ext 读取） | |
 | `apa ext check` | 协议一致性自测 | 无 | |
 | `apa connection list [--direction channel]` | 列出连接（内置渠道）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
+| `apa connection add/configure/rename/enable/disable/remove` | 管理内置渠道连接：`add [<JSON 文件>\|-]` 新建（同 `POST /connections`）、`configure <id> [<JSON 文件>\|-]` 改配置与凭据（同 `PUT /connections/{id}`）、`rename <id> <名字>`、`enable <id>`、`disable <id>`、`remove <id>`；属权限卡的"渠道"组（主文档 §14.3），凭据只写不回显 | delegate（"渠道"开放时） | 2、4、6、23 |
 | **自动化** | | | |
 | `apa instance add/list/enable/disable` | 能力包实例（3a；改实例的执行 Agent 为 3b） | delegate（`list` 为 observer） | 20、23 |
 | `apa pack list` | 列出已加载能力包 | observer | |
 | `apa pack validate <目录>` | 本地校验能力包 | 无 | |
+| **设置** | | | |
+| `apa settings get/put/post/delete <路径> [<JSON 文件>\|-]` | Web 能做的设置都有 CLI 入口：原样调 `/settings/<路径>`（如 `policy`、`allowlists`、`model-endpoints`、`judgment`、`note-vaults`、`sources/<id>/outbound`、`projects/<id>/allowed-executors`、`projects/<id>/capture-outbound`、`declarations/<harness>/<rev>/confirm`），请求体从文件或标准输入读；能不能做按调用者的权限卡判（主文档 §14.3），只有本人的事为 20 | observer（读）；写按各段所属的组 | 2、4、20、23 |
+| `apa purge <id>` | 物理删除事项、材料或来源事件（主文档 §6.15）；属权限卡的"物理删除"组，开放只能限时 | delegate（"物理删除"开放时） | 4、5、23 |
 | **可观测** | | | |
-| `apa why <id>` | 回放事项或运行 | observer，按权限裁剪 | 5 |
+| `apa why <id>` | 回放事项或运行。另有 `apa why denied [--agent <id>]`：这个 Agent 最近被拦下的记录（主文档 §14.5），数据同 `GET /agents/{agent}/limits` 的 `denied`；`--pretty` 每条四行：没做成什么、哪条限制、在哪看、谁能改；`--agent` 只给本人看别的 Agent | observer，按权限裁剪 | 4、5 |
 | `apa health` | 健康视图 | observer | |
 | `apa run list/show` | 运行记录 | observer | |
 | `apa judgment stats [--use] [--template] [--source] [--since]` | 各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
