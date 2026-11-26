@@ -127,6 +127,12 @@ func (f *fx) finishedRuns(n int) []string {
 		targets[f.task(fmt.Sprintf("RET 一次性运行 %d", i), "acc-once")] = true
 	}
 	var ids []string
+	f.t.Cleanup(func() {
+		if f.t.Failed() && len(ids) < n {
+			f.t.Logf("本步事项 %v\n全部运行: %s\n审计事件: %s\n服务日志: %s", targets, f.apa(f.OBS, 0, "run", "list").Stdout,
+				f.webOK("GET", "/audit/events?limit=500", "", http.StatusOK), f.ServiceLog())
+		}
+	})
 	f.waitFor("一次性运行结束", 30*time.Second, func() bool {
 		ids = ids[:0]
 		for id, r := range f.runs() {
