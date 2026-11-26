@@ -239,7 +239,7 @@ func (s *Service) releaseBatch(ctx context.Context, call func(releaseIn, string)
 			return proposed, true, append(errs, err)
 		}
 		switch {
-		case got.Disposition == domain.DispositionProposed:
+		case got.Disposition == domain.DispositionProposed || got.Queue != "":
 			proposed++
 		case got.Disposition == domain.DispositionPending: // 处理出错留在 pending：按进入建议流计，保证不超额，下一次调用接手
 			proposed++
@@ -269,7 +269,7 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 	var calls []direct.JudgeCall
 	for _, ev := range window {
 		src, err := sn.source(ev.SourceID)
-		if err != nil || IsCaptureSource(src.ID) {
+		if err != nil {
 			continue
 		}
 		m, err := s.match(src, ev)
@@ -278,7 +278,7 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 		}
 		var custom string
 		if m != nil {
-			if rules.Exit(m.rule) != rules.ExitScreen {
+			if rules.Exit(m.rule) != rules.ExitProcess {
 				continue
 			}
 			custom = m.rule.Screen
@@ -297,8 +297,8 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 		if err != nil || outboundGate(o, pol, src) != "" {
 			continue
 		}
-		calls = append(calls, direct.JudgeCall{Pack: pack, Template: screen, Input: eventInput(src, ev, "", nil),
-			MaterialSource: materialSource(ev, o), Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
+		q1, q2 := s.judgeCalls(src, ev, pack, screen, "", o, pol)
+		calls = append(calls, q1, q2)
 	}
 	if len(calls) > 0 {
 		pf.Prefetch(ctx, calls)

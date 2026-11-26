@@ -177,6 +177,43 @@ func (d Disturb) PushRuleFor(cat string) PushRule {
 // DefaultDailyCap 是日上限缺省值（§7.4）。
 const DefaultDailyCap = 20
 
+// SourcePipeline 是来源处理线的设置（§9.3，设置 › 来源处理）。零值即默认：
+// 攒够 10 条或最早一条等了 30 分钟触发一批、一批最多 20 条、紧急立即处理默认关、失败最多重试 2 次、每日不限批数、两份提示词留空用内置默认。
+type SourcePipeline struct {
+	Agent           string `json:"agent,omitempty"`
+	BatchSize       int    `json:"batch_size,omitempty"`
+	WaitMinutes     int    `json:"wait_minutes,omitempty"`
+	UrgentImmediate bool   `json:"urgent_immediate,omitempty"`
+	MaxBatch        int    `json:"max_batch,omitempty"`
+	MaxRetries      *int   `json:"max_retries,omitempty"`
+	DailyBatchLimit int    `json:"daily_batch_limit,omitempty"`
+	JudgePrompt     string `json:"judge_prompt,omitempty"`
+	BatchPrompt     string `json:"batch_prompt,omitempty"`
+}
+
+// 来源处理线参数的默认值与范围。
+const (
+	DefaultPipelineBatch      = 10
+	MaxPipelineBatch          = 100
+	DefaultPipelineWait       = 30
+	MaxPipelineWait           = 1440
+	DefaultPipelineMaxBatch   = 20
+	DefaultPipelineMaxRetries = 2
+	MaxPipelineRetries        = 10
+	MaxPipelineDailyBatches   = 1000
+	MaxPipelinePrompt         = 12000
+)
+
+func (s SourcePipeline) Batch() int            { return cmp.Or(s.BatchSize, DefaultPipelineBatch) }
+func (s SourcePipeline) Wait() time.Duration   { return time.Duration(cmp.Or(s.WaitMinutes, DefaultPipelineWait)) * time.Minute }
+func (s SourcePipeline) MaxBatchSize() int     { return cmp.Or(s.MaxBatch, DefaultPipelineMaxBatch) }
+func (s SourcePipeline) Retries() int {
+	if s.MaxRetries == nil {
+		return DefaultPipelineMaxRetries
+	}
+	return *s.MaxRetries
+}
+
 // 执行跨来源合并的 Agent（MergeJudge 的取值）：same 与生成事项和建议相同（写作模型，整批一次调用）；off 关闭合并，只走规则。
 const (
 	MergeSame = "same"
@@ -503,6 +540,8 @@ type Policy struct {
 	MergeJudge string `json:"merge_judge,omitempty"`
 	// Merge 是合并任务本身的设置；旧文档没有此键读作全部默认。
 	Merge MergeSettings `json:"merge"`
+	// SourcePipeline 是来源处理线的设置（§9.3）；旧文档没有此键读作全部默认。
+	SourcePipeline SourcePipeline `json:"source_pipeline"`
 	// NoteVaults 是笔记库登记（§6.13、§12.8）：名字在实例内唯一，OpenURL 是"在笔记应用打开"的 URL 模板。
 	// 已存的策略版本没有这个键，读作没有登记，不改写。只在 Web 改。
 	NoteVaults []NoteVault `json:"note_vaults"`
@@ -844,7 +883,36 @@ func normalize(p Policy) (Policy, error) {
 	if p.Channels == nil {
 		p.Channels = map[string]Channel{}
 	}
+	if err := normalizeSourcePipeline(&p.SourcePipeline); err != nil {
+		return p, err
+	}
 	return normalizeJudgment(p)
+}
+
+func normalizeSourcePipeline(sp *SourcePipeline) error {
+	sp.Agent = strings.TrimSpace(sp.Agent)
+	if sp.BatchSize < 0 || sp.BatchSize > MaxPipelineBatch {
+		return invalid("source_pipeline batch_size %d: use 1 to %d", sp.BatchSize, MaxPipelineBatch)
+	}
+	if sp.WaitMinutes < 0 || sp.WaitMinutes > MaxPipelineWait {
+		return invalid("source_pipeline wait_minutes %d: use 1 to %d", sp.WaitMinutes, MaxPipelineWait)
+	}
+	if sp.MaxBatch < 0 || sp.MaxBatch > MaxPipelineBatch {
+		return invalid("source_pipeline max_batch %d: use 1 to %d", sp.MaxBatch, MaxPipelineBatch)
+	}
+	if sp.MaxRetries != nil && (*sp.MaxRetries < 0 || *sp.MaxRetries > MaxPipelineRetries) {
+		return invalid("source_pipeline max_retries %d: use 0 to %d", *sp.MaxRetries, MaxPipelineRetries)
+	}
+	if sp.DailyBatchLimit < 0 || sp.DailyBatchLimit > MaxPipelineDailyBatches {
+		return invalid("source_pipeline daily_batch_limit %d: use 0 to %d", sp.DailyBatchLimit, MaxPipelineDailyBatches)
+	}
+	if len([]rune(sp.JudgePrompt)) > MaxPipelinePrompt {
+		return invalid("source_pipeline judge_prompt exceeds %d characters", MaxPipelinePrompt)
+	}
+	if len([]rune(sp.BatchPrompt)) > MaxPipelinePrompt {
+		return invalid("source_pipeline batch_prompt exceeds %d characters", MaxPipelinePrompt)
+	}
+	return nil
 }
 
 // normalizeJudgment 校验判断设置：带的两端在 [0,1] 且下限不大于上限，同一（模板，来源）只能出现一次。

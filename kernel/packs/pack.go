@@ -592,15 +592,15 @@ func checkSourceRule(r SourceRule) error {
 		return fmt.Errorf("%s: on_update %q must be refresh or attach", where, r.OnUpdate)
 	}
 	switch r.Then {
-	case "", "proposed", "ignore", "screen", "judge", "extract", "digest", "alert":
+	case "", "proposed", "ignore", "process", "screen", "judge", "extract", "digest", "alert":
 	default:
-		return fmt.Errorf("%s: then %q must be proposed, ignore, screen, extract, digest or alert (judge is the old name of screen)", where, r.Then)
+		return fmt.Errorf("%s: then %q must be proposed, ignore, process, digest or alert (screen, judge and extract are accepted as aliases of process)", where, r.Then)
 	}
-	if r.Prescreen == NoPrescreen && r.Then != "extract" {
+	if r.Prescreen == NoPrescreen && r.Then != "extract" && r.Then != "process" {
 		return fmt.Errorf("%s: prescreen: %s only applies to then: extract", where, NoPrescreen)
 	}
-	if r.NotifyUrgent && r.Then != "screen" && r.Then != "judge" && r.Then != "extract" {
-		return fmt.Errorf("%s: notify_urgent only applies to then: screen or then: extract", where)
+	if r.NotifyUrgent && r.Then != "process" && r.Then != "screen" && r.Then != "judge" && r.Then != "extract" {
+		return fmt.Errorf("%s: notify_urgent only applies to then: process, screen or extract", where)
 	}
 	if r.Then == "alert" && len(r.Where) == 0 {
 		return fmt.Errorf("%s: an alert rule must carry where[]: alert cannot hang on every event", where)

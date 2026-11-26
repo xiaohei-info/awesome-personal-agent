@@ -65,6 +65,12 @@ type JudgeCall struct {
 	// UnjudgedOnUnavailable 为真时，没有任何一级给出可用答复就不取保守默认、不写记录，Verdict.Unavailable 为真：
 	// 入站事件记未判定，恢复后重判（§8.7）。single_shot 模板不受此项影响，照取 on_undecided。
 	UnjudgedOnUnavailable bool
+	// Question 非空时替换模板正文作为本次题面（用于同一模板的多题判定，如 judge 的第二题"急不急"）。
+	Question string
+	// CriteriaExtra 非空时附在模板判据后面（用于本人在设置页写的判断标准，保留模板里的安全边界）。
+	CriteriaExtra string
+	// OnUndecided 非空时覆盖模板的保守默认（如 judge 第一题取 yes、第二题取 no）。
+	OnUndecided string
 }
 
 // Verdict 是一道判断题的结论。
@@ -258,7 +264,30 @@ func (p *pending) fit(level, locality string, max int) (budget.Result, bool) {
 }
 
 func (p *pending) question() string {
-	return render(p.pr.Body, Call{Target: p.c.Subject, Project: p.c.Project}, "")
+	body := p.pr.Body
+	if strings.TrimSpace(p.c.Question) != "" {
+		body = p.c.Question
+	}
+	return render(body, Call{Target: p.c.Subject, Project: p.c.Project}, "")
+}
+
+func (p *pending) criteria() string {
+	base := strings.TrimSpace(p.meta.Criteria)
+	extra := strings.TrimSpace(p.c.CriteriaExtra)
+	if extra == "" {
+		return base
+	}
+	if base == "" {
+		return extra
+	}
+	return base + "\n" + extra
+}
+
+func (p *pending) onUndecided() string {
+	if strings.TrimSpace(p.c.OnUndecided) != "" {
+		return strings.TrimSpace(p.c.OnUndecided)
+	}
+	return onUndecided(p.meta)
 }
 
 func (p *pending) use() string {
@@ -274,7 +303,7 @@ func (p *pending) use() string {
 // fp 是一级的输入指纹：模板版本、问法与判据、结构化输入（不含统计）、裁剪后的资料、后端种类和端点标识（§8.5）。
 func (p *pending) fp(backend, endpoint, material string) string {
 	h := sha256.New()
-	for _, f := range []string{p.pk.Name, p.pk.Hash, p.c.Template, p.question(), p.meta.Criteria, string(canon(p.rawIn)), material, backend, endpoint} {
+	for _, f := range []string{p.pk.Name, p.pk.Hash, p.c.Template, p.question(), p.criteria(), string(canon(p.rawIn)), material, backend, endpoint} {
 		fmt.Fprintf(h, "%d:%s|", len(f), f)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -371,7 +400,7 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 			j.owns = append(j.owns, p)
 			continue
 		}
-		j := &job{fp: fp, q: model.Question{ID: "q" + strconv.Itoa(len(jobs)+1), Question: p.question(), Criteria: p.meta.Criteria,
+		j := &job{fp: fp, q: model.Question{ID: "q" + strconv.Itoa(len(jobs)+1), Question: p.question(), Criteria: p.criteria(),
 			Input: p.input, Material: mat, Truncated: res.Mode != budget.ModeNone}, owns: []*pending{p}}
 		jobs = append(jobs, j)
 		byFP[fp] = j
@@ -500,7 +529,7 @@ func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verd
 	}
 	v.Answer = final.answer
 	if v.DecidedBy == "" {
-		v.DecidedBy, v.LowConfidence, v.Answer = record.DecidedDefault, true, onUndecided(p.meta)
+		v.DecidedBy, v.LowConfidence, v.Answer = record.DecidedDefault, true, p.onUndecided()
 	}
 	v.Unavailable = !answeredAny
 	if p.c.ScoreOnly { // 影子下 answered 恒为假：能不能记分看有没有概率
@@ -535,7 +564,7 @@ func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verd
 		}
 		sh := v.Record
 		sh.ID, sh.Levels = shID, levels[shIdx:shIdx+1]
-		sh.DecidedBy, sh.Answer, sh.LowConfidence = record.DecidedDefault, onUndecided(p.meta), true
+		sh.DecidedBy, sh.Answer, sh.LowConfidence = record.DecidedDefault, p.onUndecided(), true
 		fin := v.Record
 		fin.Shadow, fin.Levels = false, append([]record.Level(nil), levels...)
 		fin.Levels[shIdx].PYes = nil
@@ -704,7 +733,7 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 	if cached != nil {
 		content, lv.Reused = cached, true
 	} else {
-		req := model.Request{System: p.question(), User: judgeUser(p.meta.Criteria, p.input, mat), Schema: schema}
+		req := model.Request{System: p.question(), User: judgeUser(p.criteria(), p.input, mat), Schema: schema}
 		if p.meta.Timeout != "" {
 			req.Timeout, _ = time.ParseDuration(p.meta.Timeout) // 加载时已校验
 		}
