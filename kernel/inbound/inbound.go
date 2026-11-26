@@ -1003,6 +1003,9 @@ func (s *Service) dispose(ctx context.Context, m *matched, ev domain.SourceEvent
 	if ev.Rejudges > 0 { // 每次重判是一次新的处置，不能重放上一次的结果
 		key += fmt.Sprintf(":rejudge-%d", ev.Rejudges)
 	}
+	if ev.AttachState != "" { // 挂靠后交回或释放是一次新的处置（挂靠只能发生一次，终值唯一）
+		key += ":" + ev.AttachState
+	}
 	_, err := s.do(ctx, system, d.Rule, key, CmdDispose, d, command.Chain{})
 	return err
 }

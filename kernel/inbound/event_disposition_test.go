@@ -10,6 +10,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -122,4 +123,53 @@ func TestEventDispositionCommandsProposeIntoIgnoreAttachAndHandback(t *testing.T
 		t.Fatal("expected conflict attaching to closed item")
 	}
 	var _ items.Write // keep import clean if needed
+}
+
+// 挂靠后交回，事件回到待处理，再次处置必须重新入队，不能被首次处置的幂等键重放吞掉。
+func TestHandbackAfterAttachRequeuesEvent(t *testing.T) {
+	cls := &spyClassifier{fn: func(qs []model.Question) model.JudgeResult {
+		ans := make([]model.Answer, len(qs))
+		for i, q := range qs {
+			ans[i] = model.Answer{ID: q.ID, PYes: 0.90, Source: "classifier"}
+		}
+		return model.JudgeResult{Answers: ans, Healthy: true}
+	}}
+	e := setupUnifiedJudgeEnv(t, cls, nil, "", "")
+	fm, err := followmsg.New(followmsg.Options{Store: e.st, Exec: e.x, Owner: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fm.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
+	dlg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent_1", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
+	state := func() (ev domain.SourceEvent) {
+		_ = e.st.View(bg, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, "ev_hb"); return })
+		return
+	}
+	ingestOne(t, e, "src_mail", "mail", "ev_hb", "mail.received", "hb")
+	if err := e.svc.Process(bg); err != nil {
+		t.Fatal(err)
+	}
+	if ev := state(); ev.Queue != runner.QueueQueued {
+		t.Fatalf("first process should queue: %+v", ev)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error { _, err := runner.Claim(tx, "run_hb", 10); return err }); err != nil {
+		t.Fatal(err)
+	}
+	var it struct{ ID string }
+	_ = json.Unmarshal(e.must("item.create", map[string]any{"kind": "task", "title": "已有事项", "phase": "open"}), &it)
+	if _, err := e.svc.AttachEvent(bg, dlg, "ev_hb", it.ID, "属于它"); err != nil {
+		t.Fatal(err)
+	}
+	hb, _ := json.Marshal(map[string]any{"message": "ev_hb", "reason": "挂错了"})
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: followmsg.CmdHandback, Input: hb}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Process(bg); err != nil {
+		t.Fatal(err)
+	}
+	if ev := state(); ev.Disposition != domain.DispositionPending || ev.Queue != runner.QueueQueued {
+		t.Fatalf("handed-back event must be queued again: %+v", ev)
+	}
 }
