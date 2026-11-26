@@ -5,7 +5,7 @@ import { errorText as msg, lang, useT } from "../../app/i18n";
 import { shared } from "./strings";
 import { useDirty } from "../../app/leave";
 
-// 「我来拍板」「提醒与打扰」「设置 › Agent」共用：形状对应 /v1/settings/{policy,allowlists,access-limits}（附录 B.2）。
+// 「权限总览」「提醒与打扰」「设置 › Agent」共用：形状对应 /v1/settings/{policy,allowlists,access-limits}（附录 B.2）。
 // 校验、规整、人格上限（约 400 token）全部由服务端判定，页面只搬运编辑结果并原样显示拒绝原因；被拒绝时什么都没保存，草稿保留。
 // PUT 按段替换：每张卡片只发自己的段，且与改版前的请求体逐字段一致（settings-payload.test.tsx 守住）。
 export type PolicyRoute = "policy" | "allowlists" | "access-limits" | "merge";
