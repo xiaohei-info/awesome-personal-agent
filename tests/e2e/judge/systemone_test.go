@@ -47,8 +47,8 @@ func TestFlowJudgeSystemOne(t *testing.T) {
 		}
 		must(t, json.Unmarshal(b[0].Body, &req))
 		eq(t, "model", req.Model, "cls-stub-latest")
-		if len(req.Questions) != 1 || !strings.Contains(b[0].BodyText, "SO-MATERIAL") || !strings.Contains(b[0].BodyText, `"type":"noul"`) {
-			t.Fatalf("请求体不是一道带资料的 noul 题: %s", b[0].BodyText)
+		if len(req.Questions) != 2 || !strings.Contains(b[0].BodyText, "SO-MATERIAL") || !strings.Contains(b[0].BodyText, `"type":"noul"`) {
+			t.Fatalf("请求体不是两道带资料的 noul 题: %s", b[0].BodyText)
 		}
 	})
 

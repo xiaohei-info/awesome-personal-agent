@@ -51,6 +51,7 @@ func TestFlowEndpointConfig(t *testing.T) {
 	e.ModelStub = modelstub.NewAt("127.0.0.1:0")
 	f := &fx{Env: e, t: t, src: "src_acctext", events: filepath.Join(e.Root, "acc_text_events.jsonl")}
 	f.registerText()
+	e.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议
 
 	f.step(t, "ACT-EPC-01 新配置键带默认值", func(t *testing.T) {
 		f.webOK("PUT", "/settings/model-endpoints", mustJSON(map[string]any{

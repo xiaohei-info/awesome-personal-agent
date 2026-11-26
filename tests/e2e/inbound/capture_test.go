@@ -4,10 +4,12 @@ package inbound
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
@@ -62,19 +64,9 @@ func (k *kit) claim() int {
 	return k.APIRaw("GET", "/v1/deliveries/next?wait=1", "", k.CHAN).Code
 }
 
-// extract 是 triage-extract 的合法输出：{"candidates":[…]}，每项必有 title、kind（内置包的 output_schema）。
-func extract(cands ...map[string]any) string {
-	for _, c := range cands {
-		c["kind"] = "task"
-	}
-	b, _ := json.Marshal(map[string]any{"candidates": cands})
-	return string(b)
-}
-
 func TestFlowCapture(t *testing.T) {
 	k := newKit(t)
 	open := k.Projects["acc-open"]
-	var capTwoItems []string
 
 	k.step("ACT-CAP-01 关掉项目的捕获后不捕获", func(t *testing.T) {
 		before := len(k.proposed())
@@ -103,12 +95,13 @@ func TestFlowCapture(t *testing.T) {
 	})
 
 	cap2 := "cap-two 下周三前把合同发给小王；另外周五要订会议室"
-	k.step("ACT-CAP-03 一段含两件事的对话先预筛再抽取，得到两条建议", func(t *testing.T) {
+	k.step("ACT-CAP-03 对话增量与其他来源走同一条线，批处理用运行凭据读到对话原文", func(t *testing.T) {
+		seen := filepath.Join(k.Root, "capture-read.txt")
+		k.BatchAgent(fmt.Sprintf(`"$APA" source event "$EV" >> %q
+"$APA" source propose "$EV" >/dev/null`, seen))
+		defer k.BatchAgent("")
 		before := len(k.proposed())
 		k.Cls.PYes(keyOf("cap-two"), 0.90)
-		wed := weekday(time.Now().AddDate(0, 0, 1), time.Wednesday).Format("2006-01-02")
-		k.ModelStub.When("cap-two", replyJSON(extract(
-			map[string]any{"title": "把合同发给小王", "deadline": wed}, map[string]any{"title": "周五订会议室"})))
 		k.clear()
 		code, out := k.capture(k.WRK, open, cap2)
 		if code != 200 || !out.Captured {
@@ -116,36 +109,19 @@ func TestFlowCapture(t *testing.T) {
 		}
 		ev := k.waitCapture(open, map[string]bool{})
 		eq(t, "disposition", ev.Disposition, "proposed")
-		if len(ev.Items) != 2 {
-			t.Fatalf("内部来源事件的 items 应含两条事项 id: %+v", ev)
-		}
-		capTwoItems = ev.Items
-		titles := map[string]bool{}
-		for _, id := range ev.Items {
-			it := k.item(id)
-			eq(t, "phase", it.Phase, "proposed")
-			eq(t, "project", it.Project, open)
-			titles[it.Title] = true
-		}
-		if !titles["把合同发给小王"] || !titles["周五订会议室"] {
-			t.Errorf("两条建议的标题不符: %v", titles)
-		}
-		eq(t, "建议流新增", len(k.proposed()), before+2)
-		if n := len(k.clsAbout("cap-two")); n != 1 {
-			t.Errorf("CLS_LOG 应先有一道 capture-prescreen 题: %d", n)
-		}
-		if n := len(k.modelAbout("cap-two", false)); n != 1 {
-			t.Errorf("MODEL_LOG 应有一次 triage-extract 请求: %d", n)
-		}
-		if n := len(k.modelAbout("cap-two", true)); n != 0 {
-			t.Errorf("预筛已定案，不应有同题重答: %d", n)
+		it := k.item(ev.Item)
+		eq(t, "phase", it.Phase, "proposed")
+		eq(t, "project", it.Project, open)
+		eq(t, "建议流新增", len(k.proposed()), before+1)
+		if b, err := os.ReadFile(seen); err != nil || !strings.Contains(string(b), "订会议室") {
+			t.Errorf("运行凭据应能读到对话原文: %v %s", err, b)
 		}
 		if k.claim() != http.StatusNoContent {
 			t.Error("CHAN 不应领到投递")
 		}
 	})
 
-	k.step("ACT-CAP-04 预筛为否时生成型零调用", func(t *testing.T) {
+	k.step("ACT-CAP-04 判为不用处理的对话不进队列", func(t *testing.T) {
 		before, seen := len(k.proposed()), k.captureIDs(open)
 		k.Cls.PYes(keyOf("cap-chat"), 0.03)
 		k.clear()
@@ -153,58 +129,31 @@ func TestFlowCapture(t *testing.T) {
 		ev := k.waitCapture(open, seen)
 		eq(t, "disposition", ev.Disposition, "ignored")
 		if len(k.clsAbout("cap-chat")) == 0 {
-			t.Error("CLS_LOG 应有这道预筛题")
+			t.Error("CLS_LOG 应有这道题")
 		}
-		quiet()
-		eq(t, "MODEL_LOG 新请求", len(k.ModelStub.Requests())-k.modelOff, 0)
 		eq(t, "建议流条数", len(k.proposed()), before)
+		if strings.Contains(k.BatchPrompts(), ev.ID) {
+			t.Error("忽略的对话不应进批处理")
+		}
 	})
 
-	// 模型替身按请求体子串匹配：待处理建议的标题会随 active_proposals 进后续请求，所以匹配串取只出现在本次增量里的整句。
-	k.step("ACT-CAP-05 预筛落在下限之上即抽取（宁可多抽）", func(t *testing.T) {
-		before, seen := len(k.proposed()), k.captureIDs(open)
-		k.Cls.PYes(keyOf("cap-maybe"), 0.30)
-		k.ModelStub.When("cap-maybe 回头记得给房东回电话", replyJSON(extract(map[string]any{"title": "cap-maybe 回电话给房东"})))
-		k.clear()
-		k.capture(k.WRK, open, "cap-maybe 回头记得给房东回电话")
-		ev := k.waitCapture(open, seen)
-		eq(t, "disposition", ev.Disposition, "proposed")
-		eq(t, "抽取请求数", len(k.modelAbout("cap-maybe", false)), 1)
-		eq(t, "同题重答数", len(k.modelAbout("cap-maybe", true)), 0)
-		eq(t, "建议流新增", len(k.proposed()), before+1)
-		eq(t, "标题", k.item(ev.Items[0]).Title, "cap-maybe 回电话给房东")
-	})
-
-	k.step("ACT-CAP-06 抽取出零条候选时不建建议", func(t *testing.T) {
-		before, seen := len(k.proposed()), k.captureIDs(open)
-		k.Cls.PYes(keyOf("cap-zero"), 0.90)
-		k.ModelStub.When("cap-zero 我们讨论了一下架构", replyJSON(`{"candidates":[]}`))
-		k.clear()
-		k.capture(k.WRK, open, "cap-zero 我们讨论了一下架构")
-		ev := k.waitCapture(open, seen)
-		eq(t, "disposition", ev.Disposition, "ignored")
-		eq(t, "抽取请求数", len(k.modelAbout("cap-zero", false)), 1)
-		eq(t, "建议流条数", len(k.proposed()), before)
-	})
-
-	k.step("ACT-CAP-07 判断端点不可用时直接交生成型抽取", func(t *testing.T) {
+	k.step("ACT-CAP-07 判断端点不可用时由对话端点回答同一题", func(t *testing.T) {
 		before, seen := len(k.proposed()), k.captureIDs(open)
 		k.Cls.SetFault(modelstub.ClsFault{Status: 503})
 		defer k.Cls.SetFault(modelstub.ClsFault{})
-		k.ModelStub.When("cap-nocls 明天交报销单", replyJSON(extract(map[string]any{"title": "cap-nocls 交报销单"})))
+		k.chatJudge("cap-nocls", "yes", true)
 		k.clear()
 		k.capture(k.WRK, open, "cap-nocls 明天交报销单")
 		ev := k.waitCapture(open, seen)
 		eq(t, "disposition", ev.Disposition, "proposed")
 		eq(t, "建议流新增", len(k.proposed()), before+1)
-		eq(t, "标题", k.item(ev.Items[0]).Title, "cap-nocls 交报销单")
 	})
 
 	k.step("ACT-CAP-08 两个端点都不可用时捕获的增量记未判定，不丢", func(t *testing.T) {
 		before, seen := len(k.proposed()), k.captureIDs(open)
 		k.Cls.SetFault(modelstub.ClsFault{Status: 503})
 		defer k.Cls.SetFault(modelstub.ClsFault{})
-		k.ModelStub.When("cap-down 下周一体检", failReply(500))
+		k.ModelStub.Judge(modelstub.ChatJudge{Key: keyOf("cap-down"), Status: 500})
 		k.capture(k.WRK, open, "cap-down 下周一体检")
 		ev := k.waitCapture(open, seen)
 		eq(t, "disposition", ev.Disposition, "unjudged")
@@ -220,10 +169,7 @@ func TestFlowCapture(t *testing.T) {
 		quiet()
 		eq(t, "内部来源事件数", len(k.captureEvents(open)), len(seen))
 		eq(t, "建议流条数", len(k.proposed()), before)
-		eq(t, "第二次 cap-two 抽取请求数", len(k.modelAbout("cap-two", false)), 0)
-		if len(capTwoItems) != 2 {
-			t.Error("ACT-CAP-03 应已得到两条建议")
-		}
+		eq(t, "第二次 cap-two 判断请求数", len(k.clsAbout("cap-two")), 0)
 	})
 
 	k.step("ACT-CAP-10 运行身份下不生效", func(t *testing.T) {

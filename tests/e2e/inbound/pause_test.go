@@ -65,16 +65,14 @@ func TestFlowModelsPause(t *testing.T) {
 
 	k.step("恢复后新事件立即按原配置判断", func(t *testing.T) {
 		k.screenCls("pz-", 0.90)
-		k.draft("pz-resumed", map[string]any{"title": "pz 恢复后起草", "kind": "task"})
-		k.draft("pz-paused", map[string]any{"title": "pz 暂停积压重判", "kind": "task"})
 		pause(false)
 		k.clear()
 		k.emit("pz-2", "pz-resumed 恢复后的事件")
 		ev := k.waitEvent(inpSrc, "pz-2", wait)
 		eq(t, "disposition", ev.Disposition, "proposed")
-		eq(t, "title", k.item(ev.Item).Title, "pz 恢复后起草")
-		if len(k.Cls.Batches())-k.clsOff == 0 || len(k.ModelStub.Requests())-k.modelOff == 0 {
-			t.Errorf("恢复后应调用两个端点: cls %d model %d", len(k.Cls.Batches())-k.clsOff, len(k.ModelStub.Requests())-k.modelOff)
+		eq(t, "title", k.item(ev.Item).Title, "pz-resumed 恢复后的事件")
+		if len(k.Cls.Batches())-k.clsOff == 0 {
+			t.Errorf("恢复后应调用判断端点")
 		}
 		if ok, d := k.signal("model_unavailable"); !ok || d["paused"] == true {
 			t.Errorf("恢复后模型信号不再是已暂停: ok=%v %v", ok, d)
@@ -86,6 +84,6 @@ func TestFlowModelsPause(t *testing.T) {
 		if !k.WaitFor(wait, func() bool { return k.byEventID(inpSrc, "pz-1")[0].Disposition == "proposed" }) {
 			t.Fatalf("pz-1 一直没有重判: %+v\n%s", k.byEventID(inpSrc, "pz-1")[0], k.ServiceLog())
 		}
-		eq(t, "title", k.item(k.byEventID(inpSrc, "pz-1")[0].Item).Title, "pz 暂停积压重判")
+		eq(t, "title", k.item(k.byEventID(inpSrc, "pz-1")[0].Item).Title, "pz-paused 暂停期间的事件")
 	})
 }

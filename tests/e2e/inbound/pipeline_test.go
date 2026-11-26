@@ -4,13 +4,12 @@ package inbound
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
 const inpRules = `name: acc-inp-rules
@@ -21,14 +20,6 @@ source_rules:
     match: {source_type: acc, event_type: [inp.notice]}
     then: ignore
 `
-
-// weekday 返回 d 当天或其后最近的 wd。
-func weekday(d time.Time, wd time.Weekday) time.Time {
-	for d.Weekday() != wd {
-		d = d.AddDate(0, 0, 1)
-	}
-	return d
-}
 
 // newOpenItem 用 DEL 代本人在 acc-open 建事项并转 open（验收文档 ACT-INP-03、10 的前置）。
 func (k *kit) newOpenItem(title string) string {
@@ -66,7 +57,6 @@ func TestFlowInboundPipeline(t *testing.T) {
 
 	k.step("ACT-INP-02 第 1 步去重：同一事件重复到达只处理一次", func(t *testing.T) {
 		k.screenCls("inp-dup", 0.90)
-		k.draft("inp-dup 请审阅文档", map[string]any{"title": "inp-dup 起草标题", "kind": "task"})
 		k.clear()
 		k.emit("inp-dup-1", "inp-dup 请审阅文档")
 		k.waitEvent(inpSrc, "inp-dup-1", wait)
@@ -75,13 +65,12 @@ func TestFlowInboundPipeline(t *testing.T) {
 		if n := len(k.byEventID(inpSrc, "inp-dup-1")); n != 1 {
 			t.Errorf("来源事件列表里 id=inp-dup-1 应只有一条，实际 %d", n)
 		}
-		eq(t, "建议流里\"inp-dup 起草标题\"条数", k.countTitled("inp-dup 起草标题"), 1)
+		eq(t, "建议流里这条建议的条数", k.countTitled("inp-dup 请审阅文档"), 1)
 		eq(t, "CLS_LOG 含 inp-dup 的题数", len(k.clsAbout("inp-dup")), 1)
-		eq(t, "MODEL_LOG 含 inp-dup 的起草请求数", len(k.modelAbout("inp-dup", false)), 1)
 	})
 
 	var t1 string
-	k.step("ACT-INP-03 第 2 步归属：命中关联键的事件挂靠到原事项，不进初筛与起草", func(t *testing.T) {
+	k.step("ACT-INP-03 第 2 步归属：命中关联键的事件挂靠到原事项，不进 judge 与队列", func(t *testing.T) {
 		t1 = k.newOpenItem("inp-thread 合同修订")
 		k.apa(k.DEL, 0, "item", "relate", t1, "--key", "inp-thread-1")
 		before := len(k.proposed())
@@ -116,7 +105,7 @@ func TestFlowInboundPipeline(t *testing.T) {
 		k.removePack("acc-inp-rules")
 	})
 
-	k.step("ACT-INP-05 第 4 步初筛低于下限：忽略并留痕，不起草", func(t *testing.T) {
+	k.step("ACT-INP-05 第 4 步 judge 低于下限：忽略并留痕，不进队列", func(t *testing.T) {
 		k.screenCls("inp-low", 0.05)
 		before := len(k.proposed())
 		k.clear()
@@ -135,55 +124,34 @@ func TestFlowInboundPipeline(t *testing.T) {
 		eq(t, "建议流条数", len(k.proposed()), before)
 	})
 
-	k.step("ACT-INP-06 第 4、5、6 步：初筛为是的事件被完整起草后进入 proposed", func(t *testing.T) {
+	k.step("ACT-INP-06 判为要处理的事件进队列，由批处理转为建议", func(t *testing.T) {
 		k.screenCls("inp-high", 0.90)
-		deadline := weekday(time.Now().AddDate(0, 0, 8), time.Friday).Format("2006-01-02")
-		planned := weekday(time.Now(), time.Thursday).Format("2006-01-02")
-		k.draft("inp-high 请在周五前审阅季度报告", map[string]any{"title": "审阅 inp-high 季度报告", "summary": "对方请你周五前审阅季度报告",
-			"kind": "task", "project": k.Projects["acc-work"], "deadline": deadline, "planned_for": planned,
-			"recommend": "accept", "reason": "对方明确提出请求"})
 		k.clear()
 		k.emit("inp-high-1", "inp-high 请在周五前审阅季度报告")
 		ev := k.waitEvent(inpSrc, "inp-high-1", wait)
 		eq(t, "disposition", ev.Disposition, "proposed")
 		it := k.item(ev.Item)
 		eq(t, "phase", it.Phase, "proposed")
-		eq(t, "title", it.Title, "审阅 inp-high 季度报告")
-		eq(t, "summary", it.Summary, "对方请你周五前审阅季度报告")
-		eq(t, "kind", it.Kind, "task")
-		eq(t, "project", it.Project, k.Projects["acc-work"])
-		eq(t, "deadline", strings.TrimSuffix(strings.SplitN(it.Deadline, "T", 2)[0], ""), deadline)
-		eq(t, "planned_for", strings.SplitN(it.PlannedFor, "T", 2)[0], planned)
-		if p := it.Proposal; p == nil || p.Recommend != "accept" || p.Reason != "对方明确提出请求" || p.LowConfidence || len(p.Sources) != 1 || p.Sources[0] != ev.ID {
-			t.Errorf("proposal 字段与起草结果不符: %+v", it.Proposal)
+		eq(t, "title", it.Title, "inp-high 请在周五前审阅季度报告")
+		eq(t, "project", it.Project, "prj_inbox") // 未指定项目的非 brief/routine 事项落内置 Inbox（决定 92）
+		if p := it.Proposal; p == nil || len(p.Sources) != 1 || p.Sources[0] != ev.ID {
+			t.Errorf("proposal.sources 应是这条来源事件: %+v", it.Proposal)
 		}
 		if n := len(k.modelAbout("inp-high", true)); n != 0 {
 			t.Errorf("MODEL_LOG 里不应有 inp-high 的判断题（分类端点已定案），实际 %d", n)
 		}
-		eq(t, "起草请求数", len(k.modelAbout("inp-high", false)), 1)
-		// 建议流（Web 页面读的 GET /v1/items?phase=proposed）显示该条。
-		found := false
-		for _, p := range k.proposed() {
-			found = found || p.ID == ev.Item
-		}
-		if !found {
-			t.Error("建议流应显示该条")
+		if p := k.BatchPrompts(); !strings.Contains(p, ev.ID) || strings.Contains(p, "正文 inp-high") {
+			t.Errorf("批处理提示词应带事件 id、不带正文: %s", p)
 		}
 	})
 
-	k.step("ACT-INP-07 把握低的不丢：各级未定时留为建议并标\"把握低\"，仍被起草", func(t *testing.T) {
+	k.step("ACT-INP-07 各级未定时按要处理进队列，不丢", func(t *testing.T) {
 		k.screenCls("inp-unsure", 0.35)
 		k.chatJudge("inp-unsure", "no", false)
-		k.draft("inp-unsure 也许相关的通知", map[string]any{"title": "inp-unsure 起草标题", "kind": "task", "recommend": "dismiss", "reason": "可能无关"})
 		k.clear()
 		k.emit("inp-unsure-1", "inp-unsure 也许相关的通知")
 		ev := k.waitEvent(inpSrc, "inp-unsure-1", wait)
 		eq(t, "disposition", ev.Disposition, "proposed")
-		it := k.item(ev.Item)
-		eq(t, "title", it.Title, "inp-unsure 起草标题")
-		if it.Proposal == nil || !it.Proposal.LowConfidence {
-			t.Errorf("proposal.low_confidence 应为 true: %+v", it.Proposal)
-		}
 		j := k.judgment(ev.Judgment)
 		if len(j.Levels) != 2 || j.Levels[0].Backend != "classifier" || j.Levels[0].PYes == nil || *j.Levels[0].PYes != 0.35 ||
 			j.Levels[1].Answer != "no" || j.Levels[1].Sufficient == nil || *j.Levels[1].Sufficient || j.DecidedBy != "default" || !j.LowConfidence {
@@ -191,79 +159,25 @@ func TestFlowInboundPipeline(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-INP-08 起草失败不挡路：生成端点报错时建议仍进入建议流", func(t *testing.T) {
-		k.screenCls("inp-draftfail", 0.90)
-		// 匹配事件正文而不是标题：标题会随 active_proposals 进后续事件的起草请求，坏回答会串到别的事件上。
-		k.ModelStub.When("正文 inp-draftfail", failReply(500))
-		k.clear()
-		k.emit("inp-draftfail-1", "inp-draftfail 原始标题", func(e *Ev) { e.Summary = "原始摘要" })
-		ev := k.waitEvent(inpSrc, "inp-draftfail-1", wait)
+	k.step("ACT-INP-08 批处理运行失败后事件回到待处理，重试不产生重复建议", func(t *testing.T) {
+		marker := filepath.Join(k.Root, "batch-failed-once")
+		k.BatchAgent(fmt.Sprintf(`"$APA" source propose "$EV" >/dev/null 2>&1 || true
+if [ ! -f %[1]q ]; then touch %[1]q; exit 1; fi`, marker))
+		defer k.BatchAgent("")
+		k.screenCls("inp-retry", 0.90)
+		k.emit("inp-retry-1", "inp-retry 第一次处理会失败")
+		ev := k.waitEvent(inpSrc, "inp-retry-1", wait)
 		eq(t, "disposition", ev.Disposition, "proposed")
-		it := k.item(ev.Item)
-		eq(t, "phase", it.Phase, "proposed")
-		eq(t, "title", it.Title, "inp-draftfail 原始标题")
-		eq(t, "summary", it.Summary, "")
-		eq(t, "kind", it.Kind, "task")
-		eq(t, "project", it.Project, "prj_inbox") // 未指定项目的非 brief/routine 事项落内置 Inbox（决定 92）
-		if len(k.modelAbout("inp-draftfail", false)) == 0 {
-			t.Error("生成端点应收到过起草请求（并返回 500）")
+		k.emit("inp-retry-2", "inp-retry 失败之后的下一条")
+		next := k.waitEvent(inpSrc, "inp-retry-2", wait)
+		eq(t, "disposition", next.Disposition, "proposed")
+		eq(t, "第一条的建议条数", k.countTitled("inp-retry 第一次处理会失败"), 1)
+		if _, err := os.Stat(marker); err != nil {
+			t.Errorf("应有一次失败的运行: %v", err)
 		}
 	})
 
-	k.step("ACT-INP-09 起草输出不合 schema 视同起草失败", func(t *testing.T) {
-		k.screenCls("inp-badschema", 0.90)
-		k.ModelStub.When("正文 inp-badschema", replyJSON(`{"kind":"foo","summary":"不该被采纳的摘要"}`))
-		k.clear()
-		k.emit("inp-badschema-1", "inp-badschema 原始标题")
-		ev := k.waitEvent(inpSrc, "inp-badschema-1", wait)
-		eq(t, "disposition", ev.Disposition, "proposed")
-		it := k.item(ev.Item)
-		eq(t, "title", it.Title, "inp-badschema 原始标题")
-		eq(t, "summary", it.Summary, "")
-		eq(t, "kind", it.Kind, "task")
-	})
-
-	k.step("ACT-INP-10 起草从内核给的候选清单里推荐\"补到已有事项\"", func(t *testing.T) {
-		t2 := k.newOpenItem("inp-cand 供应商合同")
-		k.screenCls("inp-cand", 0.90)
-		k.draft("inp-cand 供应商合同第三版", map[string]any{"title": "inp-cand 起草标题", "kind": "task",
-			"recommend": "attach", "attach_to": t2, "reason": "与已有的供应商合同是同一件事"})
-		before := k.item(t2)
-		k.clear()
-		k.emit("inp-cand-1", "inp-cand 供应商合同第三版")
-		ev := k.waitEvent(inpSrc, "inp-cand-1", wait)
-		reqs := k.modelAbout("inp-cand 供应商合同第三版", false)
-		if len(reqs) != 1 || !strings.Contains(reqs[0], "open_items") || !strings.Contains(reqs[0], t2) {
-			t.Fatalf("起草请求的结构化输入里应有含 T2 的候选清单: %v", reqs)
-		}
-		p := k.item(ev.Item).Proposal
-		if p == nil || p.Recommend != "attach" || p.AttachTo != t2 {
-			t.Errorf("proposal 应记 recommend=attach、attach_to=T2: %+v", p)
-		}
-		after := k.item(t2)
-		eq(t, "T2 阶段", after.Phase, before.Phase)
-		eq(t, "T2 版本", after.Version, before.Version)
-		eq(t, "T2 阶段仍为 open", after.Phase, "open")
-	})
-
-	k.step("ACT-INP-11 起草不能编造候选清单以外的事项 id", func(t *testing.T) {
-		k.screenCls("inp-fake", 0.90)
-		k.draft("inp-fake 某个通知", map[string]any{"title": "inp-fake 起草标题", "kind": "task", "recommend": "attach", "attach_to": "itm-does-not-exist", "reason": "编造"})
-		k.clear()
-		k.emit("inp-fake-1", "inp-fake 某个通知")
-		ev := k.waitEvent(inpSrc, "inp-fake-1", wait)
-		eq(t, "disposition", ev.Disposition, "proposed")
-		it := k.item(ev.Item)
-		eq(t, "phase", it.Phase, "proposed")
-		if it.Proposal != nil && it.Proposal.AttachTo == "itm-does-not-exist" {
-			t.Errorf("建议记下了编造的事项 id: %+v", it.Proposal)
-		}
-		if it.Proposal != nil && it.Proposal.Recommend == "attach" {
-			t.Errorf("不应留下指向不存在事项的补到推荐: %+v", it.Proposal)
-		}
-	})
-
-	k.step("ACT-INP-12 内置 inbound-triage 使用三个新模板名", func(t *testing.T) {
+	k.step("ACT-INP-12 内置 inbound-triage 已加载，judge 用 triage-screen", func(t *testing.T) {
 		for name, body := range map[string]string{"apa pack list": k.apa(k.OBS, 0, "pack", "list").Stdout, "GET /v1/packs": k.APIRaw("GET", "/v1/packs", "", k.OBS).Body} {
 			var out struct {
 				Packs []struct {
@@ -290,23 +204,6 @@ func TestFlowInboundPipeline(t *testing.T) {
 			if s.ID == "pack_rejections" && !s.OK {
 				t.Errorf("内置包应无校验错误: %+v", s)
 			}
-		}
-		// 起草请求带内置 triage-draft 模板的正文（本步骤之前所有起草请求都必须带它）。
-		draftFile, err := os.ReadFile(filepath.Join(repoRoot(), "packs", "inbound-triage", "prompts", "triage-draft.md"))
-		k.must(err)
-		first := strings.TrimSpace(strings.SplitN(strings.SplitN(string(draftFile), "\n---\n", 2)[1], "\n", 2)[0])
-		drafts := 0
-		for _, r := range k.ModelStub.Requests() {
-			if baseline.IsJudgeRequest(r) || !strings.Contains(r.BodyText, "attach_to") { // 其余生成请求是事项摘要等系统调用
-				continue
-			}
-			drafts++
-			if !strings.Contains(plain(r.BodyText), first) {
-				t.Errorf("生成请求没有带 triage-draft 的提示词 %q: %s", first, r.BodyText)
-			}
-		}
-		if drafts == 0 {
-			t.Error("应已有起草请求")
 		}
 		// ACT-INP-05..07 的判断记录带模板名：初筛用 triage-screen，没有 v0.1 的单一判断模板。
 		for _, id := range []string{"inp-low-1", "inp-unsure-1"} {
@@ -385,7 +282,7 @@ func TestFlowInboundUpgradeKeepsOldProposals(t *testing.T) {
 		if !strings.Contains(raw, "旧正文") {
 			t.Errorf("P0 正文应不变: %s", raw)
 		}
-		eq(t, "含 v01-prop 的 triage-draft 请求数", k.modelAny("v01-prop"), 0)
+		eq(t, "含 v01-prop 的模型请求数", k.modelAny("v01-prop"), 0)
 		eq(t, "含 v01-prop 的 CLS 批次数", len(k.clsAbout("v01-prop")), 0)
 		if after := k.fixtureHTTP2(base, "/v1/audit/events?limit=500&object="+p0, hdr); after != eventsBefore {
 			t.Errorf("P0 的 Event 在升级后不应新增起草相关记录:\nbefore=%s\nafter=%s", eventsBefore, after)
