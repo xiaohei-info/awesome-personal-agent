@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -175,7 +177,9 @@ func rejudge(tx *store.Tx, pv *Preview, card func(string) policy.Card, owners ma
 				continue
 			}
 			if agent == "" {
-				agent = owners[ev.Actor.Principal]
+				if agent, err = agentOf(tx, owners, ev.Actor.Principal); err != nil {
+					return err
+				}
 			}
 			before := "effective"
 			if ev.Type == domain.EvCommandRejected {
@@ -260,6 +264,20 @@ func commandOf(ev domain.Event) (cmd, group, agent, note string) {
 		return "rejected:" + p.Action, g, agent, "old code " + p.Code + " on " + ev.Object
 	}
 	return "", "", "", ""
+}
+
+// agentOf 与 command.Caller.Agent 同口径：运行凭据（run:<id>）取运行记录上的 Agent，钥匙取 owners 里的归属。
+func agentOf(tx *store.Tx, owners map[string]string, principal string) (string, error) {
+	run, ok := strings.CutPrefix(principal, "run:")
+	if !ok {
+		return owners[principal], nil
+	}
+	rec, err := proc.Get(tx, run)
+	var de *domain.Error
+	if errors.As(err, &de) && de.Code == domain.CodeNotFound {
+		return "", nil // 运行记录已不在：按没有归属
+	}
+	return rec.Run.InstanceID(), err
 }
 
 func keyOwners(tx *store.Tx) (map[string]string, error) {

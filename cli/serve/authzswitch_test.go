@@ -11,6 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -151,9 +152,19 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 			return err
 		}
 		agent.Principal = key.ID
+		run, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{AgentSnapshot: &domain.AgentSnapshot{AgentID: "agent_r", ConfigRev: 1},
+			Category: domain.RunBackground, TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, now)
+		if err != nil {
+			return err
+		}
+		// 旧事件没记依据、发起者是运行凭据：按运行记录归到 agent_r（拍板开着），代答照旧生效。
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvDecisionResolved, Object: "itm_5", At: now, Payload: json.RawMessage(`{}`),
+			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:" + run.ID, Via: domain.ViaCLI}}); err != nil {
+			return err
+		}
 		doc, _ := policy.Sections(policy.Default())
 		delete(doc, "agent_cards")
-		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"legacy:hermes":{"tier":"rules"}}}`)
+		doc["agent_tier"] = json.RawMessage(`{"by_agent":{"agent_a":{"tier":"organize"},"agent_r":{"tier":"decide"},"legacy:hermes":{"tier":"rules"}}}`)
 		doc["permission_cap"] = json.RawMessage(`{"by_agent":{},"default":"read","by_harness":{"hermes":"full"}}`)
 		raw, _ := json.Marshal(doc)
 		if _, err := tx.Exec(`INSERT INTO policy_version (version, doc, at) VALUES (1, ?, ?)`, string(raw), now.UnixNano()); err != nil {
@@ -188,7 +199,7 @@ func TestPreviewShowsMappedCardsAndChangedOutcomes(t *testing.T) {
 		a.Tool != policy.PermRead || a.Allows(policy.GroupDecide, now) || !a.Allows(policy.GroupSourceEvents, now) {
 		t.Fatalf("cards: %+v", pv.Plan.Cards)
 	}
-	if pv.Rejudge["unchanged"] != 4 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
+	if pv.Rejudge["unchanged"] != 5 || pv.Rejudge["now_allowed"] != 1 || len(pv.Details) != 1 || pv.Details[0].Command != "rejected:answer_decision" {
 		t.Fatalf("rejudge: %v %+v", pv.Rejudge, pv.Details)
 	}
 	if err := st.View(ctx, func(tx *store.Tx) error {
