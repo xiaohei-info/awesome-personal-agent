@@ -196,7 +196,8 @@ func TestFlowBootstrap(t *testing.T) {
 
 	step("ACT-BOOT-05 agent 经 CLI 自助上手", func(t *testing.T) {
 		// 账本里先有一条带标记的事项。
-		r := e.Apa(del, "", "item", "add", "--kind", "task", "--title", marker, "--phase", "open")
+		// 没归属 Agent 的钥匙只能整理（§14.3）：建待确认事项，直接建 open 是拍板。
+		r := e.Apa(del, "", "item", "add", "--kind", "task", "--title", marker, "--phase", "proposed")
 		var it struct {
 			ID string `json:"id"`
 		}
@@ -216,7 +217,7 @@ func TestFlowBootstrap(t *testing.T) {
 		if guide.Code != 0 || tmpl.Code != 0 {
 			t.Fatalf("guide 退出码 %d/%d", guide.Code, tmpl.Code)
 		}
-		for _, want := range []string{"Exit codes", "7 kernel unreachable", "3 unauthenticated", "20 web_only"} {
+		for _, want := range []string{"Exit codes", "7 kernel unreachable", "3 unauthenticated", "20 hard line"} {
 			if !strings.Contains(guide.Stdout, want) {
 				t.Errorf("apa guide 缺少 %q", want)
 			}
