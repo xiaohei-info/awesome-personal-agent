@@ -54,7 +54,16 @@ def tools():
 
 def test_registers_the_apa_tools(tools):
     assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
-                          "apa_report", "apa_dispatch", "apa_item_history", "apa_attach", "apa_proposals_apply", "apa_item_progress"}
+                          "apa_report", "apa_dispatch", "apa_item_history", "apa_attach", "apa_proposals_apply", "apa_item_progress",
+                          "apa_item_list", "apa_item_show", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search"}
+
+
+def test_query_tools_map_to_read_commands(tools, apa):
+    tools["apa_item_list"]({"q": "passport", "phase": "open", "planned_for": "2026-05-01"}, session_id="s")
+    tools["apa_source_event"]({"id": "sev_1", "part": "body"}, session_id="s")
+    argv = [c["argv"] for c in calls(apa)]
+    assert argv[0][:2] == ["item", "list"] and "--planned-for" in argv[0]
+    assert argv[1] == ["source", "event", "sev_1", "--part", "body"]
 
 
 def test_cli_calls_carry_harness_hermes(tools, apa):
@@ -166,7 +175,7 @@ def test_no_tool_offers_evidence_grant_session_kind_or_timeout_default(schemas):
 @pytest.mark.parametrize("tool", DECIDE)
 def test_decide_tier_descriptions_explain_exit_23(schemas, tool):
     d = schemas[tool]["description"]
-    assert "decide tier" in d and "exit 23" in d and "do not retry" in d and "Web link" in d
+    assert "permission card" in d and "decide for me" in d and "exit 23" in d and "do not retry" in d and "web_url" in d
 
 
 def test_tier_closed_exit_23_is_exposed_not_retried(tools, apa, monkeypatch):

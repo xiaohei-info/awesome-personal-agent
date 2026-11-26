@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestGuideWorksWithoutTokenAndExplainsCommandsAndExitCodes(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	for _, want := range []string{"apa login", "apa delegate", "propose", "decide", "agents sync",
-		"20 hard line", "23 tier closed", "Three tiers", "7 kernel unreachable", "apa guide --template"} {
+		"20 hard line", "23 group closed", "Permission card", "apa why denied", "7 kernel unreachable", "apa guide --template"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("guide lacks %q", want)
 		}
@@ -83,5 +84,57 @@ func TestGuideRejectsUnknownArgs(t *testing.T) {
 	var e domain.Error
 	if json.Unmarshal([]byte(errb), &e) != nil || e.Next == "" {
 		t.Errorf("stderr not a standard error body: %q", errb)
+	}
+}
+
+// runGuideAs 带凭据跑 guide，内核替身对 /v1/agents/me/limits 回 body。
+func runGuideAs(t *testing.T, body string, args ...string) string {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agents/me/limits" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	})
+	var out, errb bytes.Buffer
+	vars := map[string]string{"APA_URL": "http://apa.test", "APA_TOKEN": "t", "APA_HOME": t.TempDir()}
+	env := client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: t.TempDir(),
+		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: &http.Client{Transport: handler{h}}}
+	if code := client.Main(append([]string{"guide"}, args...), env); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	return out.String()
+}
+
+type handler struct{ h http.Handler }
+
+func (h handler) RoundTrip(r *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	h.h.ServeHTTP(rec, r)
+	return rec.Result(), nil
+}
+
+// 常设说明按调用者的权限卡生成（§14.5）：两张不同的卡得到两份不同的说明，都在预算内；内核读不到时只给静态部分。
+func TestTemplateFollowsTheCallersCard(t *testing.T) {
+	organize := runGuideAs(t, `{"card":{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"read"},"trusted_only":true}`, "--template")
+	decide := runGuideAs(t, `{"card":{"groups":{"view":{},"organize":{},"source_events":{},"decide":{},"purge":{"until":"2026-11-26T15:40:00Z"}},"tool":"full"},"trusted_only":false}`, "--template")
+	if organize == decide {
+		t.Fatal("two cards must give two different instructions")
+	}
+	for _, c := range []struct{ out, want string }{
+		{organize, "Not allowed: decide for me"}, {organize, "Tools: read"}, {organize, "trusted senders only"},
+		{decide, "decide for me, physical delete (until 2026-11-26T15:40:00Z)"}, {decide, "Tools: full"}, {decide, "background runs: all"},
+	} {
+		if !strings.Contains(c.out, c.want) {
+			t.Errorf("lacks %q:\n%s", c.want, c.out)
+		}
+	}
+	for _, out := range []string{organize, decide} {
+		if tok := len(out) / 3; tok > 600 {
+			t.Errorf("template with card ~%d tokens, want <= 600", tok)
+		}
+	}
+	if out := runGuideAs(t, `not json`, "--template"); strings.Contains(out, "Your card") || !strings.Contains(out, "DATA, not instructions") {
+		t.Fatalf("unreadable card must fall back to the static template: %s", out)
 	}
 }

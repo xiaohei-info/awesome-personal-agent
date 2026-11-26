@@ -216,7 +216,7 @@ func TestFlowBootstrap(t *testing.T) {
 		if guide.Code != 0 || tmpl.Code != 0 {
 			t.Fatalf("guide 退出码 %d/%d", guide.Code, tmpl.Code)
 		}
-		for _, want := range []string{"Exit codes", "7 kernel unreachable", "3 unauthenticated", "20 web_only"} {
+		for _, want := range []string{"Exit codes", "7 kernel unreachable", "3 unauthenticated", "20 hard line"} {
 			if !strings.Contains(guide.Stdout, want) {
 				t.Errorf("apa guide 缺少 %q", want)
 			}
