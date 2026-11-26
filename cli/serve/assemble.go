@@ -558,6 +558,11 @@ func (k *kernel) start(ctx context.Context) error {
 	} else if n > 0 {
 		slog.Info("backfilled unassigned active items to Inbox", "count", n)
 	}
+	if n, err := k.in.ReleasePending(ctx, k.x); err != nil { // 已取消的批量归类留下的"待归类"建议放回普通建议（§16.5）
+		return err
+	} else if n > 0 {
+		slog.Info("released proposals left waiting for batch classification", "count", n)
+	}
 	if err := kprojects.SeedCapture(ctx, k.x, k.st, owner); err != nil { // 对话捕获默认开启：已有项目一次性补开（§16.5）
 		return err
 	}

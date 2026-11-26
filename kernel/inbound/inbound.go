@@ -268,6 +268,9 @@ func (s *Service) Register(x *command.Executor) error {
 	if err := registerUnmerge(x); err != nil {
 		return err
 	}
+	if err := registerReleasePending(x); err != nil {
+		return err
+	}
 	if err := RegisterAttach(x); err != nil {
 		return err
 	}

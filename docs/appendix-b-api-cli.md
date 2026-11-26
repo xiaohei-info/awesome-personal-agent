@@ -115,7 +115,7 @@
 | Agent 与执行者配置 | `executor.confirm`、`executor.reject`、`executor.register`、`executor.put`、`executor.remove`；`agent.configure`；`project.repo.add`、`project.repo.remove`、`project.allowed_executors.set` | 退出码 23 |
 | 物理删除 | `purge.object` | 退出码 23；开放必须带有效期 |
 | 只有本人 | `credential.issue`、`credential.revoke`、`credential.assign`、`credential.scope.set` | 退出码 20（`hard_line`），不论权限卡；Web 会话没刚输过口令为退出码 20（`reauth_required`） |
-| 系统内部 | `source.ingest`、`source.run_result`；`inbound.dispose`、`inbound.requeue`、`inbound.expire`、`proposal.batch_log`；`followmsg.attach`、`followmsg.ack`、`followmsg.release`；`delegate.settle`；`followup.settle`；`retention.purge_content`、`retention.report`；`agents.render`；`revision.summarize`；`material.refresh`、`material.relocate` | 没有对外入口；Agent 凭据调用为退出码 20（`hard_line`） |
+| 系统内部 | `source.ingest`、`source.run_result`；`inbound.dispose`、`inbound.release_pending`、`inbound.requeue`、`inbound.expire`、`proposal.batch_log`；`followmsg.attach`、`followmsg.ack`、`followmsg.release`；`delegate.settle`；`followup.settle`；`retention.purge_content`、`retention.report`；`agents.render`；`revision.summarize`；`material.refresh`、`material.relocate` | 没有对外入口；Agent 凭据调用为退出码 20（`hard_line`） |
 
 不走命令的设置路由按段归组（主文档 §14.3）："改日常规则与提醒"是打扰与提醒（`disturb`）、人格与助手语言、渠道的登记属性（`channels`）、后台运行时限、同时运行数与连锁层数（`limits`：`{"long_runs", "short_runs", "chain_depth"}`，各 0 表示取运行配置的初值，同时运行数可设 1–16、层数 1–32；同时运行数在下次启动内核时生效）、不确定带与影子模式、抽检设置、暂停模型、信任的发件人（转发白名单）、来源的原文保留天数、来源处理线的设置（`source_pipeline`）；"数据去向"是判断端点与生成端点（含测试连接）、笔记库、外发范围；"Agent 与执行者配置"是默认 Agent 与后台由谁干（`default_agent_id`、`main_agent_id`、`rule_agent`、`default_harness`）、启动方式（`main_session_launch`）；"渠道"是删除自写程序渠道与识别回答人；"只有本人"是权限卡（`agent_cards`，只读段；写走 `PUT /settings/agents/{agent}/card`）、渠道回答人、口令与会话。Agent 读设置路由时只看到它的权限卡开放了的组的段。
 
