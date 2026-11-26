@@ -120,6 +120,8 @@ type Service struct {
 	probe     probeState
 	// batching 串行化队列节拍，避免并发重复取批。
 	batching sync.Mutex
+	// notifying 串行化批处理结论通知的投递与待重试文件清理，避免 SettleBatch 与定时重推并发重复。
+	notifying sync.Mutex
 	// captures 跟踪捕获触发的后台处理；测试在关账本前等它们退出，否则提交后钩子会撞上已关闭的连接。
 	captures sync.WaitGroup
 }

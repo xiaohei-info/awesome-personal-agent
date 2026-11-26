@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -220,5 +221,100 @@ func TestBatchResultFiltersStreamJSONToolsAndLogs(t *testing.T) {
 	}
 	if !strings.Contains(content2, EmptyBatchOutputNotice) || strings.Contains(content2, "sev_secret_999") || strings.Contains(content2, "diagnostic") {
 		t.Fatalf("tool-only output should fall back to fixed notice without leaking: %s", content2)
+	}
+}
+
+// FIX-5：SettleBatch 时结论通知写入遇到暂时性错误，结论必须进入可持久重试状态；
+// 即使经过失败的定时重推甚至重启（新 Service 实例），后续维护循环仍能补投且最终只产生一条投递。
+func TestBatchResultNotificationPersistsAndRetriesAfterFailure(t *testing.T) {
+	e := setupUnifiedJudgeEnv(t, nil, nil, "", "")
+	q, runsDir := registerBatchAgent(t, e, policy.SourcePipeline{BatchSize: 1})
+	att := attention.New(attention.Options{
+		Queue:  e.queue,
+		WebURL: func(id string) string { return "http://localhost/items/" + id },
+	})
+
+	attempts := 0
+	notify := func(ctx context.Context, run domain.Run, summary string) error {
+		attempts++
+		if attempts <= 2 {
+			return errors.New("transient store lock")
+		}
+		return e.st.Update(ctx, func(tx *store.Tx) error { return att.SourceResult(tx, run.ID, summary) })
+	}
+	e.svc.o.Batch.Notify = notify
+
+	enqueueEvent(t, e, "ev_retry1", "normal", "body", e.now)
+	if err := e.svc.TickQueue(bg); err != nil {
+		t.Fatal(err)
+	}
+	r1 := latestBatchRun(t, e)
+	_ = e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := tx.Exec(`UPDATE sources_runner_event SET disposition = 'ignored' WHERE id = 'ev_retry1'`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE outcall_run SET state = ? WHERE id = ?`, string(domain.RunSucceeded), r1.Run.ID)
+		return err
+	})
+	r1.Run.State = domain.RunSucceeded
+
+	// 第 1 次（SettleBatch 内）：写入失败，不丢失结论
+	e.svc.SettleBatch(bg, proc.Result{Run: r1.Run, Stdout: []byte("处理了 1 条，已忽略。")})
+	if attempts != 1 {
+		t.Fatalf("expected 1 notify attempt in SettleBatch, got %d", attempts)
+	}
+
+	// 第 2 次（定时 TickQueue 重试）：仍然失败，继续保留待重试状态
+	if err := e.svc.TickQueue(bg); err == nil {
+		t.Fatal("expected retry error on 2nd attempt")
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 notify attempts after first TickQueue retry, got %d", attempts)
+	}
+
+	// 模拟进程重启：构造全新 Service 实例（指向同一账本与同一 RunsDir），RecoverBatches 补投成功
+	restarted, err := New(Options{
+		Store: e.st, Exec: e.x, Packs: e.loadr, Judge: e.svc.o.Judge, Owner: "owner", Now: e.Now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.AttachBatch(BatchOptions{RunsDir: runsDir, APIURL: "http://127.0.0.1:19999", Queue: q, Notify: notify})
+	if err := restarted.RecoverBatches(bg); err != nil {
+		t.Fatalf("RecoverBatches retry failed: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3rd notify attempt during RecoverBatches, got %d", attempts)
+	}
+
+	// 再次 TickQueue 不再重复调用 Notify
+	if err := restarted.TickQueue(bg); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 {
+		t.Fatalf("completed notification should not retry again, attempts=%d", attempts)
+	}
+
+	// 最终账本里恰好有一条 batch-result 投递且含正确摘要
+	var contents []string
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT content FROM delivery_delivery WHERE id = ?`, attention.BatchResultID(r1.Run.ID))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var c string
+			if err := r.Scan(&c); err != nil {
+				return err
+			}
+			contents = append(contents, c)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(contents) != 1 || !strings.Contains(contents[0], "处理了 1 条，已忽略。") {
+		t.Fatalf("expected exactly 1 delivery with summary, got %+v", contents)
 	}
 }

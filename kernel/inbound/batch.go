@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,7 +30,14 @@ const (
 	BatchTemplate = "source-batch"
 	// EmptyBatchOutputNotice 是批处理成功但未产生文字输出时的固定知会句（§2.3、B4）。
 	EmptyBatchOutputNotice = "本批来源已处理完成，未输出文字说明。"
+
+	pendingNotifyFile = "notify.pending.json"
 )
+
+type pendingNotification struct {
+	Run     domain.Run `json:"run"`
+	Summary string     `json:"summary"`
+}
 
 // BatchQueue 是外呼调用器的调度入口（*proc.Dispatcher 满足它）。
 type BatchQueue interface {
@@ -120,14 +128,21 @@ func startOfLocalDay(now time.Time) time.Time {
 	return time.Date(loc.Year(), loc.Month(), loc.Day(), 0, 0, 0, 0, time.Local)
 }
 
-// TickQueue 是来源处理线唯一的定时驱动（§9.3）：检查队列条件（立即开关+急件、满 N 条、最早一条等够 T 分钟），
-// 满足时在同一事务里取批并把 source_batch 运行入队，同一时刻只跑一批。
+// TickQueue 是来源处理线唯一的定时驱动（§9.3）：先补投上次失败留下的批处理结论通知，
+// 再检查队列条件（立即开关+急件、满 N 条、最早一条等够 T 分钟），满足时在同一事务里取批并把 source_batch 运行入队，同一时刻只跑一批。
 func (s *Service) TickQueue(ctx context.Context) error {
 	if s.o.Batch.Queue == nil || s.o.Batch.RunsDir == "" {
 		return nil
 	}
 	s.batching.Lock()
 	defer s.batching.Unlock()
+
+	notifyErr := s.flushPendingNotifications(ctx)
+	tickErr := s.tickQueueLocked(ctx)
+	return errors.Join(notifyErr, tickErr)
+}
+
+func (s *Service) tickQueueLocked(ctx context.Context) error {
 
 	now := s.o.Now()
 	var (
@@ -297,9 +312,11 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 	}
 	ok := res.Run.State == domain.RunSucceeded
 	var (
-		fin   runner.Finished
-		hl    executors.Headless
-		hasHL bool
+		fin         runner.Finished
+		hl          executors.Headless
+		hasHL       bool
+		summary     string
+		pendingPath string
 	)
 	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		_, pol, err := policy.Current(tx)
@@ -322,25 +339,117 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 			"dropped":  len(fin.Dropped),
 			"reason":   res.Reason,
 		})
-		_, err = eventlog.Append(tx, domain.Event{
+		if _, err = eventlog.Append(tx, domain.Event{
 			Type: domain.EvRunFinished, Object: BatchTarget, Actor: system.Actor, Payload: payload, At: s.o.Now(),
-		})
-		return err
+		}); err != nil {
+			return err
+		}
+		if ok && s.o.Batch.Notify != nil {
+			summary = strings.TrimSpace(extractBatchSummary(hl, hasHL, res.Stdout))
+			if summary == "" {
+				summary = EmptyBatchOutputNotice
+			}
+			p, werr := s.writePendingNotify(res.Run, summary)
+			if werr != nil {
+				return werr
+			}
+			pendingPath = p
+		}
+		return nil
 	}); err != nil {
+		if pendingPath != "" {
+			_ = os.Remove(pendingPath)
+		}
 		if s.o.OnError != nil {
 			s.o.OnError(fmt.Errorf("inbound: settle batch %s: %w", res.Run.ID, err))
 		}
 		return
 	}
 	if ok && s.o.Batch.Notify != nil {
-		summary := strings.TrimSpace(extractBatchSummary(hl, hasHL, res.Stdout))
-		if summary == "" {
-			summary = EmptyBatchOutputNotice
-		}
-		if err := s.o.Batch.Notify(ctx, res.Run, summary); err != nil && s.o.OnError != nil {
+		if err := s.deliverBatchNotification(ctx, res.Run, summary, pendingPath); err != nil && s.o.OnError != nil {
 			s.o.OnError(fmt.Errorf("inbound: notify batch %s: %w", res.Run.ID, err))
 		}
 	}
+}
+
+func (s *Service) writePendingNotify(run domain.Run, summary string) (string, error) {
+	if s.o.Batch.RunsDir == "" || run.ID == "" || filepath.Base(run.ID) != run.ID || run.ID == "." || run.ID == ".." {
+		return "", nil
+	}
+	dir := filepath.Join(s.o.Batch.RunsDir, run.ID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(pendingNotification{Run: run, Summary: summary})
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, pendingNotifyFile)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return path, nil
+}
+
+func (s *Service) deliverBatchNotification(ctx context.Context, run domain.Run, summary, pendingPath string) error {
+	s.notifying.Lock()
+	defer s.notifying.Unlock()
+	if pendingPath != "" {
+		if _, err := os.Stat(pendingPath); os.IsNotExist(err) {
+			return nil
+		}
+	}
+	if err := s.o.Batch.Notify(ctx, run, summary); err != nil {
+		return err
+	}
+	if pendingPath != "" {
+		if err := os.Remove(pendingPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) flushPendingNotifications(ctx context.Context) error {
+	if s.o.Batch.Notify == nil || s.o.Batch.RunsDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(s.o.Batch.RunsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(s.o.Batch.RunsDir, entry.Name(), pendingNotifyFile)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("inbound: read pending notify %s: %w", entry.Name(), err))
+			continue
+		}
+		var p pendingNotification
+		if err := json.Unmarshal(raw, &p); err != nil {
+			errs = append(errs, fmt.Errorf("inbound: decode pending notify %s: %w", entry.Name(), err))
+			continue
+		}
+		if err := s.deliverBatchNotification(ctx, p.Run, p.Summary, path); err != nil {
+			errs = append(errs, fmt.Errorf("inbound: retry notify batch %s: %w", p.Run.ID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func extractBatchSummary(hl executors.Headless, hasHL bool, stdout []byte) string {
@@ -351,9 +460,9 @@ func extractBatchSummary(hl executors.Headless, hasHL bool, stdout []byte) strin
 }
 
 // RecoverBatches 在内核启动时检查仍停在 running 的事件：对应运行已不在队列或已结束（没有存活进程）的，
-// 按失败收尾放回待处理并计次，防止重启后事件永久卡在"处理中"（§9.3）。
+// 按失败收尾放回待处理并计次，防止重启后事件永久卡在"处理中"（§9.3）；同时补投上次未写成的批处理结论通知。
 func (s *Service) RecoverBatches(ctx context.Context) error {
-	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
+	recErr := s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		_, pol, err := policy.Current(tx)
 		if err != nil {
 			return err
@@ -375,4 +484,6 @@ func (s *Service) RecoverBatches(ctx context.Context) error {
 		}
 		return nil
 	})
+	notifyErr := s.flushPendingNotifications(ctx)
+	return errors.Join(recErr, notifyErr)
 }
