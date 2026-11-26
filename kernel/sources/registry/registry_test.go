@@ -216,15 +216,15 @@ func TestEnableDisableIsIdempotentAndRecorded(t *testing.T) {
 	}
 }
 
-// 来源登记与修改是 3b：Agent 一律硬线（20，留痕）；启停是 3a，档位未放开得 23。
+// 来源登记与修改属"接入来源"：没开这一组的 Agent 是 23（留痕）；启停属"改日常规则与提醒"，没开也是 23。
 // 通用登记只接受随发行附带的程序，本人在 Web 也一样；自定义命令只能走专用命令，不能借通用命令绕过。
 func TestDelegateMayOnlyRegisterBundledPrograms(t *testing.T) {
 	e := setup(t)
 	dlg := e.bearer(t, auth.Delegate)
-	if _, err := e.do(dlg, CmdRegister, pull("src_feed")); exit(err) != domain.ExitWebOnly {
+	if _, err := e.do(dlg, CmdRegister, pull("src_feed")); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("delegate register: %v", err)
 	}
-	if _, err := e.do(dlg, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitWebOnly {
+	if _, err := e.do(dlg, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("delegate register_script: %v", err)
 	}
 	if _, err := e.do(owner, CmdRegister, pull("src_feed")); err != nil {
@@ -233,7 +233,7 @@ func TestDelegateMayOnlyRegisterBundledPrograms(t *testing.T) {
 	if _, err := e.do(owner, CmdRegister, m{"id": "src_hook", "type": "webhook"}); err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
-	if _, err := e.do(dlg, CmdUpdate, m{"id": "src_feed", "schedule": "30m"}); exit(err) != domain.ExitWebOnly {
+	if _, err := e.do(dlg, CmdUpdate, m{"id": "src_feed", "schedule": "30m"}); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("delegate update: %v", err)
 	}
 	if _, err := e.do(dlg, CmdSetEnabled, m{"id": "src_feed", "enabled": false}); exit(err) != domain.ExitTierClosed {
@@ -271,7 +271,7 @@ func TestScriptSourcesAreWebOnlyAfterRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	dlg := e.bearer(t, auth.Delegate)
-	if _, err := e.do(dlg, CmdUpdateExec, m{"id": "src_sh", "command": "/bin/rm -rf /"}); exit(err) != domain.ExitWebOnly {
+	if _, err := e.do(dlg, CmdUpdateExec, m{"id": "src_sh", "command": "/bin/rm -rf /"}); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("delegate update_script: %v", err)
 	}
 	if _, err := e.do(owner, CmdUpdate, m{"id": "src_sh", "schedule": "2h"}); exit(err) != domain.ExitUsage {
@@ -299,10 +299,10 @@ func TestWorkerObserverAndScopedCredentialsCannotRegister(t *testing.T) {
 	e := setup(t)
 	for _, k := range []auth.Kind{auth.Worker, auth.Observer} {
 		b := e.bearer(t, k)
-		if _, err := e.do(b, CmdRegister, pull("src_feed")); exit(err) != domain.ExitWebOnly {
+		if _, err := e.do(b, CmdRegister, pull("src_feed")); exit(err) != domain.ExitPermissionDenied {
 			t.Fatalf("%s: %v", k, err)
 		}
-		if _, err := e.do(b, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitWebOnly {
+		if _, err := e.do(b, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitPermissionDenied {
 			t.Fatalf("%s script: %v", k, err)
 		}
 	}
@@ -408,8 +408,8 @@ func TestHostConfigFileRegistersAndOverridesScripts(t *testing.T) {
 	if s := e.get(t, "src_sh"); s.Command != "/opt/b.sh" || s.Schedule != "2h" || s.Timeout != 45 || s.Enabled {
 		t.Fatalf("override: %+v", s)
 	}
-	// 配置文件不是后门：delegate 身份加载仍是 web_only；错误文件如实报错。
-	if err := LoadFile(bg, e.x, e.bearer(t, auth.Delegate), path); exit(err) != domain.ExitWebOnly {
+	// 配置文件不是后门：delegate 身份加载照样按权限卡判（没开"接入来源"为 23）；错误文件如实报错。
+	if err := LoadFile(bg, e.x, e.bearer(t, auth.Delegate), path); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("delegate load: %v", err)
 	}
 	write(`{"sources":[{"id":"src_x","type":"script"}]}`)

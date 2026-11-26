@@ -91,7 +91,7 @@ func mergeTarget(tx *store.Tx, v mergeIn) (it, t domain.Item, err error) {
 
 // registerBulk 登记 proposal.merge（二档，同 proposal.accept）与 proposal.batch_log（系统内部）。
 func registerBulk(x *command.Executor) error {
-	err := x.Register(command.Spec{Name: CmdMergeProposal, Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, Page: "/proposals", KeepVersion: true,
+	err := x.Register(command.Spec{Name: CmdMergeProposal, Action: authz.ActionAnswerDecision, Group: authz.GroupDecide, Page: "/proposals", KeepVersion: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseMerge(in)
 			if err != nil {
@@ -131,7 +131,7 @@ func registerBulk(x *command.Executor) error {
 	if err != nil {
 		return err
 	}
-	return x.Register(command.Spec{Name: CmdBatchLog, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
+	return x.Register(command.Spec{Name: CmdBatchLog, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v batchLog
 			if err := json.Unmarshal(in, &v); err != nil || !batchRe.MatchString(v.Batch) {

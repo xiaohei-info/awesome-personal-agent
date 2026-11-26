@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
@@ -129,10 +130,15 @@ type attention2 struct {
 	produced       bool
 }
 
-// 总览只给 Web 本人，只读。
-func TestOverviewIsWebOnly(t *testing.T) {
-	e := setup(t, OverviewRoutes(nil, packList{}, func() time.Duration { return time.Hour }))
-	if rec := e.do("GET", "/v1/settings/notify/overview", "", e.bearer(auth.Delegate)); rec.Code != 403 {
+// 总览属"改日常规则与提醒"：没开这一组的 Agent 为 23，只读。
+func TestOverviewFollowsTheRulesGroup(t *testing.T) {
+	e := setup(t)
+	srv, err := core.New(core.Deps{Store: e.st, Auth: e.auth, Groups: []core.RouteGroup{OverviewRoutes(e.st, packList{}, func() time.Duration { return time.Hour })}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.srv = srv
+	if rec := e.do("GET", "/v1/settings/notify/overview", "", e.bearer(auth.Delegate)); rec.Code != 403 || errCode(t, rec) != domain.CodeTierClosed {
 		t.Fatalf("delegate: %d %s", rec.Code, rec.Body)
 	}
 }

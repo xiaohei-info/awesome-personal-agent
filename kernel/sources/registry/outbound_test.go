@@ -175,7 +175,7 @@ func TestSetOutboundWebOnly(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: err = %v", k, err)
 		}
-		if de.Code != domain.CodeWebOnly || de.Reason != domain.ReasonHardLine {
+		if want := map[auth.Kind]domain.Code{auth.Delegate: domain.CodeTierClosed}[k]; (want != "" && de.Code != want) || (want == "" && de.Code != domain.CodePermissionDenied) {
 			t.Errorf("%s: %v", k, de)
 		}
 	}

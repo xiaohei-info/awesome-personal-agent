@@ -18,7 +18,7 @@ instance_params:
     mode: {type: string, enum: [run, create_item]}
     title: {type: string}
     instruction: {type: string}
-    access: {type: string, enum: [read, edit, full]}
+    access: {type: string, enum: [read, edit, full]}  # 已取消（2026-11-26）：工具档位取权限卡，旧实例写了也不生效
     output: {type: string, enum: [item, item_and_material]}
 clock_rules:
   - id: scheduled-routine

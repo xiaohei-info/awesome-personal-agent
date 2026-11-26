@@ -537,7 +537,7 @@ func repoOwner(tx *store.Tx, remote string) (string, error) {
 // 项目允许的执行者是 3b（只在 Web，再输口令）。allowed_executors 只有 project.allowed_executors.set 一条写入路径（§14.7）。
 func Register(x *command.Executor) error {
 	specs := []command.Spec{
-		{Name: "project.create", Action: authz.ActionManageProject, Tier: authz.TierOrganize, Page: "/projects",
+		{Name: "project.create", Action: authz.ActionManageProject, Group: authz.GroupOrganize, Page: "/projects",
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				var v createIn
 				return authz.Object{}, decode(in, &v)
@@ -572,8 +572,8 @@ func Register(x *command.Executor) error {
 				}
 				return ref{id}, nil
 			}},
-		{Name: "project.update", Action: authz.ActionManageProject, Tier: authz.TierOrganize, Page: "/projects",
-			TierFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+		{Name: "project.update", Action: authz.ActionManageProject, Group: authz.GroupOrganize, Page: "/projects",
+			GroupFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Group, error) {
 				var v updateIn
 				_ = decode(in, &v)
 				return captureTier(v.Capture != nil), nil
@@ -627,7 +627,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.repo.add", Action: authz.ActionManageProject, Tier: authz.TierPower, Page: "/projects",
+		{Name: "project.repo.add", Action: authz.ActionManageProject, Group: authz.GroupAgents, Page: "/projects",
 			Object: objectOf(func(v repoIn) string { return v.ID }),
 			Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 				var v repoIn
@@ -652,7 +652,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.repo.remove", Action: authz.ActionManageProject, Tier: authz.TierPower, Page: "/projects",
+		{Name: "project.repo.remove", Action: authz.ActionManageProject, Group: authz.GroupAgents, Page: "/projects",
 			Object: objectOf(func(v repoIn) string { return v.ID }),
 			Apply: func(c *command.Ctx) (any, error) {
 				var v repoIn
@@ -666,7 +666,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.checkout.set", Action: authz.ActionEditCheckout, Tier: authz.TierOrganize,
+		{Name: "project.checkout.set", Action: authz.ActionEditCheckout, Group: authz.GroupOrganize,
 			Object: objectOf(func(v checkoutIn) string { return v.ID }),
 			Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 				var v checkoutIn
@@ -693,7 +693,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.checkout.remove", Action: authz.ActionEditCheckout, Tier: authz.TierOrganize,
+		{Name: "project.checkout.remove", Action: authz.ActionEditCheckout, Group: authz.GroupOrganize,
 			Object: objectOf(func(v checkoutIn) string { return v.ID }),
 			Apply: func(c *command.Ctx) (any, error) {
 				var v checkoutIn
@@ -711,7 +711,7 @@ func Register(x *command.Executor) error {
 				})
 			}},
 		// 对话捕获送外部端点的范围是数据去向，属 3b（§14.14）。
-		{Name: CmdSetCaptureOutbound, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/projects",
+		{Name: CmdSetCaptureOutbound, Action: authz.ActionChangeSettings, Group: authz.GroupOutbound, Page: "/projects",
 			Object: objectOf(func(v captureOutboundIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, err := parseCaptureOutbound(in)
@@ -735,7 +735,7 @@ func Register(x *command.Executor) error {
 				}
 				return ref{p.ID}, nil
 			}},
-		{Name: "project.allowed_executors.set", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/projects",
+		{Name: "project.allowed_executors.set", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/projects",
 			Object: objectOf(func(v executorsIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, _, err := parseExecutors(in)
@@ -759,7 +759,7 @@ func Register(x *command.Executor) error {
 				return ref{p.ID}, nil
 			}},
 		// 系统内部命令：启动时认领老库收件箱或新建内置 Inbox（§6.5、§16.5）。
-		{Name: CmdEnsureInbox, Action: authz.ActionManageProject, Tier: authz.TierInternal,
+		{Name: CmdEnsureInbox, Action: authz.ActionManageProject, Group: authz.GroupInternal,
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				var v struct{}
 				return authz.Object{}, decode(in, &v)
@@ -821,11 +821,11 @@ func Register(x *command.Executor) error {
 }
 
 // captureTier：改对话捕获字段是 3a（改日常），其余项目信息是一档。字段不再有 CLI 与 Web 入口，只有启动迁移（SeedCapture）与直接调 API 会写它。
-func captureTier(capture bool) authz.Tier {
+func captureTier(capture bool) authz.Group {
 	if capture {
-		return authz.TierRules
+		return authz.GroupRules
 	}
-	return authz.TierOrganize
+	return authz.GroupOrganize
 }
 
 // parseExecutors 把 executors 字段落成三态：null → nil（不限制），[] → 空非 nil，名单 → 去重后的名单。

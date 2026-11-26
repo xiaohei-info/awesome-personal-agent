@@ -169,7 +169,7 @@ func (e *env) bearer(kind auth.Kind) func(*http.Request) {
 }
 
 // agent 签一把归属 Agent id 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier。
-func (e *env) agent(id, tier string) func(*http.Request) {
+func (e *env) agent(id string, tier policy.Card) func(*http.Request) {
 	e.t.Helper()
 	var secret string
 	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
@@ -179,7 +179,7 @@ func (e *env) agent(id, tier string) func(*http.Request) {
 		}
 		secret = s
 		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent[id] = policy.AgentAllowance{Tier: tier}
+			p.AgentCards[id] = tier
 			return nil
 		})
 		return err
@@ -253,7 +253,7 @@ func TestReadsAreClosedToExtAndWebhookAndAnonymous(t *testing.T) {
 // 放开「连日常规矩也替我改」的 Agent 可以做。
 func TestInstanceLifecycleThroughAPI(t *testing.T) {
 	e := setup(t)
-	dlg, obs := e.agent("agent_r", policy.AllowRules), e.bearer(auth.Observer)
+	dlg, obs := e.agent("agent_r", policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules)), e.bearer(auth.Observer)
 	if rec := e.do("POST", "/v1/instances", `{"pack":"brief","params":{"schedule":"24h"}}`, e.bearer(auth.Delegate)); rec.Code != 403 || decode[domain.Error](t, rec).Code != domain.CodeTierClosed {
 		t.Fatalf("organize-only create: %d %s", rec.Code, rec.Body)
 	}
@@ -388,7 +388,7 @@ func TestRuleModeFollowsAgentTier(t *testing.T) {
 	if n := len(e.events(domain.EvRuleModeChanged)); n != 0 {
 		t.Fatalf("%d mode_changed events from rejected calls", n)
 	}
-	if rec := e.do("PATCH", rulePath, `{"mode":"auto"}`, e.agent("agent_r", policy.AllowRules)); rec.Code != 200 {
+	if rec := e.do("PATCH", rulePath, `{"mode":"auto"}`, e.agent("agent_r", policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules))); rec.Code != 200 {
 		t.Fatalf("rules-tier Agent: %d %s", rec.Code, rec.Body)
 	}
 }
@@ -413,7 +413,7 @@ func TestRuleModeFailureSemantics(t *testing.T) {
 // 评审阻塞项：非法 enabled 不能让 params 先落地再报错。
 func TestPatchInstanceBadEnabledChangesNothing(t *testing.T) {
 	e := setup(t)
-	dlg := e.agent("agent_r", policy.AllowRules)
+	dlg := e.agent("agent_r", policy.DefaultCard().With(policy.GroupDecide, policy.GroupRules))
 	in := decode[instances.Instance](t, e.do("POST", "/v1/instances", `{"pack":"brief","params":{"schedule":"24h"}}`, dlg))
 	for _, bad := range []string{`"yes"`, `null`, `1`} {
 		rec := e.do("PATCH", "/v1/instances/"+in.ID, `{"params":{"schedule":"48h"},"enabled":`+bad+`}`, dlg)

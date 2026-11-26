@@ -334,7 +334,7 @@ func TestTraceRoutes(t *testing.T) {
 	}
 	run := e.runCredential(id)
 	for _, path := range []string{"/v1/items/" + id + "/trace", "/v1/source-events/sev_x/trace"} {
-		if rec := e.do("GET", path, "", func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+run) }); rec.Code != 403 {
+		if rec := e.do("GET", path, "", func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+run) }); rec.Code == 403 {
 			t.Fatalf("run credential %s: %d %s", path, rec.Code, rec.Body)
 		}
 	}

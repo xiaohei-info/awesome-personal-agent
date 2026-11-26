@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -13,13 +12,10 @@ import (
 )
 
 // spotCheck 是 GET /judgments/spot-check：抽检池（只读，observer 及以上）。条数默认取策略的 spot_check.per_brief，
-// ?limit= 可改小或放大。池横跨全部来源，运行凭据只读目标事项范围，所以不开放给它。
+// ?limit= 可改小或放大。池横跨全部来源。
 func (h *handlers) spotCheck(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := readable(p); err != nil {
 		return err
-	}
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credentials cannot read the spot-check pool", "use an owner or observer credential")
 	}
 	limit := -1
 	if v := r.URL.Query().Get("limit"); v != "" {

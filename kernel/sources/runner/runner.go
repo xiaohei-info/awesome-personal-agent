@@ -266,12 +266,12 @@ func (r *Runner) fail(err error) {
 
 // Register 登记内部命令，并让来源登记的变更（登记、改周期、启停）提交后同步时间轮。
 func (r *Runner) Register(x *command.Executor) error {
-	err := x.Register(command.Spec{Name: CmdRunResult, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, Object: objectOf,
+	err := x.Register(command.Spec{Name: CmdRunResult, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal, Object: objectOf,
 		Apply: r.applyResult})
 	if err != nil {
 		return err
 	}
-	if err := x.Register(command.Spec{Name: CmdIngest, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, Object: objectOf, Apply: r.applyIngest}); err != nil {
+	if err := x.Register(command.Spec{Name: CmdIngest, Action: authz.ActionUpdateOwn, Group: authz.GroupInternal, Object: objectOf, Apply: r.applyIngest}); err != nil {
 		return err
 	}
 	x.OnCommit(func(c command.Commit) {

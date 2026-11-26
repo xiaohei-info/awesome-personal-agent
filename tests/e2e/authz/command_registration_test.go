@@ -96,7 +96,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 		marker := filepath.Join(work, "evil.ran")
 		evil := script(t, work, "evil.sh", marker)
 		r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil", "--command", evil, "--schedule", "1s", "--timeout", "10")
-		k.expect("CLI 登记自定义命令", r, exitWebOnly)
+		k.expect("CLI 登记自定义命令", r, exitTierClosed)
 		body := `{"id":"src_evil2","name":"src_evil2","type":"script","command":"` + evil + `","schedule":"1s","timeout":10}`
 		if w := k.APIRaw("POST", "/v1/sources", body, k.DEL); w.Code != http.StatusForbidden {
 			t.Errorf("POST /v1/sources 带自定义命令: HTTP %d，期望 403 %s", w.Code, w.Body)
@@ -144,7 +144,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 		k.waitFor("确认后命令被拉起", 20*time.Second, func() bool { return exists(marker) })
 	})
 
-	k.step("ACT-CMD-03 运行凭据不能提交声明", func(t *testing.T) {
+	k.step("ACT-CMD-03 运行凭据提交的声明只进待确认", func(t *testing.T) {
 		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub"}`, 200) // 无头运行替身，已确认
 		k.triggerRun()
 		var token string
@@ -159,13 +159,12 @@ func TestFlowCommandRegistration(t *testing.T) {
 			}
 			return false
 		})
-		// 对照：这把运行凭据本身有效（能读账本），只是没有提交声明的权限。
+		// 运行凭据只带身份：与所属 Agent 的钥匙一样能提交声明，但声明要本人确认才生效。
 		k.expect("运行凭据读账本", k.Apa(token, "", "inbox"), 0)
-		before := k.webOK("GET", "/v1/settings/declarations", "", 200)
 		r := k.Apa(token, declaration("acc-from-run", filepath.Join(work, "from-run.ran")), "declare", "-")
-		k.expect("运行凭据 apa declare", r, exitDenied)
-		if after := k.webOK("GET", "/v1/settings/declarations", "", 200); after != before || strings.Contains(after, "acc-from-run") {
-			t.Errorf("声明不应被接收: %s", after)
+		k.expect("运行凭据 apa declare", r, 0)
+		if cmds := k.webOK("GET", "/v1/settings/commands", "", 200); strings.Contains(cmds, "acc-from-run") {
+			t.Errorf("未确认的声明不应生效: %s", cmds)
 		}
 	})
 
@@ -202,10 +201,10 @@ func TestFlowCommandRegistration(t *testing.T) {
 		}
 	})
 
-	// 2026-11-20 改写（权限模型第二版）：登记任何来源都是外部接入（3b），delegate 一律 20；随发行附带的拉取程序由本人在 Web 登记。
-	k.step("ACT-CMD-05 随发行附带的拉取程序也只由本人登记", func(t *testing.T) {
+	// 2026-11-26 改写（权限卡）：登记任何来源都属"接入来源"，这一组没开的 delegate 为 23；本人在 Web 登记。
+	k.step("ACT-CMD-05 随发行附带的拉取程序要开放接入来源才能由 Agent 登记", func(t *testing.T) {
 		args := []string{"source", "add", "--id", "src_rss", "--name", "src_rss", "--type", "pull", "--command", "rss-source", "--schedule", "1h", "--timeout", "30"}
-		k.expect("delegate 登记 RSS 拉取程序", k.Apa(k.DEL, "", args...), exitWebOnly)
+		k.expect("delegate 登记 RSS 拉取程序", k.Apa(k.DEL, "", args...), exitTierClosed)
 		k.expect("本人登记 RSS 拉取程序", k.OwnerApa("", args...), 0)
 		if show := k.Apa(k.OBS, "", "source", "show", "src_rss"); show.Code != 0 || !contains(show.Stdout, `"rss-source"`, `"pull"`) {
 			t.Errorf("来源应已登记: %d %s", show.Code, show.Stdout)

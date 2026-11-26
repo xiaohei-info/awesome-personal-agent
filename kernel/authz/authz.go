@@ -7,6 +7,8 @@ package authz
 
 import (
 	"encoding/json"
+	"net/url"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -19,7 +21,7 @@ const (
 	LevelObserver Level = "observer"
 	LevelWorker   Level = "worker"
 	LevelDelegate Level = "delegate"
-	LevelRun      Level = "run" // 运行钥匙：绑定一次运行，写范围是本次目标事项及其子事项
+	LevelRun      Level = "run" // 运行凭据：只标明哪次运行、属于哪个 Agent；范围与 delegate 钥匙相同，权限随所属 Agent
 	LevelWeb      Level = "web"
 )
 
@@ -47,33 +49,43 @@ const (
 	ActionRunnerTask      Action = "runner_task"
 )
 
-// Tier 是动作按后果固定的档（§14.3）。零值无效：每条命令必须登记一档。
-type Tier int
+// Group 是命令所属的组（§14.3）：权限卡上的十组，加只有本人与系统内部。零值无效：每条命令必须登记一组。
+type Group string
 
 const (
-	TierUnset    Tier = iota
-	TierRead          // 只读
-	TierOrganize      // 一档 整理：永远开，可撤回
-	TierDecide        // 二档 拍板：Agent 档位 ≥ decide 且对象项目在范围内
-	TierRules         // 3a 改日常：Agent 档位 = rules
-	TierPower         // 3b 造新权力：永不放开，只有 Web 本人且刚再输过口令
-	TierInternal      // 系统内部：只有内核自己（与 Web 本人）能调，Agent 一律硬线
+	GroupView         Group = policy.GroupView
+	GroupOrganize     Group = policy.GroupOrganize
+	GroupSourceEvents Group = policy.GroupSourceEvents
+	GroupDecide       Group = policy.GroupDecide
+	GroupRules        Group = policy.GroupRules
+	GroupConnect      Group = policy.GroupConnect
+	GroupOutbound     Group = policy.GroupOutbound
+	GroupChannels     Group = policy.GroupChannels
+	GroupAgents       Group = policy.GroupAgents
+	GroupPurge        Group = policy.GroupPurge
+	GroupOwner        Group = "owner"    // 只有本人：改权限卡、钥匙、口令与会话、渠道回答人；任何设置都开放不了
+	GroupInternal     Group = "internal" // 系统内部：只有内核自己（与 Web 本人）能调
 )
 
-var tierNames = map[Tier]string{TierRead: "read", TierOrganize: "organize", TierDecide: "decide", TierRules: "rules", TierPower: "power", TierInternal: "internal"}
+// Grave 报告组 g 是否后果较大：Web 本人做要刚输过口令，规则与时钟做不了（§14.3、§14.13）。
+func (g Group) Grave() bool {
+	switch g {
+	case GroupConnect, GroupOutbound, GroupChannels, GroupAgents, GroupPurge, GroupOwner:
+		return true
+	}
+	return false
+}
 
-func (t Tier) String() string { return tierNames[t] }
+// OnCard 报告组 g 是否是权限卡上的一组（只有本人与系统内部不在卡上）。
+func (g Group) OnCard() bool { return g != "" && g != GroupOwner && g != GroupInternal }
 
 // Object 是动作的对象。全部字段来自账本或内核，不来自调用方。
 type Object struct {
 	ID       string
 	Assignee string // 事项当前的执行者
-	// 运行钥匙的范围由内核据账本解析：对象是否为目标事项或其子事项 / 是否属于目标事项所属项目。
-	InRunScope   bool
-	InRunProject bool
 
 	Kind    string
-	Project string // 二档的项目限定按它比对
+	Project string // "替我拍板"的项目限定按它比对
 
 	// 执行者校验点（§14.7）。ProjectInfo 为 nil 表示无项目，不校验。
 	ProjectInfo *domain.Project
@@ -81,7 +93,7 @@ type Object struct {
 	// Candidates 是名录里当前在名单内的执行者 id，只随拒绝返回。
 	Candidates []string
 
-	// ToProject 非 nil 表示命令要把对象移入该项目（空串为移出）：二档的项目限定要求来源与目标都在范围内。
+	// ToProject 非 nil 表示命令要把对象移入该项目（空串为移出）："替我拍板"的项目限定要求来源与目标都在范围内。
 	ToProject *string
 
 	// Creator 仅供调用方留痕；判定从不读取它。
@@ -93,18 +105,19 @@ type Request struct {
 	Actor  domain.Actor
 	Level  Level
 	Action Action
-	Tier   Tier
+	Group  Group
 	Object Object
-	// Fresh：Web 会话刚再输过一次口令（3b 要求，§14.3）。只由内核的会话层给出。
+	// Fresh：Web 会话刚再输过一次口令（后果较大的组与只有本人的事要求，§14.3）。只由内核的会话层给出。
 	Fresh bool
-	// Agent 与 Allowance：调用者所属的 Agent（内核记录的凭据归属或运行记录）与它的档位；没有归属时为只整理。
-	Agent     string
-	Allowance policy.AgentAllowance
-	Owner     string // 本人的执行者 id，指派给本人始终允许
-	WebURL    string // 对象在 Web 的页面，二档拒绝时返回
-	Page      string // 动作所在的设置页，3a/3b 拒绝时返回；空则用 WebURL
-	Channel   string // ActionChannelAnswer：渠道
-	Sender    string // ActionChannelAnswer：回答人
+	// Agent 与 Card：调用者所属的 Agent（内核记录的凭据归属或运行记录）与它的权限卡；没有归属时为默认卡。
+	Agent   string
+	Card    policy.Card
+	Now     time.Time // 判定时刻：权限卡上的开放到期由它比较得出
+	Owner   string    // 本人的执行者 id，指派给本人始终允许
+	WebURL  string    // 对象在 Web 的页面：本人可以直接做这件事的地方
+	Page    string    // 动作所在的设置页；空则用 WebURL
+	Channel string    // ActionChannelAnswer：渠道
+	Sender  string    // ActionChannelAnswer：回答人
 }
 
 type Verdict string
@@ -143,11 +156,27 @@ func outOfScope() Decision {
 	return reject(domain.CodePermissionDenied, domain.ReasonOutOfScope, "this key cannot reach this object", "do not retry with this key", "")
 }
 
+// directURL 是本人可以直接做这件事的页面：拍板落在对象页，其余落在动作所在的设置页。
+func directURL(r Request) string {
+	if r.Group == GroupDecide && r.WebURL != "" {
+		return r.WebURL
+	}
+	return pick(r.Page, r.WebURL)
+}
+
 func pick(page, url string) string {
 	if page != "" {
 		return page
 	}
 	return url
+}
+
+// SettingsURL 是 Agent 权限卡的页面，被拦时作为"去哪开"返回。
+func SettingsURL(agent string) string {
+	if agent == "" {
+		return "/settings/agents"
+	}
+	return "/settings/agents/" + url.PathEscape(agent) + "#permissions"
 }
 
 // Decide 对 r 给出判定。p 是当前生效的策略版本（只用到渠道回答人名单）。
@@ -158,44 +187,69 @@ func Decide(p policy.Policy, r Request) Decision {
 	if r.Action == ActionChannelAnswer {
 		return decideChannel(p, r)
 	}
-	if r.Tier == TierUnset {
-		return reject(domain.CodeInvalidRequest, "", "command has no tier", "report this as a kernel bug", "")
+	if r.Group == "" {
+		return reject(domain.CodeInvalidRequest, "", "command has no group", "report this as a kernel bug", "")
 	}
-	// 1 硬线：3b 不读档位，任何设置都放不开。
-	if r.Tier == TierPower {
-		switch {
-		case r.Level == LevelWeb && r.Fresh:
-		case r.Level == LevelWeb:
-			return reject(domain.CodeReauthRequired, domain.ReasonReauthRequired, "this action creates new authority and needs the password entered again",
-				"enter the password again and retry", "")
-		default:
-			return reject(domain.CodeWebOnly, domain.ReasonHardLine, "only the owner can do this, in the Web UI; no setting opens it to an Agent",
-				"give the Web link to the owner and stop; do not retry", pick(r.Page, r.WebURL))
-		}
+	web, system := r.Level == LevelWeb, r.Actor.Type == domain.ActorSystem
+	// 1 只有本人与后果较大的组：Web 本人须刚输过口令；规则与时钟做不了；Agent 做只有本人的事一律 20，任何设置都开放不了。
+	switch {
+	case web && r.Group.Grave() && !r.Fresh:
+		return reject(domain.CodeReauthRequired, domain.ReasonReauthRequired, "this action needs the password entered again",
+			"enter the password again and retry", "")
+	case !web && (r.Group == GroupOwner || system && r.Group.Grave()):
+		return reject(domain.CodeWebOnly, domain.ReasonHardLine, "only the owner can do this, in the Web UI; no setting opens it to an Agent",
+			"give the Web link to the owner and stop; do not retry", pick(r.Page, r.WebURL))
 	}
 	// 2 钥匙范围。
 	if !inScope(r) {
 		return outOfScope()
 	}
-	// 3 档位：Web 本人与内核自己（规则、时钟，依据是本人开启的规则模式）不看档位。
-	if r.Level != LevelWeb && r.Actor.Type != domain.ActorSystem {
-		switch r.Tier {
-		case TierDecide:
-			if !decideOpen(r) {
-				return reject(domain.CodeTierClosed, domain.ReasonTierClosed, "this Agent may not decide this for the owner",
-					"do not retry; hand the Web link to the owner, or ask the question with apa ask", r.WebURL)
-			}
-		case TierRules:
-			if r.Allowance.Tier != policy.AllowRules {
-				return reject(domain.CodeTierClosed, domain.ReasonTierClosed, "this Agent may not change everyday rules",
-					"do not retry; give the Web link to the owner", pick(r.Page, r.WebURL))
-			}
-		case TierInternal: // 只给内核自己：外部钥匙调不到，也不能被档位放开
-			return reject(domain.CodeWebOnly, domain.ReasonHardLine, "this command is run by the kernel itself",
-				"do not call it", "")
+	// 3 权限卡：Web 本人与内核自己（规则、时钟，依据是本人开启的规则模式）不看权限卡。
+	if !web && !system {
+		if r.Group == GroupInternal { // 只给内核自己：外部钥匙调不到，也不能被权限卡开放
+			return reject(domain.CodeWebOnly, domain.ReasonHardLine, "this command is run by the kernel itself", "do not call it", "")
+		}
+		if !cardAllows(r) {
+			d := reject(domain.CodeTierClosed, domain.ReasonTierClosed, "this Agent's permission card does not allow "+string(r.Group)+" here",
+				"do not retry; hand this to the owner: the group can be opened at settings_url, or the owner can do it at web_url", directURL(r))
+			d.Err.Group = string(r.Group)
+			su := SettingsURL(r.Agent)
+			d.Err.SettingsURL = &su
+			return d
 		}
 	}
 	return checkExecutor(r)
+}
+
+// cardAllows：卡上这一组开着且没到期；"替我拍板"设了项目限定时对象（与要移入）的项目也在名单内。
+func cardAllows(r Request) bool {
+	if !r.Card.Allows(string(r.Group), r.Now) {
+		return false
+	}
+	if r.Group != GroupDecide {
+		return true
+	}
+	return inProjects(r.Card, r.Object.Project) && (r.Object.ToProject == nil || inProjects(r.Card, *r.Object.ToProject))
+}
+
+func inProjects(c policy.Card, project string) bool {
+	return len(c.DecideProjects) == 0 || contains(c.DecideProjects, project)
+}
+
+// DecideOpen 报告权限卡 c 在 now 时是否在项目 project 上开放了"替我拍板"。
+// 材料"改已有直接生效还是留待确认"也按它（§12.4）。
+func DecideOpen(c policy.Card, project string, now time.Time) bool {
+	return c.Allows(policy.GroupDecide, now) && inProjects(c, project)
+}
+
+// CanRead 是只读路由的钥匙范围判定（无效级别与 ext、webhook 之类读不到账本的钥匙为 4）；
+// "查看"组由 API 入口对全部读取统一判定（§14.3），这里不看权限卡。
+func CanRead(r Request) Decision {
+	r.Action = ActionRead
+	if !validLevel(r) || !inScope(r) {
+		return outOfScope()
+	}
+	return allow
 }
 
 func validLevel(r Request) bool {
@@ -210,12 +264,11 @@ func validLevel(r Request) bool {
 
 func own(r Request) bool { return r.Object.Assignee != "" && r.Object.Assignee == r.Actor.Principal }
 
-// inScope 是钥匙范围（§14.2）：observer 只读与提建议；worker 自己的事项；运行钥匙本次目标；delegate 全部；Web 本人全部。
+// inScope 是钥匙范围（§14.2）：observer 只读与提建议；worker 自己的事项；delegate 与运行凭据全部；Web 本人全部。
 func inScope(r Request) bool {
 	if r.Level == LevelWeb {
 		return true
 	}
-	o := r.Object
 	switch r.Action {
 	case ActionRead, ActionCreateProposed:
 		return true
@@ -232,37 +285,13 @@ func inScope(r Request) bool {
 		case ActionReviseMaterial, ActionSubmitPlugin, ActionEditCheckout:
 			return true
 		}
-	case LevelDelegate:
+	case LevelDelegate, LevelRun:
 		return true
-	case LevelRun:
-		switch r.Action {
-		case ActionUpdateOwn, ActionDelegate, ActionEditAnyItem, ActionAnswerDecision:
-			return o.InRunScope
-		case ActionReviseMaterial:
-			// shortcut: 材料与附件的写范围还没收到本次目标（方案 A05），沿用旧口径；要收窄先给材料解析出所属事项。
-			return true
-		case ActionEditCheckout:
-			return o.InRunProject
-		}
 	}
 	return false
 }
 
-// decideOpen：档位放开二档，且设了项目限定时要移入的项目也在名单内。
-func decideOpen(r Request) bool {
-	return DecideOpen(r.Allowance, r.Object.Project) && (r.Object.ToProject == nil || DecideOpen(r.Allowance, *r.Object.ToProject))
-}
-
-// DecideOpen 报告档位 a 是否在项目 project 上放开了二档（替本人拍板）；设了项目限定时对象的项目须在名单内。
-// 材料"改已有直接生效还是留待确认"也按它（§12.4）。
-func DecideOpen(a policy.AgentAllowance, project string) bool {
-	if a.Tier != policy.AllowDecide && a.Tier != policy.AllowRules {
-		return false
-	}
-	return len(a.Projects) == 0 || contains(a.Projects, project)
-}
-
-// decideChannel：本人经已配对渠道回答。回答人在名单内即是本人，不看档位；名单为空等于这个渠道不能回答。
+// decideChannel：本人经已配对渠道回答。回答人在名单内即是本人，不看权限卡；名单为空等于这个渠道不能回答。
 func decideChannel(p policy.Policy, r Request) Decision {
 	if r.Sender == "" || !contains(p.ChannelAnswerers[r.Channel], r.Sender) {
 		return reject(domain.CodePermissionDenied, domain.ReasonOutOfScope, "sender is not an allowed answerer for this channel", "ask the owner to answer in the Web UI", r.WebURL)
@@ -293,7 +322,7 @@ func ForwardAllowed(p policy.Policy, source, sender string, verified bool) bool 
 	return sender != "" && verified && contains(p.ForwardAllowlist[source], sender)
 }
 
-// RejectionEvent 构造应记账的拒绝事件（§6.7）：硬线（20）、档位未放开（23）、钥匙范围外（4，限范围判定）、
+// RejectionEvent 构造应记账的拒绝事件（§6.7）：只有本人（20）、权限卡没开（23）、钥匙范围外（4，限范围判定）、
 // 项目不允许的执行者（21），一条留痕路径。再输口令（reauth_required）是本人还没完成的操作，不记。
 // 判定本身无副作用，由调用方在自己的事务里追加。
 func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
@@ -306,7 +335,9 @@ func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	default:
 		return domain.Event{}, false
 	}
-	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "tier": r.Tier.String(), "code": d.Err.Code, "reason": d.Err.Reason, "exit": d.ExitCode(), "why": d.Err.Why, "agent": r.Agent})
+	// tier 键沿用旧名，取值是组键（附录 B.6）；web_url 供"被拦明细"与 apa why denied 给出本人直接做这件事的地方。
+	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "tier": string(r.Group), "code": d.Err.Code, "reason": d.Err.Reason,
+		"exit": d.ExitCode(), "why": d.Err.Why, "agent": r.Agent, "web_url": d.Err.WebURL})
 	return domain.Event{Type: domain.EvCommandRejected, Object: r.Object.ID, Actor: r.Actor, Reason: d.Err.Why, Payload: payload}, true
 }
 

@@ -145,7 +145,8 @@ func TestFlowRawReadScope(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-RSC-05 运行凭据与 ext 密钥不能读来源原文", func(t *testing.T) {
+	// 2026-11-26 改写（权限卡）：运行凭据与所属 Agent 的钥匙同读，能读来源原文；ext 密钥仍不能。
+	k.step("ACT-RSC-05 运行凭据能读来源原文，ext 密钥不能", func(t *testing.T) {
 		_, _, env := k.StubRun("hang") // 运行期间凭据有效：在超时（4 秒）之前用完
 		tok := env["APA_TOKEN"]
 		if tok == "" {
@@ -155,9 +156,9 @@ func TestFlowRawReadScope(t *testing.T) {
 			t.Fatalf("运行凭据应能调 today: %d", r.Code)
 		}
 		id := ids["src_acc_raw"]
-		eq(t, "运行凭据读来源事件的 HTTP 状态", k.APIRaw("GET", "/v1/source-events/"+id, "", tok).Code, 403)
+		eq(t, "运行凭据读来源事件的 HTTP 状态", k.APIRaw("GET", "/v1/source-events/"+id, "", tok).Code, 200)
 		eq(t, "ext 密钥读来源事件的 HTTP 状态", k.APIRaw("GET", "/v1/source-events/"+id, "", k.CHAN).Code, 403)
-		eq(t, "apa source event 的退出码（运行凭据）", k.Apa(tok, "", "source", "event", id).Code, exitDenied)
+		eq(t, "apa source event 的退出码（运行凭据）", k.Apa(tok, "", "source", "event", id).Code, 0)
 	})
 
 	k.step("ACT-RSC-06 已接受事项上的挂靠消息：内部钥匙全文，外部钥匙按档位（挂上事项不再放行）", func(t *testing.T) {
@@ -205,7 +206,8 @@ func TestFlowRawReadScope(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-RSC-07 对话捕获的内部来源原文只对 Web 登录开放", func(t *testing.T) {
+	// 2026-11-26 改写（权限卡）：对话捕获与其他来源一样，Web 登录、内部钥匙与运行凭据读全文；外部受众的钥匙与 ext 密钥读不到。
+	k.step("ACT-RSC-07 对话捕获的原文对内部受众开放，外部读不到", func(t *testing.T) {
 		open := e.Projects["acc-open"]
 		k.web("PATCH", "/v1/projects/"+open, `{"capture":true}`, 200)
 		body, _ := json.Marshal(map[string]any{"text": "rsc-07 下周一提交报销单", "project": open})
@@ -228,6 +230,9 @@ func TestFlowRawReadScope(t *testing.T) {
 		if web.Body == nil || !strings.Contains(*web.Body, "rsc-07 下周一提交报销单") || web.Scope != "full" {
 			t.Errorf("Web 登录应读到捕获全文: %+v", web)
 		}
-		k.readEvent(k.OBS, id, "", 403)
+		if obs := k.readEvent(k.OBS, id, "", 200); obs.Body == nil || obs.Scope != "full" {
+			t.Errorf("内部钥匙应读到捕获全文: %+v", obs)
+		}
+		k.readEvent(k.CHAN, id, "", 403)
 	})
 }

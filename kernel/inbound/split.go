@@ -54,7 +54,7 @@ func splittable(tx *store.Tx, v splitIn) (domain.Item, error) {
 }
 
 func registerSplit(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdSplit, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+	return x.Register(command.Spec{Name: CmdSplit, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseSplit(in)
 			return authz.Object{ID: v.Event}, err

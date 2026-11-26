@@ -156,7 +156,7 @@ type renameInput struct {
 // Register 登记六条命令。
 func (s *Service) Register(x *command.Executor) error {
 	spec := func(name string, apply func(*command.Ctx) (any, error)) command.Spec {
-		return command.Spec{Name: name, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/channels", Object: objectOf, Apply: apply}
+		return command.Spec{Name: name, Action: authz.ActionChangeSettings, Group: authz.GroupChannels, Page: "/settings/channels", Object: objectOf, Apply: apply}
 	}
 	for _, sp := range []command.Spec{
 		spec(CmdCreate, s.applyCreate), spec(CmdConfigure, s.applyConfigure),

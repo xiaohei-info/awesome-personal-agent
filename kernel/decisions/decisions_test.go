@@ -27,11 +27,11 @@ func agent(p string, lvl authz.Level) command.Trusted {
 }
 
 // setTier 以本人身份把 agent 的档位设成 tier（3b 设置，测试里直接写策略）。
-func (e *env) setTier(t *testing.T, agent, tier string) {
+func (e *env) setTier(t *testing.T, agent string, tier policy.Card) {
 	t.Helper()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent[agent] = policy.AgentAllowance{Tier: tier}
+			p.AgentCards[agent] = tier
 			return nil
 		})
 		return err
@@ -236,7 +236,7 @@ func TestRequestValidationAndAuthorization(t *testing.T) {
 	if e.get(t, id).Phase != domain.PhaseOpen {
 		t.Fatal("refused requests must not move the item")
 	}
-	for name, who := range map[string]command.Identity{"observer": observer, "stranger worker": agent("other", authz.LevelWorker), "run": runner} {
+	for name, who := range map[string]command.Identity{"observer": observer, "stranger worker": agent("other", authz.LevelWorker)} {
 		if _, err := e.do(who, "decision.request", "", map[string]any{"id": id, "ask": ask(nil)}); exit(err) != domain.ExitPermissionDenied {
 			t.Errorf("%s: want exit 4, got %v", name, err)
 		}
@@ -306,7 +306,7 @@ func TestDelegateAnswerFollowsTier(t *testing.T) {
 	if e.get(t, id).Phase != domain.PhaseNeedsInput || rejections(e.events(t, id)) != 1 {
 		t.Fatal("a refused answer must not take effect and must be recorded")
 	}
-	e.setTier(t, "agent_dlg", policy.AllowDecide)
+	e.setTier(t, "agent_dlg", policy.DefaultCard().With(policy.GroupDecide))
 	e.must(t, delegate, "decision.answer", "", map[string]any{"id": id, "choice": "A"})
 	it := e.get(t, id)
 	if r := it.Ask.Resolution; r == nil || r.ResolvedVia != ViaAgent || r.AnsweredBy != "dlg" || r.Evidence != "" {
@@ -321,7 +321,7 @@ func TestDelegateAnswerFollowsTier(t *testing.T) {
 
 func TestOnlyFirstAnswerCounts(t *testing.T) {
 	e := setup(t)
-	e.setTier(t, "agent_dlg", policy.AllowDecide)
+	e.setTier(t, "agent_dlg", policy.DefaultCard().With(policy.GroupDecide))
 	id := e.asked(t, nil)
 	e.must(t, delegate, "decision.answer", "", map[string]any{"id": id, "choice": "A"})
 	for name, who := range map[string]command.Identity{"web": owner, "delegate": delegate} {
@@ -337,7 +337,7 @@ func TestOnlyFirstAnswerCounts(t *testing.T) {
 	e.verify(t)
 }
 
-// worker 在自己的事项上回答是二档，档位未放开得 23；observer 与不在运行范围的运行钥匙在钥匙范围外（4）。三种拒绝都留痕。
+// worker 在自己的事项上回答是二档，档位未放开得 23；运行凭据随所属 Agent，同样 23；observer 在钥匙范围外（4）。三种拒绝都留痕。
 func TestWorkerObserverAndRunCannotAnswer(t *testing.T) {
 	e := setup(t)
 	id := e.asked(t, nil)
@@ -345,7 +345,7 @@ func TestWorkerObserverAndRunCannotAnswer(t *testing.T) {
 	for name, c := range map[string]struct {
 		who  command.Identity
 		want int
-	}{"worker": {worker, domain.ExitTierClosed}, "observer": {observer, domain.ExitPermissionDenied}, "run": {runner, domain.ExitPermissionDenied}} {
+	}{"worker": {worker, domain.ExitTierClosed}, "observer": {observer, domain.ExitPermissionDenied}, "run": {runner, domain.ExitTierClosed}} {
 		if _, err := e.do(c.who, "decision.answer", "", map[string]any{"id": id, "choice": "A"}); exit(err) != c.want {
 			t.Errorf("%s: want exit %d, got %v", name, c.want, err)
 		}
@@ -368,7 +368,7 @@ func TestProposalAcceptAndDismiss(t *testing.T) {
 	if _, err := e.do(worker, "proposal.accept", "", map[string]any{"id": a}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("worker: not its item: %v", err)
 	}
-	e.setTier(t, "agent_dlg", policy.AllowDecide)
+	e.setTier(t, "agent_dlg", policy.DefaultCard().With(policy.GroupDecide))
 	e.must(t, delegate, "proposal.accept", "", map[string]any{"id": a})
 	e.must(t, owner, "proposal.dismiss", "", map[string]any{"id": d, "reason": "not now"})
 	if e.get(t, a).Phase != domain.PhaseOpen || e.get(t, d).Phase != domain.PhaseDropped {
@@ -387,13 +387,13 @@ func TestProposalAcceptAndDismiss(t *testing.T) {
 	if ev := e.last(t, n, domain.EvItemPhaseChanged); e.get(t, n).Phase != domain.PhaseDropped || ev.Reason != "proposal dismissed" {
 		t.Fatalf("dismiss without reason: %+v", ev)
 	}
-	// 只认第一次：已处理的建议再来是 6；运行身份是 4 并留痕。
+	// 只认第一次：已处理的建议再来是 6；运行身份随所属 Agent 是 23 并留痕。
 	if _, err := e.do(owner, "proposal.dismiss", "", map[string]any{"id": a}); exit(err) != domain.ExitConflict {
 		t.Fatalf("second decision on a proposal: %v", err)
 	}
 	p := e.item(t, map[string]any{"phase": "proposed"})
-	if _, err := e.do(runner, "proposal.accept", "", map[string]any{"id": p}); exit(err) != domain.ExitPermissionDenied || rejections(e.events(t, p)) != 1 {
-		t.Fatalf("run identity: want exit 4 recorded, got %v", err)
+	if _, err := e.do(runner, "proposal.accept", "", map[string]any{"id": p}); exit(err) != domain.ExitTierClosed || rejections(e.events(t, p)) != 1 {
+		t.Fatalf("run identity: want exit 23 recorded, got %v", err)
 	}
 	if e.get(t, p).Phase != domain.PhaseProposed {
 		t.Fatal("rejected accept must not change the item")
@@ -483,7 +483,7 @@ func TestIdempotentAnswerReplaysFirstResult(t *testing.T) {
 // 撤销写一条反向事件：ask 回到未回答、阶段回 needs_input，原事件保留；之后可重新回答。撤回是 3a，档位只整理的 Agent 不能撤。
 func TestRevertChatAnswer(t *testing.T) {
 	e := setup(t)
-	e.setTier(t, "agent_dlg", policy.AllowDecide)
+	e.setTier(t, "agent_dlg", policy.DefaultCard().With(policy.GroupDecide))
 	id := e.asked(t, nil)
 	e.must(t, delegate, "decision.answer", "", map[string]any{"id": id, "choice": "A"})
 	seq := e.last(t, id, domain.EvDecisionResolved).Seq

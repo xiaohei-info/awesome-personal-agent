@@ -13,7 +13,7 @@ import { ReminderScope, WhenReady, useInstanceName, usePreview, useReminderScope
 import { rstrings, strings } from "./strings";
 
 // 设置 › 提醒与推送（设计 v2 §3.1、§5）：只留全局规矩——暂停所有提醒、默认渠道、安静时段（含临近截止照发）、每天上限；
-// 「更多」里是暂停名单与合并窗口。各类提醒送到哪在它自己的页面上改（定时安排卡、自动规则、来源、我来拍板、Agent、建议、状态），
+// 「更多」里是暂停名单与合并窗口。各类提醒送到哪在它自己的页面上改（定时安排卡、自动规则、来源、权限总览、Agent、建议、状态），
 // 这里只有一张只读总览：行表取自服务端（GET /settings/notify/overview，与内核选去处同一张行表），每行一句话加「去改」。
 // 每一节各自保存，发整段 disturb：已保存的原样带回，只换这一节改过的字段。
 const MERGE_MIN = [0, 15, 30, 60];

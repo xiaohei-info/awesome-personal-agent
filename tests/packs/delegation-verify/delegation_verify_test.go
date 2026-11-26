@@ -201,7 +201,7 @@ func TestPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("screen meta: %+v", s.Meta)
 	}
 	v := p.Prompts["delegation-verify-task"]
-	if v.Meta.Agent != "task" || v.Meta.Access != "read" || !strings.Contains(v.Body, "{item_id}") {
+	if v.Meta.Agent != "task" || v.Meta.Access != "" || !strings.Contains(v.Body, "{item_id}") {
 		t.Fatalf("verify meta: %+v", v.Meta)
 	}
 	for name, pr := range p.Prompts {

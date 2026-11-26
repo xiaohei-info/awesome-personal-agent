@@ -57,7 +57,7 @@ func pausedErr(pol policy.Policy) error {
 }
 
 func scoreSpec(s *Service) command.Spec {
-	return command.Spec{Name: CmdBacklogScore, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+	return command.Spec{Name: CmdBacklogScore, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			_, err := parseRules(in)
 			return authz.Object{}, err

@@ -208,7 +208,7 @@ func (o Options) create() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Tier: authz.TierOrganize,
+	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -316,7 +316,7 @@ func report() command.Spec {
 		var v reportIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: true,
+	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Receipt: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -501,7 +501,7 @@ func settle() command.Spec {
 		var v settleIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.settle", Action: authz.ActionChangeSettings, Tier: authz.TierInternal,
+	return command.Spec{Name: "delegate.settle", Action: authz.ActionChangeSettings, Group: authz.GroupInternal,
 		Actions: func(_ *store.Tx, c command.Caller, _ authz.Object, _ json.RawMessage) []authz.Action {
 			if c.Actor.Type == domain.ActorSystem && c.Actor.Via == domain.ViaClock {
 				return []authz.Action{authz.ActionRead}

@@ -100,7 +100,7 @@ func setup(t *testing.T) *env {
 	// dlgD 归属 agent_d，本人把它放开到「也替我拍板」；dlg 没有归属，只整理。
 	if err := st.Update(context.Background(), func(tx *store.Tx) error {
 		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_d"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			p.AgentCards["agent_d"] = policy.DefaultCard().With(policy.GroupDecide)
 			return nil
 		})
 		return err
@@ -459,10 +459,12 @@ func TestHostedMaterial(t *testing.T) {
 		t.Fatalf("hits: %+v", hits)
 	}
 
-	// 正文只给 Web 登录；读取是异步的：先 reading，轮询到 ready。
+	// 正文属"查看"组，Agent 与 Web 一样能读；读取是异步的：先 reading，轮询到 ready。
 	content := "/v1/materials/" + id + "/content"
-	want(t, e.do("wrk", "GET", content, ""), 403, "web_only")
-	want(t, e.do("dlg", "GET", content, ""), 403, "web_only")
+	if r := e.do("dlg", "GET", content, ""); r.Code != 200 {
+		t.Fatalf("delegate reads hosted content: %d %s", r.Code, r.Body)
+	}
+	want(t, e.do("ext", "GET", content, ""), 403, "permission_denied") // 外部受众的非导出 ext 读不到托管正文
 	var got map[string]any
 	deadline := time.Now().Add(20 * time.Second)
 	for {

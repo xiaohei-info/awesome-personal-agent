@@ -40,7 +40,6 @@ func TestSameHostCardsResolveIndependently(t *testing.T) {
 	pol := policy.Default()
 	pol.DefaultHarness = "host"
 	pol.DefaultAgentID, pol.MainAgentID = &daily.ID, &main.ID
-	pol.PermissionCap.Default = "full"
 	pol.RuleAgent = map[string]string{"handoff": daily.ID}
 	if err := e.st.View(bg, func(tx *store.Tx) error {
 		for _, test := range []struct {
@@ -250,9 +249,12 @@ func TestOnlyOwnerCanConfirmOrRegister(t *testing.T) {
 	ext := e.bearer(t, auth.Spec{Kind: auth.Ext, Scope: "chan"})
 	e.must(t, worker, "executor.declare", decl("acme", build))
 
-	// 3b 硬线先于钥匙范围：任何非 Web 钥匙都是 20。
+	// "Agent 与执行者配置"组：没开这一组的 delegate 是 23，worker、observer 在钥匙范围外是 4。
 	for name, id := range map[string]command.Identity{"worker": worker, "delegate": delegate, "observer": observer} {
-		want := domain.ExitWebOnly
+		want := domain.ExitPermissionDenied
+		if name == "delegate" {
+			want = domain.ExitTierClosed
+		}
 		for cmd, in := range map[string]any{
 			"executor.confirm": ref{"acme", 1}, "executor.register": decl("other", chat),
 			"executor.put": chat, "executor.remove": idIn{"acme.build"},
@@ -436,7 +438,7 @@ func TestHostFileRegistration(t *testing.T) {
 	}
 
 	delegate := e.bearer(t, auth.Spec{Kind: auth.Delegate})
-	if _, err := RegisterHostFile(bg, e.x, delegate, path); exit(err) != domain.ExitWebOnly {
+	if _, err := RegisterHostFile(bg, e.x, delegate, path); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("non-owner host registration: %v", err)
 	}
 	bad := filepath.Join(t.TempDir(), "bad.json")

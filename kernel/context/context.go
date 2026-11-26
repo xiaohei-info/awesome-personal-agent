@@ -69,12 +69,15 @@ type Reader struct {
 	Principal string
 	Run       string
 	Harness   string // 调用方报告的 harness：委派历史据它标 own（只是方便字段，不是边界）
+	Agent     string // 所属 Agent：后台运行看哪些消息按它的权限卡（§14.6）
 }
 
 // ItemMessages 是一个事项转给读取者的挂靠消息。
 type ItemMessages struct {
 	Item string `json:"item"`
 	followmsg.Forwarded
+	// Withheld 是因为"后台运行只看信任发件人的消息"没给这个读取者看的、还没确认的消息条数（§14.6）。
+	Withheld int `json:"filtered_messages,omitempty"`
 }
 
 // Entry 是增量里的一个事项，不含正文。
@@ -342,11 +345,16 @@ func appendMessages(tx *store.Tx, to []ItemMessages, r Reader, it domain.Item, p
 	if owns {
 		read = followmsg.Forward
 	}
-	f, err := read(tx, it.ID, allowlist.Keep(pol, r.Level, it))
-	if err != nil || len(f.Messages) == 0 {
+	keep := allowlist.Keep(pol, r.Level, r.Agent, it)
+	f, err := read(tx, it.ID, keep)
+	if err != nil {
 		return to, err
 	}
-	return append(to, ItemMessages{Item: it.ID, Forwarded: f}), nil
+	withheld, err := allowlist.Withheld(tx, it.ID, keep)
+	if err != nil || len(f.Messages) == 0 && withheld == 0 {
+		return to, err
+	}
+	return append(to, ItemMessages{Item: it.ID, Forwarded: f, Withheld: withheld}), nil
 }
 
 // responsible：运行身份对目标事项与它的委派子事项负责；其他读取者对分配给自己的事项负责，

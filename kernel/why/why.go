@@ -93,9 +93,9 @@ type content struct{ reason, payload, evidence bool }
 
 func visible(l authz.Level) content {
 	switch l {
-	case authz.LevelWeb, authz.LevelDelegate:
+	case authz.LevelWeb, authz.LevelDelegate, authz.LevelRun: // 运行凭据与 delegate 钥匙同读（§14.2）
 		return content{true, true, true}
-	case authz.LevelWorker, authz.LevelRun:
+	case authz.LevelWorker:
 		return content{true, true, false}
 	}
 	return content{} // observer：只有信封与授权依据
@@ -106,7 +106,7 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 	if r.ID == "" {
 		return Timeline{}, domain.NewError(domain.CodeInvalidRequest, "id is empty", "pass an item or run id")
 	}
-	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Tier: authz.TierRead, Object: authz.Object{ID: r.ID}}); d.Err != nil {
+	if d := authz.CanRead(authz.Request{Actor: r.Actor, Level: r.Level, Object: authz.Object{ID: r.ID}}); d.Err != nil {
 		return Timeline{}, d.Err
 	}
 	tl := Timeline{ID: r.ID, Steps: []Step{}}
@@ -233,7 +233,7 @@ func Audit(tx *store.Tx, p policy.Policy, r AuditRequest) ([]Step, error) {
 	if r.Limit == 0 {
 		r.Limit = 100
 	}
-	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Tier: authz.TierRead}); d.Err != nil {
+	if d := authz.CanRead(authz.Request{Actor: r.Actor, Level: r.Level}); d.Err != nil {
 		return nil, d.Err
 	}
 	steps := []Step{}

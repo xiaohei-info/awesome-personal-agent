@@ -19,6 +19,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kexec "github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -32,6 +33,11 @@ type api struct {
 	x  *command.Executor
 }
 
+// gate：读这些设置按权限卡的"Agent 与执行者配置"组判（Web 本人直接放行），与命令同一条留痕路径（§14.3）。
+func gate(st *store.Store, h core.Handler) core.Handler {
+	return core.Gate(st, authz.GroupAgents, "/settings/agents", h)
+}
+
 // Routes 返回路由分组；x 须已由 kernel/executors.Register 与 kernel/projects.Register 登记命令。经 core.Deps.Groups 挂载。
 func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 	a := &api{st, x}
@@ -40,12 +46,12 @@ func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 			{Method: "GET", Path: "/agents", Handler: a.agents},
 			{Method: "POST", Path: "/settings/agents", Handler: a.saveAgent},
 			{Method: "POST", Path: "/settings/executors", Handler: a.putExecutor},
-			{Method: "GET", Path: "/settings/declarations", Handler: web(a.declarations(""))},
+			{Method: "GET", Path: "/settings/declarations", Handler: gate(st, a.declarations(""))},
 			{Method: "POST", Path: "/settings/declarations/{harness}/{rev}/confirm", MaxBody: 1, Handler: a.decide("executor.confirm")},
 			{Method: "POST", Path: "/settings/declarations/{harness}/{rev}/reject", MaxBody: 1, Handler: a.decide("executor.reject")},
-			{Method: "GET", Path: "/settings/commands", Handler: web(a.declarations(kexec.StateActive))},
+			{Method: "GET", Path: "/settings/commands", Handler: gate(st, a.declarations(kexec.StateActive))},
 			{Method: "POST", Path: "/settings/commands", Handler: a.registerCommand},
-			{Method: "GET", Path: "/settings/projects/{id}/allowed-executors", Handler: web(a.getAllowed)},
+			{Method: "GET", Path: "/settings/projects/{id}/allowed-executors", Handler: gate(st, a.getAllowed)},
 			{Method: "PUT", Path: "/settings/projects/{id}/allowed-executors", MaxBody: 64 << 10, Handler: a.setAllowed},
 		} {
 			r.Handle(rt)
@@ -75,19 +81,17 @@ func (a *api) agents(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	}); err != nil {
 		return err
 	}
-	// 每张卡带它的档位（§14.3）：判定读的就是这一份，页面照它显示。
+	// 每张卡带它的权限卡（§14.5）：判定读的就是这一份，页面照它显示。
 	type agentOut struct {
 		kexec.Card
-		Tier     string   `json:"tier"`
-		Projects []string `json:"tier_projects"`
+		Permission policy.Card `json:"permission"`
 	}
 	out := make([]agentOut, len(cards))
 	for i, c := range cards {
 		if !p.Web {
 			c.Values = nil
 		}
-		al := pol.Allowance(c.ID)
-		out[i] = agentOut{Card: c, Tier: al.Tier, Projects: append([]string{}, al.Projects...)}
+		out[i] = agentOut{Card: c, Permission: pol.Card(c.ID)}
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"agents": out, "selected": selected.Snapshot, "reason": selected.Reason})
 }
@@ -97,16 +101,6 @@ func (a *api) saveAgent(w http.ResponseWriter, r *http.Request, p *core.Principa
 		return err
 	}
 	return a.run(w, r, p, http.StatusOK, "agent.configure", in)
-}
-
-// web 只放行 Web 会话：设置的读取不走授权命令，agent 不需要看。
-func web(h core.Handler) core.Handler {
-	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if !p.Web {
-			return domain.NewError(domain.CodeWebOnly, "settings can only be used by the owner in the Web UI", "ask the owner to change it in the Web settings")
-		}
-		return h(w, r, p)
-	}
 }
 
 // run 以请求的凭据执行一条内核命令并渲染结果。

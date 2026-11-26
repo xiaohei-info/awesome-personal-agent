@@ -2,31 +2,31 @@ import { useEffect, useId, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
-import { PERM } from "../../app/ids";
 import { useRaw } from "../../app/raw";
-import { Val, useLabel } from "../../app/values";
+import { Val } from "../../app/values";
 import { Basics } from "./AgentEditor";
-import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
+import { Permission } from "./Permission";
+import { PolicyPage, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { AGENT_KINDS, entries, hasKey, LEGACY, useData, type Credential, type Declaration, type Entry } from "./data";
 import { useEntryName } from "./SettingsAgentsPage";
 import { strings } from "./strings";
 import { AudienceChoice, ScopeEditor, ScopeSummary, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 
 // 设置 › Agent › 某个 Agent（界面设计 §3.2、§4、§6.3；设计 §14.3）：这个 Agent 的全部属性只在这里改。
-// ①接入清单（没完成时置顶，每步就地做完）②基本信息 ③档位一行（只读，在「我来拍板」改）④钥匙（能碰哪些事）⑤后台权限 ⑥在哪里做 ⑦被谁使用（只读）⑧它做过什么 ⑨高级。
-// 钥匙（/settings/tokens）只定范围，档位只定后果，两者互不影响；判定都在服务端。
+// ①接入清单（没完成时置顶，每步就地做完）②基本信息 ③钥匙（能碰哪些事）④权限卡与限制清单 ⑤在哪里做 ⑥被谁使用（只读）⑦它做过什么 ⑧高级。
+// 钥匙（/settings/tokens）只定范围，权限卡定能做哪些组，两者互不影响；判定都在服务端。
 // 每档给 Agent 的工具只取声明里的 headless.tools / tool_notes（附录 A.2），不解析命令行参数。
 
 export function AgentPage() {
   const t = useT(strings);
   const { id = "" } = useParams();
-  const { docs, error: polError, load: loadPol, save } = usePolicyDocs(["policy", "access-limits"] as const);
+  const { docs, error: polError, load: loadPol, save } = usePolicyDocs(["policy"] as const);
   const { data, error, setError, load } = useData();
   const nameOf = useEntryName();
-  const pol = docs?.policy, lim = docs?.["access-limits"];
+  const pol = docs?.policy;
   const e = data ? entries(data).find((x) => x.id === id) : undefined;
   const reloadAll = async () => { await load(); await loadPol(); };
-  if (data && pol && lim && !e)
+  if (data && pol && !e)
     return (
       <main>
         <p className="eyebrow"><Link to="/settings/agents">{t.back}</Link></p>
@@ -35,21 +35,20 @@ export function AgentPage() {
     );
   const name = e ? nameOf(e) : t.agent;
   return (
-    <PolicyPage title={name} error={polError ?? (data ? null : error)} ready={!!pol && !!lim && !!data && !!e} onRetry={() => { void loadPol(); void load(); }}>
+    <PolicyPage title={name} error={polError ?? (data ? null : error)} ready={!!pol && !!data && !!e} onRetry={() => { void loadPol(); void load(); }}>
       <p className="eyebrow"><Link to="/settings/agents">{t.back}</Link></p>
       {error && data && <div role="alert">{error}</div>}
-      {e && pol && lim && (
+      {e && pol && (
         <div className="stack">
           <Connect e={e} name={name} reload={load} onError={setError} />
           <RolesLine e={e} pol={pol} />
           {e.instance ? <Basics key={e.card!.rev} card={e.card!} host={e.live?.declaration} onSaved={reloadAll} /> : <LegacyBasics e={e} />}
-          <TierLine e={e} />
-          <section aria-label={t.keys} className="panel stack">
+          <section aria-label={t.keys} className="panel stack" id="keys">
             <h2>{t.keys}</h2>
             <p className="sub">{t.keysScope}</p>
             <Keys e={e} reload={load} onError={setError} />
           </section>
-          <Tools e={e} lim={lim} save={save} />
+          <Permission e={e} version={Number(pol.version)} />
           {e.live && <Launch e={e} name={name} pol={pol} save={save} />}
           <UsedBy e={e} pol={pol} />
           <Records e={e} />
@@ -170,47 +169,6 @@ function LegacyBasics({ e }: { e: Entry }) {
   );
 }
 
-// 后台权限（权限上限）：全站只有这一个控件。本人建的 Agent 写 permission_cap.by_agent[id]，旧的写 by_harness[程序]；
-// 其余 Agent 的与默认值原样带回（PUT 按段替换）。完全放开先看后果再确认。
-function Tools({ e, lim, save }: { e: Entry; lim: Doc; save: Save }) {
-  const t = useT(strings);
-  const lang = useLang();
-  const label = useLabel();
-  const live = e.live?.declaration;
-  const scope = e.instance ? "by_agent" : "by_harness";
-  const cap = lim.permission_cap as { by_agent?: Record<string, string>; default: string; by_harness?: Record<string, string> };
-  const [tier, setTier, dirty] = useDraft(lim.permission_cap, () => cap[scope]?.[e.key] ?? (e.instance ? "read" : cap.default));
-  const [asking, setAsking] = useState(false);
-  const offered = Object.keys(live?.headless?.access ?? {});
-  const tools = (p: string) => (live?.headless?.tools?.[p] ?? []).map((x) => x[lang]);
-  const note = (p: string) => live?.headless?.tool_notes?.[p]?.[lang];
-  const choose = (p: string) => (p === "full" && tier !== "full" ? setAsking(true) : (setAsking(false), setTier(p)));
-  const submit = () => {
-    if (!live) return reject(t.allowFirst);
-    return save("access-limits", { permission_cap: { ...cap, [scope]: { ...(cap[scope] ?? {}), [e.key]: tier } } });
-  };
-  return (
-    <Card title={t.tools} hint={live ? undefined : t.allowFirst} onSave={submit} dirty={dirty}>
-      <div className="seg" role="group" aria-label={t.tools}>
-        {PERM.map((p) => (
-          <button key={p} type="button" aria-pressed={tier === p} disabled={!live || !offered.includes(p)} onClick={() => choose(p)}>
-            {label("perm", p)}{live && !offered.includes(p) ? ` · ${t.notOffered}` : ""}
-          </button>
-        ))}
-      </div>
-      {asking ? (
-        <div role="group" aria-label={t.fullPreview}>
-          <p>{t.fullPreview}{[...tools("full"), note("full")].filter(Boolean).join(t.listSep)}</p>
-          <button type="button" className="danger" onClick={() => { setTier("full"); setAsking(false); }}>{t.confirmFull}</button>{" "}
-          <button type="button" onClick={() => setAsking(false)}>{t.cancel}</button>
-        </div>
-      ) : (
-        live && <p data-testid={"tools-" + e.harness}>{[...tools(tier), note(tier)].filter(Boolean).join(" · ")}</p>
-      )}
-    </Card>
-  );
-}
-
 /** 声明能不能在对话里接着做：新字段 wake，或旧声明 launch: wake（§13.6）。 */
 export const canWake = (d?: Declaration) => !!(d?.main_session?.wake || d?.main_session?.launch === "wake");
 
@@ -266,17 +224,6 @@ function Launch({ e, name, pol, save }: { e: Entry; name: string; pol: Doc; save
         </details>
       )}
     </section>
-  );
-}
-
-/** 档位只在「我来拍板」改（设计 §14.3）；这里一行说它现在能替你做到哪一档，并给去改的链接，与分工那一行同一写法。 */
-function TierLine({ e }: { e: Entry }) {
-  const t = useT(strings);
-  const label = useLabel();
-  return (
-    <p className="sub">
-      {t.tierNow(label("agentTier", e.card?.tier || "organize"))} <Link to={"/settings#tier-" + encodeURIComponent(e.id)}>{t.tierChange}</Link>
-    </p>
   );
 }
 

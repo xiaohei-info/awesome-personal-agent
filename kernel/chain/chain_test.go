@@ -3,6 +3,7 @@ package chain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -139,16 +140,21 @@ func (e *env) trips() []Trip {
 }
 
 // 一轮自动链路：委派（任务委派继承加一）→ 执行者回执（继承加一）→ 父事项回 open。
-func (e *env) round(parent string) (child string, res command.Result) {
+// 超过阈值时委派返回 chain_depth_exceeded，tripped 为真（§14.9）。
+func (e *env) round(parent string) (child string, tripped bool) {
 	e.t.Helper()
-	res = e.do(e.as("DEL"), "delegate.create", map[string]any{"parent": parent, "assignee": workHost}, inherit(parent))
-	if res.Suppressed {
-		return "", res
+	res, err := e.try(e.as("DEL"), "delegate.create", map[string]any{"parent": parent, "assignee": workHost}, inherit(parent))
+	var de *domain.Error
+	if errors.As(err, &de) && de.Reason == domain.ReasonChainDepthExceeded {
+		return "", true
+	}
+	if err != nil {
+		e.t.Fatalf("delegate.create: %v", err)
 	}
 	child = e.newID(res)
 	e.do(e.as("WRK"), "delegate.report", map[string]any{"id": child, "outcome": "done", "summary": "s",
 		"evidence": map[string]any{"pr": "https://x/pr/" + child}}, inherit(child))
-	return child, res
+	return child, false
 }
 
 // ACT-DEP-01：深度沿委派与回执逐轮递增，不被重置。
@@ -196,11 +202,11 @@ func TestDepthRisesAlongDelegationAndReceipt(t *testing.T) {
 func TestTripRecordsOnly(t *testing.T) {
 	e := setup(t, 2)
 	parent := e.newID(e.do(owner, "item.create", map[string]any{"kind": "task", "title": "loop", "phase": "open"}, command.Chain{}))
-	var tripped command.Result
-	for i := 0; i < 5 && !tripped.Suppressed; i++ {
+	var tripped bool
+	for i := 0; i < 5 && !tripped; i++ {
 		_, tripped = e.round(parent)
 	}
-	if !tripped.Suppressed {
+	if !tripped {
 		t.Fatal("chain never tripped")
 	}
 	var children int
@@ -216,7 +222,7 @@ func TestTripRecordsOnly(t *testing.T) {
 		t.Fatalf("trips = %+v", ts)
 	}
 	// 再来一次也只记录。
-	if _, res := e.round(parent); !res.Suppressed {
+	if _, over := e.round(parent); !over {
 		t.Fatal("still-over-threshold chain dispatched")
 	}
 	ts = e.trips()
@@ -262,12 +268,12 @@ func TestBackgroundShapedTripIsRecognised(t *testing.T) {
 func TestOwnerRedelegationStartsNewChainWhileAskAndTimerKeepDepth(t *testing.T) {
 	e := setup(t, 2)
 	parent := e.newID(e.do(owner, "item.create", map[string]any{"kind": "task", "title": "loop", "phase": "open"}, command.Chain{}))
-	var res command.Result
-	for i := 0; i < 5 && !res.Suppressed; i++ {
-		_, res = e.round(parent)
+	var over bool
+	for i := 0; i < 5 && !over; i++ {
+		_, over = e.round(parent)
 	}
-	if !res.Suppressed || e.depth(parent) <= 2 {
-		t.Fatalf("not tripped: %+v depth=%d", res, e.depth(parent))
+	if !over || e.depth(parent) <= 2 {
+		t.Fatalf("not tripped: depth=%d", e.depth(parent))
 	}
 	// 本人重新委派：新链路从头开始。
 	child := e.newID(e.do(owner, "delegate.create", map[string]any{"parent": parent, "assignee": workHost}, command.Chain{}))

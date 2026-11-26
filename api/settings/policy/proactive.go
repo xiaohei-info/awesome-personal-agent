@@ -17,7 +17,7 @@ import (
 // 请求体是 disturb.proactive 的形状；校验与保存时同一套（不合法为 400）。
 func proactivePreview(st *store.Store) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if err := webOnly(p); err != nil {
+		if err := rulesOnly(st, r, p); err != nil {
 			return err
 		}
 		raw, err := readBody(r)

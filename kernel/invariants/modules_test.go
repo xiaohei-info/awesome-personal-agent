@@ -226,8 +226,8 @@ func TestInv7OneRunPerItem(t *testing.T) {
 	}
 }
 
-// 不变量 8：运行身份没有代答能力。运行凭据不能回答决策、接受或丢弃建议；各留一条拒绝 Event，事项不变。
-func TestInv8RunIdentityCannotAnswer(t *testing.T) {
+// 不变量 8：运行凭据随所属 Agent 的权限。所属 Agent 没放开拍板时，运行凭据不能回答决策、接受或丢弃建议；各留一条拒绝 Event，事项不变。
+func TestInv8RunIdentityFollowsAgent(t *testing.T) {
 	st := open(t, eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, proc.Module, runidentity.Module)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	x := command.New(st, func() time.Time { return now })
@@ -276,8 +276,8 @@ func TestInv8RunIdentityCannotAnswer(t *testing.T) {
 		"proposal.accept":  {"id": proposed},
 		"proposal.dismiss": {"id": proposed, "reason": "x"},
 	} {
-		if _, err := do(t, x, run, cmd, in); exit(err) != domain.ExitPermissionDenied {
-			t.Errorf("%s by a run credential: want exit 4, got %v", cmd, err)
+		if _, err := do(t, x, run, cmd, in); exit(err) != domain.ExitTierClosed {
+			t.Errorf("%s by a run credential: want exit 23 (its Agent only organizes), got %v", cmd, err)
 		}
 	}
 	if got := rejections() - before; got != 3 {

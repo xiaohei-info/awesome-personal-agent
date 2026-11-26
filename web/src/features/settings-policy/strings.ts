@@ -18,36 +18,30 @@ const sharedEn: typeof sharedZh = {
 };
 export const shared: Dict<typeof sharedZh> = { zh: sharedZh, en: sharedEn };
 
-// 设置 › 我来拍板（设计 §14.3）：每个 Agent 能替你做到哪一档，就在这里改（唯一可编辑处）；下方是只能本人做的那条硬线。
+// 设置 › 权限总览（设计 §14.5）：每个 Agent 的权限卡一览，只看；点名字去它自己的页面改。下方是有事要你拍板时怎么告诉你。
 const zh = {
   ...sharedZh,
-  title: "我来拍板",
-  summary: (n: number) => (n ? `${n} 个 Agent 放开了拍板` : "Agent 都只整理"),
-  lede: "每个 Agent 能替你做到哪一档，就在这里改。",
+  title: "权限总览",
+  summary: (n: number) => (n ? `${n} 个 Agent 能替你拍板` : "Agent 都不能替你拍板"),
+  lede: "每个 Agent 能替你做什么。点名字去它的页面改。",
   noAgents: "还没有 Agent，先在「设置 › Agent」添加",
-  tier: (name: string) => `${name}能做到哪一档`,
-  tierWhere: "拍板限在哪些项目",
-  allProjects: "全部项目",
-  save: "保存档位",
-  hardLine: "只有你本人能做",
-  hardLineWhat: "发钥匙、填凭据、改工具权限、接入新来源、外发范围、渠道回答人、物理删除",
-  hardLineHow: "在网页上做，且要再输一次口令",
+  allowed: "允许",
+  denied: "不允许",
+  allowedUntil: (at: string) => `允许到 ${at}`,
+  ownerOnly: "只有你本人能做：改权限卡、发和收回钥匙、改登录口令、指定谁能在渠道里代你回答。",
   notifyCard: "有事要你拍板时怎么告诉你",
 };
 
 const en: typeof zh = {
   ...sharedEn,
-  title: "Your call",
-  summary: (n) => (n ? `${n} Agent${n === 1 ? "" : "s"} may decide` : "Agents only organize"),
-  lede: "How far each Agent may go for you; change it right here.",
+  title: "Permissions",
+  summary: (n) => (n ? `${n} Agent${n === 1 ? "" : "s"} may decide for you` : "No Agent may decide for you"),
+  lede: "What each Agent may do for you. Open an Agent to change it.",
   noAgents: "No Agents yet; add one in Settings › Agents",
-  tier: (name) => `How far ${name} may go`,
-  tierWhere: "Decide only in these projects",
-  allProjects: "All projects",
-  save: "Save tier",
-  hardLine: "Only you can do",
-  hardLineWhat: "Issue keys, enter credentials, change tool access, connect new sources, outbound scope, channel answerers, permanent deletion",
-  hardLineHow: "On the web, after entering your password again",
+  allowed: "Allowed",
+  denied: "Not allowed",
+  allowedUntil: (at) => `Allowed until ${at}`,
+  ownerOnly: "Only you can: change permission cards, issue and revoke keys, change the login password, pick who may answer for you in a channel.",
   notifyCard: "How you hear about decisions",
 };
 

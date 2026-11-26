@@ -369,12 +369,12 @@ func boundOr(tx *store.Tx, c command.Caller, o authz.Object) bool {
 	return ok
 }
 
-// editActions：改自己的事项（运行凭据：范围内的事项）为 update_own，改他人的为 edit_any_item（§14.3）；
+// editActions：改自己的事项为 update_own，改他人的为 edit_any_item（§14.3）；
 // 写了 assignee 或 project 再加名单校验点，使 21 号拒绝走管线留痕。
-func editActions(c command.Caller, o authz.Object, own, wroteAssignee, wroteProject bool, first ...authz.Action) []authz.Action {
+func editActions(own, wroteAssignee, wroteProject bool, first ...authz.Action) []authz.Action {
 	as := first
 	if len(as) == 0 {
-		if own || (c.Level == authz.LevelRun && o.InRunScope) {
+		if own {
 			as = []authz.Action{authz.ActionUpdateOwn}
 		} else {
 			as = []authz.Action{authz.ActionEditAnyItem}
@@ -558,13 +558,13 @@ func (s *svc) create() command.Spec {
 		it.Project = p
 		return it, nil
 	}
-	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed, Tier: authz.TierOrganize,
-		TierFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed, Group: authz.GroupOrganize,
+		GroupFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Group, error) {
 			v, err := parse(in)
 			if v.phase() == domain.PhaseProposed {
-				return authz.TierOrganize, err
+				return authz.GroupOrganize, err
 			}
-			return authz.TierDecide, err
+			return authz.GroupDecide, err
 		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
@@ -585,9 +585,9 @@ func (s *svc) create() command.Spec {
 			v, _ := parse(in)
 			own := o.Assignee != "" && o.Assignee == c.Actor.Principal
 			if v.phase() == domain.PhaseProposed {
-				return editActions(c, o, own, v.Assignee != "", o.Project != "", authz.ActionCreateProposed)
+				return editActions(own, v.Assignee != "", o.Project != "", authz.ActionCreateProposed)
 			}
-			return editActions(c, o, own, v.Assignee != "", o.Project != "")
+			return editActions(own, v.Assignee != "", o.Project != "")
 		},
 		Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
@@ -651,13 +651,13 @@ func (s *svc) update() command.Spec {
 		next, err = applyPatch(cur, patch)
 		return
 	}
-	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
-		TierFor: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
+		GroupFor: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Group, error) {
 			_, _, _, patch, err := plan(tx, in)
 			if _, chosen := patch["preferred_agent_id"]; chosen {
-				return authz.TierRules, err // 指定由哪个 Agent 来做是改日常（§14.3）
+				return authz.GroupRules, err // 指定由哪个 Agent 来做是改日常（§14.3）
 			}
-			return authz.TierOrganize, err
+			return authz.GroupOrganize, err
 		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			cur, next, _, _, err := plan(tx, in)
@@ -670,7 +670,7 @@ func (s *svc) update() command.Spec {
 			_, _, _, patch, _ := plan(tx, in)
 			_, a := patch["assignee"]
 			_, p := patch["project"]
-			return editActions(c, o, boundOr(tx, c, o), a, p)
+			return editActions(boundOr(tx, c, o), a, p)
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			cur, next, _, _, err := plan(tx, in)
@@ -722,13 +722,13 @@ func (s *svc) transition() command.Spec {
 		next, err = transit(cur, v)
 		return
 	}
-	return command.Spec{Name: "item.transition", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
-		TierFor: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+	return command.Spec{Name: "item.transition", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
+		GroupFor: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Group, error) {
 			cur, _, v, err := plan(tx, in)
 			if leavesPending(cur.Phase, v.To) {
-				return authz.TierDecide, err
+				return authz.GroupDecide, err
 			}
-			return authz.TierOrganize, err
+			return authz.GroupOrganize, err
 		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			cur, next, _, err := plan(tx, in)
@@ -739,7 +739,7 @@ func (s *svc) transition() command.Spec {
 		},
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, in json.RawMessage) []authz.Action {
 			cur, _, v, _ := plan(tx, in)
-			as := editActions(c, o, boundOr(tx, c, o), false, false)
+			as := editActions(boundOr(tx, c, o), false, false)
 			if leavesPending(cur.Phase, v.To) {
 				as = append(as, authz.ActionAnswerDecision)
 			}
@@ -779,7 +779,7 @@ func (s *svc) relate() command.Spec {
 		var v relateIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.relate", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+	return command.Spec{Name: "item.relate", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -792,7 +792,7 @@ func (s *svc) relate() command.Spec {
 			return object(tx, cur, cur)
 		},
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) []authz.Action {
-			return editActions(c, o, boundOr(tx, c, o), false, false)
+			return editActions(boundOr(tx, c, o), false, false)
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
@@ -973,7 +973,7 @@ func (s *svc) revert() command.Spec {
 		var v revertIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.revert", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/agent-changes",
+	return command.Spec{Name: "item.revert", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/agent-changes",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

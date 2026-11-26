@@ -168,9 +168,12 @@ func TestReposAndCheckouts(t *testing.T) {
 	other := e.create(t, "Q")
 	const remote = "https://git.example/x/app.git"
 
-	// 远程仓库是 3b：任何钥匙都是硬线。
-	for _, id2 := range []command.Identity{worker, delegate} {
-		if _, err := e.do(t, id2, "project.repo.add", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitWebOnly {
+	// 远程仓库属"Agent 与执行者配置"：worker 在钥匙范围外（4），没开这一组的 delegate 是 23。
+	for _, c := range []struct {
+		id2  command.Identity
+		want int
+	}{{worker, domain.ExitPermissionDenied}, {delegate, domain.ExitTierClosed}} {
+		if _, err := e.do(t, c.id2, "project.repo.add", map[string]any{"id": id, "remote": remote}); exit(err) != c.want {
 			t.Fatalf("agent must not add remote: %v", err)
 		}
 	}
@@ -215,7 +218,7 @@ func TestReposAndCheckouts(t *testing.T) {
 
 	// 删除远程地址同时带走其检出，之后别的项目可以登记它。
 	e.must(t, worker, "project.checkout.set", co)
-	if _, err := e.do(t, worker, "project.repo.remove", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitWebOnly {
+	if _, err := e.do(t, worker, "project.repo.remove", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("worker must not remove remote: %v", err)
 	}
 	e.must(t, owner, "project.repo.remove", map[string]any{"id": id, "remote": remote})
@@ -305,10 +308,10 @@ func TestAllowedExecutorsAreWebOnly(t *testing.T) {
 	in := map[string]any{"id": id, "executors": []string{"evil"}}
 
 	_, err := e.do(t, delegate, "project.allowed_executors.set", in)
-	if exit(err) != domain.ExitWebOnly {
-		t.Fatalf("delegate/CLI must get exit 20, got %v", err)
+	if exit(err) != domain.ExitTierClosed {
+		t.Fatalf("delegate/CLI must get exit 23, got %v", err)
 	}
-	if _, err := e.do(t, worker, "project.allowed_executors.set", in); exit(err) != domain.ExitWebOnly {
+	if _, err := e.do(t, worker, "project.allowed_executors.set", in); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("worker: %v", err)
 	}
 	if p := e.get(t, id); p.AllowedExecutors != nil {
@@ -334,7 +337,7 @@ func TestExecutorViolationUsesPersistedList(t *testing.T) {
 	id := e.create(t, "P")
 	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": id, "executors": []string{"a"}})
 	p := e.get(t, id)
-	d := authz.Decide(policy.Policy{}, authz.Request{Actor: owner.Actor, Level: authz.LevelWeb, Action: authz.ActionDelegate, Tier: authz.TierOrganize,
+	d := authz.Decide(policy.Policy{}, authz.Request{Actor: owner.Actor, Level: authz.LevelWeb, Action: authz.ActionDelegate, Group: authz.GroupOrganize,
 		Owner: "me", Object: authz.Object{ProjectInfo: &p, Executor: "stranger"}})
 	if d.Err == nil || d.ExitCode() != domain.ExitExecutorNotAllowed || len(d.Err.Allowed) != 1 || d.Err.Allowed[0] != "a" {
 		t.Fatalf("decision %+v", d)

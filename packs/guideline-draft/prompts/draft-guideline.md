@@ -1,6 +1,5 @@
 ---
 agent: task
-access: read
 cwd: project_checkout
 result_material: true
 ---

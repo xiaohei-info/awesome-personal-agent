@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -25,27 +26,23 @@ type api struct {
 	x  *command.Executor
 }
 
+// gate：读这些设置按权限卡的"数据去向"组判（Web 本人直接放行），与命令同一条留痕路径（§14.3）。
+func gate(st *store.Store, h core.Handler) core.Handler {
+	return core.Gate(st, authz.GroupOutbound, "/sources", h)
+}
+
 // Routes 返回路由分组；x 须已由 registry.Register 与 projects.Register 登记命令。经 core.Deps.Groups 挂载。
 func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 	a := &api{st, x}
 	return func(r *core.Router) {
 		for _, rt := range []core.Route{
-			{Method: "GET", Path: "/settings/sources/{id}/outbound", Handler: web(a.getSource)},
+			{Method: "GET", Path: "/settings/sources/{id}/outbound", Handler: gate(st, a.getSource)},
 			{Method: "PUT", Path: "/settings/sources/{id}/outbound", MaxBody: 1 << 10, Handler: a.putSource},
-			{Method: "GET", Path: "/settings/projects/{id}/capture-outbound", Handler: web(a.getProject)},
+			{Method: "GET", Path: "/settings/projects/{id}/capture-outbound", Handler: gate(st, a.getProject)},
 			{Method: "PUT", Path: "/settings/projects/{id}/capture-outbound", MaxBody: 1 << 10, Handler: a.putProject},
 		} {
 			r.Handle(rt)
 		}
-	}
-}
-
-func web(h core.Handler) core.Handler {
-	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if !p.Web {
-			return domain.NewError(domain.CodeWebOnly, "settings can only be used by the owner in the Web UI", "ask the owner to change it in the Web settings")
-		}
-		return h(w, r, p)
 	}
 }
 

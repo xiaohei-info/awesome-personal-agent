@@ -1,6 +1,5 @@
 ---
 agent: task
-access: read
 materials: [context, prior, schedule, decisions, due_waiting, planned, activity, proposals, digest, spot_check]
 result_fields:
   - period
@@ -31,7 +30,7 @@ default_instruction: |-
 - activity 是业务日期（on）落在本期的进展与本期完成的事项，按项目分组；date_source 为 at 的进展没有业务日期，是按记录时刻算进本期的，写时注明"按记录时间"。更早日子的历史进展不在其中，不要当成本期发生的事。
 - proposals 不是全部建议：pending_total 是未处置的总数，new_in_window 是上一份以来新增的条数，new_by_source 是新增按来源的分布；proposals 是排在最前的至多 20 条（先高优先级与已过期或今明到期，再今天不处理有后果的，再本期新增的，再更早的把握低的；why 写原因），also_needs_you 是其余必须本人看的（多为更早的把握低建议），只有标题与链接，合计一句并给条数与链接即可，不逐条展开。not_listed 大于 0 时写一句"还有 N 条没列出，在建议页查看"，用 more_web_url 做链接。
 - digest 是只需知会的来源事件，不是待办，不要建事项。条目的 occurred_at 是来源事件自己的发生时刻（已按 context.timezone）；要写"何时"就用它，没有 occurred_at 的写"来源未给时间"，不要用简报生成或收到的时刻代替。
-- spot_check 有条目时只写一句：有几条被忽略的来源待抽检，链接用 context.spot_check_url；结论只能本人在 Web 点，不要代为判断。
+- spot_check 有条目时只写一句：有几条被忽略的来源待抽检，链接用 context.spot_check_url。
 - 正文不出现任何 id 与资料字段名；要指向某条时，用条目的 web_url 或来源 link 做 Markdown 链接，只用资料里给出的地址。
 - 要据内容下结论时（这件事对本人意味着什么、要不要动手），先读条目 raw[].file 指向的原文，不只凭标题和摘要；原文只有摘录或被裁剪的按摘录判断并写明"只读到摘录"，没有原文文件的写明"没读到原文"。读了仍判断不了的写明缺什么信息，不要用"请去看看这封邮件"代替判断。
 - 不建事项、不改其他事项、不替本人决定。

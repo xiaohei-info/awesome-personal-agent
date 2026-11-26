@@ -175,7 +175,6 @@ exec %q "$@"
 	f.mode("summary-only", "")
 	f.declare(harness, wrapper, "{prompt}", true)
 	f.declare(harnessNoResume, wrapper, "{prompt}", false)
-	f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"read","by_harness":{}}}`, 200)
 }
 
 func (f *fx) declare(name, wrapper, arg string, resume bool) {

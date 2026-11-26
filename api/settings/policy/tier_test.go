@@ -10,9 +10,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 策略段按档判（§14.3）：Agent 档位放开到 3a 才能改 3a 段，没放开是 23；3b 段对任何 Agent 都是硬线 20，不读档位。
-// 档位本身只有 Web 本人能设。
-func TestSettingsSectionsFollowAgentTier(t *testing.T) {
+// 策略段按组判（§14.3）：Agent 的权限卡开放"改日常规则与提醒"才能改这一组的段，没开是 23；
+// 只有本人的段（权限卡、渠道回答人）对任何 Agent 都是 20，不读权限卡。权限卡本身只有 Web 本人能设。
+func TestSettingsSectionsFollowPermissionCard(t *testing.T) {
 	e := setup(t)
 	var secret string
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
@@ -25,20 +25,24 @@ func TestSettingsSectionsFollowAgentTier(t *testing.T) {
 	agent := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
 
 	persona := `{"persona":"terse"}`
+	rules := `{"groups":{"view":{},"organize":{},"source_events":{},"rules":{}},"tool":"read"}`
 	if rec := e.do("PUT", "/v1/settings/policy", persona, agent); rec.Code != http.StatusForbidden || errCode(t, rec) != domain.CodeTierClosed {
-		t.Fatalf("3a while organize only: want 23 tier_closed, got %d %s", rec.Code, rec.Body)
+		t.Fatalf("rules while closed: want 23 tier_closed, got %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("PUT", "/v1/settings/agents/agent_a/tier", `{"tier":"rules"}`, agent); errCode(t, rec) != domain.CodeWebOnly {
-		t.Fatalf("an Agent must not set its own tier: %d %s", rec.Code, rec.Body)
+	if rec := e.do("PUT", "/v1/settings/agents/agent_a/card", rules, agent); errCode(t, rec) != domain.CodeWebOnly {
+		t.Fatalf("an Agent must not set its own card: %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("PUT", "/v1/settings/agents/agent_a/tier", `{"tier":"rules"}`, e.web); rec.Code != http.StatusOK {
-		t.Fatalf("owner sets tier: %d %s", rec.Code, rec.Body)
+	if rec := e.do("PUT", "/v1/settings/agents/agent_a/card", rules, e.web); rec.Code != http.StatusOK {
+		t.Fatalf("owner sets the card: %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do("PUT", "/v1/settings/policy", persona, agent); rec.Code != http.StatusOK {
-		t.Fatalf("3a once opened: %d %s", rec.Code, rec.Body)
+		t.Fatalf("rules once opened: %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("PUT", "/v1/settings/access-limits", `{"permission_cap":{"default":"full","by_harness":{}}}`, agent); errCode(t, rec) != domain.CodeWebOnly {
-		t.Fatalf("3b stays a hard line even at the top tier: %d %s", rec.Code, rec.Body)
+	if rec := e.do("PUT", "/v1/settings/access-limits", `{"agent_cards":{}}`, agent); errCode(t, rec) != domain.CodeWebOnly {
+		t.Fatalf("the cards stay owner-only even with every group open: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("PUT", "/v1/settings/agents/agent_a/card", `{"groups":{"purge":{}}}`, e.web); rec.Code != http.StatusBadRequest {
+		t.Fatalf("purge without an expiry is refused: %d %s", rec.Code, rec.Body)
 	}
 	if err := e.st.View(bg, func(tx *store.Tx) error {
 		_, p, err := kpolicy.Stored(tx)

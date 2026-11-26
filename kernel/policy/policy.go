@@ -82,32 +82,6 @@ const (
 	WriteProposed = "proposed"
 )
 
-// Agent 的档位（§14.3）：只整理 / 也替我拍板 / 连日常规矩也替我改。缺省只整理。
-const (
-	AllowOrganize = "organize"
-	AllowDecide   = "decide"
-	AllowRules    = "rules"
-)
-
-// AgentAllowance 是一个 Agent 的档位；Projects 非空时只限定二档：对象的项目须在名单内。
-type AgentAllowance struct {
-	Tier     string   `json:"tier"`
-	Projects []string `json:"projects,omitempty"`
-}
-
-// AgentTier 是各 Agent 的档位，键是 Agent 实例 id。只在 Web 改（3b）。
-type AgentTier struct {
-	ByAgent map[string]AgentAllowance `json:"by_agent"`
-}
-
-// Allowance 返回 agent 的档位；没有归属的调用者与没设过的 Agent 都是只整理。
-func (p Policy) Allowance(agent string) AgentAllowance {
-	if a, ok := p.AgentTier.ByAgent[agent]; ok && agent != "" {
-		return a
-	}
-	return AgentAllowance{Tier: AllowOrganize}
-}
-
 // Quiet 是每日静默时段，Start、End 为 "HH:MM"（跨午夜时 Start > End），Zone 为 IANA 时区，空取 UTC。
 type Quiet struct {
 	Start string `json:"start"`
@@ -329,13 +303,6 @@ func ParseClock(s string) (int, error) {
 	return t.Hour()*60 + t.Minute(), nil
 }
 
-// PermissionCap 是运行权限上限：按 harness 设置，未设置的用 Default。
-type PermissionCap struct {
-	ByAgent   map[string]string `json:"by_agent,omitempty"`
-	Default   string            `json:"default"`
-	ByHarness map[string]string `json:"by_harness"`
-}
-
 // MainSessionLaunch 是以 Agent 本人身份做事时怎么拉起（§13.6）：按 Agent（harness）与按规则（规则键）各一份，
 // 值是 headless（单独开一个后台会话）或 wake（在和本人的对话里接着做）；没有的键表示没选，按下一级取。只在 Web 改。
 // 旧版本策略文档没有这个段，读作两份空表。
@@ -476,10 +443,13 @@ type Judgment struct {
 
 // Policy 是一个版本的完整配置。两份白名单相互独立：键是来源或渠道，值是发送者或回答人。
 type Policy struct {
-	// 旧版本文档里的 web_only、material_write、screening_timeout_ms 段已随旧权限模型取消，解码时忽略（§14.3）。
-	Disturb          Disturb          `json:"disturb"`
-	PermissionCap    PermissionCap    `json:"permission_cap"`
-	AgentTier        AgentTier        `json:"agent_tier"`
+	// 旧版本文档里的 web_only、material_write、screening_timeout_ms 段已随旧权限模型取消，解码时忽略（§14.3）；
+	// agent_tier 与 permission_cap 两段随权限卡取消，只在切换时按原文换算（§16.5）。
+	Disturb Disturb `json:"disturb"`
+	// AgentCards 是各 Agent 的权限卡（§14.5），键是 Agent 实例 id 或兼容卡 legacy:<程序>。只有本人能改。
+	AgentCards map[string]Card `json:"agent_cards"`
+	// Limits 是同时运行数与连锁层数（§14.9）；旧文档没有此键，读作全部取运行配置的初值。
+	Limits           Limits           `json:"limits"`
 	JudgeEndpoint    *JudgeEndpoint   `json:"judge_endpoint"`
 	GenerateEndpoint GenerateEndpoint `json:"generate_endpoint"`
 	Persona          string           `json:"persona"` // 只影响表达方式，不进入任何权限判定
@@ -580,7 +550,7 @@ func uriComponent(s string) string {
 	return b.String()
 }
 
-// Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。
+// Default 是版本 0 的配置：默认类别、没有权限卡（Agent 取默认卡）、人格与白名单为空。
 func Default() Policy {
 	return Policy{
 		Disturb: Disturb{Routes: map[string]string{
@@ -588,12 +558,11 @@ func Default() Policy {
 			string(domain.DeliveryReminder): "inject", string(domain.DeliveryHealth): "web",
 			string(domain.DeliveryWake): "web",
 		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true, DailyCap: DefaultDailyCap, Mutes: []Mute{}}, // 合并窗口默认 30 分钟（§7.4）
-		PermissionCap:     PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
-		AgentTier:         AgentTier{ByAgent: map[string]AgentAllowance{}},
-		MainSessionLaunch: MainSessionLaunch{ByHarness: map[string]string{}, ByRule: map[string]string{}},
-		ForwardAllowlist:  map[string][]string{},
-		ChannelAnswerers:  map[string][]string{},
-		Channels:          map[string]Channel{},
+		AgentCards:              map[string]Card{},
+		MainSessionLaunch:       MainSessionLaunch{ByHarness: map[string]string{}, ByRule: map[string]string{}},
+		ForwardAllowlist:        map[string][]string{},
+		ChannelAnswerers:        map[string][]string{},
+		Channels:                map[string]Channel{},
 		NoteVaults:              []NoteVault{},
 		Judgment:                Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
 		BackgroundRunTimeoutSec: DefaultBackgroundRunTimeoutSec,
@@ -782,34 +751,8 @@ func normalize(p Policy) (Policy, error) {
 		}
 	}
 
-	if p.AgentTier.ByAgent == nil {
-		p.AgentTier.ByAgent = map[string]AgentAllowance{}
-	}
-	for a, v := range p.AgentTier.ByAgent {
-		if a == "" || !oneOf(v.Tier, AllowOrganize, AllowDecide, AllowRules) {
-			return p, invalid("agent_tier agent %q tier %q", a, v.Tier)
-		}
-		if v.Projects = dedupSorted(v.Projects); len(v.Projects) == 0 {
-			v.Projects = nil
-		}
-		p.AgentTier.ByAgent[a] = v
-	}
-
-	if !oneOf(p.PermissionCap.Default, PermRead, PermEdit, PermFull) {
-		return p, invalid("permission_cap default %q", p.PermissionCap.Default)
-	}
-	for h, v := range p.PermissionCap.ByAgent {
-		if h == "" || !oneOf(v, PermRead, PermEdit, PermFull) {
-			return p, invalid("permission_cap agent %q level %q", h, v)
-		}
-	}
-	for h, v := range p.PermissionCap.ByHarness {
-		if h == "" || !oneOf(v, PermRead, PermEdit, PermFull) {
-			return p, invalid("permission_cap harness %q level %q", h, v)
-		}
-	}
-	if p.PermissionCap.ByHarness == nil {
-		p.PermissionCap.ByHarness = map[string]string{}
+	if err := normalizeCards(&p); err != nil {
+		return p, err
 	}
 	for field, m := range map[string]*map[string]string{"by_harness": &p.MainSessionLaunch.ByHarness, "by_rule": &p.MainSessionLaunch.ByRule, "by_agent": &p.MainSessionLaunch.ByAgent} {
 		if *m == nil {
@@ -1033,8 +976,9 @@ func Switched(tx *store.Tx) (bool, error) {
 	return len(es) > 0, err
 }
 
-// legacyKeys 是旧权限模型留在策略文档里的段：高风险类别、初筛超时、按材料类别直接写（2026-11-20 取消，§14.3）。
-var legacyKeys = []string{"material_write", "screening_timeout_ms", "web_only"}
+// legacyKeys 是旧权限模型留在策略文档里的段：高风险类别、初筛超时、按材料类别直接写（2026-11-20 取消）；
+// 档位与工具上限（2026-11-26 由权限卡取代，§14.3、§16.5）。
+var legacyKeys = []string{"agent_tier", "material_write", "permission_cap", "screening_timeout_ms", "web_only"}
 
 // LegacyKeys 返回最新一版存储文档里还带着的旧权限模型段；空表示已切换到新文档。
 func LegacyKeys(tx *store.Tx) ([]string, error) {
@@ -1076,9 +1020,9 @@ func StoredRaw(tx *store.Tx, keys ...string) (map[string]json.RawMessage, error)
 	return out, nil
 }
 
-// RulesSections 是策略里属于 3a 改日常的顶层段（§14.3）：Agent 档位放开到 3a 可改，规矩改动清单列出并可撤回。
-// 其余段都是 3b。设置路由的段表与它一致（api/settings/policy）。
-var RulesSections = []string{"background_run_timeout_sec", "channels", "disturb", "forward_allowlist", "judgment", "models_paused", "persona", "persona_lang"}
+// RulesSections 是策略里属于"改日常规则与提醒"的顶层段（§14.3）：权限卡开放这一组的 Agent 可改，规矩改动清单列出并可撤回。
+// 其余段属别的组或只有本人。设置路由的段表与它一致（api/settings/policy）。
+var RulesSections = []string{"background_run_timeout_sec", "channels", "disturb", "forward_allowlist", "judgment", "limits", "models_paused", "persona", "persona_lang"}
 
 // At 读第 v 版策略（存储原文，不按模型暂停改写）；没有这一版返回 not_found。
 func At(tx *store.Tx, v int) (Policy, error) {

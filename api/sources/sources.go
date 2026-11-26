@@ -167,10 +167,10 @@ type api struct {
 func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer, dc Declared) (core.RouteGroup, error) {
 	a := &api{st: st, x: x, rp: rp, pr: pr, au: au, dc: dc}
 	for _, s := range []command.Spec{
-		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Tier: authz.TierPower, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
-		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Tier: authz.TierPower, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
-		{Name: CmdReplay, Action: authz.ActionManageSource, Tier: authz.TierOrganize, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
-		{Name: CmdFetchAttachment, Action: authz.ActionManageSource, Tier: authz.TierOrganize, Object: idObject, KeepVersion: true,
+		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Group: authz.GroupConnect, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
+		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Group: authz.GroupConnect, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
+		{Name: CmdReplay, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
+		{Name: CmdFetchAttachment, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents, Object: idObject, KeepVersion: true,
 			Validate: a.validateFetch, Apply: a.applyFetch},
 	} {
 		if err := x.Register(s); err != nil {
@@ -354,10 +354,13 @@ func (a *api) get(w http.ResponseWriter, r *http.Request, p *core.Principal) err
 	return core.WriteJSON(w, http.StatusOK, v)
 }
 
-// selfSender：只对声明了 identity 模式的来源；不落账、不缓存。只 Web：它会在主机上运行来源程序。
+// selfSender：只对声明了 identity 模式的来源；不落账、不缓存。它会在主机上运行来源程序，是填信任发件人的一步，
+// 属"改日常规则与提醒"（§14.3）。
 func (a *api) selfSender(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if !p.Web {
-		return domain.NewError(domain.CodeWebOnly, "only the owner in the Web UI can look up their own identity", "open the source in the Web UI")
+		if _, err := core.Authorize(a.st, r, p, authz.GroupRules, "/sources/"+r.PathValue("id"), "api:"+r.URL.Path); err != nil {
+			return err
+		}
 	}
 	s, err := a.source(r, r.PathValue("id"))
 	if err != nil {
@@ -379,7 +382,7 @@ func (a *api) selfSender(w http.ResponseWriter, r *http.Request, p *core.Princip
 // 非空返回 sender_unverifiable：名单在那里不会生效，不让人以为填了有用。
 func (a *api) trustedSenders(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	// 信任的发件人属 3a 改日常（§14.3）：Web 本人，或档位放开到 3a 的 Agent。
-	basis, err := apipolicy.Authorize(a.st, r, p, authz.TierRules, "/sources/"+r.PathValue("id"), "settings:/settings/sources/{id}/trusted-senders")
+	basis, err := apipolicy.Authorize(a.st, r, p, authz.GroupRules, "/sources/"+r.PathValue("id"), "settings:/settings/sources/{id}/trusted-senders")
 	if err != nil {
 		return err
 	}
@@ -500,7 +503,7 @@ func (a *api) rejectOutbound(r *http.Request, p *core.Principal, id string, in m
 			return err
 		}
 	}
-	return domain.NewError(domain.CodeWebOnly, "outbound is not part of the source registration or update", "set it in the Web UI (PUT /v1/settings/sources/{id}/outbound)")
+	return domain.NewError(domain.CodeInvalidRequest, "outbound is not part of the source registration or update", "set it with PUT /v1/settings/sources/{id}/outbound")
 }
 
 func writeValue(w http.ResponseWriter, status int, res command.Result) error {
@@ -765,10 +768,6 @@ func scoredPage(tx *store.Tx, source string, ds []domain.Disposition, after int6
 }
 
 func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	// 这里是未过滤的外部内容，运行凭据只能经转发白名单读挂靠消息（§9.4、§14.3）。
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot list source events", "read forwarded messages from the context instead")
-	}
 	q := r.URL.Query()
 	var ds []domain.Disposition
 	if raw := q.Get("disposition"); raw != "" {
@@ -799,7 +798,7 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		out  = map[string]any{}
 	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
-		if !(p.Web && inbound.IsCaptureSource(id)) { // 对话内容只给本人；其他凭据和登记外的来源一样是 404
+		if !inbound.IsCaptureSource(id) { // 对话捕获不在登记表里；外部钥匙读它由下面的档位拒绝（§14.14）
 			if _, err := registry.Get(tx, id); err != nil {
 				return err
 			}
@@ -847,9 +846,6 @@ func (a *api) outboundPreview(w http.ResponseWriter, r *http.Request, p *core.Pr
 			return err
 		}
 		if inbound.IsCaptureSource(ev.SourceID) {
-			if !p.Web { // 对话内容只给本人；其他凭据看来就是不存在
-				return domain.NewError(domain.CodeNotFound, "source event "+ev.ID+" not found", "list the source's events")
-			}
 			return nil
 		}
 		_, err = registry.Get(tx, ev.SourceID)
@@ -911,11 +907,9 @@ func (a *api) ignoreOne(w http.ResponseWriter, r *http.Request, p *core.Principa
 func (a *api) writeEvent(w http.ResponseWriter, r *http.Request, p *core.Principal, ev domain.SourceEvent) error {
 	var v eventView
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
-		scope := scopeFull
-		if !inbound.IsCaptureSource(ev.SourceID) {
-			if scope = readscope.New(tx, p.Caller).Tier(ev.SourceID); scope == readscope.None {
-				scope = scopeMeta // 写命令已经成功，响应只带元信息
-			}
+		scope := readscope.New(tx, p.Caller).Tier(ev.SourceID)
+		if scope == readscope.None {
+			scope = scopeMeta // 写命令已经成功，响应只带元信息
 		}
 		var err error
 		v, err = viewEvent(tx, ev, scope)
@@ -998,11 +992,8 @@ func (a *api) backlogRejudge(w http.ResponseWriter, r *http.Request, p *core.Pri
 	return core.WriteJSON(w, http.StatusOK, res)
 }
 
-// restorable 预览可放回积压的旧判断忽略事件：from、to 必填（RFC 3339），source 可选；只读。命中的是未过滤的外部事件，运行凭据不能预览。
+// restorable 预览可放回积压的旧判断忽略事件：from、to 必填（RFC 3339），source 可选；只读。
 func (a *api) restorable(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot preview restorable source events", "ask the owner to preview from the source page or the CLI")
-	}
 	q := r.URL.Query()
 	var t [2]time.Time
 	for i, k := range []string{"from", "to"} {

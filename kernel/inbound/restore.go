@@ -172,7 +172,7 @@ func PreviewRestore(tx *store.Tx, from, to time.Time, source string) (RestorePre
 }
 
 func restoreSpec() command.Spec {
-	return command.Spec{Name: CmdBacklogRestore, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+	return command.Spec{Name: CmdBacklogRestore, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			_, err := parseRestore(in)
 			return authz.Object{}, err

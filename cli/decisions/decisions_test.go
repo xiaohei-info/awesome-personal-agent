@@ -143,7 +143,7 @@ func (w *world) token(kind auth.Kind, executor string) string {
 }
 
 // agent 签一把归属 Agent id 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier。
-func (w *world) agent(id, tier string) string {
+func (w *world) agent(id string, tier policy.Card) string {
 	w.t.Helper()
 	var secret string
 	if err := w.st.Update(bg, func(tx *store.Tx) error {
@@ -153,7 +153,7 @@ func (w *world) agent(id, tier string) string {
 		}
 		secret = s
 		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent[id] = policy.AgentAllowance{Tier: tier}
+			p.AgentCards[id] = tier
 			return nil
 		})
 		return err
@@ -200,7 +200,7 @@ func (w *world) asked(extra, wrk string) string {
 // 放开拍板的 Agent apa decide 自答生效并记 agent，只认第一次（6）。
 func TestAskDecideAndFirstAnswerWins(t *testing.T) {
 	w := newWorld(t)
-	wrk, closed, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, ""), w.agent("agent_a", policy.AllowDecide)
+	wrk, closed, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, ""), w.agent("agent_a", policy.DefaultCard().With(policy.GroupDecide))
 	id := w.asked("", wrk)
 	it := w.get(id)
 	if it.Phase != domain.PhaseNeedsInput || it.Ask.Question != "ship it?" || len(it.Ask.Options) != 2 ||
@@ -234,7 +234,7 @@ func TestAskDecideAndFirstAnswerWins(t *testing.T) {
 // ACT-DEC-04、05：观察者回答在钥匙范围外（4）；worker 回答自己事项上的问题在范围内，但档位未放开（23）；自由文本答案记录原文。
 func TestDecidePermissionAndFreeText(t *testing.T) {
 	w := newWorld(t)
-	wrk, dlg, obs := w.token(auth.Worker, "wrk1"), w.agent("agent_a", policy.AllowDecide), w.token(auth.Observer, "")
+	wrk, dlg, obs := w.token(auth.Worker, "wrk1"), w.agent("agent_a", policy.DefaultCard().With(policy.GroupDecide)), w.token(auth.Observer, "")
 	id := w.asked("", wrk)
 	if r := w.apa(obs, "decide", id, "--option", "A"); r.code != 4 {
 		t.Fatalf("observer want 4: %+v", r)
@@ -261,7 +261,7 @@ func TestDecidePermissionAndFreeText(t *testing.T) {
 // 放开拍板的 Agent 直接生效；已处理再处理为 6。
 func TestAcceptDismissProposal(t *testing.T) {
 	w := newWorld(t)
-	wrk, closed, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, ""), w.agent("agent_a", policy.AllowDecide)
+	wrk, closed, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, ""), w.agent("agent_a", policy.DefaultCard().With(policy.GroupDecide))
 	a := w.item(`{"kind":"task","title":"a"}`)
 	d := w.item(`{"kind":"task","title":"d"}`)
 	if r := w.apa(closed, "accept", a); r.code != 23 {

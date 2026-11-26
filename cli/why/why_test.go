@@ -286,3 +286,33 @@ func agentAudience(k auth.Kind) string {
 	}
 	return ""
 }
+
+// apa why denied --pretty：每次被拦四行说明（没做成什么、哪条限制、在哪看、谁能改），数据原样来自 /agents/me/limits。
+func TestWhyDeniedPrintsFourLines(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agents/me/limits" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"denied_week":2,"denied":[` +
+			`{"at":"2026-11-26T10:00:00Z","object":"itm_1","action":"change_settings","group":"purge","exit":23,"settings_url":"/settings/agents/agent_a#permissions"},` +
+			`{"at":"2026-11-26T09:00:00Z","object":"settings:credentials","action":"change_settings","group":"owner","exit":20,"owner_only":true,"web_url":"/settings/agents"}]}`))
+	})
+	var out, errb bytes.Buffer
+	vars := map[string]string{"APA_URL": "http://apa.test", "APA_TOKEN": "t", "APA_HOME": t.TempDir()}
+	code := client.Main([]string{"why", "denied", "--pretty"}, client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: t.TempDir(),
+		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: &http.Client{Transport: handlerTransport{h}}})
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"denied in the last 7 days: 2", "not done: change_settings on itm_1", "limit: permission card group purge is not allowed",
+		"see: /settings/agents/agent_a#permissions", "who can change it: the owner, on this Agent's permission card", "limit: only the owner can do this"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "\n  "); n != 8 {
+		t.Fatalf("want four lines per denial, got %d:\n%s", n, got)
+	}
+}

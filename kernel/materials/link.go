@@ -163,7 +163,7 @@ func link(src PackSource) command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "material.link", Action: authz.ActionReviseMaterial, Tier: authz.TierOrganize,
+		Name: "material.link", Action: authz.ActionReviseMaterial, Group: authz.GroupOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -221,7 +221,7 @@ func update(src PackSource) command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "material.update", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/materials",
+		Name: "material.update", Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/materials",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

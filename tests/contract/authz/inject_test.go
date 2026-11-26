@@ -46,9 +46,9 @@ func TestErrorsAndGuideCarryNoLedgerContent(t *testing.T) {
 		{"exit 4", domain.ExitPermissionDenied, func() *httptest.ResponseRecorder {
 			return (e.api("WRK", "PATCH", "/v1/items/"+parent, patch("x")))
 		}},
-		// 退出码 20：delegate 改项目允许的执行者（设置类）。
+		// 退出码 20：delegate 签发钥匙（只有本人）。
 		{"exit 20", domain.ExitWebOnly, func() *httptest.ResponseRecorder {
-			return (e.api("DEL", "PUT", "/v1/settings/projects/"+prj+"/allowed-executors", `{"executors":["evil"]}`))
+			return (e.api("DEL", "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`))
 		}},
 		// 退出码 23：只整理的 delegate 直接建进行中的事项（立项是二档）。
 		{"exit 23", domain.ExitTierClosed, func() *httptest.ResponseRecorder {

@@ -150,7 +150,7 @@ func TestFlowWakeLease(t *testing.T) {
 		}
 	})
 
-	f.step("ACT-WAK-05 运行身份透传，运行凭据不能代答", func(t *testing.T) {
+	f.step("ACT-WAK-05 运行身份透传，运行凭据的代答随所属 Agent 的权限卡", func(t *testing.T) {
 		out, _ := f.asRun(run1, cred1, 0, nil, "context", "--scope", "item")
 		contains(t, "运行身份下的 context（默认读目标事项）", out, i1)
 		out, _ = f.asRun(run1, cred1, 0, nil, "context", "--scope", "item", "--item", child)
@@ -159,10 +159,10 @@ func TestFlowWakeLease(t *testing.T) {
 		if all := f.webOK("GET", "/items/"+child+"/messages", "", 200); !strings.Contains(all, mBob) {
 			t.Errorf("白名单外的消息本人在 Web 仍应可见: %s", all)
 		}
-		f.asRun(run1, cred1, 4, map[string]string{"APA_SESSION_KIND": "direct"}, "decide", d1, "--option", "A")
+		f.asRun(run1, cred1, 23, map[string]string{"APA_SESSION_KIND": "direct"}, "decide", d1, "--option", "A") // 所属 Agent 没开"替我拍板"
 		rej := f.waitEvent("按运行身份拒绝的代答", func(e event) bool { return e.Type == "command.rejected" && e.Object == d1 && e.Actor.Run == run1 })
-		if rej.Payload["exit"] != float64(4) {
-			t.Errorf("拒绝记录应带退出码 4: %s", rej.Raw)
+		if rej.Payload["exit"] != float64(23) {
+			t.Errorf("拒绝记录应带退出码 23: %s", rej.Raw)
 		}
 		if ph := f.phase(d1); ph != "needs_input" {
 			t.Errorf("决策不应被回答: %s", ph)

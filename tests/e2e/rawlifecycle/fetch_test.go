@@ -114,16 +114,11 @@ func TestFlowAttachmentFetch(t *testing.T) {
 		k.setFetch("src_acc_raw", "ok")
 	})
 
-	// 2026-11-20 改写（权限模型第二版）：取回附件是一档，delegate 不要本人原话；自报的原话与私聊头被忽略；运行凭据与 observer 在范围外。
-	k.step("ACT-FET-04 delegate 一档可取回，运行凭据与 observer 不可", func(t *testing.T) {
+	// 2026-11-26 改写（权限卡）：取回附件属"处理来源事件"，delegate 与运行凭据（与所属 Agent 同权）可取回；自报的原话与私聊头被忽略；observer 在范围外。
+	k.step("ACT-FET-04 delegate 可取回，observer 不可", func(t *testing.T) {
 		path := "/v1/source-events/" + ev.ID + "/attachments/1/fetch"
 		direct := map[string]string{"X-APA-Evidence": "本人：把第二个附件取回来", "X-APA-Session": "fet-session", "X-APA-Session-Kind": "direct"}
-		_, _, env := k.StubRun("hang")
-		runTok := env["APA_TOKEN"]
-		if runTok == "" {
-			t.Fatalf("取不到运行凭据: %v", env)
-		}
-		for name, tok := range map[string]string{"RUNTOK": runTok, "OBS": k.OBS} {
+		for name, tok := range map[string]string{"OBS": k.OBS} {
 			if r := k.APIRawHeaders("POST", path, "", tok, direct); r.Code != 403 {
 				t.Errorf("%s 应为 403: %d %s", name, r.Code, r.Body)
 			}

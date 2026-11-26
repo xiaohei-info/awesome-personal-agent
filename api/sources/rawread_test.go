@@ -235,32 +235,40 @@ func TestExternalKeyReadIsTrimmedToItsSourceScopes(t *testing.T) {
 	}
 }
 
-// ACT-RSC-05、07：运行凭据、ext 与 webhook 密钥读不到来源原文；对话捕获的内部来源只对 Web 登录开放。
-func TestRunCredentialExtAndCaptureCannotReadContent(t *testing.T) {
+// ACT-RSC-05、07：ext 与 webhook 密钥读不到来源原文；运行凭据与内部钥匙读对话捕获与其他来源一样全文，
+// 外部受众的钥匙读不到对话捕获（§14.2、§14.14）。
+func TestRunCredentialReadsContentExtAndExternalCannot(t *testing.T) {
 	e := setup(t)
 	e.registerRaw("src_raw")
 	e.setExternal("src_raw", "full")
 	id := e.seedRaw("src_raw", "k", rawFull)
 	path := "/v1/source-events/" + id
-	for name, tok := range map[string]string{"run": e.runCredential(), "ext": e.token(auth.Ext), "webhook": e.token(auth.Webhook)} {
+	for name, tok := range map[string]string{"ext": e.token(auth.Ext), "webhook": e.token(auth.Webhook)} {
 		if r := e.do(tok, "GET", path, ""); r.Code != 403 {
-			t.Errorf("%s credential: %d %s", name, r.Code, r.Body)
+			t.Errorf("%s credential: %d", name, r.Code)
 		}
 	}
+	if got := read(t, e.do(e.runCredential(), "GET", path, "")); got.Scope != "full" || got.Body == nil {
+		t.Errorf("run credential reads source content: %+v", got.Scope)
+	}
 	capID := e.seedRaw("capture:prj_1", "c1", rawEvent{body: "对话增量"})
-	if r := e.do(e.token(auth.Observer), "GET", "/v1/source-events/"+capID, ""); r.Code != 403 {
-		t.Errorf("observer reading conversation capture: %d %s", r.Code, r.Body)
+	for name, got := range map[string]readResp{
+		"run":      read(t, e.do(e.runCredential(), "GET", "/v1/source-events/"+capID, "")),
+		"observer": read(t, e.do(e.token(auth.Observer), "GET", "/v1/source-events/"+capID, "")),
+		"delegate": read(t, e.do(e.token(auth.Delegate), "GET", "/v1/source-events/"+capID, "")),
+		"web":      read(t, e.web("GET", "/v1/source-events/"+capID, "")),
+	} {
+		if got.Body == nil || *got.Body != "对话增量" || got.Scope != "full" {
+			t.Errorf("%s reading conversation capture: %+v", name, got.Scope)
+		}
 	}
-	if r := e.do(e.token(auth.Delegate), "GET", "/v1/source-events/"+capID, ""); r.Code != 403 {
-		t.Errorf("delegate reading conversation capture: %d", r.Code)
-	}
-	if got := read(t, e.web("GET", "/v1/source-events/"+capID, "")); got.Body == nil || *got.Body != "对话增量" || got.Scope != "full" {
-		t.Errorf("web reading conversation capture: %+v", got)
+	if r := e.do(e.scoped(auth.Observer, map[string]string{"src_raw": "full"}), "GET", "/v1/source-events/"+capID, ""); r.Code != 403 {
+		t.Errorf("external key reading conversation capture: %d", r.Code)
 	}
 }
 
 // ACT-RSC-06：挂在事项上的消息对外部钥匙同样按它来源的档位读（挂上事项不再放行全文）；内部钥匙全文；
-// 运行凭据只经转发白名单读它（发送者不在名单时 403）。GET /items/{id}/messages 同口径。
+// 运行凭据与内部钥匙一样全文。GET /items/{id}/messages 同口径。
 func TestAttachedMessageFollowsTheKeysSourceScope(t *testing.T) {
 	e := setup(t)
 	e.registerRaw("src_mail")
@@ -287,8 +295,8 @@ func TestAttachedMessageFollowsTheKeysSourceScope(t *testing.T) {
 	if got := read(t, e.do(internal, "GET", "/v1/source-events/"+id, "")); got.Scope != "full" || got.Body == nil || *got.Body != bigBody || got.Trimmed != nil {
 		t.Fatalf("internal key reads the attached message in full: %+v", got.Scope)
 	}
-	if r := e.do(e.runCredential(), "GET", "/v1/source-events/"+id, ""); r.Code != 403 {
-		t.Errorf("run credential reads attached messages only through the forward allowlist: %d %s", r.Code, r.Body)
+	if got := read(t, e.do(e.runCredential(), "GET", "/v1/source-events/"+id, "")); got.Scope != "full" {
+		t.Errorf("run credential reads the attached message in full: %+v", got.Scope)
 	}
 	if r := e.do(e.token(auth.Ext), "GET", "/v1/source-events/"+id, ""); r.Code != 403 {
 		t.Errorf("ext: %d", r.Code)

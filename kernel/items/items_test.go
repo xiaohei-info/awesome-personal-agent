@@ -34,10 +34,10 @@ func agent(p string, lvl authz.Level) command.Trusted {
 }
 
 // setTier 以本人身份设 agent 的档位（3b 设置，测试里直接写策略）。
-func (e *env) setTier(t *testing.T, agent string, a policy.AgentAllowance) {
+func (e *env) setTier(t *testing.T, agent string, a policy.Card) {
 	t.Helper()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.AgentTier.ByAgent[agent] = a; return nil })
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.AgentCards[agent] = a; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -418,11 +418,11 @@ func TestDelegateWritesFollowTiers(t *testing.T) {
 		t.Fatal("refused writes must not take effect")
 	}
 	// 只在 p2 放开：p1 上仍是 23。
-	e.setTier(t, "agent_dlg", policy.AgentAllowance{Tier: policy.AllowDecide, Projects: []string{p2}})
+	e.setTier(t, "agent_dlg", withProjects(policy.DefaultCard().With(policy.GroupDecide), p2))
 	if _, err := e.do(delegate, second[1].cmd, second[1].in); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("outside the allowed projects: %v", err)
 	}
-	e.setTier(t, "agent_dlg", policy.AgentAllowance{Tier: policy.AllowDecide, Projects: []string{p1}})
+	e.setTier(t, "agent_dlg", withProjects(policy.DefaultCard().With(policy.GroupDecide), p1))
 	for _, c := range second {
 		r, err := e.do(delegate, c.cmd, c.in)
 		if err != nil {
@@ -1256,4 +1256,29 @@ func TestItemCreateDefaultsToInboxAndBackfillMigratesActiveOnly(t *testing.T) {
 		t.Fatalf("new brief should stay unassigned, got %q", e.get(t, newBrief).Project)
 	}
 	e.verify(t)
+}
+
+// 旧档位"替我拍板"且没限项目的 Agent，换算后在任意项目都能接受建议；没绑 Agent 的宿主钥匙走 legacy:<宿主> 的兼容卡。
+func TestLegacyDecideWithoutProjectsAcceptsAnywhere(t *testing.T) {
+	e := setup(t)
+	card, err := policy.CardFromTier("decide", nil, policy.PermRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.setTier(t, "legacy:hermes", card)
+	key := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "cred_h", Via: domain.ViaCLI}, Level: authz.LevelDelegate, CredentialHarness: "hermes"}
+	for _, p := range []string{e.project(t, nil), e.project(t, nil)} {
+		prop := e.create(t, owner, map[string]any{"phase": "proposed", "project": p})
+		if _, err := e.do(key, "item.transition", map[string]any{"id": prop, "to": "open", "reason": "accept"}); err != nil {
+			t.Fatalf("accept in %s: %v", p, err)
+		}
+		if e.get(t, prop).Phase != domain.PhaseOpen {
+			t.Fatalf("proposal in %s not accepted", p)
+		}
+	}
+}
+
+func withProjects(c policy.Card, projects ...string) policy.Card {
+	c.DecideProjects = projects
+	return c
 }

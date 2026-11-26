@@ -47,7 +47,7 @@ func RegisterAttach(x *command.Executor) error {
 	if err := registerBulk(x); err != nil {
 		return err
 	}
-	return x.Register(command.Spec{Name: CmdAttach, Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, Page: "/proposals",
+	return x.Register(command.Spec{Name: CmdAttach, Action: authz.ActionAnswerDecision, Group: authz.GroupDecide, Page: "/proposals",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseAttach(in)
 			if err != nil {

@@ -1143,7 +1143,7 @@ func (k *kernel) usableAgent(t *testing.T) {
 		"command": []string{"true"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string][]string{"read": {}, "edit": {}}}})
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
 		_, err := policy.Update(tx, hostOwner.Actor, "t", func(p *policy.Policy) error {
-			p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx"
+			p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
 			return nil
 		})
 		return err
@@ -1289,7 +1289,7 @@ curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TO
 	s := webLogin(t, addr)
 	for _, c := range []struct{ method, path, body string }{
 		{"PUT", "/settings/policy", `{"default_harness":"acme"}`},
-		{"PUT", "/settings/access-limits", `{"permission_cap":{"default":"edit"}}`},
+		{"PUT", "/settings/agents/legacy:acme/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"edit"}`},
 		{"PATCH", "/rules/" + strings.ReplaceAll(labelledRule, "/", "%2F") + "/mode", `{"mode":"auto"}`},
 	} {
 		if code, b := s.do(c.method, c.path, c.body); code >= 300 {

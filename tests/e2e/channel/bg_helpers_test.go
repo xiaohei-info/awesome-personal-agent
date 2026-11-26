@@ -111,7 +111,6 @@ exec %q "$@"
 	must(f.t, os.WriteFile(wrapper, []byte(script), 0o755))
 	f.mode("summary-only", "")
 	f.declare(harness, wrapper, "{prompt}", true)
-	f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"read","by_harness":{}}}`, 200)
 }
 
 func (f *bg) declare(name, wrapper, arg string, resume bool) {

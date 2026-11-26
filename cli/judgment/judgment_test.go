@@ -178,14 +178,14 @@ func TestShowListsEveryLevelAndWhoDecided(t *testing.T) {
 	}
 }
 
-// ACT-JRC-05：运行凭据读目标事项的记录成功，读别的事项的记录退出码 5。
-func TestRunCredentialCannotShowUnrelatedRecord(t *testing.T) {
+// ACT-JRC-05：运行凭据只带身份，目标事项与别的事项的记录都能读（§14.2）。
+func TestRunCredentialShowsAnyRecord(t *testing.T) {
 	r := newRig(t)
 	if res := r.apa(r.runSecret, "judgment", "show", "jd_mid"); res.code != 0 || !strings.Contains(res.out, `"jd_mid"`) {
 		t.Fatalf("target item's record: %+v", res)
 	}
-	if res := r.apa(r.runSecret, "judgment", "show", "jd_low"); res.code != domain.ExitNotFound {
-		t.Fatalf("unrelated record must exit %d: %+v", domain.ExitNotFound, res)
+	if res := r.apa(r.runSecret, "judgment", "show", "jd_low"); res.code != 0 {
+		t.Fatalf("other record: %+v", res)
 	}
 }
 

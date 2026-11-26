@@ -156,7 +156,7 @@ type PromptMeta struct {
 	RelayTo             string         `yaml:"relay_to"` // 生成型：信息不足时接力的任务型模板
 	EventStats          string         `yaml:"event_stats"`
 	Timeout             string         `yaml:"timeout"`
-	Access              string         `yaml:"access"`
+	Access              string         `yaml:"access"` // 已取消（2026-11-26）：工具档位取权限卡；只为旧包能照常加载（严格解码）保留这个键，读时忽略
 	Cwd                 string         `yaml:"cwd"`
 	ResultFields        []string       `yaml:"result_fields"`   // 任务型：spec 里要写全的字段，顶层键或 a[].b（§8.4）
 	ResultMaterial      bool           `yaml:"result_material"` // 任务型：结果是一条材料修订

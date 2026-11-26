@@ -97,7 +97,7 @@ func newKernel(t *testing.T) *kernel {
 		}
 		k.tokens[decider] = s
 		_, err = policy.Update(tx, owner.Actor, "test tier", func(p *policy.Policy) error {
-			p.AgentTier.ByAgent["agent_d"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			p.AgentCards["agent_d"] = policy.DefaultCard().With(policy.GroupDecide)
 			return nil
 		})
 		return err
