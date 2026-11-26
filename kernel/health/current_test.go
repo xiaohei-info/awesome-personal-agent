@@ -186,3 +186,16 @@ func TestNoticeAlertsCarryCodeAndItem(t *testing.T) {
 		t.Fatalf("notice = %+v", a)
 	}
 }
+
+// 批处理拉不起的告警：之后有批处理入队（agent.queued）即清除。
+func TestBatchBlockedAlertClearsWhenBatchQueues(t *testing.T) {
+	e := setup(t)
+	e.event(domain.EvHealthAlert, "source_batch", "拉不起", map[string]any{"kind": "source_batch_blocked"})
+	if v := e.collect(nil); len(v.OtherAlerts) != 1 || v.Healthy() {
+		t.Fatalf("open: %+v", v.OtherAlerts)
+	}
+	e.event(domain.EvAgentQueued, "source_batch", "", map[string]any{})
+	if v := e.collect(nil); len(v.OtherAlerts) != 0 {
+		t.Fatalf("cleared: %+v", v.OtherAlerts)
+	}
+}

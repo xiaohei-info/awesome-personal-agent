@@ -12,6 +12,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -340,5 +341,46 @@ func TestBatchEnvIssueErrorBlocksLaunch(t *testing.T) {
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, "ev_notok"); return })
 	if ev.Queue != runner.QueueQueued || ev.Disposition != domain.DispositionPending {
 		t.Fatalf("event should be requeued after credential failure, got queue=%s disp=%s", ev.Queue, ev.Disposition)
+	}
+}
+
+// 处理 Agent 拉不起来时队列不再静默堆积：记一条健康告警，同一原因不刷屏，能拉起后再卡会再报。
+func TestBatchBlockedWritesOneHealthAlert(t *testing.T) {
+	e := setupUnifiedJudgeEnv(t, nil, nil, "", "")
+	q := &spyBatchQueue{}
+	e.svc.AttachBatch(BatchOptions{RunsDir: filepath.Join(e.dir, "runs"), APIURL: "http://127.0.0.1:19999", Queue: q})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "batch settings", func(p *policy.Policy) error {
+			p.SourcePipeline = policy.SourcePipeline{BatchSize: 1}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	alerts := func() (n int) {
+		_ = e.st.View(bg, func(tx *store.Tx) error {
+			es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert, Object: BatchTarget}, 0, 10)
+			n = len(es)
+			return err
+		})
+		return
+	}
+	enqueueEvent(t, e, "ev_blocked", runner.LevelNormal, "body", e.now)
+	for i := 0; i < 2; i++ {
+		if err := e.svc.TickQueue(bg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if q.dispatched != 0 || alerts() != 1 {
+		t.Fatalf("blocked: dispatched=%d alerts=%d, want 0 and exactly 1", q.dispatched, alerts())
+	}
+	registerBatchAgent(t, e, policy.SourcePipeline{BatchSize: 1})
+	e.svc.AttachBatch(BatchOptions{RunsDir: filepath.Join(e.dir, "runs"), APIURL: "http://127.0.0.1:19999", Queue: q})
+	if err := e.svc.TickQueue(bg); err != nil {
+		t.Fatal(err)
+	}
+	if q.dispatched != 1 || alerts() != 1 {
+		t.Fatalf("recovered: dispatched=%d alerts=%d", q.dispatched, alerts())
 	}
 }

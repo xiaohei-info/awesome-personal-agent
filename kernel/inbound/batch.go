@@ -192,11 +192,15 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 		return fmt.Errorf("inbound: batch prompt template %s/%s not loaded", DefaultPack, BatchTemplate)
 	}
 	access := selected.Snapshot.PermissionCap // 工具档位取所属 Agent 权限卡上的值（§14.5）
-	if why := selected.AccessReason(access); why != "" {
-		return nil
+	why := selected.Reason
+	if why == "" && selected.Record.Declaration.Headless == nil {
+		why = "处理 Agent 没有可用的无头运行声明"
 	}
-	if selected.Record.Declaration.Headless == nil {
-		return nil
+	if why == "" {
+		why = selected.AccessReason(access)
+	}
+	if why != "" {
+		return s.alertBatchBlocked(ctx, why, now)
 	}
 	hl := *selected.Record.Declaration.Headless
 	runID, err := newBatchRunID()
@@ -273,7 +277,25 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 		_ = os.RemoveAll(runDir)
 		return nil
 	}
+	s.batchBlocked = ""
 	return s.o.Batch.Queue.Dispatch(ctx)
+}
+
+// alertBatchBlocked 在队列该开批却拉不起处理 Agent 时记一条健康告警（事件否则静默堆积）；同一原因只记一次，
+// 成功入队后重置，下次再卡会再报。告警在批处理入队事件（agent.queued）之后由健康视图清除。调用方持有 s.batching。
+func (s *Service) alertBatchBlocked(ctx context.Context, why string, now time.Time) error {
+	if why == s.batchBlocked {
+		return nil
+	}
+	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: BatchTarget, Actor: system.Actor, At: now, Payload: json.RawMessage(`{"kind":"source_batch_blocked"}`),
+			Reason: "来源事件在排队，但处理 Agent 拉不起来：" + why})
+		return err
+	}); err != nil {
+		return err
+	}
+	s.batchBlocked = why
+	return nil
 }
 
 // BatchEnv 在外呼调用器拉起 source_batch 子进程前签发运行凭据并组装环境变量（§7.7、§13.6）。

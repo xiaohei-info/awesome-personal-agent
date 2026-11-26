@@ -529,6 +529,11 @@ func othersOpen(tx *store.Tx, as []OtherAlert, now time.Time) ([]OtherAlert, err
 			continue
 		}
 		ok, err := handled(tx, a.Object, a.Seq)
+		if err == nil && !ok && a.Object == "source_batch" { // 批处理拉不起的告警：之后有批处理入队即已恢复
+			var q []eventlog.Entry
+			q, err = eventlog.Query(tx, eventlog.Filter{Object: a.Object, Type: domain.EvAgentQueued}, a.Seq, 1)
+			ok = len(q) > 0
+		}
 		if err != nil {
 			return nil, err
 		}
