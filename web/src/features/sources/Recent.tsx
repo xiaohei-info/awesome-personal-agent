@@ -3,19 +3,33 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
+import { useItemTitle } from "../../app/names";
 import { Val } from "../../app/values";
 import { TraceView } from "../trace/Trace";
 import { strings } from "./strings";
 import { ago, when, type SourceEvent } from "./shared";
 
-// 最近的消息（设计 §15.1）：这个来源进来的全部消息，从新到旧；点一行就地展开它的处理经过。
+// 最近的消息（设计 §15.1、§9.3）：这个来源进来的全部消息，从新到旧；每条标明队列状态（待处理/处理中/已处理）与去向，点一行就地展开处理经过。
 const FILTERS: Record<string, string> = { all: "", proposed: "proposed", ignored: "ignored", attached: "attached", backlog: "unjudged,expired" };
 const PAGE = 20;
+
+function Destination({ id }: { id: string }) {
+  const t = useT(strings);
+  const title = useItemTitle(id);
+  const label = title && title !== id ? title : t.viewTarget;
+  return (
+    <span className="sub">
+      {" "}
+      <Link to={"/items/" + encodeURIComponent(id)}>{t.wentTo(label)}</Link>
+    </span>
+  );
+}
 
 function Row({ v }: { v: SourceEvent }) {
   const t = useT(strings);
   const [open, setOpen] = useState(false);
   const subject = v.subject || v.type;
+  const target = v.item || v.items?.[0] || "";
   return (
     <li>
       <button type="button" className="quiet event-row" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -23,9 +37,19 @@ function Row({ v }: { v: SourceEvent }) {
           <strong>{subject}</strong>
           {v.sender && <span className="sub"> · {v.sender}{v.sender_verified ? ` · ${t.verified}` : ""}</span>}
         </span>
-        <span className="badge"><Val k="disposition" id={v.disposition} /></span>
+        {v.queue ? (
+          <>
+            <span className="badge"><Val k="queueStatus" id={v.queue} /></span>
+            {v.queue === "done" && v.disposition !== "pending" && (
+              <span className="badge"><Val k="disposition" id={v.disposition} /></span>
+            )}
+          </>
+        ) : (
+          <span className="badge"><Val k="disposition" id={v.disposition} /></span>
+        )}
         <time className="sub" dateTime={v.occurred_at} title={when(v.occurred_at)}>{ago(v.occurred_at)}</time>
       </button>
+      {target && <Destination id={target} />}
       {open && (
         <div role="region" aria-label={t.traceOf(subject)}>
           <TraceView path={`/source-events/${encodeURIComponent(v.id)}/trace`} />

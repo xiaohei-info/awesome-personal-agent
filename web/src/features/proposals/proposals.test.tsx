@@ -389,17 +389,11 @@ describe("跨来源合并：展开看来源与依据，一键拆分（§9.3）",
 describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3）", () => {
   const merged = prop("m", { origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sources: ["e1", "e2"],
     merges: [{ event: "e2", source: "src_wx", title: "AgentSafe 资产确认", by: "generate", score: 0.81, why: "同一个资产编号 B18630823", batch: "mb_1", item: "f1", at: "2030-01-01T02:00:00Z" }] } as any });
-  const activity = { days: 7, pending: 3, model_calls: 1, chars: 4200, batches: [{ batch: "mb_1", at: "2030-01-01T02:00:00Z", size: 3, run: "run_1", chars: 4200, decisions: [
-    { item: "f1", title: "AgentSafe 资产确认", source: "src_wx", sources: 1, action: "merge", target: "m", target_title: "建议 m", why: "同一个资产编号 B18630823", by: "generate" },
-    { item: "f2", title: "周报模板改版", source: "src_dx", sources: 1, action: "duplicate", target: "d9", target_title: "周报模板改版 W47", why: "本人忽略过的同一件事", by: "generate" },
-    { item: "f3", title: "导出报表加一列", source: "src_wx", action: "keep", why: "和账本里已有的记录比过，没有相似的", by: "rule" }] },
-    { batch: "mb_2", at: "2030-01-01T01:00:00Z", size: 20, run: "run_2", chars: 5900, deferred: 9, decisions: [] }] };
   function withMerge() {
     const s = server([merged]);
     const base = s.impl;
     const impl = (async (url: string, init: RequestInit = {}) => {
       if (url === "/v1/sources") return json(200, { sources: [{ id: "src_mail_qq", name: "QQ 邮箱" }, { id: "src_wx", name: "微信" }, { id: "src_dx", name: "大象" }] });
-      if (url === "/v1/merge/activity?days=7") return json(200, activity);
       if (url === "/v1/source-events/e1") return json(200, { event: { id: "e1", source_id: "src_mail_qq", subject: "确认 AgentSafe AI 资产", occurred_at: "2030-01-01T00:00:00Z", link: "https://mail.example/1" } });
       if (url === "/v1/source-events/e2") return json(200, { event: { id: "e2", source_id: "src_wx", subject: "AgentSafe", summary: "@我 资产 B18630823 要确认", occurred_at: "2030-01-01T01:00:00Z" } });
       if (url === "/v1/items/f1") return json(200, { item: { id: "f1", phase: "dropped", title: "AgentSafe 资产确认", proposal: { low_confidence: false, sources: ["e2"] } } });

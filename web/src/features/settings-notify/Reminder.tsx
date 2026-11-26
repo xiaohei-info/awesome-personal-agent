@@ -208,6 +208,7 @@ function Explain({ k, target }: { k: string; target: Target }) {
     health: [r.quietSend, r.noCap],
     new_proposals: [r.quietHeld, r.twoHours],
     source_alert: [r.quietSkip, cap, r.oncePerItem],
+    source_result: [r.quietSkip, r.oncePerResult],
   };
   const elseText = (v: string) => (v === "next_chat" ? t.opts.chat_next : v === "default" ? t.pushTo(channels.plain[d.delivery?.default_channel] ?? t.noDefault) : t.pushTo(channels.plain[v] ?? t.goneChannel));
   const out = [...(lines[kindOf(k)] ?? []).filter(Boolean)];

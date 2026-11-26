@@ -50,6 +50,8 @@ export const GENERIC_ERROR: readonly string[] = ["invalid_request", "conflict", 
 export const SOURCE_TYPE = ["pull", "script", "webhook"] as const;
 /** 来源事件处置：kernel/domain/entities.go Disposition */
 export const DISPOSITION = ["pending", "attached", "proposed", "ignored", "unjudged", "expired", "digest", "alerted"] as const;
+/** 来源处理线队列状态：kernel/domain/entities.go SourceEvent.Queue */
+export const QUEUE_STATUS = ["queued", "running", "done"] as const;
 /** 未判定原因：kernel/domain/entities.go Unjudged*。models_paused 由「暂停模型」改动新增 */
 export const UNJUDGED_REASON = ["model_unavailable", "outbound_unset", "undecided", "restored", "models_paused", "process_failed"] as const;
 /** 外发范围：kernel/sources/registry/outbound.go Scope* */
@@ -188,7 +190,6 @@ export const VIEW_FIELD = ["title", "project", "created_at", "updated_at", "phas
  * 筛选门槛页拖线的起点；本人在 Web 覆盖过的以策略为准。ids.check 对照包文件防漂移。 */
 export const PACK_BAND: Record<string, { low?: number; high?: number }> = {
   "triage-screen": { low: 0.15, high: 0.6 },
-  "capture-prescreen": { low: 0.1 },
   "web-only-screening": { low: 0.2 },
   "delegation-screen": { low: 0.2 },
 };
