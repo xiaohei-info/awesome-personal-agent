@@ -53,11 +53,14 @@ const (
 	CmdAck      = "followmsg.ack"
 	CmdHandback = "followmsg.handback"
 	CmdRelease  = "followmsg.release"
+	// CmdAttachEvent 是面向 Agent 的来源事件挂靠命令（§9.3、§9.4），与 followmsg.attach 共用 AttachInTx 落账逻辑。
+	CmdAttachEvent = "inbound.attach_event"
 
 	EvAttached   = "followmsg.attached"
 	EvProcessed  = "followmsg.processed"
 	EvHandedBack = "followmsg.handed_back"
 	EvReleased   = "followmsg.released"
+	evDisposed   = "inbound.disposed"
 
 	systemPrinc = "kernel:followmsg"
 	// Principal 是本包写事项的内核身份；摘要起草凭它识别"挂靠与来源刷新"，不为它们调模型（挂靠本身不调模型）。
@@ -430,7 +433,7 @@ type releaseIn struct {
 
 // Register 登记本模块的命令，并订阅提交后的两件事：回执带游标就确认，事项关闭就退回未处理消息。
 func (s *Service) Register(x *command.Executor) error {
-	for _, sp := range []command.Spec{attach(), ack(), handback(), release()} {
+	for _, sp := range []command.Spec{attach(), attachEvent(), ack(), handback(), release()} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}
@@ -526,6 +529,92 @@ func emit(c *command.Ctx, typ, item, reason string, payload any) error {
 	p, _ := json.Marshal(payload)
 	_, err := c.Emit(domain.Event{Type: typ, Object: item, Reason: reason, Payload: p})
 	return err
+}
+
+// AttachInTx 在调用方的命令事务内把来源事件挂到未关闭的事项上（§9.4）：
+// 供 followmsg.attach 与来源处理线的 inbound.attach_event 共用同一段落账逻辑。
+// applied 为假时状态设为 pending（挂错后可经 followmsg.handback 交回）；为真时设为 processed。
+func AttachInTx(c *command.Ctx, eventID, itemID string, applied bool) error {
+	it, err := items.Get(c.Tx, itemID)
+	if err != nil {
+		return err
+	}
+	if closed(it) {
+		return conflict("item "+itemID+" is closed", "re-read the item")
+	}
+	state, reason := runner.AttachPending, "follow-up message attached"
+	if applied {
+		state, reason = runner.AttachProcessed, "message recorded on the item"
+	}
+	if err := runner.SetAttachState(c.Tx, eventID, state, itemID); err != nil {
+		return err
+	}
+	if applied || it.Phase == domain.PhaseProposed {
+		if err := addEchoSource(c, attachIn{Event: eventID, Item: itemID, Applied: applied}); err != nil {
+			return err
+		}
+	}
+	return emit(c, EvAttached, itemID, reason, map[string]string{"message": eventID})
+}
+
+type attachEventIn struct {
+	Event  string `json:"event"`
+	Item   string `json:"item"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func attachEvent() command.Spec {
+	parse := func(in json.RawMessage) (attachEventIn, error) {
+		var v attachEventIn
+		if err := decode(in, &v); err != nil {
+			return v, err
+		}
+		v.Event, v.Item = strings.TrimSpace(v.Event), strings.TrimSpace(v.Item)
+		if v.Event == "" || v.Item == "" {
+			return v, invalid("event and item are required")
+		}
+		return v, nil
+	}
+	return command.Spec{Name: CmdAttachEvent, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
+		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(in)
+			return authz.Object{ID: v.Event}, err
+		},
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			v, err := parse(in)
+			if err != nil {
+				return err
+			}
+			ev, err := runner.Event(tx, v.Event)
+			if err != nil {
+				return err
+			}
+			d := ev.Disposition
+			if d != domain.DispositionUnjudged && d != domain.DispositionExpired && d != domain.DispositionDigest && !runner.Running(ev) {
+				return conflict("source event "+v.Event+" is "+string(d)+", not running in queue, unjudged or digest", "re-read the source event")
+			}
+			it, err := items.Get(tx, v.Item)
+			if err != nil {
+				return err
+			}
+			if closed(it) {
+				return conflict("item "+v.Item+" is closed", "re-read the item")
+			}
+			return nil
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, _ := parse(c.Input)
+			if err := AttachInTx(c, v.Event, v.Item, false); err != nil {
+				return nil, err
+			}
+			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionAttached, "item": v.Item})
+			reason := strings.TrimSpace(v.Reason)
+			if reason == "" {
+				reason = "attached to item " + v.Item
+			}
+			_, err := c.Emit(domain.Event{Type: evDisposed, Object: v.Event, Reason: reason, Payload: p})
+			return nil, err
+		}}
 }
 
 func attach() command.Spec {

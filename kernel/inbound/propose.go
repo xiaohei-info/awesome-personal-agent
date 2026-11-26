@@ -30,8 +30,9 @@ func registerPropose(x *command.Executor) error {
 			if err != nil {
 				return err
 			}
-			if d := ev.Disposition; d != domain.DispositionUnjudged && d != domain.DispositionExpired && d != domain.DispositionDigest {
-				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(d)+", not unjudged or digest", "re-read the source event")
+			d := ev.Disposition
+			if d != domain.DispositionUnjudged && d != domain.DispositionExpired && d != domain.DispositionDigest && !runner.Running(ev) {
+				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(d)+", not unjudged, digest or running in queue", "re-read the source event")
 			}
 			return nil
 		},
@@ -55,18 +56,59 @@ func registerPropose(x *command.Executor) error {
 // ProposeUnjudged 以 id 的身份把未判定事件转为 proposed 事项，返回更新后的来源事件。kind 与项目沿用命中的规则，
 // 缺省 task、不归项目。事项与处置是两条命令：中途失败时事件仍在积压里，重试接回已建事项。
 func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error) {
+	return s.ProposeInto(ctx, id, event, "")
+}
+
+// ProposeInto 把处于处理中、未判定或 digest 的来源事件转为建议；into 非空时并入该已有建议并保留来源留痕（§9.3）。
+func (s *Service) ProposeInto(ctx context.Context, id command.Identity, event, into string) (domain.SourceEvent, error) {
 	s.proposing.Lock()
 	defer s.proposing.Unlock()
 	// 先过授权：item.create 对任何凭据开放，放到后面会让被拒绝的调用者留下事项。
 	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, disposeIn{Event: event}, command.Chain{}); err != nil {
 		return domain.SourceEvent{}, err
 	}
-	item, mf, err := s.draftProposal(ctx, id, event, true)
-	var ev domain.SourceEvent
-	if err != nil {
-		return ev, err
+	var (
+		item string
+		mf   mergeFields
+		ev   domain.SourceEvent
+		err  error
+	)
+	if strings.TrimSpace(into) != "" {
+		into = strings.TrimSpace(into)
+		if err = s.o.Store.View(ctx, func(tx *store.Tx) error {
+			if ev, err = runner.Event(tx, event); err != nil {
+				return err
+			}
+			it, err := items.Get(tx, into)
+			if err != nil {
+				return err
+			}
+			if it.Phase != domain.PhaseProposed {
+				return domain.NewError(domain.CodeConflict, "item "+into+" is "+string(it.Phase)+", not proposed", "re-read the item")
+			}
+			return nil
+		}); err != nil {
+			return domain.SourceEvent{}, err
+		}
+		item = into
+		mf = mergeFields{
+			Merge: true,
+			Trace: &domain.ProposalMerge{
+				Title:   orElse(ev.Subject, ev.Type),
+				Summary: ev.Summary,
+				By:      "agent",
+			},
+		}
+	} else {
+		if item, mf, err = s.draftProposal(ctx, id, event, true); err != nil {
+			return ev, err
+		}
 	}
-	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page", mergeFields: mf}
+	reason := "manually proposed from the source page"
+	if strings.TrimSpace(into) != "" {
+		reason = "merged into proposal " + into
+	}
+	d := disposeIn{Event: event, Item: item, Reason: reason, mergeFields: mf}
 	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
 		return ev, err
 	}

@@ -73,9 +73,9 @@
 | `apa source rejects <id> [--after N] [--limit N]` | 查看没有入账的输出行及原因（`next_after` 作为下一次的 `--after`） | observer | |
 | `apa source event <事件 id> [--part body\|original\|headers\|attachments\|messages]` | 读一条来源事件及其原文（主文档 §7.6）：不带 `--part` 输出事件、原文清单与正文，带时只输出那一部分。token 读到的内容按该来源对外部端点的外发范围裁剪，输出写明所用范围与裁剪量；运行凭据不可用 | observer | 4、5 |
 | `apa source replay <入站记录>` | 重放 | delegate | |
-| `apa source propose <事件> [--into <建议>]` | 【规划中（v0.2.0）】把处于处理中、积压或 digest 的来源事件转为建议；带 `--into` 时并入该已有建议并保留来源留痕（主文档 §9.3） | delegate、运行凭据 | 2、4、5、6 |
-| `apa source ignore <事件>` | 【规划中（v0.2.0）】忽略处于处理中或积压的来源事件（主文档 §9.3） | delegate、运行凭据 | 4、5、6 |
-| `apa source attach <事件> --to <事项>` | 【规划中（v0.2.0）】把处于处理中、积压或 digest 的来源事件挂到指定未关闭事项（主文档 §9.3、§9.4） | delegate、运行凭据 | 2、4、5、6 |
+| `apa source propose <事件> [--into <建议>]` | 把处于处理中、积压或 digest 的来源事件转为建议；带 `--into` 时并入该已有建议并保留来源留痕（主文档 §9.3） | delegate、运行凭据 | 2、4、5、6 |
+| `apa source ignore <事件>` | 忽略处于处理中或积压的来源事件（主文档 §9.3） | delegate、运行凭据 | 4、5、6 |
+| `apa source attach <事件> --to <事项>` | 把处于处理中、积压或 digest 的来源事件挂到指定未关闭事项（主文档 §9.3、§9.4） | delegate、运行凭据 | 2、4、5、6 |
 | `apa source backlog list [--source] [--sort score]` | 列出积压（未判定与已到期），旧原因 `undecided`、空原样返回；`--sort score` 按影子分数从高到低排（各来源合并后统一排序，同分保持来源顺序），每条带 `score`，没有分数的排最后 | observer | |
 | `apa source backlog rules [--source]` | 积压只跑规则：重走归属与确定性规则，能挂靠的挂靠、规则有明确出口的按出口处置，其余原样；不调模型，不受 `unjudged_rejudge_days` 限制，输出 `attached`、`disposed`、`remaining`（主文档 §9.3） | delegate | |
 | `apa source backlog score [--source]` | 影子打分：用判断端点给积压按批（每批不超过判断端点的 `max_batch`）打分，只写带 `shadow` 的判断记录，不改处置、不建事项、不问对话端点；输出 `scored`、`skipped`（外发范围不允许送出的，或判断端点没有给出概率的）；没有判断端点时返回 6（说明没有判断端点），不写记录；模型已暂停时返回 6（`models_paused`），什么也不做（主文档 §8.7、§9.3） | delegate | |
@@ -205,7 +205,7 @@
 | | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 只有 Web 登录能读；外部钥匙按它对该来源的档位裁（见下），没给这个来源返回 403（退出码 4） | observer 及以上、有档位的导出 ext 密钥；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
 | | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；运行凭据不可用（返回 403，原始行是未过滤的外部输出） |
 | | `POST /source-events/{id}/propose` | 把未判定事件、digest 事件或处于队列处理中（`running`）的 `pending` 事件转为建议；请求体可带 `{"into": "<建议 id>"}` 并入已有建议并保留来源留痕（主文档 §9.3） | Web 登录、delegate、运行凭据 |
-| | `POST /source-events/{id}/attach` | 【规划中（v0.2.0）】把处于队列处理中（`running`）、未判定或 digest 的来源事件挂到指定未关闭事项（`inbound.attach_event`，主文档 §9.3、§9.4）：请求体 `{"item": "<事项 id>"}`，复用 `followmsg.attach` 落账逻辑，挂错可经 `followmsg.handback` 交回 | Web 登录、delegate、运行凭据 |
+| | `POST /source-events/{id}/attach` | 把处于队列处理中（`running`）、未判定或 digest 的来源事件挂到指定未关闭事项（`inbound.attach_event`，主文档 §9.3、§9.4）：请求体 `{"item": "<事项 id>"}`，复用 `followmsg.attach` 落账逻辑，挂错可经 `followmsg.handback` 交回 | Web 登录、delegate、运行凭据 |
 | | `POST /source-events/{id}/split` | 把误并入一条建议的来源事件拆出来另成一条建议（`inbound.split`，主文档 §9.3）：请求体 `{"from": "<建议 id>"}`，返回 `{"item": "<新建议 id>"}` | Web 登录、delegate |
 | | `POST /items/{id}/unmerge` | 撤销跨来源合并的一条折叠（`inbound.unmerge`，一档，主文档 §9.3）：被折叠的建议回到 proposed，`proposal.sweep.action` 记 `undone`，与去处互记 `not_same`；合并的来源事件与留痕从去处移回，并入的在去处追加一条撤回说明；撤销一条批内整合过的成员时整组还原（同一次整合的其他成员一并回到建议，载体的标题与摘要恢复成 `proposal.integrated` 里的原文，本人事后改过的不覆盖）。返回 `{"item": "<id>"}`；不是被折叠的或已撤销过是 409 |
 | | `GET /merge/activity?days=7` | 最近自动归类（读）：`{"days", "pending", "model_calls", "chars", "batches": [{"batch", "at", "size", "run"?, "chars", "decisions": [{"item", "title", "source"?, "sources", "action", "target"?, "target_title"?, "target_phase"?, "why"?, "by", "hint"?}]}]}`；`days` 至多 90；`sources` 是这条建议带着的消息条数：合并进别处的，按去处上从它搬去的合并留痕计（含不在它 `sources` 里的挂靠消息），其余按它自己的 `proposal.sources` |

@@ -73,6 +73,18 @@ _CLI_TOOLS = {
                           {"id": _s("Item id"), "text": _s("The progress note"), "on": _s("Date it happened (YYYY-MM-DD), not later than today")},
                           ["id", "text"],
                           lambda a: ["item", "progress", a["id"], *_flags(a, "text", "on")]),
+    "apa_source_propose": ("Turn a queued/running or backlog source event into a proposal, or merge it into an existing proposal (apa source propose).",
+                           {"id": _s("Source event id"), "into": _s("Existing proposal id to merge this event into (optional)")},
+                           ["id"],
+                           lambda a: ["source", "propose", a["id"], *_flags(a, "into")]),
+    "apa_source_ignore": ("Ignore a queued/running or backlog source event (apa source ignore).",
+                          {"id": _s("Source event id")},
+                          ["id"],
+                          lambda a: ["source", "ignore", a["id"]]),
+    "apa_source_attach": ("Attach a queued/running or backlog source event to an existing open item (apa source attach).",
+                          {"id": _s("Source event id"), "to": _s("Existing open item id"), "reason": _REASON},
+                          ["id", "to"],
+                          lambda a: ["source", "attach", a["id"], *_flags(a, "to", "reason")]),
 }
 
 

@@ -1025,14 +1025,17 @@ func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error 
 	case domain.DispositionExpired:
 		from = `disposition = 'unjudged'`
 	case domain.DispositionProposed:
-		from = `disposition IN ('unjudged', 'expired', 'digest')`
-	case domain.DispositionIgnored, domain.DispositionDigest:
+		from = `(disposition IN ('unjudged', 'expired', 'digest') OR (disposition = 'pending' AND queue_state = 'running'))`
+	case domain.DispositionIgnored:
+		from = `(disposition IN ('unjudged', 'expired') OR (disposition = 'pending' AND queue_state = 'running'))`
+	case domain.DispositionDigest:
 	default:
 		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored, digest or expired")
 	}
-	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND `+from, string(to), item, id)
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ?,
+		queue_state = CASE WHEN queue_state <> '' THEN 'done' ELSE queue_state END WHERE id = ? AND `+from, string(to), item, id)
 	if err == nil && n == 0 {
-		return domain.NewError(domain.CodeConflict, "source event "+id+" is not in the unjudged backlog", "re-read the source event")
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not in the unjudged backlog or running in queue", "re-read the source event")
 	}
 	return err
 }
@@ -1180,11 +1183,14 @@ func SetAttachState(tx *store.Tx, id, to, item string) error {
 		)
 		switch {
 		case f == "": // 首次挂靠
-			// 积压事件（unjudged、expired）重走规则时也可挂靠（§9.3 积压放开第 1 步）；原因随之清空。
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ?, unjudged_reason = '' WHERE id = ? AND attach_state = ? AND disposition IN (?, 'unjudged', 'expired')`,
+			// 积压事件（unjudged、expired）、digest 与队列处理中的 pending 事件均可挂靠；原因随之清空，在队列里的标为 done。
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ?, unjudged_reason = '',
+				queue_state = CASE WHEN queue_state <> '' THEN 'done' ELSE queue_state END
+				WHERE id = ? AND attach_state = ? AND disposition IN (?, 'unjudged', 'expired', 'digest')`,
 				to, string(domain.DispositionAttached), item, id, f, string(domain.DispositionPending))
 		case to == AttachHandedBack || to == AttachReleased:
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, queue_state = '', queue_level = '', queue_run = '', queue_tries = 0
+				WHERE id = ? AND attach_state = ? AND disposition = ?`,
 				to, string(domain.DispositionPending), id, f, string(domain.DispositionAttached))
 		default: // forwarded、processed：处置不变
 			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
