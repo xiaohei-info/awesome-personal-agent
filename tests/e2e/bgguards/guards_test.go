@@ -141,6 +141,12 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		f.mode("hang", preamble+`echo $PPID > "$OUT/stub.pid"
 `)
 		id := f.task("bgg-05", "acc-work", "acc-main")
+		t.Cleanup(func() {
+			if t.Failed() {
+				t.Logf("事项 %s stub.pid=%q\n全部运行: %s\n事项事件: %s\n通知: %+v\n服务日志: %s", id, f.outFile("stub.pid"),
+					f.apa(f.OBS, 0, "run", "list").Stdout, toJSON(f.events(id, "")), f.Notices(), f.ServiceLog())
+			}
+		})
 		f.waitFor("运行中", 20*time.Second, func() bool {
 			rs := f.runsOf(id)
 			return len(rs) == 1 && rs[0].State == "running" && f.outFile("stub.pid") != ""

@@ -422,6 +422,13 @@ func TestFlowHealthWarnings(t *testing.T) {
 	})
 
 	step(t, "ACT-HLT-06 时钟迟到在连续一小时没有迟到后清除", func(t *testing.T) {
+		parent := f.t
+		t.Cleanup(func() {
+			if t.Failed() || parent.Failed() {
+				t.Logf("内核此刻 %s\nhealth.alert 审计记录: %s", f.kernelNow().UTC().Format(time.RFC3339),
+					f.webOK("GET", "/audit/events?limit=500&type=health.alert", "", http.StatusOK))
+			}
+		})
 		// 65 分钟：期间每 10 分钟给一条事项设 1 分钟后到期；时钟每步 ≤ 4 分钟，使这些定时都准时触发，不再制造新的迟到。
 		for round := 0; round < 7; round++ {
 			id := f.task("HL-tick-"+string(rune('0'+round)), "x-plain")
