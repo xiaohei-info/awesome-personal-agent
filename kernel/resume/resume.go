@@ -425,14 +425,16 @@ func materials(f facts, runDir string) (prompt, file string) {
 	body := fmt.Sprintf("问题：%s\n回答：%s\n续接备注（resume_note）：%s\n", a.Question, answerText(a), a.ResumeNote)
 	prompt = head + body + "完整上下文见 " + filepath.Join(runDir, "context.md") + "。\n"
 	var b strings.Builder
-	b.WriteString(head + body + "\n## 挂靠消息（仅白名单内的发送者）\n")
+	heading := "\n## 挂靠消息\n"
+	if allowlist.RunsFiltered(f.pol, f.selected.Snapshot.AgentID) {
+		heading = "\n## 挂靠消息（仅白名单内的发送者）\n"
+	}
+	b.WriteString(head + body + heading)
 	if len(f.msgs) == 0 {
 		b.WriteString("（无）\n")
 	}
-	for _, m := range f.msgs {
-		if m.ForwardAllowed {
-			fmt.Fprintf(&b, "- 来源 %s 发送者 %s：%s %s\n", m.Source, m.Sender, m.Subject, m.Summary)
-		}
+	for _, m := range f.msgs { // 已按权限卡过滤（allowlist.Messages）
+		fmt.Fprintf(&b, "- 来源 %s 发送者 %s：%s %s\n", m.Source, m.Sender, m.Subject, m.Summary)
 	}
 	return prompt, b.String()
 }

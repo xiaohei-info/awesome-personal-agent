@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -230,8 +231,10 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		return Outcome{Item: t.Target}, err
 	}
 	forwarded = true
-	for _, m := range t.Messages {
-		forwarded = forwarded && authz.ForwardAllowed(pol, m.Source, m.Sender, m.Verified)
+	if allowlist.RunsFiltered(pol, selected.Snapshot.AgentID) {
+		for _, m := range t.Messages {
+			forwarded = forwarded && authz.ForwardAllowed(pol, m.Source, m.Sender, m.Verified)
+		}
 	}
 
 	out := Outcome{Item: t.Target}

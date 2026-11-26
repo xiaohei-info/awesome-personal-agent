@@ -16,8 +16,12 @@ import (
 // "后台运行看哪些消息"过滤（缺省只看信任发件人的，§14.6）；否则运行者一委派白名单就被绕过。
 func Filtered(pol policy.Policy, level authz.Level, agent string, it domain.Item) bool {
 	unattended := level == authz.LevelRun || (it.Unattended && level != authz.LevelWeb && level != authz.LevelDelegate)
-	return unattended && !pol.Card(agent).RunsAllMessages
+	return unattended && RunsFiltered(pol, agent)
 }
+
+// RunsFiltered 报告所属 Agent 为 agent 的后台运行是否只看信任发件人的消息（权限卡上的明示项，§14.6）。
+// 读取、任务型拉起与续接都用这一个判定。
+func RunsFiltered(pol policy.Policy, agent string) bool { return !pol.Card(agent).RunsAllMessages }
 
 // Allowed 报告来源事件的发送者是否进白名单。
 func Allowed(pol policy.Policy, ev domain.SourceEvent) bool {

@@ -1504,6 +1504,26 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != ok || !strings.Contains(m, "boss@example.com") || !strings.Contains(m, "relay_input") || !strings.Contains(m, "relay-marker") {
 		t.Fatalf("listed message and the generate step's verdict must reach the task agent: %s", m)
 	}
+
+	// 权限卡上"后台运行看哪些消息"改为全部：同一个事项上白名单外的消息照常交给任务型（§14.6）。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "all messages", func(p *policy.Policy) error {
+			c := policy.DefaultCard()
+			c.RunsAllMessages = true
+			p.AgentCards["legacy:hx"] = c
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h(bg, e.call("gen", blocked)); err != nil {
+		t.Fatalf("with runs_all_messages the relay must start: %v", err)
+	}
+	res = e.waitResult()
+	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != blocked || !strings.Contains(m, "stranger@example.com") {
+		t.Fatalf("an unlisted message must reach the task agent when the card says all: %s", m)
+	}
 }
 
 // ACT-JRC-20：简报运行的资料文件带 per_brief 条抽检条目（来自最近一个周期被初筛忽略的事件），条目不含来源正文。

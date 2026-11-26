@@ -3,6 +3,7 @@ package resume
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -357,13 +358,25 @@ func TestResumesWithTheSameSession(t *testing.T) {
 	}
 }
 
-// ACT-RES-03：harness 没声明续接：新会话，上下文含问题、回答、resume_note 和白名单内的挂靠消息（名单外的不进）。
+// ACT-RES-03：harness 没声明续接：新会话，上下文含问题、回答、resume_note 和白名单内的挂靠消息；
+// 名单外的不进，除非所属 Agent 的权限卡上"后台运行看哪些消息"是全部（§14.6）。
 func TestNoResumeDeclarationStartsNewSessionWithContext(t *testing.T) {
+	for _, all := range []bool{false, true} {
+		t.Run(fmt.Sprintf("runs_all_messages=%v", all), func(t *testing.T) { resumeContextCase(t, all) })
+	}
+}
+
+func resumeContextCase(t *testing.T, all bool) {
 	e := setup(t)
 	e.harness(false, false)
 	e.auto("main")
 	id := e.asked("agent-ok", nil)
-	e.setPolicy(func(p *policy.Policy) { p.ForwardAllowlist = map[string][]string{"mail": {"alice"}} })
+	e.setPolicy(func(p *policy.Policy) {
+		p.ForwardAllowlist = map[string][]string{"mail": {"alice"}}
+		c := p.AgentCards["legacy:hx"]
+		c.RunsAllMessages = all
+		p.AgentCards["legacy:hx"] = c
+	})
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		for _, m := range []struct{ id, sender string }{{"m1", "alice"}, {"m2", "bob"}} {
 			ev := domain.SourceEvent{ID: m.id, Type: "mail", Subject: "s-" + m.id, Sender: m.sender, SenderVerified: true, OccurredAt: t0}
@@ -397,8 +410,8 @@ func TestNoResumeDeclarationStartsNewSessionWithContext(t *testing.T) {
 			t.Fatalf("context lacks %q:\n%s", want, ctxFile)
 		}
 	}
-	if strings.Contains(ctxFile, "s-m2") {
-		t.Fatalf("a message outside the allowlist reached the new session:\n%s", ctxFile)
+	if strings.Contains(ctxFile, "s-m2") != all {
+		t.Fatalf("message outside the allowlist in the new session = %v, want %v:\n%s", !all, all, ctxFile)
 	}
 	e.release(r.ID)
 	e.waitResult()
