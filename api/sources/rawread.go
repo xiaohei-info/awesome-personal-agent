@@ -162,8 +162,7 @@ func scoped(ev domain.SourceEvent, scope string) domain.SourceEvent {
 	// 只留元信息与处置状态（处置、未判定原因、挂靠与判断的关联）；来源给的数值、关联键与合并键只随全文给。
 	out := domain.SourceEvent{ID: ev.ID, SourceID: ev.SourceID, Type: t.Type, Subject: t.Subject, Sender: t.Sender, SenderVerified: ev.SenderVerified,
 		OccurredAt: ev.OccurredAt, Link: t.Link, Disposition: ev.Disposition, Item: ev.Item, Summary: t.Summary, Detail: t.Detail,
-		DedupeKey: ev.DedupeKey, AttachState: ev.AttachState, UnjudgedReason: ev.UnjudgedReason, Rejudges: ev.Rejudges, Items: ev.Items, Judgment: ev.Judgment,
-		Queue: ev.Queue, QueueLevel: ev.QueueLevel}
+		DedupeKey: ev.DedupeKey, AttachState: ev.AttachState, UnjudgedReason: ev.UnjudgedReason, Rejudges: ev.Rejudges, Items: ev.Items, Judgment: ev.Judgment}
 	return out
 }
 
