@@ -296,7 +296,11 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 		return
 	}
 	ok := res.Run.State == domain.RunSucceeded
-	var fin runner.Finished
+	var (
+		fin   runner.Finished
+		hl    executors.Headless
+		hasHL bool
+	)
 	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		_, pol, err := policy.Current(tx)
 		if err != nil {
@@ -305,6 +309,9 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 		fin, err = runner.Finish(tx, res.Run.ID, ok, pol.SourcePipeline.Retries())
 		if err != nil {
 			return err
+		}
+		if res.Run.Harness != "" {
+			hl, hasHL, _ = executors.ActiveHeadless(tx, res.Run.Harness)
 		}
 		payload, _ := json.Marshal(map[string]any{
 			"run":      res.Run.ID,
@@ -326,7 +333,7 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 		return
 	}
 	if ok && s.o.Batch.Notify != nil {
-		summary := strings.TrimSpace(extractBatchSummary(res.Stdout))
+		summary := strings.TrimSpace(extractBatchSummary(hl, hasHL, res.Stdout))
 		if summary == "" {
 			summary = EmptyBatchOutputNotice
 		}
@@ -336,8 +343,11 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 	}
 }
 
-func extractBatchSummary(stdout []byte) string {
-	return string(stdout)
+func extractBatchSummary(hl executors.Headless, hasHL bool, stdout []byte) string {
+	if !hasHL {
+		hl = executors.Headless{}
+	}
+	return hl.ExtractFinalText(stdout)
 }
 
 // RecoverBatches 在内核启动时检查仍停在 running 的事件：对应运行已不在队列或已结束（没有存活进程）的，
