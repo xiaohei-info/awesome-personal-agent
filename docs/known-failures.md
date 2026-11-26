@@ -38,7 +38,7 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
 | `tests/e2e/followup` `TestFlowHealthWarnings/ACT-HLT-06`（见第 10 条） | 断言不稳（依赖时序） | 否 | 已修（`d4c33da02`） |
 | `tests/e2e/bgguards` `TestFlowBgGuards/ACT-BGG-05`（见第 11 条） | 用例隔离（依赖时刻） | 否 | 已修（`b359aa4e0`） |
 | `tests/e2e/ops` `TestFlowPurge/ACT-PRG-01`；`tests/e2e/materials` `TestOpsFlows/flow-purge`（见第 12 条） | 断言过期 | 否 | 已修（`0d22b9df0`） |
-| `tests/e2e/ops` `TestFlowRetention/*/ACT-RET-01`、`ACT-RET-02`；`tests/e2e/materials` `flow-retention`（见第 13 条） | 断言过期 | 否 | 已修（`802ba9463`、`b26f131e4`、`d880f8433`） |
+| `tests/e2e/ops` `TestFlowRetention/*/ACT-RET-01`、`ACT-RET-02`；`tests/e2e/materials` `flow-retention`（见第 13 条） | 断言过期 | 否 | 已修（`802ba9463`、`b26f131e4`、`d880f8433`、`bcda9fdb4`） |
 | `tests/e2e/upgrade` `TestSchema8Upgrade/ACT-S8-01`（见第 14 条） | 断言过期 | 否 | 已修（`fdf60c821`） |
 | `tests/e2e/ledger` `TestFlowBootstrap/ACT-BOOT-03`、`ACT-BOOT-05`（见第 15 条） | 断言过期 | 否 | 已修（`8848a1600`、`dbc7d583e`） |
 | `tests/e2e/inbound` `TestFlowCapture/ACT-CAP-06`、`TestFlowInboundPipeline/ACT-INP-10`（见第 16 条） | 断言过期（模型替身串扰） | 否 | 已修（`9e3a6aa95`） |
@@ -154,9 +154,9 @@ go test -tags e2e -count=1 -timeout 20m -run 'TestFlowCapture$|TestFlowInboundPi
 
 - **复现**：按上文"复现前的准备"，跑 `TestFlowRetention`（`tests/e2e/ops`）、`TestOpsFlows`（`tests/e2e/materials`） 所在包的整个用例。
 - **现象**：`retention_test.go: 期外请求体被清理（等待 1m40s 仍未出现）`
-- **定性**：断言过期。清理改为启动时一次加每天 04:10（`6735903d7`）。`ACT-RET-02` 此前执行不到：拨时钟后到点的简报也拉起任务型运行，按次数认运行会多数一个。
+- **定性**：断言过期。清理改为启动时一次加每天 04:10，运行目录默认保留期由 14 天改为 30 天（`6735903d7`）。`ACT-RET-02` 此前执行不到：拨时钟后到点的简报也拉起任务型运行，按次数认运行会多数一个。
 - **是否阻塞上线**：否。
-- **处理**：已修（`802ba9463`、`b26f131e4`、`d880f8433`）。`ACT-RET-01` 拨完账本时间后重启内核；`ACT-RET-02` 拨测试时钟越过 04:10，并按提示词模板认本步的运行。
+- **处理**：已修（`802ba9463`、`b26f131e4`、`d880f8433`、`bcda9fdb4`）。`ACT-RET-01` 拨完账本时间后重启内核；`ACT-RET-02` 拨测试时钟越过 04:10，并按提示词模板认本步的运行。
 
 ### 14. `tests/e2e/upgrade` `TestSchema8Upgrade/ACT-S8-01`
 
