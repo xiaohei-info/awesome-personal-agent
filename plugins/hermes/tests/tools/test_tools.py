@@ -126,6 +126,14 @@ def test_item_update_writes_spec_json_with_session(tools, apa):
     assert c["argv"][-2:] == ["--reason", "brief done"]
 
 
+def test_item_update_passes_project_and_schedule(tools, apa):
+    tools["apa_item_update"]({"id": "i1", "project": "p1", "deadline": "2026-05-01", "planned_for": "2026-04-30",
+                              "planned_slot": "09:00 - 10:00", "reason": "triage"}, session_id="s")
+    [c] = calls(apa)
+    for flag, value in (("--project", "p1"), ("--deadline", "2026-05-01"), ("--planned-for", "2026-04-30"), ("--planned-slot", "09:00 - 10:00")):
+        assert c["argv"][c["argv"].index(flag) + 1] == value
+
+
 def test_item_update_kernel_refusal_is_exposed(tools, apa, monkeypatch):
     monkeypatch.setenv("FAKE_EXIT", "4")
     monkeypatch.setenv("FAKE_ERR", '{"code":"forbidden"}')
