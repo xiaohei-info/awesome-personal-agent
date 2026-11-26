@@ -208,7 +208,7 @@ func TestFlowProposalTriage(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-PROP-09 运行身份不能处理建议", func(t *testing.T) {
+	k.step("ACT-PROP-09 运行身份随所属 Agent，没开拍板不能处理建议", func(t *testing.T) {
 		defer k.stopRuns()
 		before := len(k.events("", "proposal.attached"))
 		for _, args := range [][]string{
@@ -216,12 +216,12 @@ func TestFlowProposalTriage(t *testing.T) {
 			{"dismiss", d, "--reason", "x"},
 			{"attach", d, "--to", open},
 		} {
-			if r := k.apaRun(runTok, runID, args...); r.Code != exitDenied {
-				t.Errorf("运行凭据 apa %s 退出码 %d，期望 %d\n%s%s", strings.Join(args, " "), r.Code, exitDenied, r.Stdout, r.Stderr)
+			if r := k.apaRun(runTok, runID, args...); r.Code != 23 {
+				t.Errorf("运行凭据 apa %s 退出码 %d，期望 23\n%s%s", strings.Join(args, " "), r.Code, r.Stdout, r.Stderr)
 			}
 		}
-		// 批量等于逐条（2026-11-20）：没有一条在运行范围内，整批什么也不处理；全部被拒时为 4，没有可处理的条目时为 0。
-		if r := k.apaRun(runTok, runID, "proposals", "apply", "--recommended", "--source", "src_none"); r.Code != exitDenied && r.Code != 0 {
+		// 批量等于逐条（2026-11-20）：每条都被拒，整批什么也不处理；没有可处理的条目时为 0。
+		if r := k.apaRun(runTok, runID, "proposals", "apply", "--recommended", "--source", "src_none"); r.Code != 23 && r.Code != 0 {
 			t.Errorf("运行凭据 apa proposals apply --recommended 退出码 %d\n%s%s", r.Code, r.Stdout, r.Stderr)
 		}
 		eq(t, "prop-d 阶段", k.phase(d), "proposed")

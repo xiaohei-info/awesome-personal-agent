@@ -316,8 +316,8 @@ func TestFlowDataNotInstructions(t *testing.T) {
 			f := strings.Fields(ln)
 			got[f[0]] = f[1]
 		}
-		eq(t, "普通决策的 decide 退出码（运行凭据没有代答能力）", got[normal], "4")
-		eq(t, "付款决策的 decide 退出码", got[pay], "4")
+		eq(t, "普通决策的 decide 退出码（所属 Agent 没开拍板）", got[normal], "23")
+		eq(t, "付款决策的 decide 退出码", got[pay], "23")
 		for _, id := range []string{normal, pay} {
 			eq(t, id+" 阶段", k.phase(id), "needs_input")
 			if k.resolution(id) != nil {

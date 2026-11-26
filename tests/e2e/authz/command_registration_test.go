@@ -144,7 +144,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 		k.waitFor("确认后命令被拉起", 20*time.Second, func() bool { return exists(marker) })
 	})
 
-	k.step("ACT-CMD-03 运行凭据不能提交声明", func(t *testing.T) {
+	k.step("ACT-CMD-03 运行凭据提交的声明只进待确认", func(t *testing.T) {
 		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub"}`, 200) // 无头运行替身，已确认
 		k.triggerRun()
 		var token string
@@ -159,13 +159,12 @@ func TestFlowCommandRegistration(t *testing.T) {
 			}
 			return false
 		})
-		// 对照：这把运行凭据本身有效（能读账本），只是没有提交声明的权限。
+		// 运行凭据只带身份：与所属 Agent 的钥匙一样能提交声明，但声明要本人确认才生效。
 		k.expect("运行凭据读账本", k.Apa(token, "", "inbox"), 0)
-		before := k.webOK("GET", "/v1/settings/declarations", "", 200)
 		r := k.Apa(token, declaration("acc-from-run", filepath.Join(work, "from-run.ran")), "declare", "-")
-		k.expect("运行凭据 apa declare", r, exitDenied)
-		if after := k.webOK("GET", "/v1/settings/declarations", "", 200); after != before || strings.Contains(after, "acc-from-run") {
-			t.Errorf("声明不应被接收: %s", after)
+		k.expect("运行凭据 apa declare", r, 0)
+		if cmds := k.webOK("GET", "/v1/settings/commands", "", 200); strings.Contains(cmds, "acc-from-run") {
+			t.Errorf("未确认的声明不应生效: %s", cmds)
 		}
 	})
 
