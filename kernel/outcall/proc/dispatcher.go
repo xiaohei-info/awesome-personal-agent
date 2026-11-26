@@ -410,7 +410,7 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 	var why string
 	var werr error
 	// 任务型与后台运行共用同一个时限（§13.6），测试时钟下也按同一个口径判到期；其余类别按真实计时。
-	if !d.customClock || (rec.Run.Category != domain.RunBackground && rec.Run.Category != domain.RunTask) {
+	if !d.customClock || (rec.Run.Category != domain.RunBackground && rec.Run.Category != domain.RunTask && rec.Run.Category != domain.RunSourceBatch) {
 		select {
 		case werr = <-done:
 		case <-timer.C:

@@ -209,9 +209,10 @@ type RunCategory string
 const (
 	RunJudge      RunCategory = "judge"
 	RunGenerate   RunCategory = "generate"
-	RunTask       RunCategory = "task"
-	RunBackground RunCategory = "background"
-	RunSource     RunCategory = "source"
+	RunTask        RunCategory = "task"
+	RunBackground  RunCategory = "background"
+	RunSourceBatch RunCategory = "source_batch"
+	RunSource      RunCategory = "source"
 	RunTransform  RunCategory = "transform"
 	RunReader     RunCategory = "reader"
 )

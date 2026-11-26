@@ -123,6 +123,8 @@ type Options struct {
 	// Alert 没注入时命中 alert 出口的事件保持 pending 并报错，不假装处理。
 	Extract Exit
 	Alert   *metrics.Alerter
+	// Batch 配置来源处理线的队列调度、批处理运行与结论投递（§9.3、§13.6）。
+	Batch BatchOptions
 }
 
 // Exit 处理一个出口：命中规则 m 的事件 ev 由它写完处置（经命令模型）。
@@ -141,6 +143,8 @@ type Service struct {
 	// sweeping 让同一时刻只有一批合并归类；sweepAfter 是模型调用失败后的退避（只在内存）。
 	sweeping   sync.Mutex
 	sweepAfter time.Time
+	// batching 串行化队列节拍，避免并发重复取批。
+	batching sync.Mutex
 	// sweepCap 非零时是本进程里一批的条数上限：某批同样大小两次回答都不完整后降到 batch_size 的一半。
 	// shortcut: 只在内存，重启后回到策略批量；要长期降就在设置里把批量改小。
 	sweepCap atomic.Int32

@@ -170,7 +170,7 @@ func validState(s domain.RunState) bool {
 
 func validCategory(c domain.RunCategory) bool {
 	switch c {
-	case domain.RunJudge, domain.RunGenerate, domain.RunTask, domain.RunBackground, domain.RunSource, domain.RunTransform, domain.RunReader:
+	case domain.RunJudge, domain.RunGenerate, domain.RunTask, domain.RunBackground, domain.RunSourceBatch, domain.RunSource, domain.RunTransform, domain.RunReader:
 		return true
 	}
 	return false
