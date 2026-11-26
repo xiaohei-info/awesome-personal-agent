@@ -75,30 +75,6 @@ func TestBacklogRejudgeOnUpgradedFixture(t *testing.T) {
 		}
 		return
 	}
-	// events 读全部来源里处置在 dispositions 里的事件。
-	events := func(dispositions string) (out []event) {
-		t.Helper()
-		for _, s := range sources() {
-			for after := "0"; ; {
-				code, b := do("GET", "/sources/"+s+"/events?disposition="+dispositions+"&limit=500&after="+after, m.Tokens["observer"], nil, "")
-				var page struct {
-					Events    []event
-					NextAfter int64 `json:"next_after"`
-				}
-				if code != 200 || json.Unmarshal(b, &page) != nil {
-					t.Fatalf("events %s: %d %s", s, code, b)
-				}
-				out = append(out, page.Events...)
-				if page.NextAfter == 0 {
-					break
-				}
-				after = strconv.FormatInt(page.NextAfter, 10)
-			}
-		}
-		return
-	}
-	words := map[string]string{"X-APA-Session": "s1"} // 积压各步是一档：delegate 不要本人原话
-
 	// 本人在 Web 配上两个端点。
 	lg, _ := json.Marshal(map[string]string{"password": m.WebSecret})
 	resp, err := http.Post(base+"/auth/login", "application/json", bytes.NewReader(lg))
@@ -110,9 +86,42 @@ func TestBacklogRejudgeOnUpgradedFixture(t *testing.T) {
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&li)
 	resp.Body.Close()
+	cookies := resp.Cookies()
+	// events 读全部来源里处置在 dispositions 里的事件（用 Web 会话拿完整元信息，含队列状态）。
+	events := func(dispositions string) (out []event) {
+		t.Helper()
+		for _, s := range sources() {
+			for after := "0"; ; {
+				req, _ := http.NewRequest("GET", base+"/sources/"+s+"/events?disposition="+dispositions+"&limit=500&after="+after, nil)
+				for _, c := range cookies {
+					req.AddCookie(c)
+				}
+				r, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, _ := io.ReadAll(r.Body)
+				r.Body.Close()
+				var page struct {
+					Events    []event
+					NextAfter int64 `json:"next_after"`
+				}
+				if r.StatusCode != 200 || json.Unmarshal(b, &page) != nil {
+					t.Fatalf("events %s: %d %s", s, r.StatusCode, b)
+				}
+				out = append(out, page.Events...)
+				if page.NextAfter == 0 {
+					break
+				}
+				after = strconv.FormatInt(page.NextAfter, 10)
+			}
+		}
+		return
+	}
+	words := map[string]string{"X-APA-Session": "s1"} // 积压各步是一档：delegate 不要本人原话
 	ep := fmt.Sprintf(`{"judge_endpoint":{"url":%q,"protocol":"probability-judgment/1","locality":"local"},"generate_endpoint":{"url":%q,"model":"acc-model","api_key":"k","locality":"local"}}`, cls.URL(), chat.URL())
 	req, _ := http.NewRequest("PUT", base+"/settings/model-endpoints", strings.NewReader(ep))
-	for _, c := range resp.Cookies() {
+	for _, c := range cookies {
 		req.AddCookie(c)
 	}
 	req.Header.Set("X-CSRF-Token", li.CSRF)
