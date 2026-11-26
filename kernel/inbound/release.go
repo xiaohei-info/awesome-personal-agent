@@ -216,7 +216,7 @@ func (s *Service) BacklogRejudge(ctx context.Context, req command.Request, sourc
 		}
 	}
 	res.Deferred = len(rest)
-	return res, errors.Join(errs...)
+	return res, errors.Join(append(errs, s.TickQueue(ctx))...)
 }
 
 // releaseBatch 放回一批、交流水线处理，返回其中进入建议流的条数。模型不可用或处理出错时 stop 为真：不再往下放，余下的原样留在积压或 pending。

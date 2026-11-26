@@ -252,7 +252,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 
 	// 跟进消息归属与入站流水线互相接线：拦截在判断之前，退回后立即唤醒入站流水线。
 	fm, err := followmsg.New(followmsg.Options{Store: st, Exec: x, Owner: owner,
-		Wake: func(ctx context.Context) error { return k.in.Process(ctx) }, OnError: logErr("follow-up message")})
+		Wake: func(ctx context.Context) error { return k.in.ProcessAndTick(ctx) }, OnError: logErr("follow-up message")})
 	if err != nil {
 		return nil, err
 	}

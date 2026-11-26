@@ -297,10 +297,13 @@ func captured(v json.RawMessage) bool {
 	return json.Unmarshal(v, &o) == nil && o.Captured
 }
 
-// process 处置新事件后顺带检查一次队列：立即队列与满条数的批不等下一个维护节拍（§9.3）。
+// ProcessAndTick 处置新事件后顺带检查一次队列：立即队列与满条数的批不等下一个维护节拍（§9.3）。
+func (s *Service) ProcessAndTick(ctx context.Context) error {
+	return errors.Join(s.Process(ctx), s.TickQueue(ctx))
+}
+
 func (s *Service) process() {
-	ctx := context.Background()
-	if err := errors.Join(s.Process(ctx), s.TickQueue(ctx)); err != nil && s.o.OnError != nil {
+	if err := s.ProcessAndTick(context.Background()); err != nil && s.o.OnError != nil {
 		s.o.OnError(err)
 	}
 }
