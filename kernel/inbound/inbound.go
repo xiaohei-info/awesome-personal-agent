@@ -217,14 +217,9 @@ func (s *Service) Register(x *command.Executor) error {
 			if len(v.Items) > 0 {
 				payload["items"] = v.Items
 			}
-			if v.Judgment != "" { // 并入结论：记录过了保留期，apa why 仍从这里读出答案与定案者（§6.16）
-				rec, err := record.Get(c.Tx, v.Judgment)
-				if e, ok := err.(*domain.Error); err != nil && !(ok && e.Code == domain.CodeNotFound) {
+			if v.Judgment != "" {
+				if err := addJudgmentRef(c.Tx, payload, v.Judgment); err != nil {
 					return nil, err
-				}
-				if err == nil {
-					ref := record.RefOf(rec)
-					payload["answer"], payload["decided_by"] = ref.Answer, ref.DecidedBy
 				}
 			}
 			if len(v.Conditions) > 0 {
@@ -289,6 +284,21 @@ func (s *Service) Register(x *command.Executor) error {
 			}()
 		}
 	})
+	return nil
+}
+
+// addJudgmentRef 把判断引用并进处置载荷：记录过了保留期，apa why 仍从这里读出答案与定案者（§6.16）。
+func addJudgmentRef(tx *store.Tx, payload map[string]any, id string) error {
+	payload["judgment"] = id
+	rec, err := record.Get(tx, id)
+	if e, ok := err.(*domain.Error); ok && e.Code == domain.CodeNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ref := record.RefOf(rec)
+	payload["answer"], payload["decided_by"] = ref.Answer, ref.DecidedBy
 	return nil
 }
 
