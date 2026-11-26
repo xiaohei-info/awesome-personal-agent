@@ -236,7 +236,7 @@ func TestRequestValidationAndAuthorization(t *testing.T) {
 	if e.get(t, id).Phase != domain.PhaseOpen {
 		t.Fatal("refused requests must not move the item")
 	}
-	for name, who := range map[string]command.Identity{"observer": observer, "stranger worker": agent("other", authz.LevelWorker), "run": runner} {
+	for name, who := range map[string]command.Identity{"observer": observer, "stranger worker": agent("other", authz.LevelWorker)} {
 		if _, err := e.do(who, "decision.request", "", map[string]any{"id": id, "ask": ask(nil)}); exit(err) != domain.ExitPermissionDenied {
 			t.Errorf("%s: want exit 4, got %v", name, err)
 		}
@@ -337,7 +337,7 @@ func TestOnlyFirstAnswerCounts(t *testing.T) {
 	e.verify(t)
 }
 
-// worker 在自己的事项上回答是二档，档位未放开得 23；observer 与不在运行范围的运行钥匙在钥匙范围外（4）。三种拒绝都留痕。
+// worker 在自己的事项上回答是二档，档位未放开得 23；运行凭据随所属 Agent，同样 23；observer 在钥匙范围外（4）。三种拒绝都留痕。
 func TestWorkerObserverAndRunCannotAnswer(t *testing.T) {
 	e := setup(t)
 	id := e.asked(t, nil)
@@ -345,7 +345,7 @@ func TestWorkerObserverAndRunCannotAnswer(t *testing.T) {
 	for name, c := range map[string]struct {
 		who  command.Identity
 		want int
-	}{"worker": {worker, domain.ExitTierClosed}, "observer": {observer, domain.ExitPermissionDenied}, "run": {runner, domain.ExitPermissionDenied}} {
+	}{"worker": {worker, domain.ExitTierClosed}, "observer": {observer, domain.ExitPermissionDenied}, "run": {runner, domain.ExitTierClosed}} {
 		if _, err := e.do(c.who, "decision.answer", "", map[string]any{"id": id, "choice": "A"}); exit(err) != c.want {
 			t.Errorf("%s: want exit %d, got %v", name, c.want, err)
 		}
@@ -387,13 +387,13 @@ func TestProposalAcceptAndDismiss(t *testing.T) {
 	if ev := e.last(t, n, domain.EvItemPhaseChanged); e.get(t, n).Phase != domain.PhaseDropped || ev.Reason != "proposal dismissed" {
 		t.Fatalf("dismiss without reason: %+v", ev)
 	}
-	// 只认第一次：已处理的建议再来是 6；运行身份是 4 并留痕。
+	// 只认第一次：已处理的建议再来是 6；运行身份随所属 Agent 是 23 并留痕。
 	if _, err := e.do(owner, "proposal.dismiss", "", map[string]any{"id": a}); exit(err) != domain.ExitConflict {
 		t.Fatalf("second decision on a proposal: %v", err)
 	}
 	p := e.item(t, map[string]any{"phase": "proposed"})
-	if _, err := e.do(runner, "proposal.accept", "", map[string]any{"id": p}); exit(err) != domain.ExitPermissionDenied || rejections(e.events(t, p)) != 1 {
-		t.Fatalf("run identity: want exit 4 recorded, got %v", err)
+	if _, err := e.do(runner, "proposal.accept", "", map[string]any{"id": p}); exit(err) != domain.ExitTierClosed || rejections(e.events(t, p)) != 1 {
+		t.Fatalf("run identity: want exit 23 recorded, got %v", err)
 	}
 	if e.get(t, p).Phase != domain.PhaseProposed {
 		t.Fatal("rejected accept must not change the item")

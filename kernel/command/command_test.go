@@ -523,9 +523,8 @@ func TestChainDepthResolvedByCaller(t *testing.T) {
 		}}); err != nil {
 		t.Fatal(err)
 	}
-	inScope := func(*store.Tx, authz.Object) (bool, bool, error) { return true, false, nil }
 	run := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r1", Via: domain.ViaCLI, Run: "r1"},
-		Level: authz.LevelRun, RunScope: inScope, RunDepth: 2}
+		Level: authz.LevelRun, RunDepth: 2}
 	agent := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
 	depthOf := func(who Trusted, cmd, id string) (int, Result) {
 		t.Helper()
@@ -709,8 +708,7 @@ func TestTiersAreDecidedInThePipeline(t *testing.T) {
 	}
 	// 运行钥匙随运行所属 Agent 的档位；没有归属的运行只整理。
 	run := func(agent string) Trusted {
-		return Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r", Via: domain.ViaCLI, Run: "r"}, Level: authz.LevelRun, RunAgentID: agent,
-			RunScope: func(*store.Tx, authz.Object) (bool, bool, error) { return true, true, nil }}
+		return Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r", Via: domain.ViaCLI, Run: "r"}, Level: authz.LevelRun, RunAgentID: agent}
 	}
 	if err := do(run("agent_a"), "decision.answer", noteIn{ID: "q"}); err != nil {
 		t.Fatalf("run follows its agent: %v", err)

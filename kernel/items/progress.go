@@ -115,7 +115,7 @@ func (s *svc) progress() command.Spec {
 			return object(tx, cur, cur)
 		},
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) []authz.Action {
-			return editActions(c, o, boundOr(tx, c, o), false, false)
+			return editActions(boundOr(tx, c, o), false, false)
 		},
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)

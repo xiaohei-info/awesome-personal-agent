@@ -177,7 +177,7 @@ func TestEntryMatrixIdentityByTier(t *testing.T) {
 		{"DEL", [5]int{0, 0, 23, 23, 20}},
 		{"DEL_DECIDE", [5]int{0, 0, 0, 23, 20}},
 		{"DEL_RULES", [5]int{0, 0, 0, 0, 20}},
-		{run, [5]int{0, 0, 23, 4, 20}},
+		{run, [5]int{0, 0, 23, 23, 20}}, // 运行凭据只带身份：与所属 Agent（未设档位，只整理）的钥匙相同
 		{"web", [5]int{0, 0, 0, 0, 0}},
 	}
 	wantReason := map[int]string{domain.ExitPermissionDenied: domain.ReasonOutOfScope, domain.ExitTierClosed: domain.ReasonTierClosed, domain.ExitWebOnly: domain.ReasonHardLine}
@@ -194,7 +194,7 @@ func TestEntryMatrixIdentityByTier(t *testing.T) {
 				secret := e.secret[row.who]
 				if row.who == run {
 					target := id
-					if col == "rules" || col == "power" { // 项目不是运行的目标：运行范围只有目标事项
+					if col == "rules" || col == "power" { // 对象是项目：运行的目标另建一条事项
 						target = e.item(workHost, fmt.Sprintf("t%d", n))
 					}
 					secret = e.runFor(target)

@@ -418,7 +418,7 @@ type dispatchListIn struct {
 	Limit     int    `json:"limit"`
 }
 
-// dispatchList 是只读命令：列委派记录（Web 的执行者视图、apa 读取）。运行凭据只能按范围内的事项读。
+// dispatchList 是只读命令：列委派记录（Web 的执行者视图、apa 读取）。
 func dispatchList() command.Spec {
 	return command.Spec{Name: "delegate.dispatch_list", Action: authz.ActionRead, Tier: authz.TierRead,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
@@ -428,18 +428,6 @@ func dispatchList() command.Spec {
 		Apply: func(c *command.Ctx) (any, error) {
 			var v dispatchListIn
 			_ = decode(c.Input, &v)
-			if c.Caller.Level == authz.LevelRun {
-				ok := false
-				if v.Item != "" && c.Caller.RunScope != nil {
-					var err error
-					if ok, _, err = c.Caller.RunScope(c.Tx, authz.Object{ID: v.Item}); err != nil {
-						return nil, err
-					}
-				}
-				if !ok {
-					return nil, domain.NewError(domain.CodePermissionDenied, "a run can only read dispatches of items in its scope", "pass item= with the run's target or one of its children")
-				}
-			}
 			ds, err := ListDispatches(c.Tx, DispatchFilter(v))
 			return map[string]any{"dispatches": ds}, err
 		}}

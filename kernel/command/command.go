@@ -61,9 +61,6 @@ type Caller struct {
 	CredentialAgentID string
 	// CredentialHarness 是凭据所属程序；没有 Agent 归属的旧设置迁移来的凭据，档位按兼容卡 legacy:<程序> 取（只改档位，不改投递路由）。
 	CredentialHarness string
-	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
-	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
-	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
 	// RunDepth 只有运行凭据有值：运行记录的链路深度，本运行发出的命令据它继承（§14.9）。
 	RunDepth int
 	// RunAgentID 只有运行凭据有值：运行所属的 Agent（运行记录上的快照），后台运行随它的档位。
@@ -545,11 +542,6 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 	tr.obj = obj.ID
 	if spec.Refine != nil {
 		if err := spec.Refine(tx, caller, &obj, req.Input); err != nil {
-			return Result{}, Commit{}, err
-		}
-	}
-	if caller.Level == authz.LevelRun && caller.RunScope != nil {
-		if obj.InRunScope, obj.InRunProject, err = caller.RunScope(tx, obj); err != nil {
 			return Result{}, Commit{}, err
 		}
 	}

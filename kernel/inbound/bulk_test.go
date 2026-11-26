@@ -291,8 +291,8 @@ func TestBatchSelectedShapeAndPermissions(t *testing.T) {
 		}
 	}
 	sel := BatchRequest{Mode: BatchSelected, Do: "accept", Filter: BatchFilter{IDs: []string{a}}}
-	if _, err := Batch(bg, e.x, e.st, command.Request{Identity: runIdent, Owner: "owner"}, sel); exitOf(err) != domain.ExitPermissionDenied {
-		t.Errorf("run credential: %v", err)
+	if res, err := Batch(bg, e.x, e.st, command.Request{Identity: runIdent, Owner: "owner"}, sel); err != nil || len(res) != 1 || res[0].Code != domain.CodeTierClosed {
+		t.Errorf("run credential follows its Agent: %+v %v", res, err)
 	}
 	if res, err := Batch(bg, e.x, e.st, command.Request{Identity: delegate, Owner: "owner"}, sel); err != nil || len(res) != 1 || res[0].OK || res[0].Code != domain.CodeTierClosed {
 		t.Errorf("delegate without the decide tier is refused per item, as a single accept would be: %+v %v", res, err)

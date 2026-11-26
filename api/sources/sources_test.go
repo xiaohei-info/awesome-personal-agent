@@ -1090,9 +1090,6 @@ func TestRestoreSourceEventsRoutes(t *testing.T) {
 	if r := e.do(run, "GET", "/v1/source-events/restorable?"+win, ""); r.Code != 403 || strings.Contains(r.Body.String(), "matched") {
 		t.Fatalf("run credential preview: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(run, "POST", "/v1/source-events/restore", body); r.Code != 403 {
-		t.Fatalf("run credential restore: %d %s", r.Code, r.Body)
-	}
 	dlg := e.token(auth.Delegate)
 	for name, r := range map[string]resp{
 		"observer":  e.do(obs, "POST", "/v1/source-events/restore", body),

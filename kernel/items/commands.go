@@ -369,12 +369,12 @@ func boundOr(tx *store.Tx, c command.Caller, o authz.Object) bool {
 	return ok
 }
 
-// editActions：改自己的事项（运行凭据：范围内的事项）为 update_own，改他人的为 edit_any_item（§14.3）；
+// editActions：改自己的事项为 update_own，改他人的为 edit_any_item（§14.3）；
 // 写了 assignee 或 project 再加名单校验点，使 21 号拒绝走管线留痕。
-func editActions(c command.Caller, o authz.Object, own, wroteAssignee, wroteProject bool, first ...authz.Action) []authz.Action {
+func editActions(own, wroteAssignee, wroteProject bool, first ...authz.Action) []authz.Action {
 	as := first
 	if len(as) == 0 {
-		if own || (c.Level == authz.LevelRun && o.InRunScope) {
+		if own {
 			as = []authz.Action{authz.ActionUpdateOwn}
 		} else {
 			as = []authz.Action{authz.ActionEditAnyItem}
@@ -585,9 +585,9 @@ func (s *svc) create() command.Spec {
 			v, _ := parse(in)
 			own := o.Assignee != "" && o.Assignee == c.Actor.Principal
 			if v.phase() == domain.PhaseProposed {
-				return editActions(c, o, own, v.Assignee != "", o.Project != "", authz.ActionCreateProposed)
+				return editActions(own, v.Assignee != "", o.Project != "", authz.ActionCreateProposed)
 			}
-			return editActions(c, o, own, v.Assignee != "", o.Project != "")
+			return editActions(own, v.Assignee != "", o.Project != "")
 		},
 		Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
@@ -670,7 +670,7 @@ func (s *svc) update() command.Spec {
 			_, _, _, patch, _ := plan(tx, in)
 			_, a := patch["assignee"]
 			_, p := patch["project"]
-			return editActions(c, o, boundOr(tx, c, o), a, p)
+			return editActions(boundOr(tx, c, o), a, p)
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			cur, next, _, _, err := plan(tx, in)
@@ -739,7 +739,7 @@ func (s *svc) transition() command.Spec {
 		},
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, in json.RawMessage) []authz.Action {
 			cur, _, v, _ := plan(tx, in)
-			as := editActions(c, o, boundOr(tx, c, o), false, false)
+			as := editActions(boundOr(tx, c, o), false, false)
 			if leavesPending(cur.Phase, v.To) {
 				as = append(as, authz.ActionAnswerDecision)
 			}
@@ -792,7 +792,7 @@ func (s *svc) relate() command.Spec {
 			return object(tx, cur, cur)
 		},
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) []authz.Action {
-			return editActions(c, o, boundOr(tx, c, o), false, false)
+			return editActions(boundOr(tx, c, o), false, false)
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)

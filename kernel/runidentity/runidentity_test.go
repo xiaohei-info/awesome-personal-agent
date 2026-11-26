@@ -164,29 +164,19 @@ func (e *env) events(t *testing.T, typ string) (n int) {
 	return
 }
 
-// ACT-BGT-03：运行凭据只限目标事项及其子事项；写无关事项、改无关事项阶段、建项目都是退出码 4。
-func TestRunCredentialIsScopedToTarget(t *testing.T) {
+// 运行凭据只带身份（§14.2）：写非目标事项与所属 Agent 的钥匙同样判定。没设过档位的 Agent 能整理任何事项、建项目。
+func TestRunCredentialWritesLikeItsAgent(t *testing.T) {
 	e := setup(t)
 	target := e.newItem(t, map[string]any{"assignee": workHost})
-	child := e.childOf(t, target)
-	grandchild := e.childOf(t, child)
 	other := e.newItem(t, map[string]any{})
 	secret, _ := e.run(t, target)
 	run := e.as(secret)
 
-	e.must(t, run, "item.update", map[string]any{"id": target, "summary": "progress"})
-	e.must(t, run, "item.update", map[string]any{"id": grandchild, "summary": "deep"})
-	if e.item(t, target).Summary != "progress" || e.item(t, grandchild).Summary != "deep" {
-		t.Fatal("in-scope writes did not land")
-	}
-	e.must(t, run, "delegate.create", map[string]any{"parent": child, "assignee": workHost})
-
-	e.want(t, domain.ExitPermissionDenied, run, "item.update", map[string]any{"id": other, "summary": "x"})
-	e.want(t, domain.ExitPermissionDenied, run, "item.transition", map[string]any{"id": other, "to": "dropped", "reason": "x"})
-	e.want(t, domain.ExitPermissionDenied, run, "delegate.create", map[string]any{"parent": other, "assignee": workHost})
-	e.want(t, domain.ExitPermissionDenied, run, "project.create", map[string]any{"name": "p"})
-	if got := e.item(t, other); got.Summary != "" || got.Phase != domain.PhaseOpen {
-		t.Fatalf("unrelated item changed: %+v", got)
+	e.must(t, run, "item.update", map[string]any{"id": other, "summary": "x"})
+	e.must(t, run, "delegate.create", map[string]any{"parent": other, "assignee": workHost})
+	e.must(t, run, "project.create", map[string]any{"name": "p"})
+	if got := e.item(t, other); got.Summary != "x" {
+		t.Fatalf("non-target write did not land: %+v", got)
 	}
 }
 
@@ -207,8 +197,8 @@ func TestRunCredentialActorCarriesRunID(t *testing.T) {
 	}
 }
 
-// ACT-BGG-01：运行凭据不能代答、接受或丢弃，全部退出码 4，各记一条拒绝事件，事项不变。
-func TestRunCredentialCannotDecide(t *testing.T) {
+// ACT-BGG-01：所属 Agent 没放开拍板时，运行凭据代答、接受、丢弃都是退出码 23，各记一条拒绝事件，事项不变。
+func TestRunCredentialFollowsAgentTier(t *testing.T) {
 	e := setup(t)
 	target := e.newItem(t, map[string]any{})
 	secret, _ := e.run(t, target)
@@ -219,9 +209,9 @@ func TestRunCredentialCannotDecide(t *testing.T) {
 	prop := e.newItem(t, map[string]any{"phase": "proposed"})
 	before := []domain.Item{e.item(t, ask), e.item(t, prop)}
 
-	e.want(t, domain.ExitPermissionDenied, run, "decision.answer", map[string]any{"id": ask, "choice": "A"})
-	e.want(t, domain.ExitPermissionDenied, run, "proposal.accept", map[string]any{"id": prop})
-	e.want(t, domain.ExitPermissionDenied, run, "proposal.dismiss", map[string]any{"id": prop, "reason": "x"})
+	e.want(t, domain.ExitTierClosed, run, "decision.answer", map[string]any{"id": ask, "choice": "A"})
+	e.want(t, domain.ExitTierClosed, run, "proposal.accept", map[string]any{"id": prop})
+	e.want(t, domain.ExitTierClosed, run, "proposal.dismiss", map[string]any{"id": prop, "reason": "x"})
 
 	if n := e.events(t, domain.EvCommandRejected); n != 3 {
 		t.Fatalf("want 3 rejection events, got %d", n)
@@ -230,13 +220,6 @@ func TestRunCredentialCannotDecide(t *testing.T) {
 		after[0].Ask.Resolution != nil {
 		t.Fatalf("items changed: %+v -> %+v", before, after)
 	}
-}
-
-// ACT-CMD-03：运行凭据不能提交执行者声明。
-func TestRunCredentialCannotDeclare(t *testing.T) {
-	e := setup(t)
-	secret, _ := e.run(t, e.newItem(t, map[string]any{}))
-	e.want(t, domain.ExitPermissionDenied, e.as(secret), "executor.declare", map[string]any{"harness": "acme"})
 }
 
 // ACT-BGG-02：运行凭据委派给项目名单外的执行者是退出码 21，没有名单外子事项。
@@ -339,8 +322,8 @@ func TestIssueValidatesRun(t *testing.T) {
 	if exitOf(issue(domain.Run{Category: domain.RunSource, Target: "src_1", TimeoutSec: 5})) != domain.ExitUsage {
 		t.Fatal("a source pull is not an agent run and gets no credential")
 	}
-	if exitOf(issue(domain.Run{Category: domain.RunBackground, Target: "itm_missing", TimeoutSec: 5})) != domain.ExitUsage {
-		t.Fatal("a run whose target is not an item gets no credential")
+	if err := issue(domain.Run{Category: domain.RunBackground, Target: "batch:src_1", TimeoutSec: 5}); err != nil {
+		t.Fatalf("a run whose target is not an item still gets a credential: %v", err)
 	}
 	if err := issue(domain.Run{Category: domain.RunTask, Target: target, TimeoutSec: 5}); err != nil {
 		t.Fatal(err)
@@ -464,7 +447,7 @@ func TestExchangeForWakeRun(t *testing.T) {
 		t.Fatalf("expires must be start+timeout: %v %v", late, err)
 	}
 	e.must(t, at(first, now), "item.update", update)
-	e.want(t, domain.ExitPermissionDenied, at(first, now), "item.update", map[string]any{"id": other, "summary": "s"})
+	e.must(t, at(first, now), "item.update", map[string]any{"id": other, "summary": "s"})
 	e.want(t, domain.ExitUnauthenticated, at(first, exp), "item.update", update)
 
 	second, _, err := exchange(auth.Worker, run)

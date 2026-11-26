@@ -1,6 +1,6 @@
 // Package runidentity 是运行凭据（设计 §14.2、§14.3、§7.7）：内核为每次 agent 运行（任务型与后台运行）
-// 生成的 worker 级短期凭据。它绑定一次运行及其目标事项，范围是目标事项与其子事项（含更深的后代），
-// 没有代答能力（决策、建议、声明命令一律退出码 4，由授权判定的 LevelRun 行保证），不是新的信任级。
+// 生成的短期凭据。它只带身份：哪次运行、属于哪个 Agent、链路深度。它不带写范围或读取限制，
+// 判定结果与所属 Agent 的钥匙发出的相同；运行的目标不是事项时照常签发。
 //
 // 凭据明文只在签发时返回一次，账本只存 SHA-256 哈希。凭据随运行结束失效：每次认证都读运行状态，
 // 终态（成功、失败、超时）即拒绝，所以失效与 proc.Settle 在同一事务生效，不依赖调用方记得吊销；
@@ -23,7 +23,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -69,34 +68,27 @@ func hashOf(secret string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// runItem 取 agent 运行及其目标事项。来源拉取、转换、读取等不是 agent 运行，目标也不是事项，不签发。
-func runItem(tx *store.Tx, runID string) (proc.Record, domain.Item, error) {
+// agentRun 取 agent 运行。来源拉取、转换、读取等不是 agent 运行，不签发；目标是不是事项不影响签发。
+func agentRun(tx *store.Tx, runID string) (proc.Record, error) {
 	rec, err := proc.Get(tx, runID)
 	if err != nil {
-		return rec, domain.Item{}, err
+		return rec, err
 	}
 	if c := rec.Run.Category; c != domain.RunTask && c != domain.RunBackground {
-		return rec, domain.Item{}, invalid("only task and background runs get a run credential")
+		return rec, invalid("only task and background runs get a run credential")
 	}
-	it, err := items.Get(tx, rec.Run.Target)
-	if err != nil {
-		if e, ok := err.(*domain.Error); ok && e.Code == domain.CodeNotFound {
-			return rec, it, invalid("run target is not an existing item")
-		}
-		return rec, it, err
-	}
-	return rec, it, nil
+	return rec, nil
 }
 
-// Issue 在 tx 内为运行签发凭据并返回明文（唯一一次可见）。运行必须是未结束的 task 或 background 运行，
-// 目标事项必须存在。重复签发替换旧凭据。调用方应与 Run 入队放在同一事务（§13.6 拉起流程第 3 步）。
+// Issue 在 tx 内为运行签发凭据并返回明文（唯一一次可见）。运行必须是未结束的 task 或 background 运行。
+// 重复签发替换旧凭据。调用方应与 Run 入队放在同一事务（§13.6 拉起流程第 3 步）。
 func Issue(tx *store.Tx, runID string, now time.Time) (string, error) {
 	return issue(tx, runID, now, time.Time{})
 }
 
 // issue 的 expires 为零值表示随运行结束失效，不另设过期。
 func issue(tx *store.Tx, runID string, now, expires time.Time) (string, error) {
-	rec, _, err := runItem(tx, runID)
+	rec, err := agentRun(tx, runID)
 	if err != nil {
 		return "", err
 	}
@@ -189,7 +181,7 @@ func (i Identity) Authenticate(tx *store.Tx) (command.Caller, error) {
 	if !found || revoked != 0 || (expires != 0 && now().UnixNano() >= expires) {
 		return command.Caller{}, unauthenticated()
 	}
-	rec, target, err := runItem(tx, runID)
+	rec, err := agentRun(tx, runID)
 	if err != nil {
 		return command.Caller{}, err
 	}
@@ -205,9 +197,8 @@ func (i Identity) Authenticate(tx *store.Tx) (command.Caller, error) {
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:" + runID, Via: domain.ViaCLI,
 			Harness: harness, Session: i.Origin.Session, Run: runID},
 		Level:    authz.LevelRun,
-		RunScope: scope(target),
 		RunDepth: rec.Run.ChainDepth,
-		// 后台运行随所属 Agent 的档位（运行记录上的快照）；Actor.Harness 可以是调用方自报的，只作留痕（§14.3）。
+		// 权限随所属 Agent（运行记录上的快照）；Actor.Harness 可以是调用方自报的，只作留痕（§14.3）。
 		RunAgentID: agentID,
 	}, nil
 }
@@ -223,30 +214,6 @@ func lookup(tx *store.Tx, hash string) (runID string, revoked, expires int64, fo
 	}
 	err = rows.Scan(&runID, &revoked, &expires)
 	return runID, revoked, expires, err == nil, err
-}
-
-// scope 解析对象是否在运行范围内：对象是目标事项或其后代；项目是否为目标事项所属项目。
-// 范围全部来自账本（parent 关系与事项的项目），不来自请求。
-func scope(target domain.Item) func(*store.Tx, authz.Object) (bool, bool, error) {
-	return func(tx *store.Tx, o authz.Object) (bool, bool, error) {
-		inProject := target.Project != "" && o.Project == target.Project
-		seen := map[string]bool{}
-		for id := o.ID; id != "" && !seen[id]; {
-			if id == target.ID {
-				return true, inProject, nil
-			}
-			seen[id] = true
-			parent, ok, err := items.ParentOf(tx, id)
-			if err != nil {
-				return false, false, err
-			}
-			if !ok {
-				break
-			}
-			id = parent
-		}
-		return false, inProject, nil
-	}
 }
 
 // Env 是运行凭据的环境变量传递（§7.7）：供 proc.Options.Env 在启动时注入，不入账本。

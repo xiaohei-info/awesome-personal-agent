@@ -313,16 +313,16 @@ func TestDelegateKeepsItsOwnLevelDuringWakeRun(t *testing.T) {
 		}
 	}
 
-	// 运行凭据才是运行身份：只在本次目标内，目标外是 4，不能代答。
+	// 运行凭据只带身份：写目标外的事项、代答都随所属 Agent，与它的钥匙相同（§14.2）。
 	run := runidentity.Identity{Secret: secret, Now: func() time.Time { return e.now }}
 	if _, err := e.do(run, "item.update", map[string]any{"id": target, "title": "by run"}); err != nil {
 		t.Fatalf("run credential on its target: %v", err)
 	}
-	if _, err := e.do(run, "item.update", map[string]any{"id": other.ID, "title": "by run"}); exitOf(err) != domain.ExitPermissionDenied {
+	if _, err := e.do(run, "item.update", map[string]any{"id": other.ID, "title": "by run"}); err != nil {
 		t.Fatalf("run credential outside its target: %v", err)
 	}
-	if _, err := e.do(run, "decision.answer", map[string]any{"id": e.asked(t), "choice": "A"}); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("run credential deciding: %v", err)
+	if _, err := e.do(run, "decision.answer", map[string]any{"id": e.asked(t), "choice": "A"}); err != nil {
+		t.Fatalf("run credential deciding follows its Agent: %v", err)
 	}
 	if _, err := e.do(run, "test.power", map[string]any{}); exitOf(err) != domain.ExitWebOnly {
 		t.Fatalf("run credential 3b: %v", err)

@@ -19,7 +19,7 @@ const (
 	LevelObserver Level = "observer"
 	LevelWorker   Level = "worker"
 	LevelDelegate Level = "delegate"
-	LevelRun      Level = "run" // 运行钥匙：绑定一次运行，写范围是本次目标事项及其子事项
+	LevelRun      Level = "run" // 运行凭据：只标明哪次运行、属于哪个 Agent；范围与 delegate 钥匙相同，权限随所属 Agent
 	LevelWeb      Level = "web"
 )
 
@@ -68,9 +68,6 @@ func (t Tier) String() string { return tierNames[t] }
 type Object struct {
 	ID       string
 	Assignee string // 事项当前的执行者
-	// 运行钥匙的范围由内核据账本解析：对象是否为目标事项或其子事项 / 是否属于目标事项所属项目。
-	InRunScope   bool
-	InRunProject bool
 
 	Kind    string
 	Project string // 二档的项目限定按它比对
@@ -210,12 +207,11 @@ func validLevel(r Request) bool {
 
 func own(r Request) bool { return r.Object.Assignee != "" && r.Object.Assignee == r.Actor.Principal }
 
-// inScope 是钥匙范围（§14.2）：observer 只读与提建议；worker 自己的事项；运行钥匙本次目标；delegate 全部；Web 本人全部。
+// inScope 是钥匙范围（§14.2）：observer 只读与提建议；worker 自己的事项；delegate 与运行凭据全部；Web 本人全部。
 func inScope(r Request) bool {
 	if r.Level == LevelWeb {
 		return true
 	}
-	o := r.Object
 	switch r.Action {
 	case ActionRead, ActionCreateProposed:
 		return true
@@ -232,18 +228,8 @@ func inScope(r Request) bool {
 		case ActionReviseMaterial, ActionSubmitPlugin, ActionEditCheckout:
 			return true
 		}
-	case LevelDelegate:
+	case LevelDelegate, LevelRun:
 		return true
-	case LevelRun:
-		switch r.Action {
-		case ActionUpdateOwn, ActionDelegate, ActionEditAnyItem, ActionAnswerDecision:
-			return o.InRunScope
-		case ActionReviseMaterial:
-			// shortcut: 材料与附件的写范围还没收到本次目标（方案 A05），沿用旧口径；要收窄先给材料解析出所属事项。
-			return true
-		case ActionEditCheckout:
-			return o.InRunProject
-		}
 	}
 	return false
 }

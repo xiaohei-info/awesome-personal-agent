@@ -59,8 +59,8 @@ func TestScopeIsTheKey(t *testing.T) {
 		{req(LevelObserver, agent, ActionUpdateOwn, TierOrganize, open), domain.CodePermissionDenied},
 		{req(LevelObserver, agent, ActionCreateProposed, TierOrganize, open), ""},
 		{req(LevelWorker, agent, ActionUpdateOwn, TierOrganize, open), domain.CodePermissionDenied}, // 不是自己的事项
-		{req(LevelRun, agent, ActionEditAnyItem, TierOrganize, open), domain.CodePermissionDenied},  // 不在本次目标
-		{req(LevelRun, agent, ActionChangeSettings, TierRules, open), domain.CodePermissionDenied},
+		{req(LevelRun, agent, ActionEditAnyItem, TierOrganize, open), ""},                           // 运行凭据与 delegate 钥匙范围相同
+		{req(LevelRun, agent, ActionChangeSettings, TierRules, open), ""},
 		{req(LevelDelegate, agent, ActionWebRead, TierRead, open), domain.CodePermissionDenied},
 		{req(LevelDelegate, agent, ActionEditAnyItem, TierOrganize, policy.AgentAllowance{}), ""},
 		// 无效级别一律范围外：未知级别、空级别、非本人在 Web 之外自称 web。
@@ -76,12 +76,8 @@ func TestScopeIsTheKey(t *testing.T) {
 	}
 	own := req(LevelWorker, agent, ActionUpdateOwn, TierOrganize, policy.AgentAllowance{})
 	own.Object.Assignee = "cred"
-	inRun := req(LevelRun, agent, ActionEditAnyItem, TierOrganize, policy.AgentAllowance{})
-	inRun.Object.InRunScope = true
-	for _, r := range []Request{own, inRun} {
-		if d := Decide(p, r); d.Err != nil {
-			t.Fatalf("in scope: %+v", d.Err)
-		}
+	if d := Decide(p, own); d.Err != nil {
+		t.Fatalf("in scope: %+v", d.Err)
 	}
 }
 
@@ -103,7 +99,7 @@ func TestAllowanceOpensTiers(t *testing.T) {
 		{req(LevelDelegate, agent, ActionAnswerDecision, TierDecide, decide), domain.CodeTierClosed}, // 限了项目，没有项目的对象不在范围
 		{in(req(LevelDelegate, agent, ActionChangeSettings, TierRules, decide), "p1"), domain.CodeTierClosed},
 		{req(LevelDelegate, agent, ActionChangeSettings, TierRules, open), ""},
-		{req(LevelRun, agent, ActionAnswerDecision, TierDecide, none), domain.CodePermissionDenied}, // 范围先于档位
+		{req(LevelRun, agent, ActionAnswerDecision, TierDecide, none), domain.CodeTierClosed}, // 运行凭据随所属 Agent
 		{req(LevelWeb, web, ActionAnswerDecision, TierDecide, none), ""},
 		{req(LevelDelegate, system, ActionChangeSettings, TierRules, none), ""},
 	}

@@ -183,41 +183,19 @@ func TestObserverReadsEveryRecordWithItsLevels(t *testing.T) {
 	}
 }
 
-func TestRunCredentialReadsOnlyTargetItemRecords(t *testing.T) {
+// 运行凭据只带身份（§14.2）：判断记录与所属 Agent 的钥匙一样读，不限于本次目标。
+func TestRunCredentialReadsJudgmentRecords(t *testing.T) {
 	e := setup(t)
-	if r := e.get(e.run, "/v1/judgments/"+e.hi); r.Code != 200 {
-		t.Fatalf("target item's record: %d %s", r.Code, r.Body)
-	}
-	if r := e.get(e.run, "/v1/judgments/"+e.lo); r.Code != 404 || code(t, r) != domain.CodeNotFound {
-		t.Fatalf("other item's record must look absent: %d %s", r.Code, r.Body)
-	}
-	if r := e.get(e.run, "/v1/judgments/"+e.orphan); r.Code != 404 {
-		t.Fatalf("record of an unknown subject: %d %s", r.Code, r.Body)
-	}
-	if r := e.get(e.run, "/v1/judgments"); r.Code != 400 {
-		t.Fatalf("run list without subject: %d %s", r.Code, r.Body)
-	}
-	if r := e.get(e.run, "/v1/judgments?subject=e_lo"); r.Code != 200 || !strings.Contains(r.Body.String(), `"judgments":[]`) {
-		t.Fatalf("out of scope subject lists nothing: %d %s", r.Code, r.Body)
+	for _, id := range []string{e.hi, e.lo} {
+		if r := e.get(e.run, "/v1/judgments/"+id); r.Code != 200 {
+			t.Fatalf("record %s: %d %s", id, r.Code, r.Body)
+		}
 	}
 	var all struct{ Judgments []record.Record }
-	var evID string
-	_ = e.st.View(bg, func(tx *store.Tx) error {
-		evs, err := runner.Events(tx, "src_1")
-		evID = evs[0].ID
-		return err
-	})
-	r := e.get(e.run, "/v1/judgments?subject="+evID)
+	r := e.get(e.run, "/v1/judgments")
 	_ = json.Unmarshal(r.Body.Bytes(), &all)
-	if r.Code != 200 || len(all.Judgments) != 1 || all.Judgments[0].ID != e.hi {
-		t.Fatalf("in scope subject: %d %s", r.Code, r.Body)
-	}
-	// 事项本身作为 subject（对话增量、事项上的判断）也算范围内。
-	if err := e.st.Update(bg, func(tx *store.Tx) error { return record.Put(tx, rec("jd_item", e.itemA, e.now.Add(time.Hour))) }); err != nil {
-		t.Fatal(err)
-	}
-	if r := e.get(e.run, "/v1/judgments/jd_item"); r.Code != 200 {
-		t.Fatalf("item subject: %d %s", r.Code, r.Body)
+	if r.Code != 200 || len(all.Judgments) < 2 {
+		t.Fatalf("run lists without subject: %d %s", r.Code, r.Body)
 	}
 }
 
