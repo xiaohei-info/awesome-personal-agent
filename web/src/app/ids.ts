@@ -23,7 +23,7 @@ export const ROUTE = ["inject", "wake", "web"] as const;
 /** 被压成只留未读的原因：kernel/delivery/disturb.go Suppressed* */
 export const SUPPRESSED = ["daily_cap", "muted"] as const;
 /** 运行类别：kernel/domain/entities.go RunCategory */
-export const RUN_CATEGORY = ["judge", "generate", "task", "background", "source", "transform", "reader"] as const;
+export const RUN_CATEGORY = ["judge", "generate", "task", "background", "source_batch", "source", "transform", "reader"] as const;
 /** 运行状态：kernel/domain/entities.go RunState */
 export const RUN_STATE = ["queued", "running", "succeeded", "failed", "timeout"] as const;
 /** 运行者（§13.6，内核按字面量比较，无常量） */
@@ -51,7 +51,7 @@ export const SOURCE_TYPE = ["pull", "script", "webhook"] as const;
 /** 来源事件处置：kernel/domain/entities.go Disposition */
 export const DISPOSITION = ["pending", "attached", "proposed", "ignored", "unjudged", "expired", "digest", "alerted"] as const;
 /** 未判定原因：kernel/domain/entities.go Unjudged*。models_paused 由「暂停模型」改动新增 */
-export const UNJUDGED_REASON = ["model_unavailable", "outbound_unset", "undecided", "restored", "models_paused"] as const;
+export const UNJUDGED_REASON = ["model_unavailable", "outbound_unset", "undecided", "restored", "models_paused", "process_failed"] as const;
 /** 外发范围：kernel/sources/registry/outbound.go Scope* */
 export const OUTBOUND_SCOPE = ["full", "excerpt", "meta", "none"] as const;
 /** 积压放开的步骤（§9.3；Web 自己的流程，不是内核常量） */
