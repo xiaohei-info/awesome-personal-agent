@@ -146,7 +146,7 @@ func (f *fx) finishedRuns(n int) []string {
 }
 
 // retentionCase 在一个环境里跑 ACT-RET-01、ACT-RET-02：
-// ingestDays/runDays 是该环境生效的保留天数（默认环境 30/14，调小后的环境 1/1），
+// ingestDays/runDays 是该环境生效的保留天数（默认环境 30/30，调小后的环境 1/1），
 // 数据按"保留期之内/之外"各拨一份过去的时间，外加一份刚到的与一个在途运行。
 func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 	f := opsFx(t, cfg)
@@ -246,12 +246,12 @@ func (f *fx) addWebhookSource(id string) {
 
 // TestFlowRetention 对应验收文档 flow-retention（ACT-RET-01、ACT-RET-02）。
 // 内核的保留期以整天为单位（ingest_retention_days、run_retention_days，最小 1 天），无法配成"1 分钟"，
-// 所以：默认环境验证默认值（30 天、14 天）的边界；调小环境把两项都配成 1 天并验证按新值清理。
+// 所以：默认环境验证默认值（请求体、运行目录各 30 天）的边界；调小环境把两项都配成 1 天并验证按新值清理。
 // 两个环境互相独立，并行执行；"过期"靠把账本里的时间拨到过去实现。
 func TestFlowRetention(t *testing.T) {
-	t.Run("默认保留期 30 天与 14 天", func(t *testing.T) {
+	t.Run("默认保留期各 30 天", func(t *testing.T) {
 		t.Parallel()
-		retentionCase(t, "", 30, 14)
+		retentionCase(t, "", 30, 30)
 	})
 	t.Run("配置调小为 1 天", func(t *testing.T) {
 		t.Parallel()
