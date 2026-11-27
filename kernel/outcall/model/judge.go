@@ -7,6 +7,7 @@ package model
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -142,8 +143,9 @@ func responseUsage(raw []byte) Usage {
 		return Usage{}
 	}
 	u := out.Usage
-	return Usage{InputTokens: u.Input + u.Prompt, OutputTokens: u.Output + u.Completion,
-		CacheReadTokens: u.InputDetails.Cached + u.PromptDetails.Cached}
+	// 两套字段名同时给时只取一套，不相加。
+	return Usage{InputTokens: cmp.Or(u.Input, u.Prompt), OutputTokens: cmp.Or(u.Output, u.Completion),
+		CacheReadTokens: cmp.Or(u.InputDetails.Cached, u.PromptDetails.Cached)}
 }
 
 // Judge 按判断端点的协议取回每题的 p_yes。端点未配置返回 ErrNotConfigured；

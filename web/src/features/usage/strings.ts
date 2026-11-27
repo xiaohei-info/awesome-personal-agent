@@ -32,11 +32,6 @@ const zh = {
   purposes: {
     "chat-prescreen": "聊天里有没有要记的事",
     inbound_urgent: "来源消息急不急",
-    inbound_merge: "建议要不要合并",
-    "chat-extract": "从聊天里提取事项",
-    "triage-draft": "起草建议",
-    "triage-extract": "从来源消息提取事项",
-    "merge-batch": "批量归类建议",
     "decision-card-copy": "决策卡片文案",
     "one-line-summary": "一句话摘要",
     "revision-summary": "改动摘要",
@@ -76,11 +71,6 @@ const en: typeof zh = {
   purposes: {
     "chat-prescreen": "Anything to note in chats",
     inbound_urgent: "Is a source message urgent",
-    inbound_merge: "Should proposals merge",
-    "chat-extract": "Extract items from chats",
-    "triage-draft": "Draft proposals",
-    "triage-extract": "Extract items from sources",
-    "merge-batch": "Group proposals in batches",
     "decision-card-copy": "Decision card wording",
     "one-line-summary": "One-line summaries",
     "revision-summary": "Change summaries",

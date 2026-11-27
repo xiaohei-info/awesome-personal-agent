@@ -1,5 +1,5 @@
 // Package usage 记录并汇总 token 用量：内核直接发出的模型请求，与 APA 拉起的 Agent 运行。
-// 数字只取端点或运行自己回报的值，没回报的只计次数、不估算；记录不含内容与事项 id。
+// 数字只取端点或运行自己回报的值（会话累计值按会话做差），没回报的只计次数、不估算；记录不含内容与事项 id。
 // 本包是 usage_record 的唯一写入方；不判断、不限额、不计费。
 package usage
 
@@ -35,6 +35,15 @@ var Module = store.Module{Name: "usage", Migrations: []store.Migration{{
 );
 CREATE INDEX usage_record_at ON usage_record(at);
 CREATE UNIQUE INDEX usage_record_run ON usage_record(run_id) WHERE run_id <> '';`,
+}, {
+	// 回报会话累计值的运行另存会话与累计快照，下一次同会话的记录据此做差。
+	Version: 2, Ledger: 12, Name: "ledger-v12-usage-session",
+	SQL: `ALTER TABLE usage_record ADD COLUMN harness TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_record ADD COLUMN session TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_record ADD COLUMN session_input_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_record ADD COLUMN session_output_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_record ADD COLUMN session_cache_read_tokens INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX usage_record_session ON usage_record(harness, session) WHERE session <> '';`,
 }}}
 
 // 三个部分。
@@ -70,19 +79,28 @@ type Key struct {
 	Model   string `json:"model,omitempty"`
 }
 
-// Record 是一条记录。
+// Record 是一条记录。Total 只在运行回报会话累计值时填。
 type Record struct {
 	Key
 	Counts
-	Run string
+	Run   string
+	Total SessionTotal
+}
+
+// SessionTotal 是一次运行结束时某个会话的累计用量快照。
+type SessionTotal struct {
+	Harness, Session         string
+	Input, Output, CacheRead int64
 }
 
 // Add 写一条记录；同一运行已记过时什么都不做。
 func Add(tx *store.Tx, at time.Time, r Record) error {
 	_, err := tx.Exec(`INSERT OR IGNORE INTO usage_record (at, part, purpose, agent, model, run_id, requests, reported,
-		input_tokens, output_tokens, cache_read_tokens) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		input_tokens, output_tokens, cache_read_tokens, harness, session, session_input_tokens, session_output_tokens,
+		session_cache_read_tokens) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		at.UnixNano(), r.Part, r.Purpose, r.Agent, r.Model, r.Run, r.Requests, r.Reported,
-		r.InputTokens, r.OutputTokens, r.CacheReadTokens)
+		r.InputTokens, r.OutputTokens, r.CacheReadTokens,
+		r.Total.Harness, r.Total.Session, r.Total.Input, r.Total.Output, r.Total.CacheRead)
 	return err
 }
 
@@ -110,7 +128,6 @@ func AddRun(ctx context.Context, st *store.Store, res proc.Result, now time.Time
 		if err != nil {
 			return err
 		}
-		r := r
 		for _, rec := range recs {
 			if rec.Harness != run.Harness {
 				continue
@@ -120,13 +137,42 @@ func AddRun(ctx context.Context, st *store.Store, res proc.Result, now time.Time
 				r.Agent = n.Zh
 			}
 			if h := rec.Declaration.Headless; h != nil {
-				if in, out, cached, ok := h.ExtractUsage(res.Stdout); ok {
-					r.Reported, r.InputTokens, r.OutputTokens, r.CacheReadTokens = 1, in, out, cached
+				if u, ok := h.ExtractUsage(res.Stdout); ok {
+					r.Reported, r.InputTokens, r.OutputTokens, r.CacheReadTokens = 1, u.Input, u.Output, u.CacheRead
+					if sid := cmp.Or(u.Session, run.SessionID); h.Usage.Cumulative && sid != "" {
+						r.Total = SessionTotal{Harness: run.Harness, Session: sid, Input: u.Input, Output: u.Output, CacheRead: u.CacheRead}
+						if err := sinceSession(tx, run.SessionID, &r); err != nil {
+							return err
+						}
+					}
 				}
 			}
 		}
 		return Add(tx, now, r)
 	})
+}
+
+// sinceSession 把会话累计值换成本次的增量：减去同一 harness、同一会话上一条记录的快照。resumed 是本次续接的会话 id，
+// 运行回报了新 id（压缩换号）时靠它找到上一条。任一项比快照小（会话被压缩或重置）按本次值整条计。
+// shortcut: 累计值在对方进程里清零后、本次又超过旧快照时分辨不出，会少计一个快照的量；对方回报单次值后去掉做差。
+func sinceSession(tx *store.Tx, resumed string, r *Record) error {
+	rows, err := tx.Query(`SELECT session_input_tokens, session_output_tokens, session_cache_read_tokens FROM usage_record
+		WHERE harness = ? AND session <> '' AND session IN (?, ?) ORDER BY id DESC LIMIT 1`, r.Total.Harness, r.Total.Session, resumed)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return rows.Err()
+	}
+	var in, out, cached int64
+	if err := rows.Scan(&in, &out, &cached); err != nil {
+		return err
+	}
+	if r.Total.Input >= in && r.Total.Output >= out && r.Total.CacheRead >= cached {
+		r.InputTokens, r.OutputTokens, r.CacheReadTokens = r.Total.Input-in, r.Total.Output-out, r.Total.CacheRead-cached
+	}
+	return nil
 }
 
 // Row 是一个分组在整个时间段里的合计。

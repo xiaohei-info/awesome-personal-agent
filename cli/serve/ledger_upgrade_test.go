@@ -263,9 +263,9 @@ func TestUpgradeV2ToLatestKeepsRowsAndHistory(t *testing.T) {
 			t.Errorf("table %s lost rows: %d -> %d", n, before.rows[n], after.rows[n])
 		}
 	}
-	for _, n := range []string{"item_progress", "item_correlation", "outcall_judgment", "sources_runner_metric", "connections_connection", "connections_status", "secrets_value"} {
+	for _, n := range []string{"item_progress", "item_correlation", "outcall_judgment", "sources_runner_metric", "connections_connection", "connections_status", "secrets_value", "usage_record"} {
 		if _, ok := after.rows[n]; !ok {
-			t.Errorf("v3 table %s missing", n)
+			t.Errorf("new table %s missing", n)
 		}
 	}
 	for seq, h := range before.payload {

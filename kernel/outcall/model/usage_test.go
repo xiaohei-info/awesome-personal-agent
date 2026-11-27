@@ -29,7 +29,7 @@ func TestUsageReported(t *testing.T) {
 		body     string
 		reported int
 	}{
-		{`{"model":"m","answers":{},"usage":{"input_tokens":5,"output_tokens":1}}`, 2},
+		{`{"model":"m","answers":{},"usage":{"input_tokens":5,"output_tokens":1,"prompt_tokens":5,"completion_tokens":1}}`, 2},
 		{`{"model":"m","answers":{}}`, 0},
 	} {
 		body = tc.body

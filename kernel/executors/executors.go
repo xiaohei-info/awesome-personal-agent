@@ -81,18 +81,26 @@ type Headless struct {
 }
 
 // UsagePaths 是结果事件里 token 用量的字段路径（附录 A.2）。input 须含缓存命中的部分；cache_read 可空。
+// Cumulative 表示这些数是整个会话的累计值，续接时含前几次运行的用量。
 type UsagePaths struct {
-	Input     string `json:"input"`
-	Output    string `json:"output"`
-	CacheRead string `json:"cache_read,omitempty"`
+	Input      string `json:"input"`
+	Output     string `json:"output"`
+	CacheRead  string `json:"cache_read,omitempty"`
+	Cumulative bool   `json:"cumulative,omitempty"`
+}
+
+// RunUsage 是一条结果事件里回报的用量；Session 是同一事件里按 session.extract 取到的会话 id，可空。
+type RunUsage struct {
+	Input, Output, CacheRead int64
+	Session                  string
 }
 
 // ExtractUsage 按声明从无头运行 stdout 的最后一条结果事件取 token 用量；
 // 没声明、没有这样的事件，或报的全是 0（一次请求都没成）时 ok 为假。
 // shortcut: 结果行超过调度器保留的末段（64 KiB）时读不到，按未回报记。
-func (h Headless) ExtractUsage(stdout []byte) (input, output, cacheRead int64, ok bool) {
+func (h Headless) ExtractUsage(stdout []byte) (u RunUsage, ok bool) {
 	if h.Usage == nil {
-		return 0, 0, 0, false
+		return u, false
 	}
 	lines := bytes.Split(stdout, []byte("\n"))
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -109,9 +117,10 @@ func (h Headless) ExtractUsage(stdout []byte) (input, output, cacheRead int64, o
 			continue
 		}
 		cached, _ := jsonCount(obj, h.Usage.CacheRead)
-		return in, out, cached, in+out > 0
+		session, _ := extractJSONPath(obj, []string{h.Session.Extract})
+		return RunUsage{Input: in, Output: out, CacheRead: cached, Session: session}, in+out > 0
 	}
-	return 0, 0, 0, false
+	return u, false
 }
 
 // jsonCount 取 $.a.b 路径上的非负整数。

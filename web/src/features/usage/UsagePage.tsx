@@ -153,7 +153,7 @@ function Table({ label, head, count, none, rows }: { label: string; head: string
               <td>{r.requests.toLocaleString(locale())}</td>
               <td>{tokens(r, r.input_tokens, none)}</td>
               <td>{tokens(r, r.output_tokens, none)}</td>
-              {cached && <td>{r.cache_read_tokens.toLocaleString(locale())}</td>}
+              {cached && <td>{tokens(r, r.cache_read_tokens, none)}</td>}
             </tr>
           ))}
         </tbody>
