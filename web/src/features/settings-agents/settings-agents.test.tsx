@@ -395,6 +395,7 @@ describe("设置 › Agent › 所有 Agent 共用 › 思考强度", () => {
     const card = await screen.findByRole("region", { name: "思考强度" });
     expect(within(card).getByLabelText("判断要不要处理、急不急")).toHaveValue("low");
     expect(within(card).getByRole("option", { name: "低（默认）" })).toBeInTheDocument();
+    expect(within(card).getAllByRole("option", { name: "不指定" })).toHaveLength(3);
     await userEvent.selectOptions(within(card).getByLabelText("后台 Agent 运行"), "high");
     await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
     await waitFor(() => expect(writes(s, "/settings/policy")).toContainEqual({ method: "PUT", url: "/v1/settings/policy", body: { thinking: { judge: "low", write: "medium", background: "high" } } }));

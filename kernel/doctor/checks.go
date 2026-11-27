@@ -115,7 +115,7 @@ func modelEndpoint(ctx context.Context, f Facts, e Env) Check {
 		return c
 	}
 	c.Add(ProbeJudge(ctx, f.Policy.JudgeEndpoint, e))
-	c.Add(ProbeGenerate(ctx, f.Policy.GenerateEndpoint, e))
+	c.Add(ProbeGenerate(ctx, f.Policy.GenerateEndpoint, f.Policy.Thinking, e))
 	switch {
 	case c.Details[0].Code == CodeNotConfigured && c.Details[1].Code == CodeNotConfigured:
 		c.Code, c.Why, c.Next = CodeModelsNone, "no endpoint is configured (optional)", "configure the endpoints in Web settings (model endpoints) when you want the models to work"

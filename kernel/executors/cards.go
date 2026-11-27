@@ -233,8 +233,10 @@ func Resolve(tx *store.Tx, pol policy.Policy, sel Selection) (result Selected, e
 	if !pol.BackgroundPersona {
 		result.Args = append(result.Args, rec.Declaration.Headless.NoPersona...)
 	}
-	for _, a := range rec.Declaration.Headless.Effort {
-		result.Args = append(result.Args, strings.ReplaceAll(a, "{effort}", pol.Thinking.Effective().Background))
+	if bg := pol.Thinking.Effective().Background; bg != policy.ThinkingOff {
+		for _, a := range rec.Declaration.Headless.Effort {
+			result.Args = append(result.Args, strings.ReplaceAll(a, "{effort}", bg))
+		}
 	}
 	result.Snapshot.PermissionCap, result.Snapshot.ConfiguredModel = cap, model
 	return

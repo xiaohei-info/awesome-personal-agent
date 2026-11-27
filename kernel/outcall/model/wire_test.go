@@ -308,6 +308,9 @@ func TestResponsesSendsEffortOnly(t *testing.T) {
 		t.Fatalf("no effort must send no reasoning: %v", b)
 	}
 	var th policy.Thinking
+	if (policy.Thinking{Judge: policy.ThinkingOff}).ModelEffort(true) != "" {
+		t.Fatal("off must send nothing")
+	}
 	if th.ModelEffort(true) != "low" || th.ModelEffort(false) != "medium" {
 		t.Fatalf("defaults = %q %q", th.ModelEffort(true), th.ModelEffort(false))
 	}

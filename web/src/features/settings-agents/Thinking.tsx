@@ -2,7 +2,7 @@ import { useT } from "../../app/i18n";
 import { Card, useDraft, type Doc, type Save } from "../../app/policy-cards";
 import { strings } from "./strings";
 
-const LEVELS = ["low", "medium", "high"] as const;
+const LEVELS = ["off", "low", "medium", "high"] as const;
 const DEFAULTS = { judge: "low", write: "medium", background: "medium" } as const;
 type Key = keyof typeof DEFAULTS;
 

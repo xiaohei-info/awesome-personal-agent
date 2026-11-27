@@ -88,13 +88,13 @@ func TestSameHostCardsResolveIndependently(t *testing.T) {
 	declaration.Headless.Effort = []string{"--think", "{effort}"}
 	e.must(t, owner, "executor.register", declaration)
 	if err := e.st.View(bg, func(tx *store.Tx) error {
-		for set, want := range map[string]string{"": "medium", "high": "high"} {
+		for set, want := range map[string]string{"": "medium", "high": "high", "off": ""} {
 			pol.Thinking.Background = set
 			selected, err := Resolve(tx, pol, Selection{})
 			if err != nil {
 				return err
 			}
-			if i := slices.Index(selected.Args, "--think"); i < 0 || selected.Args[i+1] != want {
+			if i := slices.Index(selected.Args, "--think"); (want == "") != (i < 0) || (i >= 0 && selected.Args[i+1] != want) {
 				t.Fatalf("thinking=%q args=%v", set, selected.Args)
 			}
 		}

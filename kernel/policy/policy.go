@@ -370,7 +370,7 @@ type Policy struct {
 	// BackgroundPersona 为真时后台运行带上 Agent 平时的人格、记忆与常驻说明；默认关，关着时拉起命令追加声明的
 	// headless.no_persona 标志（§13.6）。旧策略版本没有此键，读作关。
 	BackgroundPersona bool `json:"background_persona"`
-	// Thinking 是各类模型调用与后台运行的思考强度（low、medium、high）；旧策略版本没有此键，空读作各自的默认值（§8.1、§13.6）。
+	// Thinking 是各类模型调用与后台运行的思考强度（low、medium、high，或 off 表示不发这个参数）；旧策略版本没有此键，空读作各自的默认值（§8.1、§13.6）。
 	Thinking Thinking `json:"thinking"`
 }
 
@@ -386,6 +386,7 @@ const (
 	DefaultJudgeThinking      = "low"
 	DefaultWriteThinking      = "medium"
 	DefaultBackgroundThinking = "medium"
+	ThinkingOff               = "off" // 不指定：不发该参数，端点不接受时的出口
 )
 
 // Effective 返回补全默认值后的三项。
@@ -393,13 +394,17 @@ func (t Thinking) Effective() Thinking {
 	return Thinking{cmp.Or(t.Judge, DefaultJudgeThinking), cmp.Or(t.Write, DefaultWriteThinking), cmp.Or(t.Background, DefaultBackgroundThinking)}
 }
 
-// ModelEffort 是一次模型调用要发的思考强度：判断类取判断项，其余取写作项。
+// ModelEffort 是一次模型调用要发的思考强度：判断类取判断项，其余取写作项；不指定返回空。
 func (t Thinking) ModelEffort(judging bool) string {
 	e := t.Effective()
+	v := e.Write
 	if judging {
-		return e.Judge
+		v = e.Judge
 	}
-	return e.Write
+	if v == ThinkingOff {
+		return ""
+	}
+	return v
 }
 
 // BackgroundRunTimeout 返回生效的后台运行时限；未设置时取 DefaultBackgroundRunTimeoutSec（4 小时）。
@@ -567,8 +572,8 @@ func normalize(p Policy) (Policy, error) {
 		return p, invalid("background_run_timeout_sec %d: use %d to %d (0.25h to 24h)", p.BackgroundRunTimeoutSec, MinBackgroundRunTimeoutSec, MaxBackgroundRunTimeoutSec)
 	}
 	for _, e := range []string{p.Thinking.Judge, p.Thinking.Write, p.Thinking.Background} {
-		if !oneOf(e, "", "low", "medium", "high") {
-			return p, invalid("thinking %q: use low, medium or high", e)
+		if !oneOf(e, "", ThinkingOff, "low", "medium", "high") {
+			return p, invalid("thinking %q: use off, low, medium or high", e)
 		}
 	}
 	for k, r := range p.Disturb.Push {

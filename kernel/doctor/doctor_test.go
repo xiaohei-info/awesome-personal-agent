@@ -404,7 +404,7 @@ func TestProbeReportsRegionUnavailable(t *testing.T) {
 		}))
 		e := Env{Model: &model.Client{}}
 		j := ProbeJudge(bg, &policy.JudgeEndpoint{URL: srv.URL + "/v1", Protocol: policy.ProtocolSystemOne, Model: "m", TimeoutMs: 5000}, e)
-		g := ProbeGenerate(bg, policy.GenerateEndpoint{URL: srv.URL + "/v1", Model: "m"}, e)
+		g := ProbeGenerate(bg, policy.GenerateEndpoint{URL: srv.URL + "/v1", Model: "m"}, policy.Thinking{}, e)
 		srv.Close()
 		if j.Status != Error || j.Code != c.want || g.Code != c.want {
 			t.Fatalf("%d %s: judge=%+v generate=%+v", c.status, c.body, j, g)
@@ -468,7 +468,7 @@ func TestProbeGenerateUsesTheDraftTemplate(t *testing.T) {
 			gen := modelstub.New()
 			defer gen.Close()
 			gen.SetDefault(modelstub.Reply{Content: c.reply})
-			d := ProbeGenerate(bg, policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}, Env{Model: &model.Client{}, Packs: ld})
+			d := ProbeGenerate(bg, policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}, policy.Thinking{}, Env{Model: &model.Client{}, Packs: ld})
 			if d.Status != c.status || d.Code != c.code || d.Data["shape"] != nilIfEmpty(c.shape) || d.Data["sample"] != "draft" {
 				t.Fatalf("%+v", d)
 			}
@@ -492,7 +492,7 @@ func TestProbeGenerateFallsBackToTheBuiltinSample(t *testing.T) {
 	gen := modelstub.New()
 	defer gen.Close()
 	gen.SetDefault(modelstub.Reply{Content: `{"answer":"yes","sufficient":true}`})
-	d := ProbeGenerate(bg, policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}, Env{Model: &model.Client{}, Packs: fakePacks{}})
+	d := ProbeGenerate(bg, policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}, policy.Thinking{}, Env{Model: &model.Client{}, Packs: fakePacks{}})
 	if d.Status != OK || d.Data["sample"] != "builtin" {
 		t.Fatalf("%+v", d)
 	}
