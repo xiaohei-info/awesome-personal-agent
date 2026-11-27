@@ -563,15 +563,16 @@ func (s *Service) judgeCalls(src domain.Source, ev domain.SourceEvent, hint, rec
 	// 当前时间取到小时：它进指纹，同一小时内的批量预取与逐条作答仍复用同一结果。
 	in := eventInput(src, ev, hint, map[string]any{"now": s.o.Now().In(time.Local).Format("2006-01-02T15:00-07:00 Monday")})
 	mat := materialSource(ev, recipients, o)
+	scope := direct.Scope{Source: src.ID} // 覆盖包给模板声明了 event_stats 时按来源统计
 	q1 = direct.JudgeCall{
 		Pack: DefaultPack, Template: Template, Input: in, MaterialSource: mat,
-		Subject: ev.ID, Source: src.ID,
+		Subject: ev.ID, Source: src.ID, Scope: scope,
 		UnjudgedOnUnavailable: true, Criteria: pol.SourcePipeline.JudgePrompt,
 	}
 	q2 = direct.JudgeCall{
 		Pack: DefaultPack, Template: UrgentTemplate, Use: UseUrgent,
 		Input: in, MaterialSource: mat,
-		Subject: ev.ID, Source: src.ID,
+		Subject: ev.ID, Source: src.ID, Scope: scope,
 	}
 	return q1, q2
 }

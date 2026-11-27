@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -247,6 +248,19 @@ func TestFlowAgentCascade(t *testing.T) {
 
 	f.step(t, "ACT-CAS-08 Event 统计随题目送出，且不进指纹", func(t *testing.T) {
 		f.reset()
+		// 内置模板不带来源历史统计：用同名覆盖包给两道题补上 event_stats。
+		over := filepath.Join(f.Home, "packs", "inbound-triage")
+		must(t, os.CopyFS(over, os.DirFS(filepath.Join("..", "..", "..", "packs", "inbound-triage"))))
+		defer func() { must(t, os.RemoveAll(over)) }()
+		for _, name := range []string{"triage-screen", "triage-urgent"} {
+			tpl := filepath.Join(over, "prompts", name+".md")
+			b, err := os.ReadFile(tpl)
+			must(t, err)
+			must(t, os.WriteFile(tpl, []byte(strings.Replace(string(b), "agent: judge\n", "agent: judge\nevent_stats: proposal_outcome\n", 1)), 0o644))
+		}
+		f.waitFor("覆盖包生效", 30*time.Second, func() bool {
+			return regexp.MustCompile(`"name":"inbound-triage"[^{]*"source":"data"`).MatchString(f.APIRaw("GET", "/v1/packs", "", f.OBS).Body)
+		})
 		f.cls("cas-st", 0.9) // 高于上限：进入建议流
 		for i := 1; i <= 6; i++ {
 			e, _ := f.one(fmt.Sprintf("cas-st-%d", i))
@@ -412,8 +426,8 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.Judge(modelstub.ChatJudge{Key: key("cas-selfconf"), Raw: `{"answer": "no", "sufficient": false, "confidence": 0.99}`})
 		e, j := f.one("cas-selfconf")
 		jr := f.judgeRequests()
-		if len(jr) != 2 {
-			t.Fatalf("判断题请求 = %d，期望 2（要不要处理、急不急）", len(jr))
+		if len(jr) != 4 {
+			t.Fatalf("判断题请求 = %d，期望 4（要不要处理、急不急各一次，不合 schema 各重问一次）", len(jr))
 		}
 		for _, r := range jr {
 			if strings.Contains(strings.ToLower(r), "confidence") {
