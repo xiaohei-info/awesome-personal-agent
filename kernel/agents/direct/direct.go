@@ -11,6 +11,7 @@ package direct
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -18,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +34,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	kusage "github.com/xiaohei-info/awesome-personal-agent/kernel/usage"
 )
 
 var (
@@ -469,7 +472,11 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		req := PromptRequest(pr, c, id, p.stats, schema)
 		var resp model.Response
 		t0 := s.o.Now()
-		resp, callErr = s.complete(ctx, p.ep, req, s.o.Attempts)
+		key := kusage.Key{Part: kusage.PartModel, Purpose: tmpl}
+		if m.Agent == "judge" {
+			key.Part, key.Purpose = kusage.PartJudge, cmp.Or(builtinUse[tmpl], tmpl)
+		}
+		resp, callErr = s.complete(ctx, p.ep, req, s.o.Attempts, key)
 		step.ElapsedMS, step.OutputChars = s.o.Now().Sub(t0).Milliseconds(), len([]rune(resp.Content))
 		if callErr == nil {
 			step.Result = json.RawMessage(resp.Content)
@@ -488,6 +495,16 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		return Step{}, callErr
 	}
 	return step, nil
+}
+
+// countUsage 记一次模型请求的用量（kernel/usage）。统计写失败只记日志，不影响本次调用。
+func (s *Service) countUsage(ctx context.Context, key kusage.Key, requests, reported int, u model.Usage) {
+	r := kusage.Record{Key: key, Counts: kusage.Counts{Requests: int64(requests), Reported: int64(reported),
+		InputTokens: int64(u.InputTokens), OutputTokens: int64(u.OutputTokens + u.ThoughtsTokens), CacheReadTokens: int64(u.CacheReadTokens),
+		CacheWriteTokens: int64(u.CacheWriteTokens)}}
+	if err := s.o.Store.Update(context.WithoutCancel(ctx), func(tx *store.Tx) error { return kusage.Add(tx, s.o.Now(), r) }); err != nil {
+		slog.Error("record model usage", "err", err)
+	}
 }
 
 // outboundGate 是生成型调用的统一外发检查：调用方没有自己按位置裁剪（RequireLocality 为空）、资料段又带着目标事项的内容时，
@@ -554,7 +571,7 @@ func normalizeJudgement(raw json.RawMessage) json.RawMessage {
 }
 
 // complete 带退避重试地调用模型。只重试端点侧的暂时性失败；模型已答复但不合 schema、请求本身不对都如实返回。
-func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request, attempts int) (model.Response, error) {
+func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request, attempts int, key kusage.Key) (model.Response, error) {
 	wait := s.o.Backoff
 	var last error
 	for i := 0; i < attempts; i++ {
@@ -565,6 +582,14 @@ func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req 
 			wait *= 2
 		}
 		resp, err := s.o.Model.Complete(ctx, ep, req)
+		if !errors.Is(err, model.ErrNotConfigured) {
+			reported := 0
+			if !resp.Usage.IsZero() {
+				reported = 1
+			}
+			key.Model = ep.Model
+			s.countUsage(ctx, key, 1, reported, resp.Usage)
+		}
 		if err == nil || !retryable(err) {
 			// 端点有答复（含不合规的答复）说明它可用；清除健康告警。
 			if err == nil || errors.Is(err, model.ErrSchema) {

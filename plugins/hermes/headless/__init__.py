@@ -3,7 +3,8 @@
 The declaration is data (declaration.json) plus whether apa-wake can wake the main session here, as apa-wake's own
 readiness.py judges it. The kernel executes it; this plugin only hands it over via `apa declare`: when the model calls
 `apa_declare_headless`, and once each time the gateway starts. The kernel drops a submission equal to the latest one,
-so an unchanged declaration never asks the owner again.
+so an unchanged declaration never asks the owner again. It also writes each APA run's token usage into the run
+directory (_record_usage).
 """
 import importlib.util
 import json
@@ -87,7 +88,41 @@ def _sync(sleep=time.sleep):
     return out
 
 
+USAGE_FILE = "usage.json"  # declaration.json headless.usage.file
+_usage_lock = threading.Lock()  # a run's subagents report from their own threads
+
+
+def _record_usage(usage=None, model=None, **_):
+    """post_api_request: add this model call to the run's own total in <run_dir>/usage.json, which the kernel reads as
+    declared in headless.usage (appendix A.2). Summed per call because Hermes' session counters, and so the tokens on
+    its result line, carry earlier runs over on a resume. A session that is not an APA run records nothing; a failure
+    never reaches the conversation."""
+    if not usage:
+        return
+    try:
+        if not run_context.context_file():
+            return
+        path = pathlib.Path(run_context.load()["run_dir"]) / USAGE_FILE
+        with _usage_lock:
+            try:
+                total = json.loads(path.read_text())
+            except (OSError, ValueError):
+                total = {}
+            # prompt_tokens includes cache reads and writes
+            for key, source in (("input_tokens", "prompt_tokens"), ("output_tokens", "output_tokens"),
+                                ("cache_read_tokens", "cache_read_tokens"), ("cache_write_tokens", "cache_write_tokens")):
+                total[key] = total.get(key, 0) + int(usage.get(source) or 0)
+            if model:
+                total["model"] = str(model)
+            tmp = path.with_name(USAGE_FILE + ".tmp")
+            tmp.write_text(json.dumps(total))
+            os.replace(tmp, path)
+    except Exception as e:
+        log.warning("apa-headless: cannot record run usage: %s", type(e).__name__)
+
+
 def register(ctx):
+    ctx.register_hook("post_api_request", _record_usage)
     desc = "Submit this host's headless-run declaration to the ledger (apa declare); it takes effect after the owner confirms in Web."
     ctx.register_tool(name="apa_declare_headless", toolset="apa", description=desc, handler=_declare,
                       schema={"name": "apa_declare_headless", "description": desc,

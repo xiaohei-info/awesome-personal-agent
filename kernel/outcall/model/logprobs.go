@@ -72,12 +72,12 @@ func (j *judgeRun) logprobOne(ctx context.Context, q Question, mu *sync.Mutex) (
 		"logprobs":     true,
 		"top_logprobs": 20,
 	})
-	var n int
+	var n tally
 	raw, f, err := j.retry(ctx, func(ctx context.Context) ([]byte, *callFault) {
 		return j.c.post(ctx, strings.TrimRight(j.ep.URL, "/")+"/chat/completions", j.ep.APIKey, body, j.timeout(), &n)
 	})
 	mu.Lock()
-	j.res.Requests += n
+	j.res.count(n)
 	mu.Unlock()
 	if err != nil {
 		return 0, "", err

@@ -97,6 +97,9 @@ def test_register_exposes_one_tool_in_the_apa_toolset():
         def register_tool(self, **kw):
             seen.append(kw)
 
+        def register_hook(self, name, cb):
+            pass
+
     h = load_headless()
     h._sync = lambda: None  # the start-up thread is covered above
     h.register(Ctx())
@@ -112,3 +115,30 @@ def test_selfcheck_reports_json():
     r = json.loads(out)
     assert "reports_session_kind" not in r and r["overlaps"] == [] and r["plugin_version"]
     assert {"name": "tools", "installed": True} in r["hooks"]
+
+
+def test_run_usage_is_this_runs_own_calls(tmp_path, monkeypatch):
+    h = load_headless()
+    context, bound = tmp_path / "context", {}
+    monkeypatch.setattr(h.run_context, "_client_env",
+                        lambda: type("Env", (), {"bound_client_env": staticmethod(lambda: bound)}))
+    hooks = {}
+    monkeypatch.setattr(h, "_sync", lambda: None)
+    h.register(type("Ctx", (), {"register_tool": lambda *a, **k: None,
+                                "register_hook": lambda self, name, cb: hooks.setdefault(name, cb)})())
+    call = lambda: hooks["post_api_request"](usage={"prompt_tokens": 100, "output_tokens": 7, "cache_read_tokens": 60,
+                                                    "cache_write_tokens": 10, "input_tokens": 30}, model="m", session_id="s")
+    call()  # not an APA run: nothing written
+    assert not list(tmp_path.rglob("usage.json"))
+    bound[h.run_context.VAR] = str(context)
+    # A resume keeps the session and the context path; the kernel rewrites the file with the new run.
+    for run, calls in (("run_a", 2), ("run_b", 1)):
+        (tmp_path / run).mkdir()
+        context.write_text(json.dumps({"run": run, "run_dir": str(tmp_path / run), "work_dir": str(tmp_path)}))
+        for _ in range(calls):
+            call()
+        hooks["post_api_request"](usage=None)
+        declared = json.loads((HEADLESS / "declaration.json").read_text())["headless"]["usage"]
+        total = json.loads((tmp_path / run / declared["file"]).read_text())
+        assert {k: total[declared[k][2:]] for k in ("input", "output", "cache_read", "cache_write", "model")} == {
+            "input": 100 * calls, "output": 7 * calls, "cache_read": 60 * calls, "cache_write": 10 * calls, "model": "m"}

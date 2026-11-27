@@ -41,6 +41,7 @@ import (
 	apipurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	apiretention "github.com/xiaohei-info/awesome-personal-agent/api/settings/retention"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
+	apiusage "github.com/xiaohei-info/awesome-personal-agent/api/usage"
 	apiversion "github.com/xiaohei-info/awesome-personal-agent/api/version"
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/connectors/bark"
@@ -92,6 +93,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
+	kusage "github.com/xiaohei-info/awesome-personal-agent/kernel/usage"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
@@ -323,6 +325,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 			return
 		}
 		ctx := context.Background() // 关停时也要把终态落账
+		if err := kusage.AddRun(ctx, st, l.Runs, res, clock.Now()); err != nil {
+			slog.Error("record run usage", "run", res.Run.ID, "err", err)
+		}
 		if err := errors.Join(k.rn.Handle(ctx, res), k.wh.Handle(ctx, res)); err != nil {
 			slog.Error("run result", "run", res.Run.ID, "err", err)
 		}
@@ -480,7 +485,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), apipolicy.OverviewRoutes(st, ld, k.stale.After), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apiexec.LimitsRoutes(st, apiexec.Fallback{Long: cfg.MaxSubprocesses, Short: cfg.MaxShortSubprocesses, Chain: x.MaxChainDepth}), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x, st, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apiexec.LimitsRoutes(st, apiexec.Fallback{Long: cfg.MaxSubprocesses, Short: cfg.MaxShortSubprocesses, Chain: x.MaxChainDepth}), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x, st, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiusage.Routes(st), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
