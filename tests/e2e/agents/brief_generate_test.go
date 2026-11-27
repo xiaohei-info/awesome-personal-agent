@@ -50,7 +50,7 @@ func TestBriefGenerateOverrideLeavesOpen(t *testing.T) {
 		var b brief
 		f.waitFor(what, 30*time.Second, func() bool {
 			var out struct{ Items []brief }
-			if err := json.Unmarshal([]byte(f.apa(f.DEL, 0, "item", "list", "--kind", "brief").Stdout), &out); err != nil {
+			if err := json.Unmarshal([]byte(f.apa(f.DEL, 0, "item", "list", "--kind", "brief", "--full").Stdout), &out); err != nil {
 				t.Fatal(err)
 			}
 			for _, x := range out.Items {

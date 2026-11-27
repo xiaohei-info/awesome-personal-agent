@@ -84,7 +84,7 @@ func source(c *client.Ctx, args []string) error {
 		if err != nil {
 			return err
 		}
-		return call(c, "GET", path, nil)
+		return readEvent(c, path)
 	case "propose":
 		return proposeEvent(c, rest)
 	case "ignore":
@@ -137,6 +137,23 @@ func oneID(args []string, sub string) (string, error) {
 		return "", usage(sub+" takes exactly one id", usageText)
 	}
 	return args[0], nil
+}
+
+// readEvent 输出一条来源事件。顶层已带正文或原文清单时，event 里的正文预览与清单副本不再重复输出。
+func readEvent(c *client.Ctx, path string) error {
+	var out map[string]any
+	if err := c.Do(context.Background(), "GET", path, nil, &out); err != nil {
+		return err
+	}
+	if ev, ok := out["event"].(map[string]any); ok {
+		if _, ok := out["body"]; ok {
+			delete(ev, "detail")
+		}
+		if _, ok := out["content"]; ok {
+			delete(ev, "content")
+		}
+	}
+	return c.Print(out)
 }
 
 // eventPath 解析 `event <事件 id> [--part 部分]`：读单条来源事件及其原文。范围（scope）与裁剪量（trimmed）在响应里，原样输出；

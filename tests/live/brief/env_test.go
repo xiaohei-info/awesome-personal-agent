@@ -226,7 +226,7 @@ func (f *fx) briefs() []briefItem {
 	var out struct {
 		Items []briefItem `json:"items"`
 	}
-	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--kind", "brief").Stdout), &out))
+	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--kind", "brief", "--full").Stdout), &out))
 	return out.Items
 }
 

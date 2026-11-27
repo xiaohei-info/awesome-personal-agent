@@ -299,7 +299,7 @@ func (f *fx) briefs() []item {
 	f.t.Helper()
 	return decode[struct {
 		Items []item `json:"items"`
-	}](f.t, f.apa(f.OBS, 0, "item", "list", "--kind", "brief").Stdout).Items
+	}](f.t, f.apa(f.OBS, 0, "item", "list", "--kind", "brief", "--full").Stdout).Items
 }
 
 // ---- 实例与运行 ----
