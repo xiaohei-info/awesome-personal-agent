@@ -6,6 +6,8 @@
 
 ## B.1 CLI
 
+每个子命令都接受 `-h` / `--help`：把用法写到标准输出、退出码 0，不读凭据、不连内核。紧跟在不带 `=` 的 `--参数` 后面的 `-h` 按该参数的值处理。
+
 "最低凭据"指能调用该命令的最低级别；运行凭据与 delegate 钥匙的范围相同，按所属 Agent 的权限卡判定（主文档 §14.3）。
 
 | 命令 | 作用 | 最低凭据 | 关键退出码 |
@@ -22,7 +24,7 @@
 | `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份（默认带连接凭据的主密钥 `master.key`，`--no-secrets` 不带）；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
 | `apa secrets rekey` | 换连接凭据的主密钥：全部可解的密文用新密钥重新加密，再原子替换 `master.key`；只在服务停止时运行，服务仍在监听时拒绝；账本还没迁移到本二进制时拒绝（主文档 §14.2、§16.5） | 主机本地 | 2、6 |
 | **上下文** | | | |
-| `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息；`--scope item` 见主文档 §7.6。后台运行按权限卡只看信任发件人的消息时，每个事项的消息另带 `filtered_messages`：没给它看的、还没确认的条数（主文档 §14.6） | observer | 3、5、7 |
+| `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递（运行凭据读取时不含）和挂靠消息；从头读时事项只含未结束的；`--scope item` 见主文档 §7.6。后台运行按权限卡只看信任发件人的消息时，每个事项的消息另带 `filtered_messages`：没给它看的、还没确认的条数（主文档 §14.6） | observer | 3、5、7 |
 | `apa persona [--lang zh\|en]` | 读取当前人格，供插件在新会话开始时注入；本人没写时是内置默认语气（主文档 §11.2）；语言：`--lang` > Web 里选的助手语言 > `LC_ALL`、`LC_MESSAGES`、`LANG` > 英文 | observer | 3、7 |
 | `apa inbox` | 列出待决和建议 | observer | |
 | `apa today` | 今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1） | observer | |
@@ -604,6 +606,10 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 渠道回答人 | 即时通讯渠道 ext 优先报用户名 | 一律报平台用户 ID | 写着用户名的旧条目不再匹配，本人在"设置 › 渠道"识别一次 ID（主文档 §16.5） |
 | webhook 映射没写 `detail` | 事件的 `detail` 取原始 payload 的前 16 KiB | 不带 `detail`；原始 payload 只在接收记录里（`apa source ingests`） | 已落盘的事件不改写；已被原始 payload 覆盖正文的事项不修复，本人可在 Web 改正文。要把 payload 的某段作资料，在映射里显式写 `detail` |
 | 代码托管来源的评论与评审挂到已有事项 | `issue.commented` 没有规则、按来源对象更新刷新事项的标题、摘要与正文 | 内置规则 `pr-discussion`、`issue-comment` 声明 `on_update: attach`：只记为挂靠消息，不改事项；`pr-activity` 只匹配合并、关闭与更新 | 覆盖了 `inbound-triage` 的同名包要同步这两条规则，否则评论仍按来源对象更新处理 |
+| 注入路由的投递与上下文增量 | 带运行身份的读取也拿到并记录注入投递；注入过的投递过时限后转 `fallback_web`、等待中的计入积压；从头读的上下文含已结束事项 | 运行身份读取不给不记；注入过的转 `delivered`，注入路由不计积压；从头读只含未结束事项（主文档 §6.9、§7.6） | 不迁移；已落盘的投递与游标不改写 |
+| 来源对象更新刷新事项 | 标题、摘要、正文非空即覆盖 | 逐字段只在仍等于来源给过的值时改写（主文档 §9.4） | 不迁移；已被覆盖的字段不恢复 |
+| 来源批处理未指定处理 Agent | 取主 Agent | 取默认 Agent（`default_agent_id`） | 想沿用主 Agent 的在"设置 › 来源处理"选定 |
+| 代码托管来源的评审与审批请求通知 | 交 judge | 内置规则 `pr-review-requested` 直通进队列 | 覆盖了 `inbound-triage` 的同名包要同步这条规则 |
 | 入站处置的载荷 | 起草成败只写在理由文字里（`; draft failed: …`） | 另带可选的 `draft: {outcome, code}`，`outcome` 为 `ok`、`failed`、`skipped`，`code` 为 `outbound`、`unavailable`、`schema`、`unsettled`、`model`；只在初筛后进建议流的处置上有 | 只增字段，理由文字不变；已落盘的处置不改写，处理经过对旧数据按理由前缀推断，推断不出写"不清楚" |
 | 抽检结论 | "该看"记 `inbound.disposed`（载荷带 `review`），"确实不用"只写判断记录 | 两种结论都另记一条 `inbound.spot_reviewed`（对象是来源事件，载荷 `{verdict, judgment}`，操作者是本人）；"该看"原有的 `inbound.disposed` 不变 | 只增事件类型，不迁移；之前的结论只在判断记录上，过了保留期就看不到 |
 | `main_session` 的拉起方式 | 声明的 `main_session.launch` 单值决定，换方式要改插件、重新提交并确认声明 | 声明用 `main_session.wake` 表示支持唤醒；本人在 Web 经策略段 `main_session_launch` 按 Agent、按规则选；`GET /rules` 加 `runner`；`background.launched` 的载荷加 `launch_from`、`launch_fallback?`，处理经过的 `run` 行加 `launched` | 只增字段，不迁移、不加表。旧声明 `launch: wake` 视为支持唤醒并作为初始值，旧策略版本读作没选，已有部署的拉起方式不变；`launch: headless` 的旧声明照常接受。续接改按原运行的 `launch` 判断：原运行是无头运行的，声明支持唤醒也能续接 |
