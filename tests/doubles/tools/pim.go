@@ -5,12 +5,11 @@ import (
 	"strings"
 )
 
-// pim 邮件线程：mail-cli 的 References/In-Reply-To 取法尚未实测（MEAS-MAIL-THREAD），这里按
-// `message` 对象带 `references`、`inReplyTo` 字符串字段合成；真实输出形态以后由实测结论修正。
+// pim 邮件线程：mail-cli get --include-source 把线程头放在原始邮件 `message.source` 里（MEAS-MAIL-THREAD），内容为合成。
 var pimThread = []map[string]any{
 	{"dateReceived": "2026-01-02T10:00:00.000Z", "isRead": false, "messageId": "mid-p1@example.test", "sender": "A <a@example.test>", "senderAddress": "a@example.test", "senderName": "A", "subject": "报价"},
 	{"dateReceived": "2026-01-03T10:00:00.000Z", "isRead": false, "messageId": "mid-p2@example.test", "sender": "B <b@example.test>", "senderAddress": "b@example.test", "senderName": "B", "subject": "Re: 报价",
-		"references": "<mid-p1@example.test>", "inReplyTo": "<mid-p1@example.test>"},
+		"source": "References: <mid-p1@example.test>\r\nIn-Reply-To: <mid-p1@example.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n正文"},
 }
 
 func pimCall(tool, c string, args []string, root string) out {
@@ -76,10 +75,8 @@ func pimCall(tool, c string, args []string, root string) out {
 			for _, m := range msgs {
 				if m["messageId"] == id {
 					msg := map[string]any{"account": "Acct", "mailbox": "INBOX", "messageId": id, "content": "正文 " + id}
-					for _, k := range []string{"references", "inReplyTo"} {
-						if v, ok := m[k]; ok {
-							msg[k] = v
-						}
+					if v, ok := m["source"]; ok {
+						msg["source"] = v
 					}
 					b := marshal(map[string]any{"success": true, "engine": "sqlite", "message": msg})
 					return ok(string(b) + "\n")

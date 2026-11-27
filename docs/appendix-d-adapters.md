@@ -127,7 +127,7 @@ default: {zh: Apple 邮件, en: Apple Mail}
 
 | 项 | 需实测的结论 | 由谁证实 |
 |---|---|---|
-| `MEAS-MAIL-THREAD` | himalaya 与 `mail-cli` 在读取正文的同一次调用里能否取到 `References`、`In-Reply-To` 头 | `mail-cli`：成立。`get --engine=sqlite --include-source` 返回 `message.source`（原始邮件，含全部信头），不带它时没有任何线程头字段；`message.attachments` 只有序号与名字。himalaya 1.1.0 见 D.2 的录制样本 |
+| `MEAS-MAIL-THREAD` | himalaya 与 `mail-cli` 在读取正文的同一次调用里能否取到 `References`、`In-Reply-To` 头 | **录制样本部分（W1 开发验收）已有结论**：两个适配器的契约测试都断言回信的 `correlation_keys` 含原信的 `thread:<Message-ID>`。`mail-cli`：成立。`get --engine=sqlite --include-source` 返回 `message.source`（原始邮件，含全部信头），不带它时没有任何线程头字段；`message.attachments` 只有序号与名字。himalaya 1.1.0 见 D.2 的录制样本 |
 | `MEAS-MAIL-DMARC` | `mail-cli get --include-source` 在 `--engine=sqlite` 下能否返回原始信头、是否改已读标记、字段名；收件服务的标识按账户配置还是按服务推定；`mail-cli accounts` 是否带邮箱地址。`mail-cli auth-check` 只做 DKIM 与 SPF、自带一份发件人名单，不用它 | 把 apple-pim 邮件声明为可信之前的验收（主文档 §21.3） |
 | `MEAS-RAW-MAIL` | himalaya 与 `mail-cli` 能否在不改已读标记的前提下给出完整正文、HTML 原文、全部信头与附件清单（D.8） | 录制样本部分由 W17 的契约测试证实；真实工具由本机升级验证 L15、L16（主文档 §20.4） |
 | `MEAS-RAW-ATTACH` | 两个邮件工具能否按句柄取回单个附件且不改已读标记 | 本机升级验证 L16 |

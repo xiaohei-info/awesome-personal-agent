@@ -244,7 +244,22 @@ func TestFlowPurge(t *testing.T) {
 	})
 
 	step(t, "ACT-PRG-05 墓碑不计入统计", func(t *testing.T) {
-		const judge = "这条来源事件需要本人知道或处理吗" // inbound-triage/triage-screen.md（判断型，声明 event_stats）
+		const judge = "这条来源事件需要本人知道或处理吗" // inbound-triage/triage-screen.md（判断型）
+		// 内置模板不带来源历史统计：用同名覆盖包给第一题补上 event_stats。
+		src := filepath.Join("..", "..", "..", "packs", "inbound-triage")
+		over := filepath.Join(f.Home, "packs", "inbound-triage")
+		if err := os.CopyFS(over, os.DirFS(src)); err != nil {
+			t.Fatal(err)
+		}
+		tpl := filepath.Join(over, "prompts", "triage-screen.md")
+		b, err := os.ReadFile(tpl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, tpl, strings.Replace(string(b), "on_undecided: yes\n", "on_undecided: yes\nevent_stats: proposal_outcome\n", 1))
+		f.waitFor("覆盖包生效", 30*time.Second, func() bool {
+			return regexp.MustCompile(`"name":"inbound-triage"[^{]*"source":"data"`).MatchString(f.APIRaw("GET", "/v1/packs", "", f.OBS).Body)
+		})
 		// 来源事件经 triage-screen：判断端点落在 band 内（0.15–0.60）才升级到对话端点，统计只出现在对话端点的请求里。
 		f.WireEndpoints()
 		f.BatchAgent("") // 过了 judge 的事件由批处理替身逐条转为建议

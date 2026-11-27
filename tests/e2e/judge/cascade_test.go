@@ -489,6 +489,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 		for _, w := range []want{
 			{"packs/inbound-triage/prompts/triage-screen.md", "0.15", "0.60"},
+			{"packs/inbound-triage/prompts/triage-urgent.md", "0.15", "0.80"},
 			{"packs/decision-card/prompts/web-only-screening.md", "0.20", ""},
 			{"packs/delegation-verify/prompts/delegation-screen.md", "0.20", ""},
 		} {
