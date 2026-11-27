@@ -230,6 +230,14 @@ func Resolve(tx *store.Tx, pol policy.Policy, sel Selection) (result Selected, e
 	cap := pol.Card(id).Tool // 主会话与全部后台运行都用权限卡上的这一档（§14.5）
 	var model string
 	result.Args, result.Env, model = rec.Declaration.InstanceOptions.expand(card.Values)
+	if !pol.BackgroundPersona {
+		result.Args = append(result.Args, rec.Declaration.Headless.NoPersona...)
+	}
+	if bg := pol.Thinking.Effective().Background; bg != policy.ThinkingOff {
+		for _, a := range rec.Declaration.Headless.Effort {
+			result.Args = append(result.Args, strings.ReplaceAll(a, "{effort}", bg))
+		}
+	}
 	result.Snapshot.PermissionCap, result.Snapshot.ConfiguredModel = cap, model
 	return
 }

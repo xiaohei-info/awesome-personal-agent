@@ -168,6 +168,18 @@ var (
 	policySections = []section{
 		disturbSection,
 		sect("background_run_timeout_sec", rules, "/settings/agents", func(p *kpolicy.Policy) *int { return &p.BackgroundRunTimeoutSec }),
+		sect("background_persona", agents, "/settings/agents", func(p *kpolicy.Policy) *bool { return &p.BackgroundPersona }),
+		// 响应里总是补全默认值后的三项，Web 据此显示"当前默认"。
+		{key: "thinking", group: agents, page: "/settings/agents",
+			get: func(p *kpolicy.Policy) any { return p.Thinking.Effective() },
+			set: func(p *kpolicy.Policy, raw json.RawMessage) error {
+				var v kpolicy.Thinking
+				if err := strictDecode(raw, &v); err != nil {
+					return err
+				}
+				p.Thinking = v
+				return nil
+			}},
 		sect("channels", rules, "/settings/channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
 		sect("limits", rules, "/settings/agents", func(p *kpolicy.Policy) *kpolicy.Limits { return &p.Limits }),
 		sect("default_agent_id", agents, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.DefaultAgentID }),
@@ -214,6 +226,7 @@ var sourcePipelineSections = []section{
 			}
 			v.Agent = strings.TrimSpace(v.Agent)
 			v.JudgePrompt = strings.TrimSpace(v.JudgePrompt)
+			v.OwnerIdentity = strings.TrimSpace(v.OwnerIdentity)
 			v.BatchPrompt = strings.TrimSpace(v.BatchPrompt)
 			p.SourcePipeline = v
 			return nil

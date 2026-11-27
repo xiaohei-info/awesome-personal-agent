@@ -73,7 +73,7 @@ _CLI_TOOLS = {
                     "reason": _REASON}, ["id", "to"],
                    lambda a: ["attach", a["id"], *_flags(a, "to", "reason")]),
     # 查询类工具（只读，属"查看"组）：只读工具档下 Agent 也能查事项、项目、来源事件与搜索。
-    "apa_item_list": ("List items (apa item list). Read-only.",
+    "apa_item_list": ("List items (apa item list), compact: no body or proposal details, use apa_item_show for one. Read-only.",
                       {"q": _s("Full-text query"), "phase": _s("Phase, e.g. open"), "project": _s("Project id"), "kind": _s("Item kind"),
                        "sort": _s("updated | deadline | planned_for | priority"), "planned_for": _s("YYYY-MM-DD"),
                        "tag": _s("Tag"), "from": _s("From date YYYY-MM-DD"), "to": _s("To date YYYY-MM-DD")}, [],

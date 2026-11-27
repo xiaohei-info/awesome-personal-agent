@@ -154,3 +154,13 @@ func NotificationBodyLink(sender, body string) string {
 	}
 	return link
 }
+
+// MailKeys 是两个邮件适配器共用的关联键（设计 §9.4、§9.7）：thread:<线程根 Message-ID>（一律带尖括号），
+// 通知邮件另带它所说对象的 owner/repo#N（与代码托管来源同一对象的键逐字相同）。link 是 NotificationLink 的结果。
+func MailKeys(root, link string) []string {
+	keys := []string{"thread:<" + strings.Trim(root, "<>") + ">"}
+	if m := githubObjectRe.FindStringSubmatch(link); m != nil {
+		keys = append(keys, m[1]+"/"+m[2]+"#"+m[4])
+	}
+	return keys
+}

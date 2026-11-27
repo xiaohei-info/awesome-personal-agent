@@ -292,7 +292,11 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 		if err != nil || outboundGate(o, pol, src) != "" {
 			continue
 		}
-		q1, q2 := s.judgeCalls(src, ev, "", o, pol)
+		rcpt, err := s.recipients(ctx, ev.ID)
+		if err != nil {
+			continue
+		}
+		q1, q2 := s.judgeCalls(src, ev, "", rcpt, o, pol)
 		calls = append(calls, q1, q2)
 	}
 	if len(calls) > 0 {

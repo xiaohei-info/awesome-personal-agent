@@ -238,7 +238,7 @@ func (pr *prober) test(w http.ResponseWriter, r *http.Request, p *core.Principal
 		d = kdoctor.ProbeJudge(r.Context(), draft.JudgeEndpoint, pr.env)
 	} else {
 		draft.GenerateEndpoint.APIKey = k
-		d = kdoctor.ProbeGenerate(r.Context(), draft.GenerateEndpoint, pr.env)
+		d = kdoctor.ProbeGenerate(r.Context(), draft.GenerateEndpoint, draft.Thinking, pr.env)
 	}
 	if r.Context().Err() != nil {
 		return r.Context().Err()

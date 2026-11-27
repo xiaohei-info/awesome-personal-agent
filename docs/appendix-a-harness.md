@@ -52,6 +52,8 @@
 | `headless.session.extract` | 从 stdout 取会话 id 的路径 |
 | `headless.resume` | 续接标志，未声明表示不支持续接 |
 | `headless.access` | 权限档位到标志的映射：`read`、`edit`、`full`；可只声明部分档位，未声明的档位不会被拉起（§13.6） |
+| `headless.effort` | 可选。带思考强度的标志，其中的 `{effort}` 换成设置里"后台 Agent 运行"一项的值（`low`、`medium`、`high`，默认 `medium`；设置为不指定时整组标志不追加）；未声明表示这个宿主不区分。 |
+| `headless.no_persona` | 可选。本人没开"Agent 后台运行带人格和记忆"（默认）时追加到拉起命令的标志，让这次运行不带平时的人格、记忆与常驻说明；续接同样追加。未声明表示这个宿主不区分（主文档 §13.6） |
 | `headless.tools` | 可选。每个已声明档位实际给 Agent 的工具，只用于展示：`{档位: [{zh, en}, …]}`。须与 `headless.access` 里的标志一致，由插件作者保证；Web 不解析命令行参数。未声明时界面只显示档位名 |
 | `headless.tool_notes` | 可选。某一档的补充说明 `{档位: {zh, en}}`（如"不再逐项问你"），与工具一起展示。同样只能写在已声明的档位上 |
 | `headless.credential` | 运行凭据的传递方式：`env`（默认）或 `file`（§7.7） |
@@ -98,16 +100,18 @@ headless:
     extract: "$.session_id"
   resume: ["--resume", "{session_id}"]
   access:
-    read: ["-t", "apa,web"]
-    edit: ["-t", "apa,web,file,terminal,delegation"]
-    full: ["--yolo", "-t", "apa,web,file,terminal,delegation"]
+    read: ["-t", "apa,no_mcp"]
+    edit: ["-t", "apa,file,terminal,no_mcp"]
+    full: ["--yolo", "-t", "apa,file,terminal,no_mcp"]
+  no_persona: ["--ignore-rules"]
+  effort: ["--reasoning", "{effort}"]
   tools:
-    read: [{zh: APA, en: APA}, {zh: 网页, en: Web}]
-    edit: [{zh: APA, en: APA}, {zh: 网页, en: Web}, {zh: 文件, en: Files}, {zh: 终端, en: Terminal}, {zh: 委派, en: Delegation}]
-    full: [{zh: APA, en: APA}, {zh: 网页, en: Web}, {zh: 文件, en: Files}, {zh: 终端, en: Terminal}, {zh: 委派, en: Delegation}]
+    read: [{zh: APA, en: APA}]
+    edit: [{zh: APA, en: APA}, {zh: 文件, en: Files}, {zh: 终端, en: Terminal}]
+    full: [{zh: APA, en: APA}, {zh: 文件, en: Files}, {zh: 终端, en: Terminal}]
   tool_notes: {full: {zh: 不再逐项问你, en: Stops asking you each time}}
-  exit_codes: {ok: [0], session_missing: [1]}
-  exit_output: {session_missing: ["No session found matching"]}
+  exit_codes: {ok: [0], session_missing: [1, 2]}
+  exit_output: {session_missing: ["No session found matching", "Resume retains gateway session policy"]}
 main_session: {}   # 文件里不写；插件按唤醒插件的实际启用情况提交 wake: true，或 wake_missing（plugins/hermes/wake/readiness.py）
 ```
 

@@ -211,6 +211,10 @@ func responsesBody(model string, req Request, schema map[string]any) map[string]
 	if req.System != "" {
 		body["instructions"] = req.System
 	}
+	// 不发 max_output_tokens：实测网关上游静默丢弃（附录 D.7），限住用量靠思考强度与超时。
+	if req.Effort != "" {
+		body["reasoning"] = map[string]any{"effort": req.Effort}
+	}
 	if schema != nil {
 		body["text"] = map[string]any{"format": map[string]any{"type": "json_schema", "name": "output", "strict": true, "schema": schema}}
 	}

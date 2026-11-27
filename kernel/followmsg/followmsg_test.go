@@ -81,7 +81,8 @@ type env struct {
 	now     time.Time
 	done    chan proc.Result
 	errs    chan error
-	sources int
+	src     string   // 本次 emit 与 msg 用的来源，缺省 src_t
+	sources []string // 已登记的来源
 	proj    string
 }
 
@@ -102,7 +103,7 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(func() { st.Close() })
 	e := &env{t: t, st: st, au: auth.New(nil), secret: map[string]string{}, dir: t.TempDir(), now: t0, stub: modelstub.New(),
-		done: make(chan proc.Result, 16), errs: make(chan error, 16)}
+		done: make(chan proc.Result, 16), errs: make(chan error, 16), src: "src_t"}
 	t.Cleanup(e.stub.Close)
 	e.x = command.New(st, e.Now)
 	lay := config.LayoutOf(filepath.Join(e.dir, "home"))
@@ -139,7 +140,7 @@ func newEnv(t *testing.T) *env {
 	e.issue("DEL", auth.Spec{Kind: auth.Delegate})
 
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(packYAML)}}
-	for _, name := range []string{"triage-screen"} { // 用内置包随发行的模板
+	for _, name := range []string{"triage-screen", "triage-urgent"} { // 用内置包随发行的模板
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
 			t.Fatal(err)
@@ -276,34 +277,42 @@ func (e *env) noErrs() {
 	}
 }
 
-// emit 让来源 src 的脚本输出给定事件，跑一次拉取，等结果入账并被入站流水线处理完。
+// emit 让来源 e.src 的脚本输出给定事件，跑一次拉取（其他已登记来源输出为空），等结果入账并被入站流水线处理完。
 func (e *env) emit(events ...map[string]any) {
 	e.t.Helper()
-	var body strings.Builder
-	for _, ev := range events {
-		b, _ := json.Marshal(ev)
-		body.WriteString("echo '" + string(b) + "'\n")
+	script := func(id string) string { return filepath.Join(e.dir, id+".sh") }
+	write := func(id string, events []map[string]any) {
+		var body strings.Builder
+		for _, ev := range events {
+			b, _ := json.Marshal(ev)
+			body.WriteString("echo '" + string(b) + "'\n")
+		}
+		body.WriteString("echo '{\"cursor\":\"c\"}'\n")
+		if err := os.WriteFile(script(id), []byte("#!/bin/sh\n"+body.String()), 0o755); err != nil {
+			e.t.Fatal(err)
+		}
 	}
-	body.WriteString("echo '{\"cursor\":\"c\"}'\n")
-	script := filepath.Join(e.dir, "src.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+body.String()), 0o755); err != nil {
-		e.t.Fatal(err)
+	for _, id := range e.sources {
+		write(id, nil)
 	}
-	if e.sources == 0 {
-		e.must(owner, registry.CmdRegisterExec, map[string]any{"id": "src_t", "type": "script", "source_type": "review", "command": script,
+	write(e.src, events)
+	if !slices.Contains(e.sources, e.src) {
+		e.must(owner, registry.CmdRegisterExec, map[string]any{"id": e.src, "type": "script", "source_type": "review", "command": script(e.src),
 			"schedule": "1m", "timeout": 30})
-		e.sources++
+		e.sources = append(e.sources, e.src)
 	}
 	e.now = e.now.Add(2 * time.Minute)
 	if err := e.r.Tick(bg, e.clk); err != nil {
 		e.t.Fatal(err)
 	}
-	select {
-	case <-e.done:
-	case err := <-e.errs:
-		e.t.Fatalf("runner: %v", err)
-	case <-time.After(20 * time.Second):
-		e.t.Fatal("timed out waiting for the source run")
+	for range e.sources {
+		select {
+		case <-e.done:
+		case err := <-e.errs:
+			e.t.Fatalf("runner: %v", err)
+		case <-time.After(20 * time.Second):
+			e.t.Fatal("timed out waiting for the source run")
+		}
 	}
 	e.noErrs()
 }
@@ -317,7 +326,7 @@ func (e *env) msg(id string) domain.SourceEvent {
 	e.t.Helper()
 	var out domain.SourceEvent
 	err := e.st.View(bg, func(tx *store.Tx) error {
-		es, err := runner.Events(tx, "src_t")
+		es, err := runner.Events(tx, e.src)
 		for _, x := range es {
 			if x.DedupeKey.EventID == id {
 				out = x
@@ -1101,6 +1110,43 @@ func TestSourceUpdateRefreshesTimesUnlessChangedByHand(t *testing.T) {
 	it = e.item(item)
 	if it.PlannedFor != "2027-01-01" || it.PlannedSlot != "08:00 - 08:30" || it.Deadline == nil || it.Deadline.Format(time.DateOnly) != "2027-01-02" {
 		t.Fatalf("hand edit must win %+v", it)
+	}
+}
+
+// 本人事项上经 Agent 挂靠、停在 pending 的消息，关单时不退回判断流：没有执行者等着接手，退回只会重判一遍。
+func TestClosingOwnItemKeepsAttachedMessages(t *testing.T) {
+	e := newEnv(t)
+	item := e.own("联调新节点", domain.PhaseWaiting, external())
+	e.emit(comment("o1", "unrelated-key"))
+	if err := e.st.Update(bg, func(tx *store.Tx) error { _, err := runner.Claim(tx, "run_test", 10); return err }); err != nil {
+		t.Fatal(err)
+	}
+	e.must(owner, CmdAttachEvent, map[string]any{"event": e.msg("o1").ID, "item": item})
+
+	e.must(owner, "item.transition", map[string]any{"id": item, "to": "done", "reason": "办完了"})
+	e.noErrs()
+
+	if m := e.msg("o1"); m.Item != item || m.Disposition != domain.DispositionAttached || m.AttachState != runner.AttachPending {
+		t.Fatalf("message was returned to triage: %+v", m)
+	}
+}
+
+// 通知邮件与代码托管平台分属两个去重域：owner/repo#N 跨域命中同一件事，别的键仍只在本域比较。
+func TestObjectKeyAttachesAcrossDedupeDomains(t *testing.T) {
+	e := newEnv(t)
+	e.emit(comment("g1", "org/web#7", "shared-thread"))
+	item := e.propose("g1")
+	before := e.itemCount()
+
+	e.src = "src_mail_t"
+	e.emit(reply("m1", "mail.received", "thread:<org/web/pull/7@code.test>", "org/web#7"))
+	if m := e.msg("m1"); m.Item != item || m.Disposition != domain.DispositionAttached || e.itemCount() != before {
+		t.Fatalf("object key did not attach across domains: %+v", m)
+	}
+
+	e.emit(reply("m2", "mail.received", "shared-thread"))
+	if m := e.msg("m2"); m.Disposition == domain.DispositionAttached || m.Item == item {
+		t.Fatalf("ordinary key crossed domains: %+v", m)
 	}
 }
 

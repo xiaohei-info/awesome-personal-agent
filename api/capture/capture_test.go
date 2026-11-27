@@ -91,7 +91,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(packYAML)}}
-	for _, name := range []string{"triage-screen"} { // 用内置包随发行的统一判断模板
+	for _, name := range []string{"triage-screen", "triage-urgent"} { // 用内置包随发行的统一判断模板
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
 			t.Fatal(err)

@@ -161,6 +161,24 @@ func TestMailFromRawSource(t *testing.T) {
 	}
 }
 
+// 工具给了纯文本正文时，从原始邮件解出的 HTML 只存原文，detail 仍是工具的正文。
+func TestMailKeepsToolTextWhenHTMLComesFromSource(t *testing.T) {
+	mk := func(Config) Runner {
+		return func(_ context.Context, _ string, args ...string) ([]byte, []byte, error) {
+			if args[0] == "messages" {
+				return []byte(`{"messages":[{"messageId":"raw1@example.test","subject":"Hi","dateReceived":"2026-01-03T10:00:00Z"}]}`), nil, nil
+			}
+			b, _ := json.Marshal(map[string]any{"success": true, "message": map[string]any{"messageId": "raw1@example.test", "content": "工具正文", "source": rawMail}})
+			return b, nil, nil
+		}
+	}
+	_, lines, _ := exec1(t, mk, `{"config":{"kind":"mail","account":"Acct"}}`)
+	ev := lines[0]
+	if ev["detail"] != "工具正文" || ev["original"].(map[string]any)["text"] != "<p>html <b>body</b></p>" {
+		t.Errorf("detail/original: %v %v", ev["detail"], ev["original"])
+	}
+}
+
 func TestCalendarHeaders(t *testing.T) {
 	mk := func(Config) Runner {
 		return func(context.Context, string, ...string) ([]byte, []byte, error) {

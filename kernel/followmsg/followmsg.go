@@ -12,6 +12,8 @@
 //     关联键都未经委派登记时，再看同一去重域里带同一关联键的来源事件建出的事项（含 proposed），
 //     命中恰好一个未关闭的就经 item.update 刷新它，消息直接记为 processed（不转发、不交回、关闭时不退回）。
 //     只命中已关闭、或命中多个未关闭事项时不猜，走普通判断流并附线索。
+//   - 代码托管对象的键（owner/repo#N）指向全局唯一的对象：本去重域里没有任何命中时，再跨去重域看一次建出事项的来源事件，
+//     使通知邮件与平台事件回到同一件事。其他键只在本去重域里比较。
 //   - 本人的未委派事项收到后续消息（回音，v0.2.0）：来源规则 on_update 为 attach，或键是本人经 item.relate 登记的
 //     而规则没有明说 refresh 时，消息记在事项上（直接 processed，不转发），不改标题与正文；事项在 waiting 且等的是
 //     人或外部时，由 system 经 item.transition 转回 open（可撤销，未到期的跟进定时随阶段变更取消）；
@@ -20,7 +22,7 @@
 //     由 system 经 item.transition 转 dropped（可撤销）；已接受的事项不动。
 //   - 挂靠本身不拉起运行：本包不起运行、不调模型；挂靠命令继承所挂事项的链路深度，不加一。
 //   - 回执确认游标（delegate.report 的 cursor）之前已转发的消息算已处理；游标是消息的落盘序号。
-//   - 事项进入终态时，未处理（pending、forwarded）的挂靠消息退回判断流，不丢。
+//   - 委派事项进入终态时，未处理（pending、forwarded）的挂靠消息退回判断流，不丢；本人事项关闭不退回。
 //   - 转发白名单（§14.6）不在本包：Forward 接受调用方给的过滤函数，被过滤的消息保持原状态、不算已处理。
 //
 // 来源事件的两列由 sources/runner 拥有，本包只经其 SetAttachState 在命令事务里推进。
@@ -263,6 +265,21 @@ func resolve(tx *store.Tx, ev domain.SourceEvent, onUpdate string) (plan, error)
 			}
 			if err := classify(ids, own); err != nil {
 				return plan{}, err
+			}
+		}
+		// 本域没有任何命中才跨域，且只认 owner/repo#N：本域的结论（含"只命中已关闭"）不被别的来源改变。
+		if len(open)+len(shut) == 0 {
+			for _, k := range ev.CorrelationKeys {
+				if !shortPR.MatchString(k) {
+					continue
+				}
+				ids, err := runner.Origins(tx, "", k)
+				if err != nil {
+					return plan{}, err
+				}
+				if err := classify(ids, own); err != nil {
+					return plan{}, err
+				}
 			}
 		}
 		mode = refresh
@@ -564,7 +581,8 @@ func (s *Service) after(ctx context.Context, c command.Commit) error {
 				cursor = rs[len(rs)-1].Cursor
 			}
 		}
-		if closed(it) {
+		// 只有委派事项的未处理消息要退回：本人事项上的挂靠消息没有执行者等着接手，关单后原样留在事项上。
+		if closed(it) && it.Kind == domain.KindDelegation {
 			as, err := runner.Attachments(tx, it.ID)
 			shut = slices.ContainsFunc(as, unprocessed)
 			return err

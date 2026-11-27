@@ -143,7 +143,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 		eq(t, "Run 的 access（规则里是 read）", r.Access, "read")
 		eq(t, "Run 的 harness（来自 Web 默认）", r.Harness, harness)
 		args := f.read(dir + "/args.txt")
-		if strings.Contains(args, "--yolo") || !strings.Contains(args, "apa,web") || strings.Contains(args, "terminal") {
+		if strings.Contains(args, "--yolo") || !strings.Contains(args, "apa,no_mcp") || strings.Contains(args, "terminal") {
 			t.Errorf("Hermes 应以 read 档的参数拉起: %s", args)
 		}
 		if got := strings.TrimSpace(f.read(dir + "/cwd.txt")); !strings.HasSuffix(got, "/runs/"+r.ID) {

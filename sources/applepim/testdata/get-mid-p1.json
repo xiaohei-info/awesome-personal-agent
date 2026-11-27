@@ -1,1 +1,1 @@
-{"success":true,"engine":"sqlite","message":{"account":"Acct","mailbox":"INBOX","messageId":"mid-p1@example.test","content":"报价正文"}}
+{"success":true,"engine":"sqlite","message":{"account":"Acct","mailbox":"INBOX","messageId":"mid-p1@example.test","content":"报价正文","source":"Message-ID: <mid-p1@example.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n报价正文\r\n"}}

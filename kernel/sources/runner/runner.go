@@ -1205,12 +1205,12 @@ func SetAttachState(tx *store.Tx, id, to, item string) error {
 }
 
 // Origins 返回去重域 dedupeDomain 里带关联键 key 的来源事件建出的事项（disposition=proposed），按 id 排序、不重复。
-// 关联键只在同一去重域内比较：不同来源的同名键不互相命中。
+// dedupeDomain 为空表示不限去重域，只给全局唯一的对象键用（§9.4）；其他关联键只在同一去重域内比较。
 func Origins(tx *store.Tx, dedupeDomain, key string) ([]string, error) {
 	rows, err := tx.Query(`SELECT DISTINCT item FROM sources_runner_event
-		WHERE dedupe_domain = ? AND disposition = ? AND item != ''
+		WHERE (? = '' OR dedupe_domain = ?) AND disposition = ? AND item != ''
 		AND EXISTS (SELECT 1 FROM json_each(correlation_keys) WHERE value = ?) ORDER BY item`,
-		dedupeDomain, string(domain.DispositionProposed), key)
+		dedupeDomain, dedupeDomain, string(domain.DispositionProposed), key)
 	if err != nil {
 		return nil, err
 	}

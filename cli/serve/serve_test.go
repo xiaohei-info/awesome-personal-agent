@@ -1462,7 +1462,7 @@ func TestServeDraftsDecisionCardAndSummaries(t *testing.T) {
 		}
 	}
 	var it struct{ ID string }
-	_ = json.Unmarshal(k.do(t, command.Chain{}, "item.create", map[string]any{"title": "采购服务器", "kind": "task", "phase": "open", "assignee": owner}), &it)
+	_ = json.Unmarshal(k.do(t, command.Chain{}, "item.create", map[string]any{"title": "采购服务器", "kind": "task", "phase": "open", "assignee": owner, "body": "等报价"}), &it)
 	var pr struct{ ID string }
 	_ = json.Unmarshal(k.do(t, command.Chain{}, "project.create", map[string]any{"name": "P"}), &pr)
 	var mr kmaterials.Result
