@@ -660,6 +660,24 @@ func TestSourceObjectUpdateRefreshesProposedItem(t *testing.T) {
 	}
 }
 
+// 本人或批处理 Agent 改过的标题、摘要不被后续来源更新覆盖；没改过的字段照常刷新。
+func TestSourceUpdateKeepsRewrittenFields(t *testing.T) {
+	e := newEnv(t)
+	ev := func(id string) map[string]any {
+		m := comment(id, "obj#rw")
+		m["summary"], m["detail"] = "summary "+id, "detail "+id
+		return m
+	}
+	e.emit(ev("r1"))
+	item := e.propose("r1")
+	e.must(owner, "item.update", map[string]any{"id": item, "title": "改写后的标题", "summary": "合并后的摘要", "reason": "整理"})
+	e.emit(ev("r2"))
+	e.emit(ev("r3"))
+	if it := e.item(item); it.Title != "改写后的标题" || it.Summary != "合并后的摘要" || it.Body != "detail r3" {
+		t.Fatalf("title=%q summary=%q body=%q", it.Title, it.Summary, it.Body)
+	}
+}
+
 // 已关闭的事项不挂靠：之后同一对象的更新按新事件处理；已写回的更新在关闭时也不退回判断流。
 func TestSourceObjectUpdateSkipsClosedItem(t *testing.T) {
 	e := newEnv(t)

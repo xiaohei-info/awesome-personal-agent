@@ -350,16 +350,42 @@ func (s *Service) wake(ctx context.Context, item string, ev domain.SourceEvent) 
 
 // refresh 用同一来源对象的新事件刷新它建出的事项：只写对象自己的规范化字段（标题、摘要、正文文本）里非空的，
 // 都为空时不写。关于对象的消息（评论、评审）由规则声明 on_update: attach，走 echo，不到这里（§9.4）。
-// 时间字段只在“仍等于上次来源给的值”时刷新（溯源标记为 source），本人改过的不覆盖（方案 A，§9.3）。
+// 每个字段都只在“仍等于来源给过的值”时刷新：本人或 Agent 改过的不覆盖（§9.4）；时间靠溯源标记判断（§9.3）。
 // 这些事项没有执行者，写入以本人登记该来源为依据，代本人执行（同入站规则的自动接受）。
 func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEvent) error {
+	var (
+		it    domain.Item
+		prior []domain.SourceEvent
+	)
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
+		if it, err = items.Get(tx, item); err != nil {
+			return err
+		}
+		var x struct {
+			SourceEvent string `json:"source_event"`
+		}
+		_ = json.Unmarshal(it.Ext, &x) // 没记建出它的事件时只看名下事件
+		var also []string
+		if x.SourceEvent != "" {
+			also = []string{x.SourceEvent}
+		}
+		prior, err = runner.Held(tx, item, also)
+		return err
+	}); err != nil {
+		return err
+	}
 	patch := map[string]string{"id": item, "reason": "source object updated by " + ev.Type + " " + ev.ID}
-	for k, v := range map[string]string{"title": ev.Subject, "summary": ev.Summary, "body": budget.ProposalBody(ev.Detail, ev.ID)} {
-		if v != "" {
-			patch[k] = v
+	next := fields(ev)
+	for k, cur := range map[string]string{"title": it.Title, "summary": it.Summary, "body": it.Body} {
+		fromSource := slices.ContainsFunc(prior, func(p domain.SourceEvent) bool {
+			// 只认同一来源对象的事件：并进这条建议的别的来源给的值不算。
+			return p.ID != ev.ID && sameObject(p, ev) && strings.TrimSpace(fields(p)[k]) == strings.TrimSpace(cur)
+		})
+		if next[k] != "" && fromSource {
+			patch[k] = next[k]
 		}
 	}
-	if err := s.refreshTimes(ctx, item, ev, patch); err != nil {
+	if err := s.refreshTimes(ctx, it, ev, patch); err != nil {
 		return err
 	}
 	if len(patch) == 2 {
@@ -371,16 +397,26 @@ func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEven
 	return err
 }
 
+// fields 是来源事件写进事项的规范化字段，与建出建议时的取法一致（标题缺省取事件类型）。
+func fields(ev domain.SourceEvent) map[string]string {
+	title := ev.Subject
+	if title == "" {
+		title = ev.Type
+	}
+	return map[string]string{"title": title, "summary": ev.Summary, "body": budget.ProposalBody(ev.Detail, ev.ID)}
+}
+
+func sameObject(a, b domain.SourceEvent) bool {
+	return a.DedupeKey.Domain == b.DedupeKey.Domain &&
+		slices.ContainsFunc(a.CorrelationKeys, func(k string) bool { return slices.Contains(b.CorrelationKeys, k) })
+}
+
 // refreshTimes 把来源事件的新结构化时间写进 patch：截止与计划日期各自判断，只在当前值仍是上次来源给的值时改写，
 // 并同步记下来源这次给的值；没有来源溯源标记的（模型推断、本人手改）不改（§9.2、§9.3）。
-func (s *Service) refreshTimes(ctx context.Context, item string, ev domain.SourceEvent, patch map[string]string) error {
+func (s *Service) refreshTimes(ctx context.Context, it domain.Item, ev domain.SourceEvent, patch map[string]string) error {
 	st := ev.Schedule(time.Local)
 	if len(st.From) == 0 {
 		return nil
-	}
-	var it domain.Item
-	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, item); return err }); err != nil {
-		return err
 	}
 	ext := map[string]string{}
 	if len(it.Ext) > 0 {
