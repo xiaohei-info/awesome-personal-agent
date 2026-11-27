@@ -102,8 +102,48 @@ type JudgeResult struct {
 	Unavailable bool
 	// Healthy 为真表示至少一批得到了合法的 200 响应且可采信，调用方据此清除不可用标记。
 	Healthy bool
-	// Requests 是实际发出的 HTTP 请求数（含重试与拆批），供诊断。
+	// Requests 是实际发出的 HTTP 请求数（含重试与拆批），Reported 是其中响应带用量的次数，Usage 是它们的合计。
 	Requests int
+	Reported int
+	Usage    Usage
+}
+
+// tally 是一次 Judge 里请求与用量的累计。
+type tally struct {
+	requests, reported int
+	usage              Usage
+}
+
+func (r *JudgeResult) count(t tally) {
+	r.Requests += t.requests
+	r.Reported += t.reported
+	r.Usage.InputTokens += t.usage.InputTokens
+	r.Usage.OutputTokens += t.usage.OutputTokens
+	r.Usage.CacheReadTokens += t.usage.CacheReadTokens
+}
+
+// responseUsage 读判断端点响应体顶层的 usage（input_tokens/output_tokens 或 prompt_tokens/completion_tokens，
+// 缓存命中取 prompt_tokens_details.cached_tokens 或 input_tokens_details.cached_tokens）；没有或形状不对返回零值，不影响判断结果。
+func responseUsage(raw []byte) Usage {
+	type details struct {
+		Cached int `json:"cached_tokens"`
+	}
+	var out struct {
+		Usage struct {
+			Input         int     `json:"input_tokens"`
+			Output        int     `json:"output_tokens"`
+			Prompt        int     `json:"prompt_tokens"`
+			Completion    int     `json:"completion_tokens"`
+			InputDetails  details `json:"input_tokens_details"`
+			PromptDetails details `json:"prompt_tokens_details"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(raw, &out) != nil {
+		return Usage{}
+	}
+	u := out.Usage
+	return Usage{InputTokens: u.Input + u.Prompt, OutputTokens: u.Output + u.Completion,
+		CacheReadTokens: u.InputDetails.Cached + u.PromptDetails.Cached}
 }
 
 // Judge 按判断端点的协议取回每题的 p_yes。端点未配置返回 ErrNotConfigured；
@@ -238,7 +278,9 @@ func (j *judgeRun) batch(ctx context.Context, qs []Question, lo, hi int, canSpli
 		return err
 	}
 	raw, f, err := j.retry(ctx, func(ctx context.Context) ([]byte, *callFault) {
-		raw, f := j.c.post(ctx, j.wire.url(j.ep), j.ep.APIKey, body, j.timeout(), &j.res.Requests)
+		var t tally
+		raw, f := j.c.post(ctx, j.wire.url(j.ep), j.ep.APIKey, body, j.timeout(), &t)
+		j.res.count(t)
 		if f != nil {
 			f = j.wire.classify(f)
 		}
@@ -390,7 +432,7 @@ type callFault struct {
 }
 
 // post 发一次 POST，返回 2xx 的响应体或归类后的故障。err 非空只表示调用方的 ctx 被取消。
-func (c *Client) post(ctx context.Context, url, key string, body []byte, timeout time.Duration, count *int) ([]byte, *callFault) {
+func (c *Client) post(ctx context.Context, url, key string, body []byte, timeout time.Duration, count *tally) ([]byte, *callFault) {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(cctx, http.MethodPost, url, bytes.NewReader(body))
@@ -405,7 +447,7 @@ func (c *Client) post(ctx context.Context, url, key string, body []byte, timeout
 	if hc == nil {
 		hc = &http.Client{}
 	}
-	*count++
+	count.requests++
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, transportFault(ctx, cctx)
@@ -419,6 +461,12 @@ func (c *Client) post(ctx context.Context, url, key string, body []byte, timeout
 	if s >= 200 && s < 300 {
 		if len(raw) > maxBody {
 			return nil, &callFault{code: CodeProtocolError}
+		}
+		if u := responseUsage(raw); !u.IsZero() {
+			count.reported++
+			count.usage.InputTokens += u.InputTokens
+			count.usage.OutputTokens += u.OutputTokens
+			count.usage.CacheReadTokens += u.CacheReadTokens
 		}
 		return raw, nil
 	}

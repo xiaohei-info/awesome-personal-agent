@@ -118,20 +118,22 @@ type Request struct {
 	Timeout time.Duration
 }
 
-// Usage 是端点在单次响应里回报的 token 用量；端点未回报时各字段为零。
+// Usage 是端点回报的 token 用量；端点未回报时各字段为零。InputTokens 含缓存命中的部分（CacheReadTokens）。
 type Usage struct {
-	InputTokens    int `json:"input_tokens,omitempty"`
-	OutputTokens   int `json:"output_tokens,omitempty"`
-	ThoughtsTokens int `json:"thoughts_tokens,omitempty"`
-	TotalTokens    int `json:"total_tokens,omitempty"`
+	InputTokens     int `json:"input_tokens,omitempty"`
+	OutputTokens    int `json:"output_tokens,omitempty"`
+	ThoughtsTokens  int `json:"thoughts_tokens,omitempty"`
+	TotalTokens     int `json:"total_tokens,omitempty"`
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
 }
 
 // IsZero 报告端点是否未回报任何 token 用量。
 func (u Usage) IsZero() bool {
-	return u.InputTokens == 0 && u.OutputTokens == 0 && u.ThoughtsTokens == 0 && u.TotalTokens == 0
+	return u == Usage{}
 }
 
 // Response 是模型的回答。Schema 非空时 Content 已确认是符合 schema 的 JSON。
+// 输出不合 schema（ErrSchema）时只有 Usage 有效：这次请求照样耗了 token。
 type Response struct {
 	Content string
 	Usage   Usage
@@ -205,16 +207,16 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 	}
 	if schema != nil {
 		if r.missing != "" {
-			return Response{}, &SchemaError{Shape: r.missing, Detail: "no structured output in the reply"}
+			return Response{Usage: r.usage}, &SchemaError{Shape: r.missing, Detail: "no structured output in the reply"}
 		}
 		var v any
 		dec := json.NewDecoder(strings.NewReader(r.content))
 		dec.UseNumber()
 		if err := dec.Decode(&v); err != nil || dec.More() {
-			return Response{}, &SchemaError{Shape: contentShape(r.content, err, r.truncated), Detail: "content is not a single JSON value"}
+			return Response{Usage: r.usage}, &SchemaError{Shape: contentShape(r.content, err, r.truncated), Detail: "content is not a single JSON value"}
 		}
 		if err := validate(schema, v, "$"); err != nil {
-			return Response{}, &SchemaError{Detail: err.Error()}
+			return Response{Usage: r.usage}, &SchemaError{Detail: err.Error()}
 		}
 	}
 	return Response{Content: r.content, Usage: r.usage}, nil

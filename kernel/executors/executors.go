@@ -67,6 +67,7 @@ type Headless struct {
 	Command    []string            `json:"command"`
 	Output     []string            `json:"output,omitempty"`
 	FinalText  string              `json:"final_text,omitempty"`
+	Usage      *UsagePaths         `json:"usage,omitempty"`
 	Session    Session             `json:"session"`
 	Resume     []string            `json:"resume,omitempty"`
 	Access     map[string][]string `json:"access"`
@@ -77,6 +78,58 @@ type Headless struct {
 	// Tools 与 ToolNotes 只供界面展示每一档给 Agent 的工具（附录 A.2），内核不解释。
 	Tools     map[string][]Label `json:"tools,omitempty"`
 	ToolNotes map[string]Label   `json:"tool_notes,omitempty"`
+}
+
+// UsagePaths 是结果事件里 token 用量的字段路径（附录 A.2）。input 须含缓存命中的部分；cache_read 可空。
+type UsagePaths struct {
+	Input     string `json:"input"`
+	Output    string `json:"output"`
+	CacheRead string `json:"cache_read,omitempty"`
+}
+
+// ExtractUsage 按声明从无头运行 stdout 的最后一条结果事件取 token 用量；
+// 没声明、没有这样的事件，或报的全是 0（一次请求都没成）时 ok 为假。
+// shortcut: 结果行超过调度器保留的末段（64 KiB）时读不到，按未回报记。
+func (h Headless) ExtractUsage(stdout []byte) (input, output, cacheRead int64, ok bool) {
+	if h.Usage == nil {
+		return 0, 0, 0, false
+	}
+	lines := bytes.Split(stdout, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		var obj map[string]any
+		if json.Unmarshal(bytes.TrimSpace(lines[i]), &obj) != nil {
+			continue
+		}
+		if typ, _ := obj["type"].(string); typ != "" && typ != "result" && typ != "final" {
+			continue
+		}
+		in, iok := jsonCount(obj, h.Usage.Input)
+		out, ook := jsonCount(obj, h.Usage.Output)
+		if !iok || !ook {
+			continue
+		}
+		cached, _ := jsonCount(obj, h.Usage.CacheRead)
+		return in, out, cached, in+out > 0
+	}
+	return 0, 0, 0, false
+}
+
+// jsonCount 取 $.a.b 路径上的非负整数。
+func jsonCount(obj map[string]any, path string) (int64, bool) {
+	rest, ok := strings.CutPrefix(path, "$.")
+	if !ok {
+		return 0, false
+	}
+	var cur any = obj
+	for _, seg := range strings.Split(rest, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		cur = m[seg]
+	}
+	n, ok := cur.(float64)
+	return int64(n), ok && n >= 0
 }
 
 // Label 是中英各一份的显示文字。
@@ -418,6 +471,11 @@ func (h *Headless) validate() error {
 	}
 	if h.FinalText != "" && !validJSONPath(h.FinalText) {
 		return invalid("headless.final_text must be a $.field path")
+	}
+	if u := h.Usage; u != nil {
+		if !validJSONPath(u.Input) || !validJSONPath(u.Output) || (u.CacheRead != "" && !validJSONPath(u.CacheRead)) {
+			return invalid("headless.usage needs input and output as $.field paths (cache_read is optional)")
+		}
 	}
 	if len(h.Access) == 0 {
 		return invalid("headless.access must declare at least one of read, edit, full")

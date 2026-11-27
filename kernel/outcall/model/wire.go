@@ -189,6 +189,9 @@ func chatParse(raw []byte, _ bool) (reply, error) {
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
 			TotalTokens      int `json:"total_tokens"`
+			Details          struct {
+				Cached int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || len(out.Choices) == 0 || out.Choices[0].Message.Content == nil {
@@ -197,6 +200,7 @@ func chatParse(raw []byte, _ bool) (reply, error) {
 	r := reply{content: *out.Choices[0].Message.Content, truncated: out.Choices[0].FinishReason == "length"}
 	if out.Usage != nil {
 		r.usage = makeUsage(out.Usage.PromptTokens, out.Usage.CompletionTokens, 0, out.Usage.TotalTokens)
+		r.usage.CacheReadTokens = out.Usage.Details.Cached
 	}
 	return r, nil
 }
@@ -233,6 +237,9 @@ func responsesParse(raw []byte, _ bool) (reply, error) {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
 			TotalTokens  int `json:"total_tokens"`
+			Details      struct {
+				Cached int `json:"cached_tokens"`
+			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || (out.Output == nil && out.OutputText == nil) {
@@ -241,6 +248,7 @@ func responsesParse(raw []byte, _ bool) (reply, error) {
 	r := reply{truncated: out.Status == "incomplete" && out.Incomplete != nil && out.Incomplete.Reason == "max_output_tokens"}
 	if out.Usage != nil {
 		r.usage = makeUsage(out.Usage.InputTokens, out.Usage.OutputTokens, 0, out.Usage.TotalTokens)
+		r.usage.CacheReadTokens = out.Usage.Details.Cached
 	}
 	if out.Output == nil {
 		r.content = *out.OutputText
@@ -292,6 +300,9 @@ func messagesParse(raw []byte, structured bool) (reply, error) {
 		Usage      *struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
+			// 这个协议的 input_tokens 不含缓存部分。
+			CacheRead  int `json:"cache_read_input_tokens"`
+			CacheWrite int `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || out.Content == nil {
@@ -299,7 +310,9 @@ func messagesParse(raw []byte, structured bool) (reply, error) {
 	}
 	r := reply{truncated: out.StopReason == "max_tokens"}
 	if out.Usage != nil {
-		r.usage = makeUsage(out.Usage.InputTokens, out.Usage.OutputTokens, 0, 0)
+		u := out.Usage
+		r.usage = makeUsage(u.InputTokens+u.CacheRead+u.CacheWrite, u.OutputTokens, 0, 0)
+		r.usage.CacheReadTokens = u.CacheRead
 	}
 	var b strings.Builder
 	for _, blk := range *out.Content {
@@ -379,6 +392,7 @@ func generateContentParse(raw []byte, _ bool) (reply, error) {
 			CandidatesTokenCount int `json:"candidatesTokenCount"`
 			ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
 			TotalTokenCount      int `json:"totalTokenCount"`
+			CachedContent        int `json:"cachedContentTokenCount"`
 		} `json:"usageMetadata"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || (out.Candidates == nil && out.PromptFeedback == nil) {
@@ -409,6 +423,7 @@ func generateContentParse(raw []byte, _ bool) (reply, error) {
 			out.UsageMetadata.ThoughtsTokenCount,
 			out.UsageMetadata.TotalTokenCount,
 		)
+		r.usage.CacheReadTokens = out.UsageMetadata.CachedContent
 	}
 	return r, nil
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	kusage "github.com/xiaohei-info/awesome-personal-agent/kernel/usage"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
@@ -89,7 +90,7 @@ type env struct {
 func setup(t *testing.T, configured bool) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, proc.Module, registry.Module, delegation.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, proc.Module, registry.Module, delegation.Module, Module, kusage.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -498,5 +499,24 @@ func TestContextCancelled(t *testing.T) {
 	}
 	if h, _ := e.svc.Health(bg); h.Unavailable {
 		t.Fatal("cancel must not mark the model unavailable")
+	}
+}
+
+// 每次发出的模型请求记一条用量：判断型模板归判断部分，生成型归模型部分；复用不发请求、不记。
+func TestModelRequestsRecordUsage(t *testing.T) {
+	e := setup(t, true)
+	e.stub.Enqueue(modelstub.Reply{Content: `{"probability":0.9,"confidence":1}`}, modelstub.Reply{Content: `{"summary":"s"}`})
+	for _, tmpl := range []string{"plain", "explain", "plain"} {
+		if _, err := e.svc.Do(bg, e.call(tmpl)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got kusage.Summary
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { got, err = kusage.Summarize(tx, t0); return }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rows) != 2 || got.Rows[0].Part != kusage.PartJudge || got.Rows[0].Requests != 1 || got.Rows[0].Model != "m1" ||
+		got.Rows[1].Part != kusage.PartModel || got.Rows[1].Purpose != "explain" || got.Rows[1].Requests != 1 {
+		t.Fatalf("rows = %+v", got.Rows)
 	}
 }
