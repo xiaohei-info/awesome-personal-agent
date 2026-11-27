@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -67,6 +68,7 @@ type Headless struct {
 	Command    []string            `json:"command"`
 	Output     []string            `json:"output,omitempty"`
 	FinalText  string              `json:"final_text,omitempty"`
+	Usage      *UsageSource        `json:"usage,omitempty"`
 	Session    Session             `json:"session"`
 	Resume     []string            `json:"resume,omitempty"`
 	Access     map[string][]string `json:"access"`
@@ -77,6 +79,97 @@ type Headless struct {
 	// Tools 与 ToolNotes 只供界面展示每一档给 Agent 的工具（附录 A.2），内核不解释。
 	Tools     map[string][]Label `json:"tools,omitempty"`
 	ToolNotes map[string]Label   `json:"tool_notes,omitempty"`
+}
+
+// UsageSource 声明一次无头运行的 token 用量从哪读（附录 A.2）。取到的值只算本次运行，续接时不含此前运行。
+// File 非空时读运行目录里的这个 JSON 文件，否则读 stdout 里最后一个带 input 与 output 字段的 JSON 行（Event 非空时只看
+// type 等于它的行）。其余各项是对象里的字段路径。
+type UsageSource struct {
+	File       string `json:"file,omitempty"`
+	Event      string `json:"event,omitempty"`
+	Input      string `json:"input"`
+	Output     string `json:"output"`
+	CacheRead  string `json:"cache_read,omitempty"`
+	CacheWrite string `json:"cache_write,omitempty"`
+	Model      string `json:"model,omitempty"`
+	// InputExcludesCache 表示 input 不含缓存读写，内核把两项加进输入。
+	InputExcludesCache bool `json:"input_excludes_cache,omitempty"`
+}
+
+// RunUsage 是一次运行回报的用量；Input 含缓存读写，Model 可空。
+type RunUsage struct {
+	Input, Output, CacheRead, CacheWrite int64
+	Model                                string
+}
+
+// Parse 从用量内容（File 的全文，或 stdout 末段）取用量；没有可用的对象，或输入输出全是 0（一次请求都没成）时 ok 为假。
+func (s UsageSource) Parse(data []byte) (RunUsage, bool) {
+	if s.File != "" {
+		return s.from(data)
+	}
+	lines := bytes.Split(data, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		if u, ok := s.from(lines[i]); ok {
+			return u, true
+		}
+	}
+	return RunUsage{}, false
+}
+
+func (s UsageSource) from(data []byte) (u RunUsage, ok bool) {
+	var obj map[string]any
+	if json.Unmarshal(bytes.TrimSpace(data), &obj) != nil || (s.Event != "" && obj["type"] != s.Event) {
+		return u, false
+	}
+	in, iok := jsonCount(obj, s.Input)
+	out, ook := jsonCount(obj, s.Output)
+	if !iok || !ook {
+		return u, false
+	}
+	u.Input, u.Output = in, out
+	u.CacheRead, _ = jsonCount(obj, s.CacheRead)
+	u.CacheWrite, _ = jsonCount(obj, s.CacheWrite)
+	u.Model, _ = extractJSONPath(obj, []string{s.Model})
+	if s.InputExcludesCache {
+		u.Input += u.CacheRead + u.CacheWrite
+	}
+	return u, u.Input > 0 || u.Output > 0
+}
+
+func (s UsageSource) validate() error {
+	if s.File != "" && (s.File != filepath.Base(s.File) || s.File == "." || s.File == "..") {
+		return invalid("headless.usage.file must be a plain file name in the run directory")
+	}
+	if s.File != "" && s.Event != "" {
+		return invalid("headless.usage.event only applies to stdout, not to usage.file")
+	}
+	if !validJSONPath(s.Input) || !validJSONPath(s.Output) {
+		return invalid("headless.usage needs input and output as $.field paths")
+	}
+	for _, p := range []string{s.CacheRead, s.CacheWrite, s.Model} {
+		if p != "" && !validJSONPath(p) {
+			return invalid("headless.usage cache_read, cache_write and model must be $.field paths")
+		}
+	}
+	return nil
+}
+
+// jsonCount 取 $.a.b 路径上的非负整数。
+func jsonCount(obj map[string]any, path string) (int64, bool) {
+	rest, ok := strings.CutPrefix(path, "$.")
+	if !ok {
+		return 0, false
+	}
+	var cur any = obj
+	for _, seg := range strings.Split(rest, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		cur = m[seg]
+	}
+	n, ok := cur.(float64)
+	return int64(n), ok && n >= 0
 }
 
 // Label 是中英各一份的显示文字。
@@ -418,6 +511,11 @@ func (h *Headless) validate() error {
 	}
 	if h.FinalText != "" && !validJSONPath(h.FinalText) {
 		return invalid("headless.final_text must be a $.field path")
+	}
+	if h.Usage != nil {
+		if err := h.Usage.validate(); err != nil {
+			return err
+		}
 	}
 	if len(h.Access) == 0 {
 		return invalid("headless.access must declare at least one of read, edit, full")

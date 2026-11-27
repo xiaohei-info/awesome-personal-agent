@@ -99,8 +99,8 @@ func TestFrozenMigrationsMatchV01Release(t *testing.T) {
 			t.Errorf("%s: frozen v0.1 migration removed", key)
 		}
 	}
-	if reg.SchemaLedger() != 11 {
-		t.Errorf("schema.ledger = %d, want 11", reg.SchemaLedger())
+	if reg.SchemaLedger() != 12 {
+		t.Errorf("schema.ledger = %d, want 12", reg.SchemaLedger())
 	}
 }
 
@@ -248,8 +248,8 @@ func TestUpgradeV2ToLatestKeepsRowsAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if s.SchemaLedger() != 11 {
-		t.Fatalf("ledger = %d, want 11", s.SchemaLedger())
+	if s.SchemaLedger() != 12 {
+		t.Fatalf("ledger = %d, want 12", s.SchemaLedger())
 	}
 	after := take(t, s)
 
@@ -263,9 +263,9 @@ func TestUpgradeV2ToLatestKeepsRowsAndHistory(t *testing.T) {
 			t.Errorf("table %s lost rows: %d -> %d", n, before.rows[n], after.rows[n])
 		}
 	}
-	for _, n := range []string{"item_progress", "item_correlation", "outcall_judgment", "sources_runner_metric", "connections_connection", "connections_status", "secrets_value"} {
+	for _, n := range []string{"item_progress", "item_correlation", "outcall_judgment", "sources_runner_metric", "connections_connection", "connections_status", "secrets_value", "usage_record"} {
 		if _, ok := after.rows[n]; !ok {
-			t.Errorf("v3 table %s missing", n)
+			t.Errorf("new table %s missing", n)
 		}
 	}
 	for seq, h := range before.payload {

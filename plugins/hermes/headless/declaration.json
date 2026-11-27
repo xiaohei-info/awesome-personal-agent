@@ -5,6 +5,7 @@
     "command": ["hermes", "chat", "--oneshot", "-q", "{prompt}"],
     "output": ["--format", "stream-json"],
     "final_text": "$.text",
+    "usage": {"file": "usage.json", "input": "$.input_tokens", "output": "$.output_tokens", "cache_read": "$.cache_read_tokens", "cache_write": "$.cache_write_tokens", "model": "$.model"},
     "session": {"extract": "$.session_id"},
     "resume": ["--resume", "{session_id}"],
     "access": {

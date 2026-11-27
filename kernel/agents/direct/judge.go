@@ -24,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	kusage "github.com/xiaohei-info/awesome-personal-agent/kernel/usage"
 )
 
 // Classifier 是外呼调用器的分类端点客户端（model.Client 满足它）。
@@ -416,6 +417,9 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 	res, err := s.o.Classifier.Judge(ctx, ep, qs, model.JudgeOptions{SingleShot: group[0].meta.SingleShot})
 	took := s.o.Now().Sub(t0)
 	s.noteClassifierHealth(ctx, res, err)
+	if res.Requests > 0 {
+		s.countUsage(ctx, kusage.Key{Part: kusage.PartJudge, Purpose: group[0].use(), Model: ep.Model}, res.Requests, res.Reported, res.Usage)
+	}
 	for i, j := range jobs {
 		a := model.Answer{ID: j.q.ID, ErrCode: model.CodeUnavailable}
 		sig := &res
@@ -741,7 +745,7 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 		if p.meta.SingleShot {
 			attempts = 1
 		}
-		resp, err := s.complete(ctx, ep, req, attempts)
+		resp, err := s.complete(ctx, ep, req, attempts, kusage.Key{Part: kusage.PartJudge, Purpose: p.use()})
 		lv.DurationMs = s.o.Now().Sub(t0).Milliseconds()
 		switch {
 		case ctx.Err() != nil:

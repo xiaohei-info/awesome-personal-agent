@@ -245,6 +245,7 @@
 | | `GET /forms/{令牌}` | 旧的一次性表单链接：302 到需要登录的 `/decisions`，不兑现令牌、不回答 | 不需要凭据 |
 | 运行 | `GET /runs?state&category&target&before&limit`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
+| 用量 | `GET /usage?days=1\|7\|30` | token 用量汇总（主文档 §8.6），见下 | observer |
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放（来源事件命中数值条件规则时另带 `alerts`：规则、条件文本、上一次与本次取值、产出的投递及其状态（提醒还被静默或合并窗口暂存时状态为 `held`），各凭据级别可见）、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
 | | `GET /source-events/{id}/trace`，`GET /items/{id}/trace` | 处理经过（主文档 §15.1）：消息经过是 `{message, entries}`，事项经过是 `{origins, more_origins?, entries}`；每行 `{at, who: {kind, name?, role?}, kind, args?, item?: {id, title, gone?}, mech?, steps}`，`steps` 与 `/why` 的 Step 同形、同样按凭据级别裁剪。`kind` 与 `args` 见下文"处理经过的行"；内部来源 `capture:<项目>` 的消息只有 Web 登录能读 | observer；运行凭据 403 |
 | | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5）；每项检查与每个对象都带稳定机器码 `code` 与可变参数 `data`，形状见下文"自检结果"。已保存端点的探测通过、且该端点有未恢复的失败时，记一条探测通过的 `run.finished`（同测试连接），健康视图据此清除该端点此前的失败（§15.2） | observer |
@@ -358,6 +359,8 @@
 `GET /context?scope=item[&item=<id>]` 在普通字段外返回 `messages`：`[{"item": "...", "cursor": "12", "messages": [...]}]`，消息字段同 §9.4 的转发内容（不含 `attach_state`、`forward_allowed`）。`cursor` 只给负责者，回执时作为 `--ack-cursor` 带回。只有 `scope=item` 接受 `item` 参数，其他作用域带它返回 400。
 
 `GET /runs` 每条运行在失败或超时时另带 `fault`（`{code, params?}`，故障类别码见主文档 §6.11，参数只有 `exit`、`timeout`），失败附注与 stderr 不返回。`GET /runs` 返回 `{"runs": [...]}`，按入队顺序升序，只留最新的 `limit` 条（缺省 100、上限 500）。`state`、`category` 取值各可逗号分隔多个（任一匹配，如 `state=failed,timeout`、`category=task,background`），`target` 精确匹配；取值不在枚举内返回 400。`before` 是上一页最旧一条的 id，只取在它之前入队的运行，与其他筛选和 `limit` 叠加，Web「运行日志」据此「加载更多」；不是已知运行 id 返回 400。
+
+`GET /usage` 返回 `{"since"?, "rows": [...], "days": [...]}`。`days` 参数缺省 1，只取 1、7、30，其他值返回 400；时间段是含今天在内的最近这么多个主机日。`since` 是最早一条记录的时刻（RFC 3339，还没有记录时省略）。`rows` 是时间段内按 `part`（`judge`、`model`、`agent`）、`purpose`（判断用途、提示词模板名或运行类别）、`agent?`（显示名）、`model?` 分组的合计；`days` 是按 `date`（`YYYY-MM-DD`）与 `part` 的合计，新的在前。计数字段：`requests`（请求数或运行次数）、`reported`（其中回报了用量的次数）、`input_tokens`（含缓存读写）、`output_tokens`、`cache_read_tokens`、`cache_write_tokens`。ext、webhook 凭据返回 403；Agent 读它按权限卡的"查看"组。
 
 `POST /runs/{id}/credential` 不带请求体，成功返回 200：`{"run": "...", "token": "apa_run_…", "expires_at": "<RFC 3339>"}`。`token` 只出现这一次，不进幂等结果表。运行不存在返回 404，不是未结束的 `launch: wake` 后台运行返回 409，其他凭据返回 403。用 delegate token 换取时，同时为该 token 记一条唤醒租约（§13.6），只供观测，不改变这把 token 的判定（~~租约期间降为运行身份~~ **已取消（2026-11-24，决定 89）**）。
 
@@ -517,6 +520,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 10（版本 7 新增连接与凭据保管的三张表，版本 8 收齐工作台结构变更，版本 9 新增 Agent 实例表与钥匙的 `agent_id`，版本 10 新增 `projects.system_role` 与内置 Inbox 唯一索引，均已按版号递增）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
+
+账本结构版本 12（token 用量统计，2026-11-27，主文档 §8.6）：新模块 `usage` 的迁移 1 建表 `usage_record` 与两个索引；不改已有表、不回填，数据从升级后开始记。只做加法：新增路由 `GET /usage`；无头运行声明增可选字段 `headless.usage`（附录 A.2），未声明的 Agent 运行记为未回报——已生效的旧声明没有它，插件重新提交且本人在 Web 确认后才开始记用量。**升级顺序**：先升级内核再换插件（旧内核拒收带未知字段的声明）。**回滚**：账本从 v11 升到 v12 不可原地降级；回滚须同时恢复旧二进制、旧插件与升级前备份的账本快照。
 
 账本结构版本 11（来源处理线，2026-11-26，主文档 §9.3、决定 95）：`sources_runner_event` 新增四列（`queue_state TEXT NOT NULL DEFAULT ''`、`queue_level TEXT NOT NULL DEFAULT ''`、`queue_run TEXT NOT NULL DEFAULT ''`、`queue_tries INTEGER NOT NULL DEFAULT 0`）与索引 `sources_runner_event_queue`（`sources_runner` 迁移 10）；事件读取新增只读字段 `queue`、`queue_level`，`unjudged_reason` 增 `process_failed`。历史事件队列列均为空，1685 条未判定积压维持"本人显式放开、每日有上限"，不倒进队列。投递矩阵新增 `source_result` 行（默认推给 Agent 马上、不推本人、唤醒不了时下次对话）。策略新增 `source_pipeline` 段，取代 `merge` 跨来源合并设置；起草、抽取、预筛、批量归类与 `apa merge`/`apa repair-merges` 随新线就绪后删除，存量"待归类"建议在切换启动时一次性放回普通建议，已合并的建议原样保留，拆分与撤销合并继续可用。**升级与回滚**：账本从 v10 升到 v11 不可原地降级；回滚须同时恢复旧二进制与升级前备份的账本快照。
 
