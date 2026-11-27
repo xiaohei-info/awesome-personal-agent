@@ -8,7 +8,9 @@ import (
 	"strings"
 )
 
-func init() { Register("login", login) }
+const loginUsage = "usage: apa login --url <url> --token <token|->"
+
+func init() { Register("login", loginUsage, login) }
 
 // login 校验地址与 token 后保存到 <APA_HOME>/credentials.json（附录 B.1：任意 token 即可，失败码 3）。
 // token 取 --token，缺省读 APA_TOKEN；`--token -` 从 stdin 读，避免出现在进程列表里。
@@ -21,7 +23,7 @@ func login(c *Ctx, args []string) error {
 	u := fs.String("url", c.Env.Getenv(EnvURL), "")
 	tok := fs.String("token", c.Env.Getenv(EnvToken), "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		return usage("invalid arguments for login", "usage: apa login --url <url> --token <token|->")
+		return usage("invalid arguments for login", loginUsage)
 	}
 	if *tok == "-" {
 		b, err := io.ReadAll(io.LimitReader(c.Env.Stdin, 4096))

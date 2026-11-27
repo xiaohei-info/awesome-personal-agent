@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -497,11 +498,9 @@ func TestHealthRouteFollowsPolicy(t *testing.T) {
 		var got []domain.Delivery
 		e.update(func(tx *store.Tx) (err error) {
 			if err = NewNotifier(e.att()).Sync(tx); err == nil {
-				got, err = e.q.Backlog(tx)
-				if u, uerr := e.q.Unread(tx); uerr == nil {
-					got = append(got, u...)
-				} else {
-					err = uerr
+				for _, list := range []func(*store.Tx) ([]domain.Delivery, error){e.q.Backlog, e.q.Unread, e.q.Injectable} {
+					ds, lerr := list(tx)
+					got, err = append(got, ds...), errors.Join(err, lerr)
 				}
 			}
 			return

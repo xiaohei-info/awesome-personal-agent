@@ -208,48 +208,22 @@ func TestFlowHermesContext(t *testing.T) {
 			t.Errorf("同一会话不应重复注入:\n%s", again)
 		}
 
-		// 无人领取超时后退回 Web 未读：仍在未读列表里，记录了注入到哪些会话，状态不是 acknowledged。
-		type dl struct {
-			ID         string `json:"id"`
-			Item       string `json:"item"`
-			State      string `json:"state"`
-			Injections []struct {
-				Session string `json:"injected_to_session"`
-			} `json:"injections"`
+		// 超过无人领取时限：带进过对话的投递收尾，不再带给之后的会话，也不进 Web 未读。
+		if !f.WaitFor(90*time.Second, func() bool { return !strings.Contains(peek(), line) }) {
+			t.Fatalf("注入后超过无人领取时限，投递仍在等下一次对话:\n%s", peek())
 		}
-		unread := func() (mine *dl) {
-			var out struct {
-				Deliveries []dl `json:"deliveries"`
+		var web struct {
+			Deliveries []struct {
+				Item string `json:"item"`
+			} `json:"deliveries"`
+		}
+		if err := json.Unmarshal([]byte(f.webOK("GET", "/deliveries/unread", "", 200)), &web); err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range web.Deliveries {
+			if d.Item == id {
+				t.Errorf("注入过的投递不应进 Web 未读: %+v", web.Deliveries)
 			}
-			if err := json.Unmarshal([]byte(f.webOK("GET", "/deliveries/unread", "", 200)), &out); err != nil {
-				t.Fatal(err)
-			}
-			for i := range out.Deliveries {
-				if out.Deliveries[i].Item == id {
-					mine = &out.Deliveries[i]
-				}
-			}
-			return
-		}
-		var mine *dl
-		if !f.WaitFor(90*time.Second, func() bool { mine = unread(); return mine != nil }) {
-			t.Fatal("注入后无人领取超限，投递应退回 Web 未读，实际没有出现在 GET /v1/deliveries/unread")
-		}
-		if mine.State == "acknowledged" {
-			t.Errorf("注入后不应是 acknowledged: %+v", mine)
-		}
-		got := map[string]bool{}
-		for _, in := range mine.Injections {
-			got[in.Session] = true
-		}
-		if !got["acc-session-1"] || !got["acc-session-2"] {
-			t.Errorf("投递应记录 injected_to_session 为 acc-session-1 与 acc-session-2: %+v", mine.Injections)
-		}
-
-		// 本人在 Web 点击后它才离开未读。
-		f.webOK("POST", "/deliveries/"+mine.ID+"/read", "", 200)
-		if still := unread(); still != nil {
-			t.Errorf("Web 点击后投递应离开未读: %+v", still)
 		}
 	})
 }

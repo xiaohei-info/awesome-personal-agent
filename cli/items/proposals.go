@@ -12,8 +12,8 @@ import (
 )
 
 func init() {
-	client.Register("attach", attach)
-	client.Register("proposals", proposals)
+	client.Register("attach", attachUsage, attach)
+	client.Register("proposals", proposalsUsage, proposals)
 }
 
 const attachUsage = "usage: apa attach <id> --to <item id> [--reason <t>]"

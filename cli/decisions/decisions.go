@@ -18,10 +18,10 @@ import (
 )
 
 func init() {
-	client.Register("ask", ask)
-	client.Register("decide", decide)
-	client.Register("accept", accept)
-	client.Register("dismiss", dismiss)
+	client.Register("ask", "usage: "+askUsage, ask)
+	client.Register("decide", "usage: "+decideUsage, decide)
+	client.Register("accept", "usage: "+acceptUsage, accept)
+	client.Register("dismiss", "usage: "+dismissUsage, dismiss)
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }

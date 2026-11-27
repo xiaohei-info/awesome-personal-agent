@@ -14,7 +14,7 @@ import (
 )
 
 // `apa secrets rekey` 与备份同属数据目录的维护：在主机上、服务停止时运行（§5.5），所以放在这里，共用迁移注册表。
-func init() { client.Register("secrets", secretsCmd) }
+func init() { client.Register("secrets", secretsUsage, secretsCmd) }
 
 const secretsUsage = "usage: apa secrets rekey"
 

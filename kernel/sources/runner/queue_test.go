@@ -194,3 +194,23 @@ func TestFinishSuccessRequeuesUnhandledEvents(t *testing.T) {
 		return nil
 	})
 }
+
+// 运行中途的处置命令已把事件标为 done：收尾仍计入本次处置数。
+func TestFinishCountsEventsDisposedDuringTheRun(t *testing.T) {
+	st := queueStore(t, 2)
+	if err := st.Update(bg, func(tx *store.Tx) error {
+		if _, err := Claim(tx, "run_d", 10); err != nil {
+			return err
+		}
+		if err := Resolve(tx, "ev_00", domain.DispositionIgnored, ""); err != nil {
+			return err
+		}
+		f, err := Finish(tx, "run_d", true, 1)
+		if err == nil && (len(f.Done) != 1 || f.Done[0] != "ev_00" || len(f.Requeued) != 1) {
+			t.Fatalf("finished = %+v", f)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

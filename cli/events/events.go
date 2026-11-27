@@ -21,7 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventfeed"
 )
 
-func init() { client.Register("events", run) }
+func init() { client.Register("events", usageHint, run) }
 
 const (
 	usageHint = "usage: apa events [--follow] [--cursor <seq>] [--limit <n>] [--pretty]"

@@ -20,8 +20,8 @@ import (
 )
 
 func init() {
-	client.Register("pack", runPack)
-	client.Register("instance", runInstance)
+	client.Register("pack", packUsage, runPack)
+	client.Register("instance", instanceUsage, runInstance)
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }

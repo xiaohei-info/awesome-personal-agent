@@ -18,7 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 )
 
-func init() { client.Register("judgment", run) }
+func init() { client.Register("judgment", usageHint, run) }
 
 const usageHint = "usage: apa judgment show <id> [--pretty] | spot-check | stats [--use U] [--template T] [--source S] [--since 30d]"
 

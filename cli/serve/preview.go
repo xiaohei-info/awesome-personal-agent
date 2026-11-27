@@ -28,7 +28,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-func init() { client.Register("authz", authzCmd) }
+func init() { client.Register("authz", authzUsage, authzCmd) }
 
 const authzUsage = "usage: apa authz preview [--json] [--days 30]"
 

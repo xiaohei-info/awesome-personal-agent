@@ -112,10 +112,10 @@ type Finished struct {
 }
 
 // Finish 在调用方事务内收尾运行 run 取走的事件：无论运行退出是否成功，只有已经有了去向（不再是 pending）的
-// 事件才转已处理；仍为 pending 的未处理事件一律计次放回待处理，计次超过 maxTries 的离开队列、转入积压。
+// 事件才算已处理（运行中途的处置命令可能已把它标为 done，同样计入 Done）；仍为 pending 的未处理事件一律计次放回待处理，计次超过 maxTries 的离开队列、转入积压。
 func Finish(tx *store.Tx, run string, _ bool, maxTries int) (Finished, error) {
 	var f Finished
-	r, err := tx.Query(`SELECT id, disposition, queue_tries FROM sources_runner_event WHERE queue_run = ? AND queue_state = ? ORDER BY seq`, run, QueueRunning)
+	r, err := tx.Query(`SELECT id, disposition, queue_tries FROM sources_runner_event WHERE queue_run = ? AND queue_state IN (?, ?) ORDER BY seq`, run, QueueRunning, QueueDone)
 	if err != nil {
 		return f, err
 	}

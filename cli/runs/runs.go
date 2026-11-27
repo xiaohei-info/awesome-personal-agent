@@ -17,7 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-func init() { client.Register("run", run) }
+func init() { client.Register("run", usageHint, run) }
 
 const usageHint = "usage: apa run list [--state <s>] [--category <c>] [--target <id>] [--limit <n>] | show <id> [--pretty]"
 

@@ -15,7 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
 
-func init() { client.Register("guide", run) }
+func init() { client.Register("guide", "usage: apa guide [--template]", run) }
 
 // 含义与退出码表以设计 §17.3 为准。
 const guideText = `APA: personal agent ledger. The ledger is the only source of truth; this CLI is a thin client of the kernel.

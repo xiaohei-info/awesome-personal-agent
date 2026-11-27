@@ -21,11 +21,11 @@ func TestFlowDecisionTimeout(t *testing.T) {
 	}
 	f.ask(id, "--deadline", deadline)
 
-	// 再提醒是一条 class=reminder 的投递（id 为 remind:ask:<事项>:<截止>）；还没被领取时在健康视图的投递积压里，
-	// 退回 Web 后在未读里。两处任一出现即算产生。轮询而不是固定睡 2 分钟。
+	// 再提醒是一条 class=reminder 的投递（id 为 remind:ask:<事项>:<截止>），这里路由为注入：等下一次对话期间在
+	// apa context 里（不带会话的读取不记注入），退回 Web 后在未读里。两处任一出现即算产生。轮询而不是固定睡 2 分钟。
 	remindID := "remind:ask:" + id
 	reminded := func() bool {
-		return strings.Contains(f.apa(f.OBS, 0, "health").Stdout, remindID) || strings.Contains(f.Web("GET", "/v1/deliveries/unread", "").Body, remindID)
+		return strings.Contains(f.apa(f.OBS, 0, "context", "--scope", "all", "--format", "inject").Stdout, remindID) || strings.Contains(f.Web("GET", "/v1/deliveries/unread", "").Body, remindID)
 	}
 	for stop := time.Now().Add(2 * time.Minute); time.Now().Before(stop) && !reminded(); {
 		time.Sleep(2 * time.Second)

@@ -16,8 +16,8 @@ import (
 )
 
 func init() {
-	client.Register("settings", run)
-	client.Register("purge", purge)
+	client.Register("settings", usageHint, run)
+	client.Register("purge", purgeHint, purge)
 }
 
 const usageHint = "usage: apa settings get <路径> | put <路径> [<JSON 文件>|-] | post <路径> [<JSON 文件>|-] | delete <路径>"

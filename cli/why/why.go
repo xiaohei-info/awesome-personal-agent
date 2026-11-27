@@ -15,14 +15,16 @@ import (
 	kwhy "github.com/xiaohei-info/awesome-personal-agent/kernel/why"
 )
 
-func init() { client.Register("why", run) }
+const whyUsage = "usage: apa why <id> [--pretty] | denied [--agent <id>]"
+
+func init() { client.Register("why", whyUsage, run) }
 
 func run(c *client.Ctx, args []string) error {
 	if len(args) >= 1 && args[0] == "denied" {
 		return denied(c, args[1:])
 	}
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		return domain.NewError(domain.CodeInvalidRequest, "apa why takes exactly one item or run id", "usage: apa why <id> [--pretty] | denied [--agent <id>]")
+		return domain.NewError(domain.CodeInvalidRequest, "apa why takes exactly one item or run id", whyUsage)
 	}
 	var tl kwhy.Timeline
 	if err := c.Do(context.Background(), "GET", "/why/"+url.PathEscape(args[0]), nil, &tl); err != nil {

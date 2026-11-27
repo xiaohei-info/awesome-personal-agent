@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,8 +131,16 @@ func TestCursorPerSessionOnlyDelta(t *testing.T) {
 	if r3 := e.build(t, Request{Session: "s1"}); !eq(ids(r3), []string{a}) || r3.Items[0].Phase != domain.PhaseDone {
 		t.Fatalf("only the changed item, with its new phase: %+v", r3.Items)
 	}
-	if other := e.build(t, Request{Session: "s2"}); len(other.Items) != 2 {
-		t.Fatalf("another session has its own cursor: %v", ids(other))
+	// 新游标（新会话、网关重启或压缩后换的键）只给现状：早已结束的事项不重放。
+	e.do(t, owner, "item.transition", map[string]any{"id": b, "to": "dropped", "reason": "不做了"})
+	c := e.item(t, map[string]any{"title": "C"})
+	// 例外：父事项还没结束时，已完成的委派子事项是要接手的回收结果。
+	d := e.item(t, map[string]any{"title": "D", "kind": "delegation"})
+	e.do(t, owner, "item.relate", map[string]any{"from": d, "to": c, "type": "parent"})
+	e.do(t, owner, "item.transition", map[string]any{"id": d, "to": "done", "reason": "回执", "evidence": "pr"})
+	other := ids(e.build(t, Request{Session: "s2"}))
+	if len(other) != 2 || !slices.Contains(other, c) || !slices.Contains(other, d) {
+		t.Fatalf("fresh cursor: open items and pending delegation results only: %v", other)
 	}
 }
 
@@ -402,6 +411,32 @@ func TestInjectRoutedDeliveriesOncePerSession(t *testing.T) {
 	_ = e.st.Update(bg, func(tx *store.Tx) error { _, _, err := q.Confirm(tx, "d_inject", 1); return err })
 	if done := e.build(t, Request{Session: "s3"}); len(done.Deliveries) != 0 {
 		t.Fatalf("acknowledged delivery still injected: %+v", done.Deliveries)
+	}
+}
+
+// 带运行身份的读取（后台运行会话）拿不到注入投递，也不写注入记录；之后本人在场的会话照样带上。
+func TestRunIdentityDoesNotConsumeInjections(t *testing.T) {
+	e := setup(t)
+	item := e.item(t, map[string]any{"title": "x"})
+	q := delivery.New(delivery.Options{})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, _, err := q.Create(tx, domain.Delivery{ID: "d1", Item: item, Class: domain.DeliveryReminder, Route: delivery.RouteInject, Version: 1,
+			Content: domain.DeliveryContent{Title: "result"}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range []Request{{Session: "bg", Reader: Reader{Run: "run_x"}}, {Reader: Reader{Run: "run_x"}}} {
+		if r := e.build(t, req); len(r.Deliveries) != 0 {
+			t.Fatalf("a run session got deliveries: %+v", r.Deliveries)
+		}
+	}
+	var d domain.Delivery
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { d, err = q.Get(tx, "d1"); return }); err != nil || len(d.Injections) != 0 {
+		t.Fatalf("injection recorded for a run: %+v %v", d.Injections, err)
+	}
+	if r := e.build(t, Request{Session: "main"}); len(r.Deliveries) != 1 {
+		t.Fatalf("the main session must still get it: %+v", r.Deliveries)
 	}
 }
 

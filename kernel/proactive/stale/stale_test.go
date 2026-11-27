@@ -181,7 +181,16 @@ func (e *env) unread() []domain.Delivery {
 			return err
 		}
 		b, err := e.q.Backlog(tx)
+		if err != nil {
+			return err
+		}
 		ds = append(u, b...)
+		in, err := e.q.Injectable(tx) // 等下一次对话的不算积压，单独取还在等的
+		for _, d := range in {
+			if d.State == domain.DeliveryPending {
+				ds = append(ds, d)
+			}
+		}
 		return err
 	}); err != nil {
 		e.t.Fatal(err)

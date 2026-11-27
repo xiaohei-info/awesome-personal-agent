@@ -31,7 +31,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-func init() { client.Register("ext", cmd) }
+func init() { client.Register("ext", usageHint, cmd) }
 
 // EnvDir 指定 ext 目录。
 const EnvDir = "APA_EXT_DIR"

@@ -55,6 +55,7 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
       {error != null && <ErrorNote error={error} />}
       {!list && error == null && <p role="status">{t.loading}</p>}
       {list && !list.length && <p className="sub">{t.none}</p>}
+      {list?.some((m) => m.attach_state === "pending") && <p className="sub">{t.openHint}</p>}
       {list && list.length > 0 && (
         <ul aria-label={t.list} className="rows">
           {list.map((m) => (

@@ -87,15 +87,15 @@ func apa(t *testing.T, env map[string]string, home string, stdin string, args ..
 }
 
 func init() {
-	Register("fail", func(c *Ctx, a []string) error { return c.Do(context.Background(), "GET", "/fail/"+a[0], nil, nil) })
-	Register("items", func(c *Ctx, a []string) error {
+	Register("fail", "", func(c *Ctx, a []string) error { return c.Do(context.Background(), "GET", "/fail/"+a[0], nil, nil) })
+	Register("items", "", func(c *Ctx, a []string) error {
 		var v map[string]any
 		if err := c.Do(context.Background(), "GET", "/items", nil, &v); err != nil {
 			return err
 		}
 		return c.Print(v)
 	})
-	Register("html", func(c *Ctx, a []string) error { return c.Do(context.Background(), "GET", "/html", nil, nil) })
+	Register("html", "", func(c *Ctx, a []string) error { return c.Do(context.Background(), "GET", "/html", nil, nil) })
 }
 
 func TestLoginSavesCredentialsThenCommandsUseThem(t *testing.T) {
@@ -355,7 +355,7 @@ func TestDuplicateRegisterPanics(t *testing.T) {
 			t.Fatal("want panic")
 		}
 	}()
-	Register("login", login)
+	Register("login", "", login)
 }
 
 // 运行上下文文件盖过环境：工具在 harness 的常驻进程里执行时，环境是拉起那个进程的运行留下的（§7.7）。

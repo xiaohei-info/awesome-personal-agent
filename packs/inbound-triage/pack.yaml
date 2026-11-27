@@ -35,6 +35,11 @@ source_rules:
     match: {source_type: reminder, event_type: [reminder.completed, reminder.out_of_view]}
     then: ignore
     on_update: attach
+  # 点名请本人评审或审批的通知没有正文，只有标题和仓库名，judge 容易按内容太少忽略：规则直通进队列，只问急不急。
+  - id: pr-review-requested
+    match: {source_type: github, event_type: [notification.review_requested, notification.approval_requested]}
+    project_by: repo_remote
+    then: proposed
   - id: agents-md-changed
     match: {source_type: github, event_type: [repo.agents_md_changed]}
     then: ignore

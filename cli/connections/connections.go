@@ -17,7 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-func init() { client.Register("connection", run) }
+func init() { client.Register("connection", usageHint, run) }
 
 const usageHint = "usage: apa connection list [--direction channel] | add [<JSON 文件>|-] | configure <id> [<JSON 文件>|-] | rename <id> <名字> | enable <id> | disable <id> | remove <id>"
 

@@ -100,7 +100,7 @@ function AgentCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) {
   const [agent, setAgent, dirty] = useDraft(sp.agent ?? "", () => sp.agent ?? "");
   return (
     <Card title={t.agentTitle} hint={t.agentHint} dirty={dirty} onSave={() => save({ agent })}>
-      <AgentPick value={agent} onChange={setAgent} main label={t.agentLabel} />
+      <AgentPick value={agent} onChange={setAgent} label={t.agentLabel} />
     </Card>
   );
 }
