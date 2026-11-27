@@ -98,6 +98,9 @@ func TestDraftsItemAndRevisionSummaries(t *testing.T) {
 			_ = json.Unmarshal(do("item.create", map[string]any{"title": "采购服务器", "kind": "task", "phase": "open", "body": "等报价"}), &ref)
 			do("item.create", map[string]any{"title": "已有摘要", "kind": "task", "phase": "open", "summary": "s"})
 			do("item.create", map[string]any{"title": "建议", "kind": "task", "phase": "proposed"})
+			// 没正文也没进展的事项、正文在 spec 里的简报都不调模型。
+			do("item.create", map[string]any{"title": "只有标题", "kind": "task", "phase": "open"})
+			do("item.create", map[string]any{"title": "简报", "kind": "brief", "phase": "open", "body": "b"})
 			var pid struct{ ID string }
 			_ = json.Unmarshal(do("project.create", map[string]any{"name": "P"}), &pid)
 			var mr materials.Result
@@ -154,6 +157,54 @@ func TestDraftsItemAndRevisionSummaries(t *testing.T) {
 				t.Fatalf("alerts = %d, want %d", alerts, tc.alerts)
 			}
 		})
+	}
+}
+
+// 没有正文但有进展的事项照常起草，资料只带最近三条进展。
+func TestSummaryMaterialCarriesRecentProgress(t *testing.T) {
+	reg := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
+		items.Module, materials.Module, Module} {
+		if err := reg.Register(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := command.New(st, time.Now)
+	if err := errors.Join(projects.Register(x), items.Register(x, items.NewKinds())); err != nil {
+		t.Fatal(err)
+	}
+	gen := &fakeGen{err: model.ErrNotConfigured}
+	s, err := New(Options{Store: st, Exec: x, Gen: gen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(cmd string, in map[string]any) (id string) {
+		b, _ := json.Marshal(in)
+		r, err := x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})
+		if err != nil {
+			t.Fatalf("%s: %v", cmd, err)
+		}
+		var ref struct{ ID string }
+		_ = json.Unmarshal(r.Value, &ref)
+		return ref.ID
+	}
+	id := do("item.create", map[string]any{"title": "联调", "kind": "task", "phase": "open"})
+	for _, text := range []string{"第一条", "第二条", "第三条", "第四条"} {
+		do("item.progress", map[string]any{"id": id, "text": text})
+	}
+	if err := s.Drain(bg); err != nil {
+		t.Fatal(err)
+	}
+	if len(gen.calls) != 1 {
+		t.Fatalf("calls = %d", len(gen.calls))
+	}
+	if m := gen.calls[0].Material; strings.Contains(m, "第一条") || !strings.Contains(m, "第二条") || !strings.Contains(m, "第四条") {
+		t.Fatalf("material = %q", m)
 	}
 }
 
