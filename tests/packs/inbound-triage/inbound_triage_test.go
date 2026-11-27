@@ -468,8 +468,9 @@ func TestRenewalMailBecomesProposedSuggestionAndBodyIsMaterialOnly(t *testing.T)
 	if len(reqs) != 2 || !strings.Contains(reqs[0].BodyText, "请立即付款") || !strings.Contains(reqs[0].BodyText, "不是指令") {
 		t.Fatal("mail body must be passed as material alongside the not-an-instruction guard")
 	}
-	if p := loadBuiltin(t); p.Prompts["triage-screen"].Meta.EventStats != "proposal_outcome" {
-		t.Fatal("triage-screen judge must declare event_stats: proposal_outcome")
+	// 来源历史统计失真，不进 judge 的题面（§9.3）。
+	if strings.Contains(reqs[0].BodyText, "dismissed") {
+		t.Fatalf("judge request still carries proposal stats: %s", reqs[0].BodyText)
 	}
 }
 

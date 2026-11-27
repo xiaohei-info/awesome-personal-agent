@@ -429,6 +429,8 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 `GET /agents-md?repo` 返回 `{"content": "…", "hash": "…", "rendered_at": "…", "last_check": {"state": "current|stale|drift", "file_hash": "…", "host": "…", "checked_at": "…"}}`。`last_check` 来自同一仓库最近一次 `POST /agents-md/check`，从未检查过时为 `null`。这两条路由的 `repo` 接受同一仓库的任一写法（主文档 §6.5）。
 
+`GET /packs` 的每个包带 `source_rules`：按声明顺序的 `{id, match, where?, then, accept?, on_update?}`（`then` 省略时给 `proposed`；字段见附录 C.5），包列表按包名排列即匹配顺序，"设置 › 来源处理"的只读清单读它。
+
 `GET /packs` 的每个包带 `views`，键是视图文件名去掉 `.yaml`，值只是声明性配置（附录 C.8），不含提示词正文与模板；未声明的列表返回 `[]`，没有视图的包返回 `{}`：
 
 ```json
@@ -522,6 +524,13 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 10（版本 7 新增连接与凭据保管的三张表，版本 8 收齐工作台结构变更，版本 9 新增 Agent 实例表与钥匙的 `agent_id`，版本 10 新增 `projects.system_role` 与内置 Inbox 唯一索引，均已按版号递增）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
+
+来源处理线小改（2026-11-27，主文档 §9.3、§9.4、附录 D.2）不改账本结构、不迁移：
+
+- 邮件线程关联键一律带尖括号；`apple-pim-source` 以前写出的无尖括号键不改写，升级后的回信不再与升级前按旧写法建出的 iCloud 类邮件事项按线程键相连（通知邮件仍可按 `owner/repo#N` 相连）。通知邮件新增 `owner/repo#N` 关联键。`apple-pim-source` 事件的 `headers` 改为原始邮件的全部信头。来源程序要换新版本。
+- 本人事项关闭时不再把挂靠消息退回判断流（委派事项不变）；`owner/repo#N` 在本去重域无命中时跨域匹配。
+- 判断模板新增 `inbound-triage/triage-urgent`（第二题，默认带 0.15–0.80，判断记录用途仍是 `inbound_urgent`）；`triage-screen` 去掉 `event_stats` 与第二题判据。覆盖了 `inbound-triage` 的同名包要自带 `triage-urgent`，否则急不急一题不问、一律按普通进队列。按模板名设过的 `triage-screen` 不确定带与影子模式只作用于第一题。`source_pipeline.judge_prompt` 只代替第一题的判据；原来写在里面的紧急判据不再生效。`source_pipeline` 新增 `owner_identity`（字符串，默认空，上限同两份提示词），两道题的判据后都附它；`judge_prompt` 整段原样作第一题判据，内核不拆段，原来写在里面的本人身份要移到 `owner_identity`，第二题判据与 stats 字样要删掉。
+- 来源规则 `where[]` 新增 `contains`、`prefix`；`GET /packs` 的每个包增 `source_rules`。
 
 账本结构版本 13（来源处理方式与下掉语气设置，2026-11-27，主文档 §9.3）：`sources_registry_source` 新增 `handling_mode TEXT NOT NULL DEFAULT 'normal'`，不回填、不改已有数据。新增来源事件处置 `reminded`、命令 `inbound.remind` 与 `source.set_handling_mode`、路由 `POST /source-events/{id}/remind`、命令行 `apa source remind`。破坏性改动：`apa persona`、`GET /context/persona` 与策略段 `persona`、`persona_lang` 删除（`PUT` 带它们为 400）；已存策略版本里的旧值原样保留、读取时忽略；已装的旧版插件读语气失败时放行。`source_pipeline.judge_prompt` 的含义从"附在内置判据后"改为"整段代替内置判据"；内置判据并入 `triage-screen` 模板的 `criteria`。
 

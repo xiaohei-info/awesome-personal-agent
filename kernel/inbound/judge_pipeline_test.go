@@ -79,6 +79,7 @@ func setupUnifiedJudgeEnv(t *testing.T, cls *spyClassifier, chat *spyChat, extra
 				p.GenerateEndpoint = policy.GenerateEndpoint{URL: "http://chat.local", Model: "m", Locality: policy.LocalityLocal}
 			}
 			p.SourcePipeline.JudgePrompt = judgePrompt
+			p.SourcePipeline.OwnerIdentity = "昵称阿江"
 			return nil
 		})
 		return err
@@ -173,9 +174,14 @@ func TestUnifiedJudgeTwoQuestionsAndUndecidedDefaults(t *testing.T) {
 		t.Fatalf("expected 1 batched classifier request with 8 questions (4 events x 2), got %d batches (%v)", len(cls.batches), len(cls.batches[0]))
 	}
 	for i, q := range cls.batches[0] {
-		// 本人改过的判断标准整段代替内置判据；题面里的安全约定不受影响。
-		if q.Criteria != "发票和报销单都算需要处理" || !strings.Contains(q.Question, "安全约定") {
-			t.Fatalf("question %d: custom judge_prompt must replace the criteria and keep the guard: %q / %q", i, q.Criteria, q.Question)
+		// 本人改过的判断标准整段代替第一题的内置判据；第二题用自己的判据。题面里的安全约定不受影响。
+		urgent := strings.HasPrefix(q.Question, "这条来源事件需要今天之内")
+		if strings.Contains(q.Criteria, "昵称阿江") == false {
+			t.Fatalf("question %d: owner identity is shared by both questions: %q", i, q.Criteria)
+		}
+		if strings.HasPrefix(q.Criteria, "发票和报销单都算需要处理") == urgent || !strings.Contains(q.Question, "安全约定") ||
+			urgent && !strings.Contains(q.Criteria, "已经恢复的告警") {
+			t.Fatalf("question %d: judge_prompt applies to Q1 only: %q / %q", i, q.Criteria, q.Question)
 		}
 	}
 	// ev_ignore 的 Q1 判否，不得再问 chat（chat 只被 both-undecided 的 Q1/Q2 与 q2-undecided 的 Q2 调了 3 次）。
@@ -287,5 +293,55 @@ source_rules:
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { topic, err = runner.Event(tx, "ev_chat_t"); return })
 	if topic.Disposition != domain.DispositionIgnored {
 		t.Fatalf("chat.topic should still be ignored by rule, got %s", topic.Disposition)
+	}
+}
+
+// 两题的输入带本机当前时间；邮件的收件信头只随全文资料送出；急不急一题放行上限 0.80，0.62 不再直接判急。
+func TestJudgeInputAndUrgentBand(t *testing.T) {
+	cls := &spyClassifier{fn: func(qs []model.Question) model.JudgeResult {
+		ans := make([]model.Answer, len(qs))
+		for i, q := range qs {
+			p := 0.90
+			if strings.HasPrefix(q.Question, "这条来源事件需要今天之内") {
+				p = 0.62
+			}
+			ans[i] = model.Answer{ID: q.ID, PYes: p, Source: "classifier"}
+		}
+		return model.JudgeResult{Answers: ans, Healthy: true}
+	}}
+	e := setupUnifiedJudgeEnv(t, cls, nil, "", "")
+	ingestOne(t, e, "src_mail", "mail", "ev_to", "mail.received", "周会纪要")
+	headers := `{"To":"me@example.test","Cc":["a@example.test","b@example.test"],"List-Id":"<team.example.test>","Received":"hop"}`
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sources_runner_event_part (event_id, part, media_type, bytes, sha256, content) VALUES ('ev_to', 'headers', 'application/json', ?, '', ?)`,
+			len(headers), []byte(headers))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Process(bg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cls.batches) != 1 || len(cls.batches[0]) != 2 {
+		t.Fatalf("batches %+v", cls.batches)
+	}
+	for _, q := range cls.batches[0] {
+		var in map[string]any
+		_ = json.Unmarshal(q.Input, &in)
+		now := e.now.In(time.Local).Format("2006-01-02T15:00-07:00 Monday")
+		if in["now"] != now || in["stats"] != nil {
+			t.Fatalf("input %s, want now %s and no stats", q.Input, now)
+		}
+		if !strings.HasPrefix(q.Material, "to: me@example.test\ncc: a@example.test, b@example.test\nlist_id: <team.example.test>\n") || strings.Contains(q.Material, "hop") {
+			t.Fatalf("material %q", q.Material)
+		}
+	}
+	var ev domain.SourceEvent
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, "ev_to"); return })
+	if ev.QueueLevel != runner.LevelNormal {
+		t.Fatalf("p=0.62 must not be urgent on its own: %+v", ev)
+	}
+	if pv := OutboundPreview(ev, "to: me@example.test\n"); !strings.Contains(pv["full"].Material, "to: me@") || strings.Contains(pv["excerpt"].Material+pv["meta"].Material, "to: me@") {
+		t.Fatalf("recipients leave only with the full scope: %+v", pv)
 	}
 }

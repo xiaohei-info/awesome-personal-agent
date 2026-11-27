@@ -685,10 +685,17 @@ func TestNotificationMailLink(t *testing.T) {
 	}
 	links := map[string]string{}
 	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
-		var ev struct{ ID, Link string }
+		var ev struct {
+			ID, Link string
+			Keys     []string `json:"correlation_keys"`
+		}
 		_ = json.Unmarshal([]byte(l), &ev)
 		if ev.ID != "" {
 			links[ev.ID] = ev.Link
+			// 另带与代码托管来源逐字相同的对象键（§9.4）。
+			if len(ev.Keys) != 2 || ev.Keys[1] != "org/app#7" {
+				t.Errorf("keys %v", ev.Keys)
+			}
 		}
 	}
 	want := "https://github.com/org/app/pull/7"

@@ -34,7 +34,7 @@ type Classifier interface {
 
 // 各内置判断模板的用途（§6.16）；其他判断型模板的用途取模板名。
 var builtinUse = map[string]string{
-	"triage-screen": "inbound_screen", "web-only-screening": "risk_screen",
+	"triage-screen": "inbound_screen", "triage-urgent": "inbound_urgent", "web-only-screening": "risk_screen",
 	"delegation-screen": "verify_gate",
 }
 
@@ -66,10 +66,10 @@ type JudgeCall struct {
 	// UnjudgedOnUnavailable 为真时，没有任何一级给出可用答复就不取保守默认、不写记录，Verdict.Unavailable 为真：
 	// 入站事件记未判定，恢复后重判（§8.7）。single_shot 模板不受此项影响，照取 on_undecided。
 	UnjudgedOnUnavailable bool
-	// Question 非空时替换模板正文作为本次题面（用于同一模板的多题判定，如 judge 的第二题"急不急"）。
-	Question string
 	// Criteria 非空时代替模板判据（本人在设置页改过的判断标准）；模板正文里的安全边界不受影响。
 	Criteria string
+	// Identity 非空时附在判据后面（本人身份，用来判断事件是否与本人有关），两道题共用。
+	Identity string
 	// OnUndecided 非空时覆盖模板的保守默认（如 judge 第一题取 yes、第二题取 no）。
 	OnUndecided string
 }
@@ -265,18 +265,18 @@ func (p *pending) fit(level, locality string, max int) (budget.Result, bool) {
 }
 
 func (p *pending) question() string {
-	body := p.pr.Body
-	if strings.TrimSpace(p.c.Question) != "" {
-		body = p.c.Question
-	}
-	return render(body, Call{Target: p.c.Subject, Project: p.c.Project}, "")
+	return render(p.pr.Body, Call{Target: p.c.Subject, Project: p.c.Project}, "")
 }
 
 func (p *pending) criteria() string {
-	if c := strings.TrimSpace(p.c.Criteria); c != "" {
-		return c
+	c := strings.TrimSpace(p.c.Criteria)
+	if c == "" {
+		c = strings.TrimSpace(p.meta.Criteria)
 	}
-	return strings.TrimSpace(p.meta.Criteria)
+	if id := strings.TrimSpace(p.c.Identity); id != "" {
+		c += "\n\n本人身份（用来判断事件是否与本人有关，例如群聊是否点名本人）：\n" + id
+	}
+	return c
 }
 
 func (p *pending) onUndecided() string {
@@ -339,7 +339,7 @@ func hostOf(raw string) string {
 	return u.Scheme + "://" + u.Host
 }
 
-// prefetch 把首位是分类端点的题按模板成批提交；其余情形留给 walk 逐级问。
+// prefetch 把首位是分类端点的题按（包，是否单次）成批提交，同一事件的两道题因此仍在一个请求里；其余情形留给 walk 逐级问。
 func (s *Service) prefetch(ctx context.Context, ps []*pending, pol policy.Policy) {
 	ep := pol.JudgeEndpoint
 	if ep == nil || ep.URL == "" || s.o.Classifier == nil {
@@ -349,10 +349,11 @@ func (s *Service) prefetch(ctx context.Context, ps []*pending, pol policy.Policy
 	var order []string
 	for _, p := range ps {
 		if p != nil && p.meta.AnswerBy[0] == "classifier" {
-			if _, ok := groups[p.c.Template]; !ok {
-				order = append(order, p.c.Template)
+			k := fmt.Sprintf("%s/%t", p.pk.Name, p.meta.SingleShot)
+			if _, ok := groups[k]; !ok {
+				order = append(order, k)
 			}
-			groups[p.c.Template] = append(groups[p.c.Template], p)
+			groups[k] = append(groups[k], p)
 		}
 	}
 	for _, t := range order {
@@ -360,7 +361,7 @@ func (s *Service) prefetch(ctx context.Context, ps []*pending, pol policy.Policy
 	}
 }
 
-// classify 把一组同模板的题提交给分类端点，结果记在各题的 prefix 上。指纹已有结果的复用，指纹相同的只问一次。
+// classify 把一组题提交给分类端点，结果记在各题的 prefix 上。指纹已有结果的复用，指纹相同的只问一次。
 func (s *Service) classify(ctx context.Context, group []*pending, ep policy.JudgeEndpoint) {
 	loc := policy.EffectiveLocality(ep.Locality)
 	type job struct {
@@ -740,7 +741,11 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 		if p.meta.SingleShot {
 			attempts = 1
 		}
-		resp, err := s.complete(ctx, ep, req, attempts, kusage.Key{Part: kusage.PartJudge, Purpose: p.use()})
+		key := kusage.Key{Part: kusage.PartJudge, Purpose: p.use()}
+		resp, err := s.complete(ctx, ep, req, attempts, key)
+		if errors.Is(err, model.ErrSchema) && !p.meta.SingleShot { // 偶发的不合规输出重问一次
+			resp, err = s.complete(ctx, ep, req, 1, key)
+		}
 		lv.DurationMs = s.o.Now().Sub(t0).Milliseconds()
 		switch {
 		case ctx.Err() != nil:

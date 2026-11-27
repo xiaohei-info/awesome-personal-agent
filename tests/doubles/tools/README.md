@@ -21,5 +21,5 @@ go build -o /tmp/tool-stub ./tests/doubles/tools/cmd/tool-stub
 
 已知限制：
 - gh 样本的时间固定在 2026-11-10（09:00–14:00Z）；来源的 `window.to` 必须不早于对应时刻事件才会被读到（测试时钟推进即可）。
-- `pim-mail-thread*` 的 `references`/`inReplyTo` 字段名是假设（`MEAS-MAIL-THREAD` 尚未实测），真实输出形态确认后改这里。
+- `pim-mail-thread*` 的线程头在 `message.source`（原始邮件）里，与 `mail-cli get --include-source` 一致（`MEAS-MAIL-THREAD`）。
 - 渠道侧不在这里实现：直接用 `ext/telegram/fakebot`。

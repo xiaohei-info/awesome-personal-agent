@@ -94,7 +94,7 @@ func holds(c packs.Condition, src domain.Source, ev domain.SourceEvent, series S
 	return compareScalar(c, got)
 }
 
-// compareScalar 做 eq、ne、in：按文本比较，数值写成 10 或 10.0 都与指标 10 相等。
+// compareScalar 做 eq、ne、in、contains、prefix（后两个区分大小写）：按文本比较，数值写成 10 或 10.0 都与指标 10 相等。
 func compareScalar(c packs.Condition, got string) (bool, error) {
 	same := func(want any) bool {
 		if a, ok := number(want); ok {
@@ -105,6 +105,10 @@ func compareScalar(c packs.Condition, got string) (bool, error) {
 		return fmt.Sprint(want) == got
 	}
 	switch c.Op {
+	case "contains":
+		return strings.Contains(got, fmt.Sprint(c.Value)), nil
+	case "prefix":
+		return strings.HasPrefix(got, fmt.Sprint(c.Value)), nil
 	case "eq":
 		return same(c.Value), nil
 	case "ne":

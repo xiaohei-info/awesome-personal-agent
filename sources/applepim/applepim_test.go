@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -177,8 +178,8 @@ func TestFailures(t *testing.T) {
 	}
 }
 
-// ACT-MAIL-13、ACT-MAIL-08：桌面邮件应用适配器同样产出线程关联键。get 的 message 带
-// references/inReplyTo；关联键写法与事件 id 一致（messageId 不带尖括号）。
+// ACT-MAIL-13、ACT-MAIL-08：桌面邮件应用适配器同样产出线程关联键。线程头从 --include-source 给的原始邮件里取；
+// 关联键与 himalaya 适配器同一写法（带尖括号），事件 id 仍是不带尖括号的 messageId。
 func TestMailThreadCorrelationKeys(t *testing.T) {
 	var calls [][]string
 	base := replay(t, &calls)
@@ -196,12 +197,15 @@ func TestMailThreadCorrelationKeys(t *testing.T) {
 		}
 	}
 	code, lines, _ := exec1(t, mk, `{"config":{"kind":"mail","account":"Acct"}}`)
+	if !slices.ContainsFunc(calls, func(c []string) bool { return slices.Contains(c, "--include-source") }) {
+		t.Errorf("get 应带 --include-source: %v", calls)
+	}
 	if code != ExitOK || len(lines) != 4 {
 		t.Fatalf("code=%d lines=%v", code, lines)
 	}
 	for i, id := range []string{"mid-p1@example.test", "mid-p2@example.test", "mid-p3@example.test"} {
 		ks, _ := lines[i]["correlation_keys"].([]any)
-		if lines[i]["id"] != id || len(ks) != 1 || ks[0] != "thread:mid-p1@example.test" {
+		if lines[i]["id"] != id || len(ks) != 1 || ks[0] != "thread:<mid-p1@example.test>" {
 			t.Errorf("%s: %v", id, lines[i])
 		}
 	}
@@ -334,7 +338,9 @@ func TestMailNotificationLink(t *testing.T) {
 			if strings.Contains(id, "/review/") {
 				refs = "<org/app/pull/7@github.com>"
 			}
-			return []byte(`{"success":true,"message":{"messageId":"` + id + `","content":"正文","references":"` + refs + `"}}`), nil, nil
+			b, _ := json.Marshal(map[string]any{"success": true, "message": map[string]any{"messageId": id, "content": "正文",
+				"source": "References: " + refs + "\r\n\r\n正文"}})
+			return b, nil, nil
 		}
 	}
 	code, lines, _ := exec1(t, mk, `{"config":{"kind":"mail","account":"Acct"}}`)
@@ -345,6 +351,11 @@ func TestMailNotificationLink(t *testing.T) {
 	for _, l := range lines[:3] {
 		if l["link"] != want[l["id"].(string)] {
 			t.Errorf("%s: link %v", l["id"], l["link"])
+		}
+		// 通知邮件另带与代码托管来源逐字相同的对象键（§9.4），别的邮件只有线程键。
+		ks, _ := l["correlation_keys"].([]any)
+		if got := slices.Contains(ks, any("org/app#7")); got != (l["link"] != nil) {
+			t.Errorf("%s: keys %v", l["id"], ks)
 		}
 	}
 }
