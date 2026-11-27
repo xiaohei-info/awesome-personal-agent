@@ -512,7 +512,7 @@ func TestModelRequestsRecordUsage(t *testing.T) {
 		}
 	}
 	var got kusage.Summary
-	if err := e.st.View(bg, func(tx *store.Tx) (err error) { got, err = kusage.Summarize(tx, t0); return }); err != nil {
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { got, err = kusage.Summarize(tx, t0, 1); return }); err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Rows) != 2 || got.Rows[0].Part != kusage.PartJudge || got.Rows[0].Requests != 1 || got.Rows[0].Model != "m1" ||

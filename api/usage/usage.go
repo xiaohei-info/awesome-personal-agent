@@ -33,11 +33,10 @@ func Routes(st *store.Store) core.RouteGroup {
 				}
 				days = n
 			}
+			var out kusage.Summary
 			// "今天"按主机日界，与今天视图一致。
 			now := clock.Now().In(time.Local)
-			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 0, 1-days)
-			var out kusage.Summary
-			if err := st.View(req.Context(), func(tx *store.Tx) (err error) { out, err = kusage.Summarize(tx, from); return }); err != nil {
+			if err := st.View(req.Context(), func(tx *store.Tx) (err error) { out, err = kusage.Summarize(tx, now, days); return }); err != nil {
 				return err
 			}
 			return core.WriteJSON(w, http.StatusOK, out)

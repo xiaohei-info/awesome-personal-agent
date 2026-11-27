@@ -6,6 +6,7 @@ package usage
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -168,23 +169,41 @@ type Row struct {
 	Counts
 }
 
-// Day 是一天里一个部分的合计。
-type Day struct {
-	Date string `json:"date"`
+// Point 是一个时间槽里一个部分的合计。
+type Point struct {
+	Slot string `json:"slot"`
 	Part string `json:"part"`
 	Counts
 }
 
-// Summary 是 [from, 现在] 的汇总。Since 是最早一条记录的时刻（还没有记录时为空），早于它的时间没有统计。
+// Summary 是时间段内的汇总。Since 是最早一条记录的时刻（还没有记录时为空），早于它的时间没有统计。
+// Slots 是时间段内的全部时间槽，旧的在前、没有记录的也在；Series 只列有记录的。
 type Summary struct {
-	Since *time.Time `json:"since,omitempty"`
-	Rows  []Row      `json:"rows"`
-	Days  []Day      `json:"days"`
+	Since  *time.Time `json:"since,omitempty"`
+	Rows   []Row      `json:"rows"`
+	Slots  []string   `json:"slots"`
+	Series []Point    `json:"series"`
 }
 
-// Summarize 汇总 from 起的记录；日期按 from 的时区切分。
-func Summarize(tx *store.Tx, from time.Time) (Summary, error) {
-	s := Summary{Rows: []Row{}, Days: []Day{}}
+// hourSlot 是今天视图的槽名：本地钟点 "00"–"23"。夏令时重复的钟点归一槽。
+const hourSlot = "15"
+
+// Summarize 汇总含 now 当天在内的最近 days 天；日界与钟点按 now 的时区。days 为 1 时按小时分槽（24 个），否则按天。
+func Summarize(tx *store.Tx, now time.Time, days int) (Summary, error) {
+	s := Summary{Rows: []Row{}, Slots: []string{}, Series: []Point{}}
+	y, m, d := now.Date()
+	from := time.Date(y, m, d-days+1, 0, 0, 0, 0, now.Location())
+	layout := time.DateOnly
+	if days == 1 {
+		layout = hourSlot
+		for h := range 24 {
+			s.Slots = append(s.Slots, fmt.Sprintf("%02d", h))
+		}
+	} else {
+		for i := range days { // 取正午，避开夏令时在零点跳变的时区
+			s.Slots = append(s.Slots, time.Date(y, m, d-days+1+i, 12, 0, 0, 0, now.Location()).Format(layout))
+		}
+	}
 	first, err := tx.Query(`SELECT COALESCE(MIN(at), 0) FROM usage_record`)
 	if err != nil {
 		return s, err
@@ -208,7 +227,7 @@ func Summarize(tx *store.Tx, from time.Time) (Summary, error) {
 	}
 	defer rows.Close()
 	// shortcut: 逐条读进内存分组；30 天的记录到几十万条、页面变慢时改为按天预聚合。
-	groups, days := map[Key]Counts{}, map[[2]string]Counts{}
+	groups, series := map[Key]Counts{}, map[[2]string]Counts{}
 	for rows.Next() {
 		var k Key
 		var c Counts
@@ -219,10 +238,10 @@ func Summarize(tx *store.Tx, from time.Time) (Summary, error) {
 		g := groups[k]
 		g.add(c)
 		groups[k] = g
-		dk := [2]string{time.Unix(0, at).In(from.Location()).Format(time.DateOnly), k.Part}
-		d := days[dk]
-		d.add(c)
-		days[dk] = d
+		sk := [2]string{time.Unix(0, at).In(now.Location()).Format(layout), k.Part}
+		p := series[sk]
+		p.add(c)
+		series[sk] = p
 	}
 	if err := rows.Err(); err != nil {
 		return s, err
@@ -234,9 +253,9 @@ func Summarize(tx *store.Tx, from time.Time) (Summary, error) {
 		return cmp.Or(cmp.Compare(a.Part, b.Part), cmp.Compare(b.InputTokens+b.OutputTokens, a.InputTokens+a.OutputTokens),
 			cmp.Compare(a.Purpose, b.Purpose), cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Model, b.Model))
 	})
-	for k, c := range days {
-		s.Days = append(s.Days, Day{k[0], k[1], c})
+	for k, c := range series {
+		s.Series = append(s.Series, Point{k[0], k[1], c})
 	}
-	slices.SortFunc(s.Days, func(a, b Day) int { return cmp.Or(cmp.Compare(b.Date, a.Date), cmp.Compare(a.Part, b.Part)) })
+	slices.SortFunc(s.Series, func(a, b Point) int { return cmp.Or(cmp.Compare(a.Slot, b.Slot), cmp.Compare(a.Part, b.Part)) })
 	return s, nil
 }

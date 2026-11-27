@@ -71,10 +71,10 @@ func TestRunsAndSummary(t *testing.T) {
 
 	var got, today Summary
 	if err := st.View(ctx, func(tx *store.Tx) (err error) {
-		if got, err = Summarize(tx, now.AddDate(0, 0, -7)); err != nil {
+		if got, err = Summarize(tx, now, 7); err != nil {
 			return err
 		}
-		today, err = Summarize(tx, now.Truncate(24*time.Hour))
+		today, err = Summarize(tx, now, 1)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -83,8 +83,14 @@ func TestRunsAndSummary(t *testing.T) {
 	if len(got.Rows) != 2 || got.Rows[0] != want {
 		t.Fatalf("rows = %+v", got.Rows)
 	}
-	if len(got.Days) != 2 || got.Days[0].Date != "2026-03-02" || got.Days[1].Date != "2026-03-01" {
-		t.Fatalf("days = %+v", got.Days)
+	// 按天：7 个连续日期补齐，旧的在前；只列有记录的点。
+	if len(got.Slots) != 7 || got.Slots[0] != "2026-02-24" || got.Slots[6] != "2026-03-02" ||
+		len(got.Series) != 2 || got.Series[0].Slot != "2026-03-01" || got.Series[1].Slot != "2026-03-02" || got.Series[1].Requests != 3 {
+		t.Fatalf("slots = %v, series = %+v", got.Slots, got.Series)
+	}
+	// 今天：24 个钟点槽。
+	if len(today.Slots) != 24 || today.Slots[0] != "00" || len(today.Series) != 1 || today.Series[0].Slot != "12" {
+		t.Fatalf("today slots = %v, series = %+v", today.Slots, today.Series)
 	}
 	if len(today.Rows) != 1 || today.Since == nil || !today.Since.Equal(now.AddDate(0, 0, -1)) {
 		t.Fatalf("today = %+v", today)
@@ -137,7 +143,7 @@ func TestDeclaredUsageContractAnyHarness(t *testing.T) {
 		}
 	}
 	var got Summary
-	if err := st.View(ctx, func(tx *store.Tx) (err error) { got, err = Summarize(tx, now); return }); err != nil {
+	if err := st.View(ctx, func(tx *store.Tx) (err error) { got, err = Summarize(tx, now, 1); return }); err != nil {
 		t.Fatal(err)
 	}
 	want := []Row{
@@ -146,5 +152,47 @@ func TestDeclaredUsageContractAnyHarness(t *testing.T) {
 	}
 	if !slices.Equal(got.Rows, want) {
 		t.Fatalf("rows = %+v", got.Rows)
+	}
+}
+
+// 日界与钟点按调用方时区，不按 UTC：东八区的 00:30 算今天 00 时，前一分钟算昨天。空账本也给出完整时间槽。
+func TestSummaryLocalDayBoundary(t *testing.T) {
+	reg := store.NewRegistry()
+	if err := reg.Register(Module); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	zone := time.FixedZone("x", 8*3600)
+	now := time.Date(2026, 3, 2, 9, 0, 0, 0, zone)
+	read := func(days int) (s Summary) {
+		t.Helper()
+		if err := st.View(ctx, func(tx *store.Tx) (err error) { s, err = Summarize(tx, now, days); return }); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if s := read(30); len(s.Slots) != 30 || s.Slots[0] != "2026-02-01" || s.Since != nil || s.Series == nil || len(s.Series) != 0 {
+		t.Fatalf("empty = %+v", s)
+	}
+	if err := st.Update(ctx, func(tx *store.Tx) error {
+		for _, at := range []time.Time{time.Date(2026, 3, 2, 0, 30, 0, 0, zone), time.Date(2026, 3, 1, 23, 59, 0, 0, zone)} {
+			if err := Add(tx, at.UTC(), Record{Key: Key{Part: PartModel, Purpose: "p"}, Counts: Counts{Requests: 1}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if s := read(1); len(s.Series) != 1 || s.Series[0].Slot != "00" || s.Series[0].Requests != 1 {
+		t.Fatalf("today = %+v", s.Series)
+	}
+	if s := read(7); len(s.Series) != 2 || s.Series[0].Slot != "2026-03-01" {
+		t.Fatalf("week = %+v", s.Series)
 	}
 }
