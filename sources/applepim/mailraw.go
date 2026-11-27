@@ -69,7 +69,11 @@ func collectMail(it mailMsg, got mailMsg) mailParts {
 			if p.attachments == nil {
 				p.attachments = rp.attachments
 			}
-			p.missing = append(p.missing, rp.missing...)
+			for _, m := range rp.missing {
+				if m.Part != "body" || got.Content == "" { // 工具已给正文时，原始邮件解不出的正文部分不算缺
+					p.missing = append(p.missing, m)
+				}
+			}
 		}
 	}
 	if len(p.headers) == 0 {
@@ -83,9 +87,7 @@ func collectMail(it mailMsg, got mailMsg) mailParts {
 		add("Subject", it.Subject)
 		add("From", it.Sender)
 		add("Date", it.DateReceived)
-		add("References", got.References)
-		add("In-Reply-To", got.InReplyTo)
-		p.missing = append(p.missing, missing{"headers", "mail-cli get 没有给出信头，只有列表与线程头里的几项"})
+		p.missing = append(p.missing, missing{"headers", "mail-cli get 没有给出信头，只有列表里的几项"})
 	}
 	if p.attachments == nil && !hasMissing(p.missing, "attachments") {
 		p.missing = append(p.missing, missing{"attachments", "mail-cli get 没有给出附件清单"})

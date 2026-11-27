@@ -217,10 +217,8 @@ type mailMsg struct {
 	SenderAddr   string `json:"senderAddress"`
 	Sender       string `json:"sender"`
 	Content      string `json:"content"`
-	// get 的 message 带线程头（MEAS-MAIL-THREAD）；缺失时只给自己的 Message-ID。
-	References string `json:"references"`
-	InReplyTo  string `json:"inReplyTo"`
-	// get 的结构化原文字段（MEAS-RAW-MAIL 未实测，形态按设计合成，见 testdata/README.md）：
+	// get 的原文字段：--include-source 给原始邮件 source（线程头与信头从它解析，MEAS-MAIL-THREAD）；
+	// 结构化的 headers、htmlContent、attachments 有就优先用（见 testdata/README.md）。
 	// 缺失（nil）与"确实没有"（空）要区分，前者以 partial 自报。
 	Headers     []mailHeader `json:"headers"`
 	HTMLContent *string      `json:"htmlContent"`
@@ -290,7 +288,7 @@ func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time
 			break // 超时或输出预算用尽：已读部分照常输出，游标只到已读部分
 		}
 		raw, err := call(ctx, r, "mail-cli", "get", "--format=json", "--engine=sqlite", "--account="+cfg.Account,
-			"--mailbox="+cfg.Mailbox, "--id="+it.m.MessageID)
+			"--mailbox="+cfg.Mailbox, "--id="+it.m.MessageID, "--include-source")
 		if err != nil {
 			if n > 0 && ctx.Err() != nil {
 				break
@@ -331,16 +329,20 @@ func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time
 func buildMail(list, got mailMsg, subj, sender string, at time.Time) event {
 	p := collectMail(list, got)
 	ev := event{ID: list.MessageID, Type: "mail.received", Subject: subj, Detail: p.text,
-		OccurredAt: at.UTC().Format(time.RFC3339Nano), Sender: sender,
-		CorrelationKeys: []string{"thread:" + threadRoot(list.MessageID, got)},
-		Link:            content.NotificationLink(sender, list.MessageID, got.References, got.InReplyTo)}
+		OccurredAt: at.UTC().Format(time.RFC3339Nano), Sender: sender}
+	refs, inReplyTo := headerValue(p.headers, "References"), headerValue(p.headers, "In-Reply-To")
+	ev.Link = content.NotificationLink(sender, list.MessageID, refs, inReplyTo)
+	ev.CorrelationKeys = content.MailKeys(threadRoot(list.MessageID, refs, inReplyTo), ev.Link)
 	if p.html != "" {
 		ev.Original = &original{MediaType: "text/html", Text: p.html}
-		if txt, err := content.HTMLToText(p.html); err != nil {
-			ev.Detail = ""
-			p.missing = append(p.missing, missing{"body", err.Error()})
-		} else {
-			ev.Detail = txt
+		// HTML 只从原始邮件里解出来时，工具给的纯文本正文照旧当 detail：转换结果带大量链接地址，会挤占判断资料。
+		if got.HTMLContent != nil || got.Content == "" {
+			if txt, err := content.HTMLToText(p.html); err != nil {
+				ev.Detail = ""
+				p.missing = append(p.missing, missing{"body", err.Error()})
+			} else {
+				ev.Detail = txt
+			}
 		}
 	}
 	ev.Headers = content.NormalizeHeaders(p.headers)
@@ -356,20 +358,25 @@ func eventSize(ev event) int {
 	return len(b) + 1
 }
 
-var msgIDRe = regexp.MustCompile(`<([^<>\s]+)>`)
+var msgIDRe = regexp.MustCompile(`<[^<>\s]+>`)
 
 // threadRoot 返回线程根 Message-ID（§9.7：References 首项，没有取 In-Reply-To，都没有就是自己）。
-// 写法与自己的 messageId 对齐：messageId 不带尖括号时，头里的 <id> 也去掉，根信与回信的键才相等。
-func threadRoot(own string, m mailMsg) string {
-	for _, h := range []string{m.References, m.InReplyTo} {
-		if sm := msgIDRe.FindStringSubmatch(h); sm != nil {
-			if strings.HasPrefix(own, "<") {
-				return sm[0]
-			}
-			return sm[1]
+func threadRoot(own, references, inReplyTo string) string {
+	for _, h := range []string{references, inReplyTo} {
+		if id := msgIDRe.FindString(h); id != "" {
+			return id
 		}
 	}
 	return own
+}
+
+func headerValue(hs []content.Header, name string) string {
+	for _, h := range hs {
+		if strings.EqualFold(h.Name, name) {
+			return h.Value
+		}
+	}
+	return ""
 }
 
 // ---- 日历 ----
