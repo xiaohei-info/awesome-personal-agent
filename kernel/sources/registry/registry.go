@@ -716,7 +716,7 @@ func planHandling(tx *store.Tx, in json.RawMessage) (domain.Source, string, erro
 	if err := strict(in, &h); err != nil {
 		return domain.Source{}, "", err
 	}
-	s, err := Get(tx, h.ID)
+	s, err := row(tx, h.ID)
 	if err != nil {
 		return s, "", err
 	}
@@ -747,16 +747,22 @@ func applyHandling(c *command.Ctx) (any, error) {
 	return s, nil
 }
 
-// CheckProposal 拒绝 Web 本人以外的调用者为"只口头提醒"来源的事件建建议（§9.3）；不在登记表里的来源（对话捕获）不受限。
+// HandlingMode 是来源（含对话捕获）的处理方式；表里没有这个来源时为空。
+func HandlingMode(tx *store.Tx, id string) (string, error) {
+	s, err := row(tx, id)
+	if isNotFound(err) {
+		return "", nil
+	}
+	return s.HandlingMode, err
+}
+
+// CheckProposal 拒绝 Web 本人以外的调用者为"只口头提醒"来源的事件建建议（§9.3）。
 func CheckProposal(tx *store.Tx, level authz.Level, source string) error {
 	if level == authz.LevelWeb {
 		return nil
 	}
-	s, err := Get(tx, source)
-	if isNotFound(err) {
-		return nil
-	}
-	if err != nil || s.HandlingMode != domain.HandlingRemindOnly {
+	mode, err := HandlingMode(tx, source)
+	if err != nil || mode != domain.HandlingRemindOnly {
 		return err
 	}
 	return domain.NewError(domain.CodeConflict, "the owner set this source to remind only: no proposal can be made from its events",
@@ -884,6 +890,19 @@ func isNotFound(err error) bool {
 
 // Get 读取一条登记；不存在返回 not_found。
 func Get(tx *store.Tx, id string) (domain.Source, error) {
+	s, err := row(tx, id)
+	if err == nil && s.Type == domain.SourceCapture {
+		return domain.Source{}, notFound(id)
+	}
+	return s, err
+}
+
+func notFound(id string) error {
+	return domain.NewError(domain.CodeNotFound, "source "+id+" not found", "list sources and retry")
+}
+
+// row 读一行，含对话捕获的内部来源。
+func row(tx *store.Tx, id string) (domain.Source, error) {
 	r, err := tx.Query(`SELECT `+cols+` FROM sources_registry_source WHERE id = ?`, id)
 	if err != nil {
 		return domain.Source{}, err
@@ -893,7 +912,7 @@ func Get(tx *store.Tx, id string) (domain.Source, error) {
 		if err := r.Err(); err != nil {
 			return domain.Source{}, err
 		}
-		return domain.Source{}, domain.NewError(domain.CodeNotFound, "source "+id+" not found", "list sources and retry")
+		return domain.Source{}, notFound(id)
 	}
 	return scan(r)
 }
@@ -909,8 +928,23 @@ func SetRunState(tx *store.Tx, id, cursor string, stats json.RawMessage) error {
 }
 
 // List 按 id 升序返回全部登记。
-func List(tx *store.Tx) ([]domain.Source, error) {
-	r, err := tx.Query(`SELECT ` + cols + ` FROM sources_registry_source ORDER BY id`)
+func List(tx *store.Tx) ([]domain.Source, error) { return list(tx, "!=") }
+
+// ListCapture 按 id 升序返回对话捕获的内部来源：它们不是登记的来源，Get 与 List 看不到，只有处理方式可改。
+func ListCapture(tx *store.Tx) ([]domain.Source, error) { return list(tx, "=") }
+
+// EnsureCapture 在调用方事务内记下一个对话捕获来源（已有则不动），使它能像其他来源一样设处理方式。
+func EnsureCapture(tx *store.Tx, id string) error {
+	_, err := row(tx, id)
+	if !isNotFound(err) {
+		return err
+	}
+	return save(tx, domain.Source{ID: id, Type: domain.SourceCapture, SourceKind: string(domain.SourceCapture),
+		Outbound: domain.Outbound{Local: ScopeFull}, Enabled: true, HandlingMode: domain.HandlingNormal}, true)
+}
+
+func list(tx *store.Tx, op string) ([]domain.Source, error) {
+	r, err := tx.Query(`SELECT `+cols+` FROM sources_registry_source WHERE type `+op+` ? ORDER BY id`, string(domain.SourceCapture))
 	if err != nil {
 		return nil, err
 	}

@@ -373,6 +373,8 @@ button.link:hover { text-decoration-color: currentColor; }
 /* 行式列表里的块级内容占满一行 */
 .rows > li > :is(pre, ul, ol, p, form, .actions, .full, details, .act-row) { flex-basis: 100%; margin: 0; }
 .rows > li > [role="group"] { display: flex; gap: 8px; }
+.rows > li > .ops[role="group"] { margin-left: auto; }
+.rows > li > section.panel { flex-basis: 100%; margin: 0; }
 /* 来源行内改名：与名字同处一行，不占满整行 */
 .rows > li > form.rename { display: inline-flex; flex-basis: auto; flex-wrap: wrap; align-items: center; gap: 6px; }
 .rows > li > form.rename input { width: 12em; max-width: 100%; }

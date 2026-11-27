@@ -13,13 +13,14 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 // 对话候选捕获（设计 §9.3、§11.2）：插件在回合结束时提交对话增量，这里把它转成内部来源事件，
 // 之后与其他来源事件走同一条流水线（规则之后的判断型 → 生成型），产出 proposed 事项。
-// 每个项目一个内部来源 "capture:<项目 id>"，不进来源登记表；事项归属该项目。
+// 每个项目一个内部来源 "capture:<项目 id>"，不是登记的来源（登记表里只存它的处理方式）；事项归属该项目。
 const (
 	// CmdCapture 提交一段对话增量。
 	CmdCapture = "inbound.capture"
@@ -162,7 +163,7 @@ type CaptureOut struct {
 	Project  string `json:"project,omitempty"`
 }
 
-// IsCaptureSource 报告 id 是否是对话捕获的内部来源；这种来源不进登记表，内容是对话原文（§9.3）。
+// IsCaptureSource 报告 id 是否是对话捕获的内部来源；这种来源不是登记的来源，内容是对话原文（§9.3）。
 func IsCaptureSource(id string) bool {
 	_, ok := captureProject(id)
 	return ok
@@ -228,6 +229,9 @@ func (s *Service) registerCapture(x *command.Executor) error {
 			sum := sha256.Sum256([]byte(id + "\x00" + c.Caller.Actor.Session + "\x00" + in.Text))
 			evID := "cap_" + hex.EncodeToString(sum[:12])
 			ev := domain.SourceEvent{ID: evID, Type: CaptureEvent, Subject: "conversation delta", Detail: in.Text, OccurredAt: c.Now()}
+			if err := registry.EnsureCapture(c.Tx, capturePrefix+id); err != nil {
+				return nil, err
+			}
 			if err := runner.AppendInternal(c.Tx, captureSource(capturePrefix+id), ev); err != nil {
 				return nil, err
 			}
