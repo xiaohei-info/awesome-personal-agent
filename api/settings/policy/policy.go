@@ -169,6 +169,17 @@ var (
 		disturbSection,
 		sect("background_run_timeout_sec", rules, "/settings/agents", func(p *kpolicy.Policy) *int { return &p.BackgroundRunTimeoutSec }),
 		sect("background_persona", agents, "/settings/agents", func(p *kpolicy.Policy) *bool { return &p.BackgroundPersona }),
+		// 响应里总是补全默认值后的三项，Web 据此显示"当前默认"。
+		{key: "thinking", group: agents, page: "/settings/agents",
+			get: func(p *kpolicy.Policy) any { return p.Thinking.Effective() },
+			set: func(p *kpolicy.Policy, raw json.RawMessage) error {
+				var v kpolicy.Thinking
+				if err := strictDecode(raw, &v); err != nil {
+					return err
+				}
+				p.Thinking = v
+				return nil
+			}},
 		sect("channels", rules, "/settings/channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
 		sect("limits", rules, "/settings/agents", func(p *kpolicy.Policy) *kpolicy.Limits { return &p.Limits }),
 		sect("default_agent_id", agents, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.DefaultAgentID }),
@@ -248,9 +259,6 @@ type generateReq struct {
 	// 资料预算（估算 token）只有 Web 能改（策略写入口本身要求 Web 登录）；省略时保持已存的值，不让旧形状的请求悄悄重置它；
 	// 给了就必须在范围内，0 也拒绝（所以用指针区分"没带"与"带了 0"）。
 	MaxMaterialTokens *int `json:"max_material_tokens"`
-	// 思考强度同样省略时保持已存的值。
-	JudgeEffort *string `json:"judge_effort"`
-	WriteEffort *string `json:"write_effort"`
 }
 
 // keyHint 是已存密钥的末 4 个字符，供 Web 显示"已设置 ····末 4 位"；短于 12 个字符的密钥不给，免得暴露过大比例。
@@ -264,14 +272,6 @@ func keyHint(k string) string {
 
 func keepKey(in *string, old string) string {
 	if in == nil || *in == maskedKey {
-		return old
-	}
-	return *in
-}
-
-// keep：请求没带这个字段时沿用已存的值。
-func keep(in *string, old string) string {
-	if in == nil {
 		return old
 	}
 	return *in
@@ -317,9 +317,8 @@ func getGenerate(p *kpolicy.Policy) any {
 	if g.URL == "" {
 		return nil
 	}
-	judge, write := g.Efforts()
 	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "api_key_hint": keyHint(g.APIKey), "protocol": kpolicy.GenerateProtocol(g.Protocol), "model": g.Model, "locality": g.Locality,
-		"max_material_tokens": g.MaterialBudget(), "judge_effort": judge, "write_effort": write}
+		"max_material_tokens": g.MaterialBudget()}
 }
 
 func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {
@@ -336,7 +335,7 @@ func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {
 		return err
 	}
 	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: r.Locality, Protocol: r.Protocol,
-		MaxMaterialTokens: budget, JudgeEffort: keep(r.JudgeEffort, p.GenerateEndpoint.JudgeEffort), WriteEffort: keep(r.WriteEffort, p.GenerateEndpoint.WriteEffort)}
+		MaxMaterialTokens: budget}
 	return nil
 }
 
@@ -349,7 +348,7 @@ func setLegacy(p *kpolicy.Policy, raw json.RawMessage) error {
 		return err
 	}
 	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: kpolicy.LocalityExternal, Protocol: r.Protocol,
-		MaxMaterialTokens: p.GenerateEndpoint.MaxMaterialTokens, JudgeEffort: p.GenerateEndpoint.JudgeEffort, WriteEffort: p.GenerateEndpoint.WriteEffort}
+		MaxMaterialTokens: p.GenerateEndpoint.MaxMaterialTokens}
 	return nil // screening_timeout_ms 随初筛取消，旧形状里带了也忽略
 }
 

@@ -307,11 +307,8 @@ func TestResponsesSendsEffortOnly(t *testing.T) {
 	if b := responsesBody("m", Request{User: "u"}, nil); b["reasoning"] != nil {
 		t.Fatalf("no effort must send no reasoning: %v", b)
 	}
-	var ep policy.GenerateEndpoint
-	if ep.Effort(true) != "low" || ep.Effort(false) != "medium" {
-		t.Fatalf("defaults = %q %q", ep.Effort(true), ep.Effort(false))
-	}
-	if ep.JudgeEffort = policy.EffortOff; ep.Effort(true) != "" {
-		t.Fatal("off must send nothing")
+	var th policy.Thinking
+	if th.ModelEffort(true) != "low" || th.ModelEffort(false) != "medium" {
+		t.Fatalf("defaults = %q %q", th.ModelEffort(true), th.ModelEffort(false))
 	}
 }

@@ -395,6 +395,7 @@ func newRunID() (string, error) {
 
 type prepared struct {
 	ep     policy.GenerateEndpoint
+	think  policy.Thinking
 	fp     string
 	cached json.RawMessage
 	stats  *Stats
@@ -435,7 +436,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		if err != nil {
 			return err
 		}
-		p.ep = pol.GenerateEndpoint
+		p.ep, p.think = pol.GenerateEndpoint, pol.Thinking
 		if p.ep.URL == "" || p.ep.Model == "" {
 			return notConfigured(pol)
 		}
@@ -476,6 +477,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		if m.Agent == "judge" {
 			key.Part, key.Purpose = kusage.PartJudge, cmp.Or(builtinUse[tmpl], tmpl)
 		}
+		req.Effort = p.think.ModelEffort(key.Part == kusage.PartJudge)
 		resp, callErr = s.complete(ctx, p.ep, req, s.o.Attempts, key)
 		step.ElapsedMS, step.OutputChars = s.o.Now().Sub(t0).Milliseconds(), len([]rune(resp.Content))
 		if callErr == nil {
@@ -572,7 +574,6 @@ func normalizeJudgement(raw json.RawMessage) json.RawMessage {
 
 // complete 带退避重试地调用模型。只重试端点侧的暂时性失败；模型已答复但不合 schema、请求本身不对都如实返回。
 func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request, attempts int, key kusage.Key) (model.Response, error) {
-	req.Effort = ep.Effort(key.Part == kusage.PartJudge)
 	wait := s.o.Backoff
 	var last error
 	for i := 0; i < attempts; i++ {

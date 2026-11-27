@@ -73,7 +73,9 @@ type Headless struct {
 	Resume    []string            `json:"resume,omitempty"`
 	Access    map[string][]string `json:"access"`
 	// NoPersona 是本人没开"后台运行带人格和记忆"时追加的标志（附录 A.2）；未声明表示这个宿主不区分。
-	NoPersona  []string         `json:"no_persona,omitempty"`
+	NoPersona []string `json:"no_persona,omitempty"`
+	// Effort 是带思考强度的标志，其中的 {effort} 换成设置里的"后台 Agent 运行"一项；未声明表示这个宿主不区分。
+	Effort     []string         `json:"effort,omitempty"`
 	Credential string           `json:"credential,omitempty"`
 	ExitCodes  map[string][]int `json:"exit_codes,omitempty"`
 	// ExitOutput 收窄 exit_codes 的同名语义：声明后，还要求 stdout 或 stderr 含其中任一片段（附录 A.2）。

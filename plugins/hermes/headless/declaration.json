@@ -2,7 +2,7 @@
   "harness": "hermes",
   "name": {"zh": "Hermes", "en": "Hermes"},
   "headless": {
-    "command": ["hermes", "chat", "--oneshot", "--reasoning", "medium", "-q", "{prompt}"],
+    "command": ["hermes", "chat", "--oneshot", "-q", "{prompt}"],
     "output": ["--format", "stream-json"],
     "final_text": "$.text",
     "usage": {"file": "usage.json", "input": "$.input_tokens", "output": "$.output_tokens", "cache_read": "$.cache_read_tokens", "cache_write": "$.cache_write_tokens", "model": "$.model"},
@@ -14,6 +14,7 @@
       "full": ["--yolo", "-t", "apa,file,terminal,no_mcp"]
     },
     "no_persona": ["--ignore-rules"],
+    "effort": ["--reasoning", "{effort}"],
     "tools": {
       "read": [{"zh": "APA", "en": "APA"}],
       "edit": [{"zh": "APA", "en": "APA"}, {"zh": "文件", "en": "Files"}, {"zh": "终端", "en": "Terminal"}],
@@ -26,10 +27,9 @@
   },
   "instance_options": {
     "fields": {
-      "model": {"label": {"zh": "模型", "en": "Model"}, "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._:/@+-]*", "display_as": "model"},
-      "reasoning": {"label": {"zh": "后台思考强度（不选为 medium）", "en": "Background thinking effort (medium if unset)"}, "type": "enum", "choices": ["minimal", "low", "medium", "high", "xhigh"]}
+      "model": {"label": {"zh": "模型", "en": "Model"}, "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._:/@+-]*", "display_as": "model"}
     },
-    "args_if_set": {"model": ["--model", "{model}"], "reasoning": ["--reasoning", "{reasoning}"]}
+    "args_if_set": {"model": ["--model", "{model}"]}
   },
   "main_session": {}
 }

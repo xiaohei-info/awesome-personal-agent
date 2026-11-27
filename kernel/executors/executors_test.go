@@ -84,6 +84,24 @@ func TestSameHostCardsResolveIndependently(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// 思考强度：声明的 {effort} 换成设置里"后台 Agent 运行"一项，没设取默认 medium。
+	declaration.Headless.Effort = []string{"--think", "{effort}"}
+	e.must(t, owner, "executor.register", declaration)
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		for set, want := range map[string]string{"": "medium", "high": "high"} {
+			pol.Thinking.Background = set
+			selected, err := Resolve(tx, pol, Selection{})
+			if err != nil {
+				return err
+			}
+			if i := slices.Index(selected.Args, "--think"); i < 0 || selected.Args[i+1] != want {
+				t.Fatalf("thinking=%q args=%v", set, selected.Args)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	daily.Enabled = false
 	e.must(t, owner, "agent.configure", daily)
 	if err := e.st.View(bg, func(tx *store.Tx) error {
