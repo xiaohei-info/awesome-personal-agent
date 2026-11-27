@@ -59,6 +59,7 @@ var state = map[string][]string{
 	"source.set_enabled":           {"source.enabled", "source.disabled"},
 	"source.rename":                {"source.renamed"},
 	"source.set_content_retention": {"source.updated"},
+	"source.set_handling_mode":     {"source.updated"},
 	"instance.create":              {"instance.toggled", "instance.updated"},
 	"instance.toggle":              {"instance.toggled"},
 	"instance.update":              {"instance.updated"},
@@ -247,7 +248,7 @@ func commandChange(tx *store.Tx, ev domain.Event) (RuleChange, bool, error) {
 	}
 	rc.Before = prev
 	rc.Revert = RevertState{OK: true}
-	if rc.Command == "source.set_content_retention" || rc.Command == "instance.update" {
+	if rc.Command == "source.set_content_retention" || rc.Command == "source.set_handling_mode" || rc.Command == "instance.update" {
 		if prev == nil {
 			rc.Revert = RevertState{Why: RevertNotPossible}
 		}
@@ -326,6 +327,10 @@ func inverse(rc RuleChange, ev domain.Event) (json.RawMessage, error) {
 			days = json.RawMessage("null")
 		}
 		in = map[string]any{"id": id, "days": days}
+	case "source.set_handling_mode":
+		mode := domain.HandlingNormal // 迁移前的来源快照没有这个字段
+		_ = json.Unmarshal(before["handling_mode"], &mode)
+		in = map[string]any{"id": id, "mode": mode}
 	case "source.rename":
 		in = map[string]any{"id": id, "name": after["previous"]}
 	case "rule.set_mode":

@@ -24,9 +24,9 @@ func TestSettingsSectionsFollowPermissionCard(t *testing.T) {
 	}
 	agent := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
 
-	persona := `{"persona":"terse"}`
+	change := `{"background_run_timeout_sec":1800}`
 	rules := `{"groups":{"view":{},"organize":{},"source_events":{},"rules":{}},"tool":"read"}`
-	if rec := e.do("PUT", "/v1/settings/policy", persona, agent); rec.Code != http.StatusForbidden || errCode(t, rec) != domain.CodeTierClosed {
+	if rec := e.do("PUT", "/v1/settings/policy", change, agent); rec.Code != http.StatusForbidden || errCode(t, rec) != domain.CodeTierClosed {
 		t.Fatalf("rules while closed: want 23 tier_closed, got %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do("PUT", "/v1/settings/agents/agent_a/card", rules, agent); errCode(t, rec) != domain.CodeWebOnly {
@@ -35,7 +35,7 @@ func TestSettingsSectionsFollowPermissionCard(t *testing.T) {
 	if rec := e.do("PUT", "/v1/settings/agents/agent_a/card", rules, e.web); rec.Code != http.StatusOK {
 		t.Fatalf("owner sets the card: %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("PUT", "/v1/settings/policy", persona, agent); rec.Code != http.StatusOK {
+	if rec := e.do("PUT", "/v1/settings/policy", change, agent); rec.Code != http.StatusOK {
 		t.Fatalf("rules once opened: %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do("PUT", "/v1/settings/access-limits", `{"agent_cards":{}}`, agent); errCode(t, rec) != domain.CodeWebOnly {
@@ -46,8 +46,8 @@ func TestSettingsSectionsFollowPermissionCard(t *testing.T) {
 	}
 	if err := e.st.View(bg, func(tx *store.Tx) error {
 		_, p, err := kpolicy.Stored(tx)
-		if p.Persona != "terse" {
-			t.Fatalf("persona not saved: %q", p.Persona)
+		if p.BackgroundRunTimeoutSec != 1800 {
+			t.Fatalf("change not saved: %d", p.BackgroundRunTimeoutSec)
 		}
 		return err
 	}); err != nil {

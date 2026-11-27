@@ -26,6 +26,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -183,8 +184,16 @@ func Register(x *command.Executor) error {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
-			if v.Result == ShouldSee && v.Item == "" {
-				return nil, nil // 授权与状态预检
+			if v.Result == ShouldSee && v.Item == "" { // 授权与状态预检
+				r, err := record.Get(c.Tx, v.Judgment)
+				if err != nil {
+					return nil, err
+				}
+				ev, err := runner.Event(c.Tx, r.Subject)
+				if err != nil {
+					return nil, err
+				}
+				return nil, registry.CheckProposal(c.Tx, c.Caller.Level, ev.SourceID)
 			}
 			r, err := record.Get(c.Tx, v.Judgment)
 			if err != nil {

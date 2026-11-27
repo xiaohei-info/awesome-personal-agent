@@ -101,7 +101,7 @@ describe("设置 › 通用 › 显示原始值", () => {
   it("默认关；打开后各处带上 ID，存在这台浏览器", async () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     const fetchImpl = (async (url: string) =>
-      new Response(JSON.stringify(url === "/v1/settings/policy" ? { version: 1, persona: "" } : { projects: [] }), { status: 200, headers: { "Content-Type": "application/json" } })) as unknown as typeof fetch;
+      new Response(JSON.stringify(url === "/v1/settings/policy" ? { version: 1 } : { projects: [] }), { status: 200, headers: { "Content-Type": "application/json" } })) as unknown as typeof fetch;
     const probe: Feature = { id: "probe", title: { zh: "探针", en: "Probe" }, path: "probe", element: <p data-testid="v"><Val k="perm" id="read" /></p> };
     render(
       <MemoryRouter initialEntries={["/settings/general"]}>

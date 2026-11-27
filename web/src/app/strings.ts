@@ -11,8 +11,8 @@
 // | 执行者 | executor | 能力包 | capability pack |
 // | 简报 | brief | 知会 | digest |
 // | 积压 | backlog | 委派 / 任务委派 | delegation / Delegations |
-// | 代答 | answer on behalf | 人格 | persona |
-// | 打扰策略 | interruption policy | 材料 | material |
+// | 代答 | answer on behalf | 打扰策略 | interruption policy |
+// | 材料 | material |
 // | 规范 | guideline | 项目 | project |
 // | 运行记录 | runs | 进展 | progress |
 // | 计划日期 | planned date | 久未推进 | stale |

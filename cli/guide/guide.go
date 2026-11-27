@@ -25,12 +25,12 @@ Output: JSON on stdout (--pretty to indent). Errors: JSON {code, why, next} on s
 
 Commands:
   onboarding   init, serve, login, guide, declare
-  context      context, persona, inbox
+  context      context, inbox
   items        item, propose
   decisions    ask, decide, accept, dismiss
   delegation   executors, delegate, dispatch, report, handback   (run apa delegate before handing work to anyone)
   projects     project, material, blob, agents sync|check
-  sources      source (auth, webhook, ingests, replay)
+  sources      source (event, propose, attach, remind = mentioned to the user only, ignore, auth, webhook, ingests, replay)
   outward      events --follow, ext run|check, connection
   automation   instance, pack
   settings     settings get|put|post|delete, purge

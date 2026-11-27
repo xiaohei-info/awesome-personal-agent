@@ -5,6 +5,11 @@ import (
 	"testing"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 // ACT-RET-01：保留天数只有 Web 能设并记 Event；null 读回为空（不清理）；普通更新不碰它。
@@ -79,5 +84,29 @@ func TestSetContentRetentionOnlyWebAndValidInput(t *testing.T) {
 	}
 	if _, err := e.do(owner, CmdSetRetention, m{"id": "src_none", "days": 3}); exit(err) != 5 {
 		t.Errorf("unknown source: exit = %d (%v)", exit(err), err)
+	}
+}
+
+// 处理方式只有 Web 本人能改：开放了"改日常规则"的 Agent 得 20（§9.3）。
+func TestSetHandlingModeOwnerOnly(t *testing.T) {
+	e := setup(t)
+	if _, err := e.do(owner, CmdRegister, pull("src_mode")); err != nil {
+		t.Fatal(err)
+	}
+	agent := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a", Via: domain.ViaCLI}, Level: authz.LevelDelegate, CredentialAgentID: "agent_a"}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "card", func(p *policy.Policy) error {
+			p.AgentCards = map[string]policy.Card{"agent_a": {Groups: map[string]policy.GroupGrant{policy.GroupRules: {}}, Tool: policy.PermRead}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.do(agent, CmdSetHandling, m{"id": "src_mode", "mode": domain.HandlingRemindOnly}); exit(err) != 20 {
+		t.Fatalf("agent: %v", err)
+	}
+	if got := e.get(t, "src_mode").HandlingMode; got != domain.HandlingNormal {
+		t.Fatalf("mode = %q", got)
 	}
 }

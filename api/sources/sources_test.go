@@ -1333,3 +1333,21 @@ func TestTrustedSendersReplaceOnlyThisSource(t *testing.T) {
 		t.Fatalf("token: %d %s", r.Code, r.Body)
 	}
 }
+
+// 处理方式（§9.3）：默认常规处理；只有 Web 本人能改，没开权限组的钥匙得 tier_closed；取值只认两个。
+func TestSourceHandlingModeRoute(t *testing.T) {
+	e := setup(t)
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 || !strings.Contains(r.Body.String(), `"handling_mode":"normal"`) {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	const path = "/v1/sources/src_hook"
+	if r := e.do(e.token(auth.Delegate), "PATCH", path, `{"handling_mode":"remind_only"}`); r.Code != 403 || r.code() != "tier_closed" {
+		t.Fatalf("delegate: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PATCH", path, `{"handling_mode":"silent"}`); r.Code != 400 {
+		t.Fatalf("bad mode: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PATCH", path, `{"handling_mode":"remind_only"}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"handling_mode":"remind_only"`) {
+		t.Fatalf("web: %d %s", r.Code, r.Body)
+	}
+}

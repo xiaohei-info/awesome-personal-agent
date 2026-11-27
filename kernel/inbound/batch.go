@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -83,18 +85,26 @@ func (s *Service) batchPromptTemplate() (packs.Prompt, bool) {
 
 // buildBatchPrompt 组装批处理提示词：正文取本人在设置页自定义的说明或内置模板正文，后面只附本批事件的元信息
 // （事件 id、来源、类型、时间、等级），绝不打包事件正文或原文（§9.3、§13.6）。
-func buildBatchPrompt(base string, evs []domain.SourceEvent) string {
+func buildBatchPrompt(base string, evs []domain.SourceEvent, remindOnly map[string]bool) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(base))
 	b.WriteString("\n\n## 本批待处理来源事件（仅元信息，请用 `apa source event <id>` 读原文）\n")
+	if len(remindOnly) > 0 { // 由内核附加：本人改过批处理说明也一样看得到
+		b.WriteString("标 mode=remind_only 的事件来自本人设为\"只口头提醒\"的来源：不得建建议（内核会拒绝）。在最后结论里口头带上它的要点，并用 `apa source remind <id>` 落账；" +
+			"确属已有事项的后续用 `apa source attach <id> --to <事项 id>`；纯噪声可以忽略。\n")
+	}
 	for i, ev := range evs {
 		at := ev.OccurredAt.UTC().Format(time.RFC3339)
 		level := ev.QueueLevel
 		if level == "" {
 			level = runner.LevelNormal
 		}
-		fmt.Fprintf(&b, "%d. id=%s | source=%s | type=%s | time=%s | level=%s\n",
-			i+1, ev.ID, ev.SourceID, ev.Type, at, level)
+		mode := ""
+		if remindOnly[ev.SourceID] {
+			mode = " | mode=" + domain.HandlingRemindOnly
+		}
+		fmt.Fprintf(&b, "%d. id=%s | source=%s | type=%s | time=%s | level=%s%s\n",
+			i+1, ev.ID, ev.SourceID, ev.Type, at, level, mode)
 	}
 	return b.String()
 }
@@ -212,7 +222,17 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 		if err != nil || len(evs) == 0 {
 			return err
 		}
-		prompt := buildBatchPrompt(basePrompt, evs)
+		remindOnly := map[string]bool{}
+		srcs, err := registry.List(tx)
+		if err != nil {
+			return err
+		}
+		for _, src := range srcs {
+			if src.HandlingMode == domain.HandlingRemindOnly && slices.ContainsFunc(evs, func(e domain.SourceEvent) bool { return e.SourceID == src.ID }) {
+				remindOnly[src.ID] = true
+			}
+		}
+		prompt := buildBatchPrompt(basePrompt, evs, remindOnly)
 		if err := os.WriteFile(filepath.Join(runDir, "prompt.txt"), []byte(prompt), 0o600); err != nil {
 			return err
 		}

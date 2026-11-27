@@ -20,7 +20,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--name N] [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
-	"rename <id> <name> | enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | event <event-id> [--part body|original|headers|attachments|messages] | propose <event-id> [--into ITEM] | ignore <event-id> | attach <event-id> --to ITEM [--reason R] | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] | backlog rejudge [--source ID] [--limit N] | backlog restore --from T --to T [--source ID] [--dry-run] | auth <id>"
+	"rename <id> <name> | enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | event <event-id> [--part body|original|headers|attachments|messages] | propose <event-id> [--into ITEM] | ignore <event-id> | remind <event-id> | attach <event-id> --to ITEM [--reason R] | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] | backlog rejudge [--source ID] [--limit N] | backlog restore --from T --to T [--source ID] [--dry-run] | auth <id>"
 
 func init() { client.Register("source", usageText, source) }
 
@@ -93,6 +93,12 @@ func source(c *client.Ctx, args []string) error {
 			return err
 		}
 		return call(c, "POST", "/source-events/"+url.PathEscape(id)+"/ignore", nil)
+	case "remind":
+		id, err := oneID(rest, "remind")
+		if err != nil {
+			return err
+		}
+		return call(c, "POST", "/source-events/"+url.PathEscape(id)+"/remind", nil)
 	case "attach":
 		return attachEvent(c, rest)
 	case "rejects":

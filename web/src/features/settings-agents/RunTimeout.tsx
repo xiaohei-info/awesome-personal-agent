@@ -45,8 +45,8 @@ export function RunTimeoutCard({ doc, save }: { doc: Doc; save: Save }) {
           <span>{t.runTimeoutUnit}</span>
         </label>
         {isDefault
-          ? <span className="badge ok">{t.personaDefault}</span>
-          : <button type="button" onClick={() => setVal(String(DEFAULT_TIMEOUT_HOURS))}>{t.personaRestore}</button>}
+          ? <span className="badge ok">{t.runTimeoutDefault}</span>
+          : <button type="button" onClick={() => setVal(String(DEFAULT_TIMEOUT_HOURS))}>{t.runTimeoutRestore}</button>}
       </div>
       <p className="sub">{t.runTimeoutNote}</p>
     </Card>

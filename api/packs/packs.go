@@ -68,14 +68,14 @@ func readable(h core.Handler) core.Handler {
 	}
 }
 
-// prompt 返回已加载能力包里一个提示词的正文（不含头部声明），供设置页显示内置默认与"恢复默认"（§9.3）。
+// prompt 返回已加载能力包里一个提示词的正文与判据（头部声明里只给判据），供设置页显示内置默认与"恢复默认"（§9.3）。
 func (a *api) prompt(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
 	for _, pk := range a.ps.List() {
 		if pk.Name != r.PathValue("pack") {
 			continue
 		}
 		if pr, ok := pk.Prompts[r.PathValue("name")]; ok {
-			return core.WriteJSON(w, http.StatusOK, map[string]string{"pack": pk.Name, "name": r.PathValue("name"), "agent": pr.Meta.Agent, "body": pr.Body})
+			return core.WriteJSON(w, http.StatusOK, map[string]string{"pack": pk.Name, "name": r.PathValue("name"), "agent": pr.Meta.Agent, "body": pr.Body, "criteria": pr.Meta.Criteria})
 		}
 	}
 	return domain.NewError(domain.CodeNotFound, "no such prompt in the loaded packs", "list packs with GET /packs")

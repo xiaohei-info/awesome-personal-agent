@@ -10,14 +10,13 @@ import { AgentPage, KeyList, KindChoice, Secret } from "./AgentPage";
 import { AutoAct } from "./AutoAct";
 import { PermissionOverview } from "./PermissionOverview";
 import { AudienceChoice, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
-import { Persona } from "./Persona";
 import { RunTimeoutCard } from "./RunTimeout";
 import { PolicyPage, usePolicyDocs, type Doc, type Save } from "../../app/policy-cards";
 import { entries, hasKey, LEGACY, ready, useData, type Data, type Entry, type Rec } from "./data";
 import { strings } from "./strings";
 
 // 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表上：分工（日常 Agent、主 Agent）、Agent 一行一个（名字、分工标记、一句状态加按钮）、权限总览、替我动手、
-// 所有 Agent 共用的语言与语气、折叠的「很少用到」。一个 Agent 的全部属性只在它自己的页面（/settings/agents/<id>）改。
+// 所有 Agent 共用的后台运行时限、折叠的「很少用到」。一个 Agent 的全部属性只在它自己的页面（/settings/agents/<id>）改。
 // 判定都在服务端；本页只搬运选择并以服务端状态为准。
 
 export { agentsOf } from "./data";
@@ -67,7 +66,6 @@ function AgentList() {
           <AutoAct pol={pol} save={save} />
           <h2>{t.common}</h2>
           <RunTimeoutCard doc={pol} save={save} />
-          <Persona doc={pol} save={save} />
           {data && <Other data={data} list={list} reload={load} onError={setError} secret={secret} onSecret={setSecret} />}
           <PageReminder row="run_failed" onSaved={() => void loadPol()} />
         </>

@@ -27,7 +27,7 @@ function server(sp: Record<string, unknown> = {}) {
         reason: "",
       });
     }
-    if (url === "/v1/packs/inbound-triage/prompts/triage-screen") return json(200, { body: "内置判断标准" });
+    if (url === "/v1/packs/inbound-triage/prompts/triage-screen") return json(200, { body: "题面", criteria: "内置判断标准\n" });
     if (url === "/v1/packs/inbound-triage/prompts/source-batch") return json(200, { body: "内置批处理说明" });
     if (url === "/v1/settings/source-pipeline" && method === "GET") return json(200, doc);
     if (url === "/v1/settings/source-pipeline" && method === "PUT") {
@@ -81,15 +81,31 @@ describe("设置 › 来源处理", () => {
       }),
     );
 
+    await screen.findByDisplayValue("内置判断标准");
     const judgeCard = screen.getByRole("region", { name: "判断标准（哪些值得处理、哪些算紧急）" });
-    await userEvent.type(within(judgeCard).getByRole("textbox"), "  报销和合同都算紧急  ");
+    await userEvent.type(await screen.findByRole("textbox", { name: "判断标准（哪些值得处理、哪些算紧急）" }), "  报销和合同都算紧急  ");
     await userEvent.click(within(judgeCard).getByRole("button", { name: /^保存/ }));
     await waitFor(() =>
-      expect(s.puts.at(-1)?.body.source_pipeline.judge_prompt).toBe("报销和合同都算紧急"),
+      expect(s.puts.at(-1)?.body.source_pipeline.judge_prompt).toBe("内置判断标准  报销和合同都算紧急"),
     );
+  });
 
-    await userEvent.click(within(judgeCard).getByText("查看内置默认"));
-    expect(await within(judgeCard).findByText("内置判断标准")).toBeInTheDocument();
+  it("提示词框填着生效的全文；恢复默认只换框里内容，保存与默认相同的内容按没改过存", async () => {
+    const s = server({ batch_prompt: "我的说明" });
+    open(s.impl);
+    expect(await screen.findByRole("textbox", { name: "判断标准（哪些值得处理、哪些算紧急）" })).toHaveValue("内置判断标准");
+    const judge = within(screen.getByRole("region", { name: "判断标准（哪些值得处理、哪些算紧急）" }));
+    expect(judge.queryByRole("button", { name: "恢复默认" })).toBeNull();
+    const box = await screen.findByRole("textbox", { name: "给处理 Agent 的说明" });
+    const batch = within(screen.getByRole("region", { name: "给处理 Agent 的说明" }));
+    expect(box).toHaveValue("我的说明");
+    await userEvent.click(batch.getByRole("button", { name: "恢复默认" }));
+    expect(box).toHaveValue("内置批处理说明");
+    expect(s.puts).toHaveLength(0);
+    await userEvent.click(batch.getByRole("button", { name: /^保存/ }));
+    await waitFor(() => expect(s.puts.at(-1)?.body.source_pipeline.batch_prompt).toBe(""));
+    await waitFor(() => expect(batch.getByRole("button", { name: /^保存/ })).toBeDisabled());
+    expect(box).toHaveValue("内置批处理说明");
   });
 
   it("高级项：重试次数、每日上限与拿不准的范围各自校验与保存", async () => {

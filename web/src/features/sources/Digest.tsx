@@ -4,6 +4,7 @@ import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { EntityPick } from "../../app/names";
+import { Seg } from "../../app/policy-cards";
 import { strings } from "./strings";
 import { when, type Source, type SourceEvent } from "./shared";
 
@@ -27,6 +28,32 @@ export function DefaultProject({ source, onSaved }: { source: Source; onSaved: (
         {t.defaultProject}
         <EntityPick kind="project" value={source.default_project ?? ""} onChange={(id) => void save(id)} empty={t.noProject} />
       </label>
+      {error !== null && <ErrorNote error={error} />}
+    </>
+  );
+}
+
+/** 来源的处理方式（§9.3）：常规处理，或只口头提醒（不建建议）；选了就存。 */
+export function HandlingMode({ source, onSaved }: { source: Source; onSaved: () => void }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const [error, setError] = useState<unknown>(null);
+  const save = async (mode: string) => {
+    setError(null);
+    try {
+      await api.patch(`/sources/${encodeURIComponent(source.id)}`, { handling_mode: mode });
+      onSaved();
+    } catch (e) {
+      setError(e);
+    }
+  };
+  return (
+    <>
+      <div className="row">
+        <span>{t.handling}</span>
+        <Seg label={t.handling} value={source.handling_mode ?? "normal"} onChange={(m) => void save(m)} options={[["normal", t.handlingNormal], ["remind_only", t.handlingRemind]]} />
+      </div>
+      <p className="sub">{t.handlingHint}</p>
       {error !== null && <ErrorNote error={error} />}
     </>
   );

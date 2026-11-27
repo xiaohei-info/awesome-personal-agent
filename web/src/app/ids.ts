@@ -49,7 +49,7 @@ export const GENERIC_ERROR: readonly string[] = ["invalid_request", "conflict", 
 /** 来源类型：kernel/domain/entities.go SourceType */
 export const SOURCE_TYPE = ["pull", "script", "webhook"] as const;
 /** 来源事件处置：kernel/domain/entities.go Disposition */
-export const DISPOSITION = ["pending", "attached", "proposed", "ignored", "unjudged", "expired", "digest", "alerted"] as const;
+export const DISPOSITION = ["pending", "attached", "proposed", "ignored", "unjudged", "expired", "digest", "alerted", "reminded"] as const;
 /** 来源处理线队列状态：kernel/domain/entities.go SourceEvent.Queue */
 export const QUEUE_STATUS = ["queued", "running", "done"] as const;
 /** 未判定原因：kernel/domain/entities.go Unjudged*。models_paused 由「暂停模型」改动新增 */

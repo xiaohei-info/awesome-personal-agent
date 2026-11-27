@@ -137,6 +137,7 @@ function What({ e, subjects }: { e: TraceEntry; subjects?: boolean }) {
     case "merged": return <>{t.merged} {item}</>;
     case "digest": return <>{t.digest}</>;
     case "alerted": return <>{t.alerted}</>;
+    case "reminded": return <>{t.reminded}</>;
     case "attached": return <>{a.via === "proposal" ? t.attachedProposal : t.attachedFollow} {item}{strs(a.fields).length ? ` · ${t.rewrote(fields(a.fields))}` : ""}</>;
     case "drafted": {
       const o = String(a.outcome);

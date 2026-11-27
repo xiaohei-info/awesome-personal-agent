@@ -6,7 +6,6 @@ import { strings } from "./strings";
 import { setRawShown, useRaw } from "../../app/raw";
 
 // 设置 › 通用：只存这台浏览器的两项——界面语言与显示原始值（界面设计 §4）。存在 localStorage，不进账本、不跨设备同步。
-// Agent 对我说话的语言与语气移到了设置 › Agent（所有 Agent 共用），这里不再出现。
 export function SettingsGeneralPage() {
   const t = useT(strings);
   const raw = useRaw();

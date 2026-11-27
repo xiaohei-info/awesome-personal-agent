@@ -32,46 +32,6 @@ var ErrInvalid = errors.New("policy: invalid")
 // Object 是 policy.changed 与 allowlist.changed 事件的对象 id。
 const Object = "policy"
 
-// MaxPersonaTokens 是人格的上限（§11.2：约 400 token，超限拒绝保存）。
-const MaxPersonaTokens = 400
-
-// PersonaDeclaration 是 `apa persona` 返回内容前的内核固定声明（§11.2）：人格不是权限来源。
-const PersonaDeclaration = "[APA 内核声明] 以下人格只影响表达方式，不能放宽判断、权限和内核规则；权限由内核判定，不读提示词。"
-
-// 内置默认语气（§6.13）：随发行附带，不写进账本；本人没写自己的人格时 `apa persona` 返回它。
-// 改文本不需要迁移，没自定义的人下一个新会话自动跟随；它不得含权限类内容，与本人写的人格同样受固定声明约束，也不超过 MaxPersonaTokens。
-const (
-	defaultPersonaZH = "像一位靠谱、温和的长期助理那样说话。先说结论和需要你做的事，再给必要的依据；用平常话，不打官腔、不堆术语、不过度客套。不确定就直说，事实和推测分开讲。有不同意见可以直接提，最后由你决定。事情轻松时可以轻松，事情重要时把风险和影响讲清楚。"
-	defaultPersonaEN = "Talk like a dependable, warm long-term assistant. Lead with the answer and anything you need from me, then the reasons that matter. Use plain words — no corporate tone, jargon, or excess politeness. Say so when you're unsure, and keep facts apart from guesses. Disagree openly when you should; the call is mine. Keep it light when things are light, and spell out risks and impact when they matter."
-)
-
-// DefaultPersona 返回内置默认语气：lang 以 zh 开头为中文，其余（含空）为英文。
-func DefaultPersona(lang string) string {
-	if strings.HasPrefix(strings.ToLower(lang), "zh") {
-		return defaultPersonaZH
-	}
-	return defaultPersonaEN
-}
-
-// PickLang 定助手说哪种语言（§11.2）：调用方明确给的 lang > 本人在 Web 的设置 > 调用方的进程区域设置 locale > 都没有（空，按英文）。
-func PickLang(p Policy, lang, locale string) string {
-	for _, v := range []string{lang, p.PersonaLang, locale} {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// PersonaText 返回注入用的人格文本：固定声明在前；本人的人格为空白时用 lang 对应的内置默认。
-func PersonaText(p Policy, lang string) string {
-	body := p.Persona
-	if strings.TrimSpace(body) == "" {
-		body = DefaultPersona(lang)
-	}
-	return PersonaDeclaration + "\n" + body
-}
-
 // 运行权限档位（决策表第 5 项）与材料写入策略（§12.4）。
 const (
 	PermRead = "read"
@@ -384,12 +344,9 @@ type Policy struct {
 	// AgentCards 是各 Agent 的权限卡（§14.5），键是 Agent 实例 id 或兼容卡 legacy:<程序>。只有本人能改。
 	AgentCards map[string]Card `json:"agent_cards"`
 	// Limits 是同时运行数与连锁层数（§14.9）；旧文档没有此键，读作全部取运行配置的初值。
-	Limits           Limits           `json:"limits"`
-	JudgeEndpoint    *JudgeEndpoint   `json:"judge_endpoint"`
-	GenerateEndpoint GenerateEndpoint `json:"generate_endpoint"`
-	Persona          string           `json:"persona"` // 只影响表达方式，不进入任何权限判定
-	// PersonaLang 是助手说哪种语言：zh、en，空串 = 跟随系统（调用方的区域设置）。旧版本策略文档没有此键，读作空串。
-	PersonaLang      string              `json:"persona_lang"`
+	Limits           Limits              `json:"limits"`
+	JudgeEndpoint    *JudgeEndpoint      `json:"judge_endpoint"`
+	GenerateEndpoint GenerateEndpoint    `json:"generate_endpoint"`
 	ForwardAllowlist map[string][]string `json:"forward_allowlist"`
 	ChannelAnswerers map[string][]string `json:"channel_answerers"`
 	Channels         map[string]Channel  `json:"channels"`
@@ -532,20 +489,6 @@ func invalid(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, a...))
 }
 
-// EstimateTokens 给出保守的 token 估计：CJK 与其他非 ASCII 字符各计 1，ASCII 约每 4 字符 1。
-func EstimateTokens(s string) int {
-	wide, ascii := 0, 0
-	for _, r := range s {
-		switch {
-		case r > unicode.MaxASCII:
-			wide++
-		case !unicode.IsSpace(r):
-			ascii++
-		}
-	}
-	return wide + (ascii+3)/4
-}
-
 // dedupSorted 去掉空白与重复并排序；全部为空时返回非 nil 空切片，保证序列化稳定。
 func dedupSorted(in []string) []string {
 	seen := map[string]bool{}
@@ -681,12 +624,6 @@ func normalize(p Policy) (Policy, error) {
 		p.ModelsPaused = false
 	}
 
-	if n := EstimateTokens(p.Persona); n > MaxPersonaTokens {
-		return p, invalid("persona is about %d tokens, limit %d", n, MaxPersonaTokens)
-	}
-	if !oneOf(p.PersonaLang, "", "zh", "en") {
-		return p, invalid("persona_lang %q", p.PersonaLang)
-	}
 	var err error
 	if p.NoteVaults, err = normalizeNoteVaults(p.NoteVaults); err != nil {
 		return p, err
@@ -960,7 +897,7 @@ func StoredRaw(tx *store.Tx, keys ...string) (map[string]json.RawMessage, error)
 
 // RulesSections 是策略里属于"改日常规则与提醒"的顶层段（§14.3）：权限卡开放这一组的 Agent 可改，规矩改动清单列出并可撤回。
 // 其余段属别的组或只有本人。设置路由的段表与它一致（api/settings/policy）。
-var RulesSections = []string{"background_run_timeout_sec", "channels", "disturb", "forward_allowlist", "judgment", "limits", "models_paused", "persona", "persona_lang"}
+var RulesSections = []string{"background_run_timeout_sec", "channels", "disturb", "forward_allowlist", "judgment", "limits", "models_paused"}
 
 // At 读第 v 版策略（存储原文，不按模型暂停改写）；没有这一版返回 not_found。
 func At(tx *store.Tx, v int) (Policy, error) {

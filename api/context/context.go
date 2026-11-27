@@ -1,9 +1,8 @@
-// Package context 是上下文与人格的 HTTP 路由（附录 B.2，设计 §7.6、§11.2）：
+// Package context 是上下文的 HTTP 路由（附录 B.2，设计 §7.6）：
 //
 //	GET /context[?session&project&path&host&scope&item&instruction&format=inject]
-//	GET /context/persona[?lang=zh|en&locale=<区域设置>]
 //
-// 路由里没有业务规则：增量投影、游标、注入渲染在 kernel/context，人格与它的固定声明在 kernel/policy；
+// 路由里没有业务规则：增量投影、游标、注入渲染在 kernel/context；
 // 本层只做认证后的参数搬运。会话取自 X-APA-Session 头（与审计同源），不带会话时不读不写游标。
 // 捕获（/capture）属于 kernel-capture，不在这里。
 package context
@@ -19,7 +18,6 @@ import (
 	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -29,7 +27,6 @@ func Routes(st *store.Store) core.RouteGroup {
 	h := &handlers{st: st}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/context", Handler: readable(h.context)})
-		r.Handle(core.Route{Method: "GET", Path: "/context/persona", Handler: readable(h.persona)})
 	}
 }
 
@@ -178,20 +175,4 @@ func scoped(tx *store.Tx, p *core.Principal, res *kcontext.Result) error {
 	}
 	res.History = hs
 	return nil
-}
-
-// persona 返回注入用的人格全文，以及同一语言的内置默认原文（Web 在没自定义时显示它）。
-// 语言：lang > 策略里的 persona_lang > locale（调用方的进程区域设置）> 英文（policy.PickLang）。
-func (h *handlers) persona(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
-	q := r.URL.Query()
-	var text, def string
-	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
-		_, pol, err := policy.Current(tx)
-		lang := policy.PickLang(pol, q.Get("lang"), q.Get("locale"))
-		text, def = policy.PersonaText(pol, lang), policy.DefaultPersona(lang)
-		return err
-	}); err != nil {
-		return err
-	}
-	return core.WriteJSON(w, http.StatusOK, map[string]string{"persona": text, "default": def})
 }

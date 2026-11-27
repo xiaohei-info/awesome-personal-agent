@@ -127,7 +127,7 @@ def test_core_hook_cli_carries_the_runs_identity(gateway):
     load_plugin("core")
     apa = sys.modules["apa_test_core.apa"]
     with gateway["session"](gateway["context"], gateway["work"]):
-        apa.run(["persona"], "s1")
+        apa.run(["guide"], "s1")
     assert_run_identity(calls(gateway)[0], gateway)
 
 
@@ -244,7 +244,7 @@ def test_hooks_in_a_run_without_its_context_never_run_apa(gateway, tmp_path, mon
     popen = []
     monkeypatch.setattr(capture.subprocess, "Popen", lambda *a, **k: popen.append(a))
     with missing_line_session(gateway):
-        assert sys.modules["apa_test_core.apa"].run(["persona"], "s1") == ""
+        assert sys.modules["apa_test_core.apa"].run(["guide"], "s1") == ""
         assert inject.pre_llm_call(session_id="s1", is_first_turn=True) is None
         receipt._report("itm_1", "progress", "working", "s1")
         capture.post_llm_call("s1", "hi", "there")

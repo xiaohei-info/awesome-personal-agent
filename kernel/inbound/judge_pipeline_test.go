@@ -173,8 +173,9 @@ func TestUnifiedJudgeTwoQuestionsAndUndecidedDefaults(t *testing.T) {
 		t.Fatalf("expected 1 batched classifier request with 8 questions (4 events x 2), got %d batches (%v)", len(cls.batches), len(cls.batches[0]))
 	}
 	for i, q := range cls.batches[0] {
-		if !strings.Contains(q.Criteria, "发票和报销单都算需要处理") {
-			t.Fatalf("question %d missing custom judge_prompt in criteria: %q", i, q.Criteria)
+		// 本人改过的判断标准整段代替内置判据；题面里的安全约定不受影响。
+		if q.Criteria != "发票和报销单都算需要处理" || !strings.Contains(q.Question, "安全约定") {
+			t.Fatalf("question %d: custom judge_prompt must replace the criteria and keep the guard: %q / %q", i, q.Criteria, q.Question)
 		}
 	}
 	// ev_ignore 的 Q1 判否，不得再问 chat（chat 只被 both-undecided 的 Q1/Q2 与 q2-undecided 的 Q2 调了 3 次）。

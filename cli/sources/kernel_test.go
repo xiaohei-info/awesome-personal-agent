@@ -811,3 +811,34 @@ func agentAudience(k auth.Kind) string {
 	}
 	return ""
 }
+
+// `apa source remind` 记为已口头提醒；只口头提醒来源的事件，开放了全部日常权限的 Agent 也建不了建议（退出码 6）、切不了处理方式（20）。
+func TestRemindCommandOnRemindOnlySource(t *testing.T) {
+	k := newKernel(t)
+	agent := k.rulesAgent()
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_hook","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`, nil)
+	var s domain.Source
+	k.ownerOK("PATCH", "/v1/sources/src_hook", `{"handling_mode":"remind_only"}`, &s)
+	if s.HandlingMode != domain.HandlingRemindOnly {
+		t.Fatalf("patched: %+v", s)
+	}
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
+			correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges)
+			VALUES ('dd', 'e1', 'e1', 'src_hook', 'r', 't', 's', '', '', '', 1, '[]', '', 0, 'unjudged', '', '', '', 0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := k.apa(agent, "source", "propose", "e1"); r.code != domain.ExitConflict || !strings.Contains(r.errOut, "remind") {
+		t.Fatalf("propose: %+v", r)
+	}
+	var ev domain.SourceEvent
+	decode(t, k.apa(agent, "source", "remind", "e1"), &ev)
+	if ev.Disposition != domain.DispositionReminded {
+		t.Fatalf("remind: %+v", ev)
+	}
+	if code, b := k.owner("GET", "/v1/sources/src_hook/events?disposition=reminded", ""); code != 200 || !strings.Contains(string(b), `"e1"`) {
+		t.Fatalf("list: %d %s", code, b)
+	}
+}
