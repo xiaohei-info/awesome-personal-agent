@@ -226,6 +226,7 @@ var sourcePipelineSections = []section{
 			}
 			v.Agent = strings.TrimSpace(v.Agent)
 			v.JudgePrompt = strings.TrimSpace(v.JudgePrompt)
+			v.OwnerIdentity = strings.TrimSpace(v.OwnerIdentity)
 			v.BatchPrompt = strings.TrimSpace(v.BatchPrompt)
 			p.SourcePipeline = v
 			return nil

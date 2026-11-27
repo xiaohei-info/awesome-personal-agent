@@ -6,10 +6,11 @@ import { Card, PolicyPage, reject, useDraft } from "../../app/policy-cards";
 import { AgentPick } from "../settings-agents/AgentPick";
 import { Reminder, ReminderScope } from "../settings-notify/Reminder";
 import { withBand, type Band } from "../judgment/JudgmentPage";
+import { SourceRules } from "./SourceRules";
 import { strings } from "./strings";
 
 // 设置 › 来源处理（§9.3）：读写 GET/PUT /settings/source-pipeline，结果提醒复用 Reminder(source_result)，
-// 拿不准的范围复用 GET/PUT /settings/judgment 的 triage-screen 全局不确定带。校验以服务端为准。
+// 两道题拿不准的范围复用 GET/PUT /settings/judgment 里 triage-screen、triage-urgent 的全局不确定带。校验以服务端为准。
 export interface SourcePipeline {
   agent?: string;
   batch_size?: number;
@@ -19,6 +20,7 @@ export interface SourcePipeline {
   max_retries?: number;
   daily_batch_limit?: number;
   judge_prompt?: string;
+  owner_identity?: string;
   batch_prompt?: string;
 }
 
@@ -70,6 +72,7 @@ export function SettingsSourcePipelinePage() {
           <ReminderScope>
             <Reminder row="source_result" />
           </ReminderScope>
+          <SourceRules />
           <PromptCard
             title={t.judgeTitle}
             hint={t.judgeHint}
@@ -78,6 +81,7 @@ export function SettingsSourcePipelinePage() {
             field="criteria"
             onSave={(text) => save({ judge_prompt: text })}
           />
+          <IdentityCard sp={sp} save={save} />
           <PromptCard
             title={t.batchPromptTitle}
             hint={t.batchPromptHint}
@@ -89,7 +93,8 @@ export function SettingsSourcePipelinePage() {
           <details className="panel">
             <summary>{t.advanced}</summary>
             <RetryCard sp={sp} save={save} />
-            <BandCard />
+            <BandCard template="triage-screen" title={t.bandTitle} hint={t.bandHint} />
+            <BandCard template="triage-urgent" title={t.urgentBandTitle} hint={t.urgentBandHint} />
           </details>
         </>
       )}
@@ -207,6 +212,17 @@ function PromptEditor({ title, hint, value, builtin, onSave }: PromptProps & { b
   );
 }
 
+function IdentityCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) {
+  const t = useT(strings);
+  const [text, setText, dirty] = useDraft(sp.owner_identity ?? "", () => sp.owner_identity ?? "");
+  const submit = () => (text.trim().length > MAX_PROMPT ? reject(t.promptTooLong(MAX_PROMPT)) : save({ owner_identity: text.trim() }));
+  return (
+    <Card title={t.identityTitle} hint={t.identityHint} dirty={dirty} onSave={submit}>
+      <textarea rows={6} aria-label={t.identityTitle} value={text} onChange={(e) => setText(e.target.value)} />
+    </Card>
+  );
+}
+
 function RetryCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) {
   const t = useT(strings);
   const init = () => ({
@@ -239,46 +255,50 @@ function RetryCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) {
   );
 }
 
-/** 拿不准的范围：读写 /settings/judgment 里 triage-screen 的全局不确定带（§8.10）。 */
-function BandCard() {
+/** 拿不准的范围：读写 /settings/judgment 里一个模板的全局不确定带（§8.10）。 */
+function BandCard({ template, title, hint }: { template: "triage-screen" | "triage-urgent"; title: string; hint: string }) {
   const t = useT(strings);
   const { api } = useSession();
   const [bands, setBands] = useState<Band[] | null>(null);
-  useEffect(() => {
+  const load = useCallback(() => {
     api.get<{ bands?: Band[] }>("/settings/judgment").then(
       (r) => setBands(Array.isArray(r?.bands) ? r.bands : []),
       () => setBands(null),
     );
   }, [api]);
+  useEffect(load, [load]);
   if (bands === null) return null;
-  const hit = bands.find((b) => b.template === "triage-screen" && !(b.source ?? ""));
-  const def = PACK_BAND["triage-screen"] ?? { low: 0.15, high: 0.6 };
-  const curLow = hit?.low ?? def.low ?? 0.15;
-  const curHigh = hit?.high ?? def.high ?? 0.6;
-  return <BandEditor bands={bands} low={curLow} high={curHigh} isDefault={!hit} onSaved={setBands} />;
+  const hit = bands.find((b) => b.template === template && !(b.source ?? ""));
+  const def = PACK_BAND[template];
+  const low = hit?.low ?? def.low!;
+  const high = hit?.high ?? def.high!;
+  // 两张卡片写同一份清单：保存前重读，免得盖掉另一张刚存的值。
+  const save = async (b: { low: number; high: number }) => {
+    const cur = await api.get<{ bands?: Band[] }>("/settings/judgment");
+    const r = await api.put<{ version: number; bands?: Band[] }>("/settings/judgment", { bands: withBand(cur.bands ?? [], { template, ...b }) });
+    load();
+    return r.version ?? 0;
+  };
+  return <BandEditor title={title} hint={hint + (hit ? "" : t.bandDefault)} low={low} high={high} onSave={save} />;
 }
 
-function BandEditor({ bands, low, high, isDefault, onSaved }: {
-  bands: Band[];
+function BandEditor({ title, hint, low, high, onSave }: {
+  title: string;
+  hint: string;
   low: number;
   high: number;
-  isDefault: boolean;
-  onSaved: (next: Band[]) => void;
+  onSave: (b: { low: number; high: number }) => Promise<number>;
 }) {
   const t = useT(strings);
-  const { api } = useSession();
   const [d, setD, dirty] = useDraft([low, high], () => ({ low: String(low), high: String(high) }));
-  const onSave = async () => {
+  const submit = () => {
     const lo = Number(d.low);
     const hi = Number(d.high);
     if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo < 0 || hi > 1 || lo > hi) return reject(t.bandBad);
-    const next = withBand(bands, { template: "triage-screen", low: lo, high: hi });
-    const r = await api.put<{ version: number; bands?: Band[] }>("/settings/judgment", { bands: next });
-    onSaved(Array.isArray(r?.bands) ? r.bands : next);
-    return r.version ?? 0;
+    return onSave({ low: lo, high: hi });
   };
   return (
-    <Card title={t.bandTitle} hint={t.bandHint + (isDefault ? t.bandDefault : "")} dirty={dirty} onSave={onSave}>
+    <Card title={title} hint={hint} dirty={dirty} onSave={submit}>
       <p className="sentence">
         <label>
           {t.bandLow}{" "}

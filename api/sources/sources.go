@@ -866,21 +866,24 @@ func (a *api) outboundPreview(w http.ResponseWriter, r *http.Request, p *core.Pr
 	if err := internalOnly(p, "the outbound preview"); err != nil {
 		return err
 	}
-	var ev domain.SourceEvent
+	var out map[string]inbound.OutboundView
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
-		var err error
-		if ev, err = runner.Event(tx, r.PathValue("id")); err != nil {
+		ev, err := runner.Event(tx, r.PathValue("id"))
+		if err != nil {
 			return err
 		}
-		if inbound.IsCaptureSource(ev.SourceID) {
-			return nil
+		if !inbound.IsCaptureSource(ev.SourceID) {
+			if _, err := registry.Get(tx, ev.SourceID); err != nil {
+				return err
+			}
 		}
-		_, err = registry.Get(tx, ev.SourceID)
+		rcpt, err := inbound.Recipients(tx, ev.ID)
+		out = inbound.OutboundPreview(ev, rcpt)
 		return err
 	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, inbound.OutboundPreview(ev))
+	return core.WriteJSON(w, http.StatusOK, out)
 }
 
 func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

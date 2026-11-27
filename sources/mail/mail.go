@@ -325,8 +325,8 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		} else {
 			miss = append([]missing{{"headers", "该版本范围的 message read 未按 -H 取信头（未实测）"}}, miss...)
 		}
-		it.ev.CorrelationKeys = []string{"thread:" + root}
 		it.ev.Link = content.NotificationLink(it.ev.Sender, it.ev.ID, root)
+		it.ev.CorrelationKeys = content.MailKeys(root, it.ev.Link)
 		it.ev.Detail = text
 		it.ev.Content = &declared{State: "partial", Missing: miss}
 		var line bytes.Buffer

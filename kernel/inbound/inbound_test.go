@@ -184,7 +184,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	e.web, e.mail = web.ID, mail.ID
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(strings.ReplaceAll(packYAML, "p_mail", mail.ID))}}
 	fs["acc-pack/pack.yaml"] = &fstest.MapFile{Data: []byte(accPackYAML)}
-	for _, name := range []string{"triage-screen", "source-batch"} { // 用内置包里随发行的模板，不另写一份
+	for _, name := range []string{"triage-screen", "triage-urgent", "source-batch"} { // 用内置包里随发行的模板，不另写一份
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
 			t.Fatal(err)

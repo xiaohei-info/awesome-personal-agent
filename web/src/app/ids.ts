@@ -91,8 +91,8 @@ export const RULE_GROUP = ["clock_rules", "event_rules"] as const;
 export const RULE_CLASS = ["reminder", "action"] as const;
 
 /** 判断用途与内置模板：kernel/agents/direct/judge.go builtinUse（模板 → 用途） */
-export const JUDGE_USE = ["inbound_screen", "capture_prescreen", "risk_screen", "delivery_defer", "followup_defer", "verify_gate"] as const;
-export const JUDGE_TEMPLATE = ["triage-screen", "capture-prescreen", "web-only-screening", "delivery-defer", "follow-up-defer", "delegation-screen"] as const;
+export const JUDGE_USE = ["inbound_screen", "inbound_urgent", "capture_prescreen", "risk_screen", "delivery_defer", "followup_defer", "verify_gate"] as const;
+export const JUDGE_TEMPLATE = ["triage-screen", "triage-urgent", "capture-prescreen", "web-only-screening", "delivery-defer", "follow-up-defer", "delegation-screen"] as const;
 /** 判断后端、定案者、逐级结果：kernel/judgment/record/record.go */
 export const JUDGE_BACKEND = ["classifier", "chat"] as const;
 export const DECIDED_BY = ["classifier", "chat", "default"] as const;
@@ -194,6 +194,7 @@ export const VIEW_FIELD = ["title", "project", "created_at", "updated_at", "phas
  * 筛选门槛页拖线的起点；本人在 Web 覆盖过的以策略为准。ids.check 对照包文件防漂移。 */
 export const PACK_BAND: Record<string, { low?: number; high?: number }> = {
   "triage-screen": { low: 0.15, high: 0.6 },
+  "triage-urgent": { low: 0.15, high: 0.8 },
   "web-only-screening": { low: 0.2 },
   "delegation-screen": { low: 0.2 },
 };

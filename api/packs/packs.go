@@ -123,8 +123,25 @@ type packView struct {
 	ClockRules     []packRule         `json:"clock_rules"`
 	EventRules     []packRule         `json:"event_rules"`
 	Views          map[string]kp.View `json:"views"`
+	// SourceRules 按声明顺序列出来源规则；包列表本身按匹配顺序（包名）排列，首条命中即止（§9.3）。
+	SourceRules []sourceRule `json:"source_rules"`
 	// DefaultInstruction 是实例驱动的 call_agent 模板的默认内容要求（C.7）；Web 在本人没改时显示它并标"默认"。
 	DefaultInstruction string `json:"default_instruction,omitempty"`
+}
+
+type sourceRule struct {
+	ID       string         `json:"id"`
+	Match    map[string]any `json:"match"`
+	Where    []condition    `json:"where,omitempty"`
+	Then     string         `json:"then"`
+	Accept   string         `json:"accept,omitempty"`
+	OnUpdate string         `json:"on_update,omitempty"`
+}
+
+type condition struct {
+	Field string `json:"field"`
+	Op    string `json:"op"`
+	Value any    `json:"value,omitempty"`
 }
 
 // defaultInstruction 取包里实例驱动的时钟规则所调模板的 default_instruction。
@@ -148,7 +165,14 @@ func (a *api) packs(w http.ResponseWriter, _ *http.Request, _ *core.Principal) e
 		src, _ := a.ps.Source(p.Name)
 		v := packView{Name: p.Name, Version: p.Version, Description: p.Description, Source: src, Hash: p.Hash,
 			Kinds: []string{}, InstanceParams: p.InstanceParams, ClockRules: []packRule{}, EventRules: []packRule{}, Views: p.Views,
-			DefaultInstruction: defaultInstruction(p)}
+			SourceRules: []sourceRule{}, DefaultInstruction: defaultInstruction(p)}
+		for _, s := range p.SourceRules {
+			x := sourceRule{ID: s.ID, Match: s.Match, Then: rules.Exit(s), Accept: s.Accept, OnUpdate: s.OnUpdate}
+			for _, c := range s.Where {
+				x.Where = append(x.Where, condition(c))
+			}
+			v.SourceRules = append(v.SourceRules, x)
+		}
 		for _, k := range p.Kinds {
 			v.Kinds = append(v.Kinds, k.Name)
 		}

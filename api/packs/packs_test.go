@@ -36,6 +36,11 @@ instance_params:
   additionalProperties: false
   properties:
     schedule: {type: string}
+source_rules:
+  - id: noisy
+    match: {source_type: mail, event_type: [mail.received]}
+    where: [{field: subject, op: contains, value: 验证码}]
+    then: ignore
 clock_rules:
   - id: scheduled
     type: recur
@@ -225,6 +230,11 @@ func TestPacksListsLoadedPack(t *testing.T) {
 	if len(out.Packs) != 1 || out.Packs[0].Name != "brief" || out.Packs[0].Source != kp.Builtin ||
 		len(out.Packs[0].EventRules) != 1 || out.Packs[0].EventRules[0].ID != "tag-hit" || out.Packs[0].InstanceParams == nil {
 		t.Fatalf("packs = %+v", out.Packs)
+	}
+	// 来源规则原样列出（只读清单用，附录 B.2）。
+	rules := `"source_rules":[{"id":"noisy","match":{"event_type":["mail.received"],"source_type":"mail"},"where":[{"field":"subject","op":"contains","value":"验证码"}],"then":"ignore"}]`
+	if !strings.Contains(rec.Body.String(), rules) {
+		t.Fatalf("source rules: %s", rec.Body)
 	}
 	// views 的对外形状（附录 B.2）：未声明的列表是 []；提示词正文与模板不外露。
 	body := rec.Body.String()
