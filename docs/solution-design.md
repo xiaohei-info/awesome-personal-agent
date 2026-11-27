@@ -1927,7 +1927,7 @@ HTTP 层错误的响应体为 `{"error": {"code": "<标识>", "message": "…"}}
 - **忽略**：`inbound.ignore_unjudged`（`POST /source-events/{id}/ignore`、`apa source ignore <事件>`），同样放宽接受处于 `running` 的 `pending` 事件。
 - **挂到已有事项**：`inbound.attach_event`（`POST /source-events/{id}/attach`、`apa source attach <事件> --to <事项>`），校验事件处于 `running`（或未判定/digest）且目标事项未关闭后，走 `followmsg.attach` 同一段落账逻辑，把事件作为挂靠消息记在目标事项上；挂错后可用"交回"（`followmsg.handback`）撤回。
 
-**防回环**：批处理会话带运行身份，已有的"运行身份不入对话捕获"直接生效；另在各 harness 的捕获插件（附录 A）里，以 APA 知会或唤醒开头的回合（`[APA ...]`）本地丢弃、不发捕获，防止来源处理结果经主会话再回流进队列。
+**防回环**：批处理会话带运行身份，已有的"运行身份不入对话捕获"直接生效；另在各 harness 的捕获插件（附录 A）里，以 APA 知会或唤醒开头的回合（`[APA ...]`）本地丢弃、不发捕获，混在人类回合中间的完整 APA 块（知会、唤醒、账本增量与跟进消息）在提交前剔除，防止来源处理结果经主会话再回流进队列。助手用自己的话复述知会时没有标记可认，由批处理提示词要求忽略。
 
 **对话捕获准入（`POST /capture`）**：对话捕获是普通来源（每个项目一个内部来源 `capture:<项目>`），入账后走上面的同一条来源处理线。内核只放行正向标注为外部人发起且未办结的轮次（`capture_schema: 1`、`speaker_role: human`、`origin_type: external_chat`、`status_hint != resolved`），其余返回 200 `captured: false`（`non_external_origin`、`already_resolved`）、不入账、不记失败；旧调用方（`capture_schema: 0` 且未传标注字段）本版照常放行、审计记 `legacy`。识别"这段是不是外部人说的"属于各 harness 的插件（附录 A）：定时任务会话、后台内部会话、系统或后台回执、APA 知会与唤醒、纯助手输出全部本地丢弃、不发请求，只把类别记进插件本地日志（不记正文与凭据）；无法确认的一律不发（fail-closed）。
 
