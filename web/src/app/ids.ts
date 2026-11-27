@@ -47,7 +47,7 @@ export const ERROR_CODE = [
 export const GENERIC_ERROR: readonly string[] = ["invalid_request", "conflict", "internal"];
 
 /** 来源类型：kernel/domain/entities.go SourceType */
-export const SOURCE_TYPE = ["pull", "script", "webhook"] as const;
+export const SOURCE_TYPE = ["pull", "script", "webhook", "capture"] as const;
 /** 来源事件处置：kernel/domain/entities.go Disposition */
 export const DISPOSITION = ["pending", "attached", "proposed", "ignored", "unjudged", "expired", "digest", "alerted", "reminded"] as const;
 /** 来源处理线队列状态：kernel/domain/entities.go SourceEvent.Queue */

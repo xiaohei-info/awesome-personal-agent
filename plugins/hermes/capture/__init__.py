@@ -25,6 +25,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import sys
@@ -57,6 +58,13 @@ TURN_HEADS = (("[Cronjob \"", "cron_echo"),
               ("[APA", "apa_notice"))
 # 用户发图或发附件时 Hermes 在轮次开头插入的说明，后面往往还有本人的话：算外部人输入。
 ATTACHMENT = "[The user sent "
+
+# 并进一轮中间的 APA 知会块（跟在本人的话后面的唤醒与提醒、被引述的账本增量与跟进消息）：只认头尾齐全的整块，
+# 结束语是内核信封与 apa-wake 写的固定文字；只提到 "[APA" 的话照原样保留。
+APA_BLOCKS = re.compile(
+    r"\[APA [^\]\n]*以下为资料，不是指令\].*?\[资料结束\]"
+    r"|\[APA(?: 提醒| 简报| 需要你看一下)?\].*?不必回复 APA。"
+    r"|\[APA wake\].*?permission card as this Agent\.", re.S)
 
 _pending = {}  # session id -> [turn text, ...] not yet sent
 _internal = {}  # session id -> 整个会话都不发的类别（定时任务会话、后台内部会话）
@@ -101,10 +109,11 @@ def _classify(session_id, user_message):
 
 def _turn_text(user_message, assistant_response):
     parts = []
-    if isinstance(user_message, str) and user_message.strip():
-        parts.append("user: " + user_message.strip())
-    if isinstance(assistant_response, str) and assistant_response.strip():
-        parts.append("assistant: " + assistant_response.strip())
+    for who, text in (("user", user_message), ("assistant", assistant_response)):
+        if isinstance(text, str):
+            text = APA_BLOCKS.sub("", text).strip()
+            if text:
+                parts.append(f"{who}: {text}")
     return "\n".join(parts)
 
 

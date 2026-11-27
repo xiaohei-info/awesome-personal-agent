@@ -16,6 +16,8 @@
 //     而规则没有明说 refresh 时，消息记在事项上（直接 processed，不转发），不改标题与正文；事项在 waiting 且等的是
 //     人或外部时，由 system 经 item.transition 转回 open（可撤销，未到期的跟进定时随阶段变更取消）；
 //     等时间的 waiting 与 proposed 只挂靠不转阶段。
+//   - 上游结束（pr.merged、pr.closed、reminder.completed）挂到仍是 proposed、且来源都指向该对象的建议时，
+//     由 system 经 item.transition 转 dropped（可撤销）；已接受的事项不动。
 //   - 挂靠本身不拉起运行：本包不起运行、不调模型；挂靠命令继承所挂事项的链路深度，不加一。
 //   - 回执确认游标（delegate.report 的 cursor）之前已转发的消息算已处理；游标是消息的落盘序号。
 //   - 事项进入终态时，未处理（pending、forwarded）的挂靠消息退回判断流，不丢。
@@ -330,7 +332,53 @@ func (s *Service) Intercept(ctx context.Context, ev domain.SourceEvent, onUpdate
 	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: p.item, Applied: p.how != forward, Echo: p.how == echo})
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: CmdAttach, Input: in, IdemKey: "followmsg:attach:" + ev.ID,
 		Chain: command.Chain{Mode: command.ChainKeep, From: p.item}, Owner: s.o.Owner})
-	return err == nil, "", err
+	if err != nil {
+		return false, "", err
+	}
+	if upstreamEnded[ev.Type] { // 挂靠已落账：关单失败只上报，不让事件重走流水线
+		err = s.dropEnded(ctx, p.item, ev)
+	}
+	return true, "", err
+}
+
+// upstreamEnded 是表示上游对象已经结束的事件类型（§9.4）。
+var upstreamEnded = map[string]bool{"pr.merged": true, "pr.closed": true, "reminder.completed": true}
+
+// dropEnded 关掉上游已结束的建议：只动仍是 proposed、且名下每条来源事件都指向这个上游对象的事项
+// （并进了别的事的建议留给本人）。带读到的版本号写入，本人刚接受的不会被关掉。
+func (s *Service) dropEnded(ctx context.Context, item string, ev domain.SourceEvent) error {
+	var (
+		only    bool
+		version int64
+	)
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+		it, err := items.Get(tx, item)
+		if err != nil || it.Phase != domain.PhaseProposed || it.Proposal == nil {
+			return err
+		}
+		for _, id := range it.Proposal.Sources {
+			src, err := runner.Event(tx, id)
+			if notFound(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !slices.ContainsFunc(src.CorrelationKeys, func(k string) bool { return slices.Contains(ev.CorrelationKeys, k) }) {
+				return nil
+			}
+		}
+		only = true
+		version, err = command.Version(tx, item)
+		return err
+	}); err != nil || !only {
+		return err
+	}
+	in, _ := json.Marshal(map[string]string{"id": item, "to": string(domain.PhaseDropped),
+		"reason": "上游已结束：来源事件 " + ev.ID + "（" + ev.Type + "）"})
+	_, err := s.o.Exec.Do(ctx, command.Request{Identity: s.onBehalf(), Command: "item.transition", Input: in, IdemKey: "followmsg:ended:" + ev.ID,
+		ExpectVersion: &version, Chain: command.Chain{Mode: command.ChainKeep, From: item}, Owner: s.o.Owner})
+	return err
 }
 
 // onBehalf 是内核代本人写事项的身份：这些事项没有执行者，写入以本人登记该来源或该键为依据（同入站规则的自动接受）。
