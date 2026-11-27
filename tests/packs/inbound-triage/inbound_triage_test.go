@@ -535,8 +535,13 @@ func TestPackIsDeclarativeAndToolNeutral(t *testing.T) {
 	if tr.Meta.Agent != "judge" || tr.Meta.QuestionType != "yes_no" || tr.Meta.OnUndecided != "yes" || tr.Meta.Band == nil {
 		t.Fatalf("triage-screen must be a yes_no judge with a band and on_undecided yes: %+v", tr.Meta)
 	}
-	if _, ok := p.Prompts["source-batch"]; !ok {
+	sb, ok := p.Prompts["source-batch"]
+	if !ok {
 		t.Fatal("source-batch prompt must exist in inbound-triage pack")
+	}
+	// 口头提醒不在建议页：超出条数的说明要按实际去处写，不能一概说"在建议页"
+	if strings.Contains(sb.Body, "另有 N 条在建议页") || !strings.Contains(sb.Body, "口头提醒在消息来源页") {
+		t.Error("source-batch overflow line must name where proposals and verbal reminders actually are")
 	}
 	for _, old := range []string{"triage", "triage-title", "triage-candidates", "triage-draft", "triage-extract", "merge-batch", "capture-prescreen"} {
 		if _, ok := p.Prompts[old]; ok {
