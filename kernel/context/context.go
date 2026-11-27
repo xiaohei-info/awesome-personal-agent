@@ -209,9 +209,16 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			}
 			return res, err
 		}
-		// 从头读（新会话、压缩或网关重启后的新游标）给的是现状摘要：早已结束的事项不是变化，不带。
-		if !inScope(it.Project) || after == 0 && (it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped) {
+		if !inScope(it.Project) {
 			continue
+		}
+		if after == 0 {
+			// 从头读（新会话、压缩或网关重启后的新游标）给的是现状摘要：早已结束的事项不是变化，不带。
+			if stale, err := settled(tx, it); err != nil {
+				return res, err
+			} else if stale {
+				continue
+			}
 		}
 		e, _, err := entry(tx, it, pol, req.Reader)
 		if err != nil {
@@ -262,6 +269,26 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+func closed(it domain.Item) bool {
+	return it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped
+}
+
+// settled：事项已结束且不再有人等它。已结束的委派子事项在父事项结束前仍是待接手的回收结果（§7.6），不算。
+func settled(tx *store.Tx, it domain.Item) (bool, error) {
+	if !closed(it) || it.Kind != domain.KindDelegation {
+		return closed(it), nil
+	}
+	id, ok, err := items.ParentOf(tx, it.ID)
+	if err != nil || !ok {
+		return true, err
+	}
+	parent, err := items.Get(tx, id)
+	if isNotFound(err) {
+		return true, nil
+	}
+	return closed(parent), err
 }
 
 // buildItem 是 `--scope item`：不读不写游标，也不带投递与项目上下文。
@@ -331,9 +358,7 @@ func itemTargets(tx *store.Tx, req Request) ([]domain.Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(mine, func(it domain.Item) bool {
-		return it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped
-	}), nil
+	return slices.DeleteFunc(mine, closed), nil
 }
 
 // appendMessages 按读取者过滤并取事项的挂靠消息：负责者才推进状态并拿确认游标。没有消息时不追加。

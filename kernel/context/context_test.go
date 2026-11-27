@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,8 +134,13 @@ func TestCursorPerSessionOnlyDelta(t *testing.T) {
 	// 新游标（新会话、网关重启或压缩后换的键）只给现状：早已结束的事项不重放。
 	e.do(t, owner, "item.transition", map[string]any{"id": b, "to": "dropped", "reason": "不做了"})
 	c := e.item(t, map[string]any{"title": "C"})
-	if other := e.build(t, Request{Session: "s2"}); !eq(ids(other), []string{c}) {
-		t.Fatalf("a fresh cursor must skip closed items: %v", ids(other))
+	// 例外：父事项还没结束时，已完成的委派子事项是要接手的回收结果。
+	d := e.item(t, map[string]any{"title": "D", "kind": "delegation"})
+	e.do(t, owner, "item.relate", map[string]any{"from": d, "to": c, "type": "parent"})
+	e.do(t, owner, "item.transition", map[string]any{"id": d, "to": "done", "reason": "回执", "evidence": "pr"})
+	other := ids(e.build(t, Request{Session: "s2"}))
+	if len(other) != 2 || !slices.Contains(other, c) || !slices.Contains(other, d) {
+		t.Fatalf("fresh cursor: open items and pending delegation results only: %v", other)
 	}
 }
 
