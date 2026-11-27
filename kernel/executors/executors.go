@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -67,7 +68,7 @@ type Headless struct {
 	Command    []string            `json:"command"`
 	Output     []string            `json:"output,omitempty"`
 	FinalText  string              `json:"final_text,omitempty"`
-	Usage      *UsagePaths         `json:"usage,omitempty"`
+	Usage      *UsageSource        `json:"usage,omitempty"`
 	Session    Session             `json:"session"`
 	Resume     []string            `json:"resume,omitempty"`
 	Access     map[string][]string `json:"access"`
@@ -80,47 +81,77 @@ type Headless struct {
 	ToolNotes map[string]Label   `json:"tool_notes,omitempty"`
 }
 
-// UsagePaths 是结果事件里 token 用量的字段路径（附录 A.2）。input 须含缓存命中的部分；cache_read 可空。
-// Cumulative 表示这些数是整个会话的累计值，续接时含前几次运行的用量。
-type UsagePaths struct {
+// UsageSource 声明一次无头运行的 token 用量从哪读（附录 A.2）。取到的值只算本次运行，续接时不含此前运行。
+// File 非空时读运行目录里的这个 JSON 文件，否则读 stdout 里最后一个带 input 与 output 字段的 JSON 行（Event 非空时只看
+// type 等于它的行）。其余各项是对象里的字段路径。
+type UsageSource struct {
+	File       string `json:"file,omitempty"`
+	Event      string `json:"event,omitempty"`
 	Input      string `json:"input"`
 	Output     string `json:"output"`
 	CacheRead  string `json:"cache_read,omitempty"`
-	Cumulative bool   `json:"cumulative,omitempty"`
+	CacheWrite string `json:"cache_write,omitempty"`
+	Model      string `json:"model,omitempty"`
+	// InputExcludesCache 表示 input 不含缓存读写，内核把两项加进输入。
+	InputExcludesCache bool `json:"input_excludes_cache,omitempty"`
 }
 
-// RunUsage 是一条结果事件里回报的用量；Session 是同一事件里按 session.extract 取到的会话 id，可空。
+// RunUsage 是一次运行回报的用量；Input 含缓存读写，Model 可空。
 type RunUsage struct {
-	Input, Output, CacheRead int64
-	Session                  string
+	Input, Output, CacheRead, CacheWrite int64
+	Model                                string
 }
 
-// ExtractUsage 按声明从无头运行 stdout 的最后一条结果事件取 token 用量；
-// 没声明、没有这样的事件，或报的全是 0（一次请求都没成）时 ok 为假。
-// shortcut: 结果行超过调度器保留的末段（64 KiB）时读不到，按未回报记。
-func (h Headless) ExtractUsage(stdout []byte) (u RunUsage, ok bool) {
-	if h.Usage == nil {
+// Parse 从用量内容（File 的全文，或 stdout 末段）取用量；没有可用的对象，或输入输出全是 0（一次请求都没成）时 ok 为假。
+func (s UsageSource) Parse(data []byte) (RunUsage, bool) {
+	if s.File != "" {
+		return s.from(data)
+	}
+	lines := bytes.Split(data, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		if u, ok := s.from(lines[i]); ok {
+			return u, true
+		}
+	}
+	return RunUsage{}, false
+}
+
+func (s UsageSource) from(data []byte) (u RunUsage, ok bool) {
+	var obj map[string]any
+	if json.Unmarshal(bytes.TrimSpace(data), &obj) != nil || (s.Event != "" && obj["type"] != s.Event) {
 		return u, false
 	}
-	lines := bytes.Split(stdout, []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		var obj map[string]any
-		if json.Unmarshal(bytes.TrimSpace(lines[i]), &obj) != nil {
-			continue
-		}
-		if typ, _ := obj["type"].(string); typ != "" && typ != "result" && typ != "final" {
-			continue
-		}
-		in, iok := jsonCount(obj, h.Usage.Input)
-		out, ook := jsonCount(obj, h.Usage.Output)
-		if !iok || !ook {
-			continue
-		}
-		cached, _ := jsonCount(obj, h.Usage.CacheRead)
-		session, _ := extractJSONPath(obj, []string{h.Session.Extract})
-		return RunUsage{Input: in, Output: out, CacheRead: cached, Session: session}, in+out > 0
+	in, iok := jsonCount(obj, s.Input)
+	out, ook := jsonCount(obj, s.Output)
+	if !iok || !ook {
+		return u, false
 	}
-	return u, false
+	u.Input, u.Output = in, out
+	u.CacheRead, _ = jsonCount(obj, s.CacheRead)
+	u.CacheWrite, _ = jsonCount(obj, s.CacheWrite)
+	u.Model, _ = extractJSONPath(obj, []string{s.Model})
+	if s.InputExcludesCache {
+		u.Input += u.CacheRead + u.CacheWrite
+	}
+	return u, u.Input > 0 || u.Output > 0
+}
+
+func (s UsageSource) validate() error {
+	if s.File != "" && (s.File != filepath.Base(s.File) || s.File == "." || s.File == "..") {
+		return invalid("headless.usage.file must be a plain file name in the run directory")
+	}
+	if s.File != "" && s.Event != "" {
+		return invalid("headless.usage.event only applies to stdout, not to usage.file")
+	}
+	if !validJSONPath(s.Input) || !validJSONPath(s.Output) {
+		return invalid("headless.usage needs input and output as $.field paths")
+	}
+	for _, p := range []string{s.CacheRead, s.CacheWrite, s.Model} {
+		if p != "" && !validJSONPath(p) {
+			return invalid("headless.usage cache_read, cache_write and model must be $.field paths")
+		}
+	}
+	return nil
 }
 
 // jsonCount 取 $.a.b 路径上的非负整数。
@@ -481,9 +512,9 @@ func (h *Headless) validate() error {
 	if h.FinalText != "" && !validJSONPath(h.FinalText) {
 		return invalid("headless.final_text must be a $.field path")
 	}
-	if u := h.Usage; u != nil {
-		if !validJSONPath(u.Input) || !validJSONPath(u.Output) || (u.CacheRead != "" && !validJSONPath(u.CacheRead)) {
-			return invalid("headless.usage needs input and output as $.field paths (cache_read is optional)")
+	if h.Usage != nil {
+		if err := h.Usage.validate(); err != nil {
+			return err
 		}
 	}
 	if len(h.Access) == 0 {

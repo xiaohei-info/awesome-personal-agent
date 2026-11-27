@@ -8,7 +8,7 @@ import { feature } from "./index";
 
 // 替身只回答 GET /v1/usage，形状同附录 B.2。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-const c = (requests: number, reported: number, input_tokens = 0, output_tokens = 0, cache_read_tokens = 0) => ({ requests, reported, input_tokens, output_tokens, cache_read_tokens });
+const c = (requests: number, reported: number, input_tokens = 0, output_tokens = 0, cache_read_tokens = 0, cache_write_tokens = 0) => ({ requests, reported, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens });
 const WEEK = {
   since: "2026-11-20T00:00:00Z",
   rows: [
@@ -16,7 +16,7 @@ const WEEK = {
     { part: "judge", purpose: "inbound_screen", model: "other-model", ...c(1, 1, 500, 5) },
     { part: "model", purpose: "tmpl_unknown_x", model: "gen-model", ...c(1, 1, 7, 8) },
     { part: "agent", purpose: "task", agent: "甲", ...c(2, 0) },
-    { part: "agent", purpose: "background", agent: "甲", ...c(1, 1, 90, 3, 40) },
+    { part: "agent", purpose: "background", agent: "甲", ...c(1, 1, 90, 3, 40, 12) },
   ],
   days: [{ part: "judge", date: "2026-11-26", ...c(4, 3, 1500, 25) }],
 };
@@ -57,7 +57,7 @@ describe("用量", () => {
     const agent = within(screen.getByRole("region", { name: "Agent 后台运行" }));
     expect(agent.getAllByText("该 Agent 未回报用量").length).toBeGreaterThan(0);
     // 同表里有缓存命中时，没回报的行缓存列同样不写 0。
-    expect(within(agent.getByRole("table", { name: "Agent 后台运行 Agent" })).getByRole("row", { name: /甲 · 任务/ })).toHaveTextContent(/甲 · 任务2(该 Agent 未回报用量){3}$/);
+    expect(within(agent.getByRole("table", { name: "Agent 后台运行 Agent" })).getByRole("row", { name: /甲 · 任务/ })).toHaveTextContent(/甲 · 任务2(该 Agent 未回报用量){4}$/);
     expect(document.body.textContent).not.toMatch(/inbound_screen|tmpl_unknown_x/);
   });
 });

@@ -325,7 +325,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 			return
 		}
 		ctx := context.Background() // 关停时也要把终态落账
-		if err := kusage.AddRun(ctx, st, res, clock.Now()); err != nil {
+		if err := kusage.AddRun(ctx, st, l.Runs, res, clock.Now()); err != nil {
 			slog.Error("record run usage", "run", res.Run.ID, "err", err)
 		}
 		if err := errors.Join(k.rn.Handle(ctx, res), k.wh.Handle(ctx, res)); err != nil {

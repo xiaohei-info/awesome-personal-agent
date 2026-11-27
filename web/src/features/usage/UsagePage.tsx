@@ -6,13 +6,13 @@ import { entryOf } from "../../app/values";
 import { strings } from "./strings";
 
 // 用量页：GET /usage?days= 的数字只做合计与分组展示，没回报用量的只计次数、不估算。
-export interface Counts { requests: number; reported: number; input_tokens: number; output_tokens: number; cache_read_tokens: number }
+export interface Counts { requests: number; reported: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
 export interface Row extends Counts { part: Part; purpose: string; agent?: string; model?: string }
 export interface Day extends Counts { part: Part; date: string }
 export interface Summary { since?: string; rows: Row[]; days: Day[] }
 type Part = "judge" | "model" | "agent";
 const PARTS: Part[] = ["judge", "model", "agent"];
-const KEYS = ["requests", "reported", "input_tokens", "output_tokens", "cache_read_tokens"] as const;
+const KEYS = ["requests", "reported", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"] as const;
 
 /** 按 key 合并计数，保持首次出现的顺序。 */
 export function groupBy<T extends Counts>(rows: T[], key: (r: T) => string): T[] {
@@ -101,6 +101,7 @@ function PartPanel({ part, rows, days }: { part: Part; rows: Row[]; days: Day[] 
             <dt>{t.input}</dt><dd>{tokens(total, total.input_tokens, none)}</dd>
             <dt>{t.output}</dt><dd>{tokens(total, total.output_tokens, none)}</dd>
             {total.cache_read_tokens > 0 && (<><dt>{t.cached}</dt><dd>{total.cache_read_tokens.toLocaleString(locale())}</dd></>)}
+            {total.cache_write_tokens > 0 && (<><dt>{t.cacheWrite}</dt><dd>{total.cache_write_tokens.toLocaleString(locale())}</dd></>)}
           </dl>
           {total.reported > 0 && total.reported < total.requests && <p className="sub">{t.unreported(total.requests - total.reported)}</p>}
           {/* 一个分组里可能有多个用途名落到"其他"，按显示名合并，不出现内核取值。 */}
@@ -141,10 +142,11 @@ const tokens = (c: Counts, n: number, none: string) => (c.reported ? n.toLocaleS
 function Table({ label, head, count, none, rows }: { label: string; head: string; count: string; none: string; rows: [string, Counts][] }) {
   const t = useT(strings);
   const cached = rows.some(([, r]) => r.cache_read_tokens > 0);
+  const written = rows.some(([, r]) => r.cache_write_tokens > 0);
   return (
       <table aria-label={label}>
         <thead>
-          <tr><th>{head}</th><th>{count}</th><th>{t.input}</th><th>{t.output}</th>{cached && <th>{t.cached}</th>}</tr>
+          <tr><th>{head}</th><th>{count}</th><th>{t.input}</th><th>{t.output}</th>{cached && <th>{t.cached}</th>}{written && <th>{t.cacheWrite}</th>}</tr>
         </thead>
         <tbody>
           {rows.map(([name, r]) => (
@@ -154,6 +156,7 @@ function Table({ label, head, count, none, rows }: { label: string; head: string
               <td>{tokens(r, r.input_tokens, none)}</td>
               <td>{tokens(r, r.output_tokens, none)}</td>
               {cached && <td>{tokens(r, r.cache_read_tokens, none)}</td>}
+              {written && <td>{tokens(r, r.cache_write_tokens, none)}</td>}
             </tr>
           ))}
         </tbody>

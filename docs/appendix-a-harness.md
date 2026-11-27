@@ -48,7 +48,7 @@
 | `headless.output` | 结构化输出标志 |
 | `headless.final_text` | 可选。从结构化 stdout（如 `stream-json`）提取最终助手文本的字段路径（如 `$.text`、`$.result`），内核据此过滤工具事件与运行日志，只把最终助手文本交给下游通知 |
 | `instance_options` | 可选。`fields` 声明非敏感字段的双语标签、`type: enum` 与 `choices` 或 `type: string` 与整值 `pattern`。`display_as: model` 表示配置模型。`args_if_set` 将字段映射为固定标志及一个单独的 `{字段}` 参数。`env_if_set` 将字段映射到声明允许的宿主配置环境名，排除 APA 身份变量、进程加载与系统路径变量及凭据名。`cwd_choices` 可列出 `run_dir` 与 `project_checkout`。留空使用宿主默认设置。 |
-| `headless.usage` | 可选。结果事件里 token 用量的字段路径 `{input, output, cache_read, cumulative}`，`input`、`output` 必填；`input` 须含缓存命中的部分。内核从 stdout 里最后一条结果事件取值记进用量统计（主文档 §8.6）；未声明或取不到时该次运行记为未回报，不估算。`cumulative: true` 表示回报的是会话累计值，内核按同一会话（会话 id 取同一事件里 `headless.session.extract` 指向的字段）做差后记账 |
+| `headless.usage` | 可选。本次运行的 token 用量从哪读，见下文"运行用量契约" |
 | `headless.session.assign` | 预设会话 id 的标志，与 `extract` 二选一 |
 | `headless.session.extract` | 从 stdout 取会话 id 的路径 |
 | `headless.resume` | 续接标志，未声明表示不支持续接 |
@@ -65,6 +65,26 @@
 | `executors[]` | 可选，兼容旧插件：`{id, kind, host?, scenarios[]}`。本人确认后并入执行者名录，不删除已登记的条目（主文档 §6.17）。新插件不提交，执行者在第一次委派时登记 |
 | `selfcheck.command` | 可选。自检命令，输出格式见 A.1。由 `apa doctor` 在 APA 主机上以运行它的账号执行，不经外呼调用器；与声明的其余部分一样，经本人在 Web 确认后才会被执行 |
 
+**运行用量契约**（`headless.usage`，可选）。内核只按这份声明读运行的 token 用量（主文档 §8.6），任何 harness 的适配器照此声明即可回报，内核没有针对某个 harness 的解析。
+
+| 约定 | 内容 |
+|---|---|
+| 语义 | 数值只含本次运行。续接会话时不含此前运行；harness 只给会话累计值时，适配器自己换算成单次值（按本次运行的各次模型调用累加，或减去开始时的累计），不能把累计值声明给内核 |
+| 来源 | 二选一。声明 `file`：运行结束时读运行目录里的这个 JSON 文件（只能是文件名，整个文件是一个对象，上限 64 KiB，链接不读），由插件或 harness 自己写。不声明 `file`：读 stdout 里最后一个同时带 `input`、`output` 字段的 JSON 行；`event` 非空时只看 `type` 等于它的行。stdout 只保留末段 64 KiB，超过的结果行读不到 |
+| 哪种适合 | 结束事件里直接带整次运行的单次合计的，声明 stdout 路径即可；只按每次模型调用或每一轮分别给用量、或只给累计值的，由插件累加后写文件。写文件时逐次累加、整份原子替换，超时被终止的运行因此留下已完成调用的合计 |
+| 字段 | `input`、`output` 必填；`cache_read`、`cache_write`、`model` 可选。值是 `$.a.b` 路径指向的非负整数（`model` 是字符串） |
+| 口径 | `input` 含缓存读写；harness 的输入数不含缓存时声明 `input_excludes_cache: true`，内核把 `cache_read` 与 `cache_write` 加进输入。`output` 含思考部分。`model` 取不到时用 Agent 卡片配置的模型 |
+| 未回报 | 没声明 `usage`、取不到文件或字段、输入与输出全是 0：该次运行记为未回报，界面如实标明，不估算 |
+
+```yaml
+# 从 stdout 的结束事件读
+usage: {event: result, input: "$.usage.input", output: "$.usage.output", cache_read: "$.usage.cache_read", cache_write: "$.usage.cache_write", model: "$.model", input_excludes_cache: true}
+# 从插件写的运行目录文件读
+usage: {file: usage.json, input: "$.input_tokens", output: "$.output_tokens"}
+```
+
+上面的字段路径只说明写法；各 harness 实际的字段与是否单次值归入该 harness 的 `MEAS-H2-*`，接入时证实（见 A.6）。
+
 示例（Hermes v0.11.0+52141 实测，标志取自 `hermes chat --help`，工具集名取自 `apa-headless` 插件的声明；`full` 档的 `--yolo` 之外仍显式列出工具集，因为 `-t` 决定模型能用哪些工具）：
 
 ```yaml
@@ -74,7 +94,7 @@ headless:
   command: ["hermes", "chat", "--oneshot", "-q", "{prompt}"]
   output: ["--format", "stream-json"]
   final_text: "$.text"
-  usage: {input: "$.tokens.input", output: "$.tokens.output", cache_read: "$.tokens.cache_read", cumulative: true}
+  usage: {file: usage.json, input: "$.input_tokens", output: "$.output_tokens", cache_read: "$.cache_read_tokens", cache_write: "$.cache_write_tokens", model: "$.model"}
   session:
     extract: "$.session_id"
   resume: ["--resume", "{session_id}"]

@@ -118,13 +118,14 @@ type Request struct {
 	Timeout time.Duration
 }
 
-// Usage 是端点回报的 token 用量；端点未回报时各字段为零。InputTokens 含缓存命中的部分（CacheReadTokens）。
+// Usage 是端点回报的 token 用量；端点未回报时各字段为零。InputTokens 含缓存读写的部分（CacheReadTokens、CacheWriteTokens）。
 type Usage struct {
-	InputTokens     int `json:"input_tokens,omitempty"`
-	OutputTokens    int `json:"output_tokens,omitempty"`
-	ThoughtsTokens  int `json:"thoughts_tokens,omitempty"`
-	TotalTokens     int `json:"total_tokens,omitempty"`
-	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
+	InputTokens      int `json:"input_tokens,omitempty"`
+	OutputTokens     int `json:"output_tokens,omitempty"`
+	ThoughtsTokens   int `json:"thoughts_tokens,omitempty"`
+	TotalTokens      int `json:"total_tokens,omitempty"`
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 // IsZero 报告端点是否未回报任何 token 用量。

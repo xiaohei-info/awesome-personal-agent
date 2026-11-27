@@ -312,7 +312,7 @@ func messagesParse(raw []byte, structured bool) (reply, error) {
 	if out.Usage != nil {
 		u := out.Usage
 		r.usage = makeUsage(u.InputTokens+u.CacheRead+u.CacheWrite, u.OutputTokens, 0, 0)
-		r.usage.CacheReadTokens = u.CacheRead
+		r.usage.CacheReadTokens, r.usage.CacheWriteTokens = u.CacheRead, u.CacheWrite
 	}
 	var b strings.Builder
 	for _, blk := range *out.Content {

@@ -9,10 +9,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
 
-// 用量解析：输入含缓存命中；输出不合 schema 的答复照样带回用量；判断端点按请求累计，没带 usage 的不算回报。
+// 用量解析：输入含缓存读写；输出不合 schema 的答复照样带回用量；判断端点按请求累计，没带 usage 的不算回报。
 func TestUsageReported(t *testing.T) {
 	r, err := messagesParse([]byte(`{"content":[{"type":"text","text":"x"}],"usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":30,"cache_creation_input_tokens":5}}`), false)
-	if err != nil || r.usage.InputTokens != 45 || r.usage.CacheReadTokens != 30 {
+	if err != nil || r.usage.InputTokens != 45 || r.usage.CacheReadTokens != 30 || r.usage.CacheWriteTokens != 5 {
 		t.Fatalf("messages: %+v %v", r.usage, err)
 	}
 	body := ""

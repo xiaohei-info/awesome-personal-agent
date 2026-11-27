@@ -500,7 +500,8 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 // countUsage 记一次模型请求的用量（kernel/usage）。统计写失败只记日志，不影响本次调用。
 func (s *Service) countUsage(ctx context.Context, key kusage.Key, requests, reported int, u model.Usage) {
 	r := kusage.Record{Key: key, Counts: kusage.Counts{Requests: int64(requests), Reported: int64(reported),
-		InputTokens: int64(u.InputTokens), OutputTokens: int64(u.OutputTokens + u.ThoughtsTokens), CacheReadTokens: int64(u.CacheReadTokens)}}
+		InputTokens: int64(u.InputTokens), OutputTokens: int64(u.OutputTokens + u.ThoughtsTokens), CacheReadTokens: int64(u.CacheReadTokens),
+		CacheWriteTokens: int64(u.CacheWriteTokens)}}
 	if err := s.o.Store.Update(context.WithoutCancel(ctx), func(tx *store.Tx) error { return kusage.Add(tx, s.o.Now(), r) }); err != nil {
 		slog.Error("record model usage", "err", err)
 	}
