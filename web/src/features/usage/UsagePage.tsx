@@ -5,7 +5,7 @@ import { useSession } from "../../app/session";
 import { entryOf } from "../../app/values";
 import { strings } from "./strings";
 
-// 诊断 › 用量：GET /usage?days= 的数字只做合计与分组展示，没回报用量的只计次数、不估算。
+// 用量页：GET /usage?days= 的数字只做合计与分组展示，没回报用量的只计次数、不估算。
 export interface Counts { requests: number; reported: number; input_tokens: number; output_tokens: number; cache_read_tokens: number }
 export interface Row extends Counts { part: Part; purpose: string; agent?: string; model?: string }
 export interface Day extends Counts { part: Part; date: string }

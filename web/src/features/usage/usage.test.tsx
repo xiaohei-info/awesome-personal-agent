@@ -36,7 +36,7 @@ beforeEach(() => {
   asked = [];
 });
 
-describe("诊断 › 用量", () => {
+describe("用量", () => {
   it("默认看今天；换时间段后分部分合计、分组、按天，没回报的不写 0，不出现内核取值", async () => {
     render(
       <MemoryRouter initialEntries={["/usage"]}>

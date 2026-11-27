@@ -1,7 +1,7 @@
 import type { Dict } from "../../app/i18n";
 import { common } from "../../app/strings";
 
-// 诊断 › 用量：GET /usage 的合计与分组，只读。purposes 按内核回报的用途取名，没登记的显示 other。
+// 用量页：GET /usage 的合计与分组，只读。purposes 按内核回报的用途取名，没登记的显示 other。
 const zh = {
   ...common.zh,
   title: "用量",
