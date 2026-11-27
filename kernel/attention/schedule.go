@@ -173,36 +173,52 @@ func duePoints(tx *store.Tx, s policy.Proactive, from, to time.Time) ([]SchedPoi
 	return out, nil
 }
 
-// stamp 是一行前面的提醒点时间：放行时与当天比，不是当天的带上日期（攒到次日或补推的点）。
-func stamp(t, now time.Time) string {
-	t = t.In(time.Local)
-	if n := now.In(time.Local); t.Year() != n.Year() || t.YearDay() != n.YearDay() {
-		return "· [" + t.Format("01-02 15:04") + "] "
+// schedFresh：放行时离提醒点超过这么久就不再说"现在"（静默、补推、攒到次日）。
+const schedFresh = 15 * time.Minute
+
+// slotText 把时段写成 15:00–17:00。
+func slotText(slot string) string { return strings.ReplaceAll(slot, " - ", "–") }
+
+// headline 是只有这一个提醒点时的标题：第一句说清什么事。
+func headline(p SchedPoint) string {
+	t := p.Item.Title
+	switch p.Why {
+	case whyPlannedDay:
+		return "今天要做：" + t
+	case whySlotStart:
+		_, end, _ := strings.Cut(p.Item.PlannedSlot, " - ")
+		return "现在开始：" + t + "（到 " + end + "）"
+	case whySlotEnd:
+		return "时段要结束了：" + t
+	case whyDaily:
+		return "现在开始：" + t
+	case whyDueDay:
+		return "今天截止：" + t
 	}
-	return "· [" + t.Format("15:04") + "] "
+	return "快截止了：" + t
 }
 
-// line 是提醒点在合并消息里的一行（不含时间，放行时由 stamp 补上）：类型、标题与事项 id（主会话据 id 接着处理）。
-func line(p SchedPoint) string {
+// line 是提醒点在合并消息里的一行："标题 —— 一句判断"，事项链接藏在标题里。
+func line(p SchedPoint, url string) string {
 	var why string
 	switch p.Why {
 	case whyPlannedDay:
-		why = "开始｜计划 " + p.Item.PlannedFor + " 做"
+		why = "计划今天做"
 		if p.Shift {
-			why += "（非工作日，顺延到今天）"
+			why = "原计划 " + p.Item.PlannedFor + "，非工作日顺延到今天"
 		}
 	case whySlotStart:
-		why = "开始｜" + p.Item.PlannedSlot
+		why = slotText(p.Item.PlannedSlot) + " 开始"
 	case whySlotEnd:
-		why = "截止｜时段 " + p.Item.PlannedSlot + " 结束"
+		why = "时段 " + slotText(p.Item.PlannedSlot) + " 到点，做完了就说一声"
 	case whyDaily:
-		why = "开始｜每天 " + p.Item.DailyAt
+		why = "每天 " + p.Item.DailyAt
 	case whyDueDay:
-		why = "截止｜今天截止"
+		why = "今天截止"
 	case whyDueSoon:
-		why = "截止｜" + p.Item.Deadline.In(time.Local).Format("01-02 15:04") + " 截止"
+		why = p.Item.Deadline.In(time.Local).Format("01-02 15:04") + " 截止"
 	}
-	return fmt.Sprintf("%s %s（%s）", why, p.Item.Title, p.Item.ID)
+	return "- " + domain.MDLink(p.Item.Title, url) + " —— " + why
 }
 
 // MainRoute 是送到主会话的路由：主 Agent 能唤醒时为它的唤醒路由，否则 Web 未读，并给出原因（executors.Main*）。
@@ -251,7 +267,7 @@ func (a *Attention) remindScheduled(tx *store.Tx, pol policy.Policy) error {
 			return err
 		}
 		if err := a.offer(tx, pol, held{id: key, item: p.Item.ID, class: domain.DeliveryReminder, priority: p.Item.Priority, version: ver,
-			content: domain.DeliveryContent{Title: p.Item.Title, Summary: line(p), WebURL: a.o.WebURL(p.Item.ID)}}); err != nil {
+			content: domain.DeliveryContent{Title: headline(p), Summary: line(p, a.o.WebURL(p.Item.ID)), WebURL: a.o.WebURL(p.Item.ID)}}); err != nil {
 			return err
 		}
 	}
@@ -290,6 +306,27 @@ func (a *Attention) releaseScheduled(tx *store.Tx, pol policy.Policy, due []held
 	s := pol.Disturb.ProactiveSettings()
 	at := func(h held) time.Time { _, _, t, _ := parseKey(h.id); return t }
 	sort.SliceStable(due, func(i, j int) bool { return at(due[i]).Before(at(due[j])) })
+	// 同一批里同一事项既有开始又有截止，只留截止；丢掉的开始点记为处理过。
+	ending := map[string]bool{}
+	for _, h := range due {
+		if kind, item, _, _ := parseKey(h.id); kind == SchedEnd {
+			ending[item] = true
+		}
+	}
+	kept := due[:0]
+	for _, h := range due {
+		if kind, item, _, _ := parseKey(h.id); kind != SchedStart || !ending[item] {
+			kept = append(kept, h)
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM attention_held WHERE id = ?`, h.id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO attention_done (id) VALUES (?)`, h.id); err != nil {
+			return err
+		}
+	}
+	due = kept
 	hold := func(hs []held, until time.Time) error {
 		for _, h := range hs {
 			if _, err := tx.Exec(`UPDATE attention_held SET release_at = ? WHERE id = ?`, until.UnixNano(), h.id); err != nil {
@@ -339,15 +376,36 @@ func (a *Attention) releaseScheduled(tx *store.Tx, pol policy.Policy, due []held
 	}
 	keys := make([]string, len(batch))
 	lines := make([]string, len(batch))
+	first := 0 // 标题取第一件"开始"项，没有就取第一件
 	for i, h := range batch {
-		keys[i], lines[i] = h.id, stamp(at(h), now)+h.content.Summary
+		keys[i], lines[i] = h.id, h.content.Summary
+		t := at(h).In(time.Local)
+		if n := now.In(time.Local); t.Year() != n.Year() || t.YearDay() != n.YearDay() {
+			lines[i] += "（原定 " + t.Format("01-02 15:04") + "）"
+		}
+		if kind, _, _, _ := parseKey(h.id); kind == SchedStart {
+			if k, _, _, _ := parseKey(batch[first].id); k != SchedStart {
+				first = i
+			}
+		}
+	}
+	title := batch[first].content.Title
+	if now.Sub(at(batch[first])) > schedFresh {
+		it, err := items.Get(tx, batch[first].item)
+		if err != nil {
+			return err
+		}
+		title = "到点提醒：" + it.Title
+	}
+	if len(batch) > 1 {
+		title += " 等 " + strconv.Itoa(len(batch)) + " 件"
 	}
 	sorted := append([]string(nil), keys...)
 	sort.Strings(sorted)
 	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
 	id := schedBatchPrefix + hex.EncodeToString(sum[:8])
 	if _, err := a.emit(tx, pol, sched, "", domain.Delivery{ID: id, Item: ScheduleItem, Class: domain.DeliveryReminder, Version: 1,
-		Content: domain.DeliveryContent{Title: fmt.Sprintf("到点提醒：%d 件事", len(batch)), Summary: strings.Join(lines, "\n"), WebURL: "/today"}}, delivery.Target{}); err != nil {
+		Content: domain.DeliveryContent{Title: title, Summary: strings.Join(lines, "\n"), WebURL: "/today"}}, delivery.Target{}); err != nil {
 		return err
 	}
 	for _, k := range keys {

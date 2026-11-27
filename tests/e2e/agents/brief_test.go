@@ -34,7 +34,7 @@ func (f *fx) briefs(titlePrefix string) []briefItem {
 }
 
 // briefScript 是简报的 STUB_HARNESS 脚本：按账本里的事项逐项目分节，用运行凭据把正文写回目标事项（写回就是回执）。
-// 周期取目标事项标题里的到期时刻（"brief 2026-11-09 10:50"）。
+// 周期取目标事项标题里的到期时刻（"简报 2026-11-09 10:50"）。
 func (f *fx) briefScript() {
 	f.t.Helper()
 	script := fmt.Sprintf(`#!/bin/sh
@@ -111,10 +111,10 @@ func TestFlowBrief(t *testing.T) {
 
 	t.Run("ACT-BRF-01 到期生成简报，按项目分节", func(t *testing.T) {
 		inst = idOf(t, f.apa(f.DEL, 0, "instance", "add", "brief", "--param", "schedule=* * * * *").Stdout)
-		tick("brief ", 1)
-		b := f.briefs("brief ")[0]
+		tick("简报 ", 1)
+		b := f.briefs("简报 ")[0]
 		eq(t, "简报最终阶段", b.Phase, "done")
-		eq(t, "spec.period 取自到期时刻", b.Spec["period"], strings.TrimPrefix(b.Title, "brief "))
+		eq(t, "spec.period 取自到期时刻", b.Spec["period"], strings.TrimPrefix(b.Title, "简报 "))
 		secs, _ := b.Spec["sections"].([]any)
 		projects := map[string]bool{}
 		for _, s := range secs {
@@ -164,13 +164,13 @@ func TestFlowBrief(t *testing.T) {
 			f.webOK("PUT", "/settings/policy", string(b), http.StatusOK)
 		}
 		known := map[string]bool{}
-		for _, b := range f.briefs("brief ") {
+		for _, b := range f.briefs("简报 ") {
 			known[b.ID] = true
 		}
 		newBrief := func() briefItem {
 			t.Helper()
-			tick("brief ", len(known)+1)
-			for _, b := range f.briefs("brief ") {
+			tick("简报 ", len(known)+1)
+			for _, b := range f.briefs("简报 ") {
 				if !known[b.ID] {
 					known[b.ID] = true
 					return b
@@ -181,7 +181,7 @@ func TestFlowBrief(t *testing.T) {
 		}
 
 		// 1. 默认路由是会话注入：新会话开始时注入带上简报摘要（投递条目 class=brief，事项增量带简报标题）。
-		first := f.briefs("brief ")[0]
+		first := f.briefs("简报 ")[0]
 		code, out, errs := f.apaEnv(f.DEL, "", []string{"APA_SESSION=acc-session-9", "APA_SESSION_KIND=direct"}, "context", "--format", "inject")
 		if code != 0 {
 			t.Fatalf("apa context 退出码 %d: %s%s", code, out, errs)
@@ -219,10 +219,10 @@ func TestFlowBrief(t *testing.T) {
 
 	t.Run("ACT-BRF-03 同一周期只生成一份", func(t *testing.T) {
 		for i := 2; i <= 5; i++ { // 保持每分钟的实例运行 5 个周期
-			tick("brief ", i)
+			tick("简报 ", i)
 		}
 		per := map[string]int{}
-		for _, b := range f.briefs("brief ") {
+		for _, b := range f.briefs("简报 ") {
 			per[b.Title]++
 		}
 		for p, n := range per {
@@ -243,15 +243,15 @@ func TestFlowBrief(t *testing.T) {
 			sec := time.Now().Add(time.Duration(off) * time.Second).Second()
 			return sec >= 5 && sec <= 35
 		})
-		before := settled("brief ") // 基线必须稳定：前面各步的周期都已写回，没有在途的简报
+		before := settled("简报 ") // 基线必须稳定：前面各步的周期都已写回，没有在途的简报
 		stopAt := time.Now().Format(time.RFC3339Nano)
 		f.StopKernel()
 		f.TCAdvance(5 * 60) // 停机 5 分钟
 		f.StartKernelAgain()
-		f.waitFor("重启后补出简报", 60*time.Second, func() bool { return len(f.briefs("brief ")) > before })
-		after := settled("brief ")
+		f.waitFor("重启后补出简报", 60*time.Second, func() bool { return len(f.briefs("简报 ")) > before })
+		after := settled("简报 ")
 		if after-before != 1 {
-			for _, b := range f.briefs("brief ") {
+			for _, b := range f.briefs("简报 ") {
 				t.Logf("简报 %s 创建于 %s", b.Title, b.Created)
 			}
 			t.Logf("停机前 %s", stopAt)
@@ -262,10 +262,10 @@ func TestFlowBrief(t *testing.T) {
 
 	t.Run("ACT-BRF-06 周期复盘，由 spec.period 区分周期", func(t *testing.T) {
 		f.apa(f.DEL, 0, "instance", "add", "review", "--param", "schedule=* * * * *")
-		tick("review ", 1)
-		tick("review ", 2)
+		tick("复盘 ", 1)
+		tick("复盘 ", 2)
 		periods := map[string]bool{}
-		for _, b := range f.briefs("review ") {
+		for _, b := range f.briefs("复盘 ") {
 			p, _ := b.Spec["period"].(string)
 			if p == "" {
 				t.Errorf("复盘 %s 没有 spec.period", b.ID)

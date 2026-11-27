@@ -100,7 +100,7 @@ func (s *Sender) abs(u string) string {
 // message 把投递内容转成中立消息。web_only 的决策内容里本来就没有选项、推荐与表单链接（触达写入时已去掉），这里再守一道。
 func (s *Sender) message(d domain.Delivery) conn.Message {
 	c := d.Content
-	m := conn.Message{Key: d.ID + "@" + strconv.FormatInt(d.Version, 10), Class: string(d.Class), Title: c.Title, Summary: c.Summary,
+	m := conn.Message{Key: d.ID + "@" + strconv.FormatInt(d.Version, 10), Class: string(d.Class), Title: domain.StripLinks(c.Title), Summary: domain.StripLinks(c.Summary),
 		WebURL: s.abs(c.WebURL), WebOnly: c.WebOnly}
 	if c.WebOnly {
 		return m

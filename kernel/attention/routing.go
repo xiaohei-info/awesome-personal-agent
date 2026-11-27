@@ -6,11 +6,13 @@ package attention
 // 不自己判静默、不自己选路由。
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -247,11 +249,49 @@ func (a *Attention) emit(tx *store.Tx, pol policy.Policy, r row, prio domain.Pri
 		if l.toMain && r.task != nil { // 定时任务的产出进主会话：内容换成带类别的正文
 			g.Content = TaskContent(*r.task, r.pack, a.o.WebURL(r.task.ID))
 		}
-		out = append(out, g)
+		told := false
+		if d.Class == domain.DeliveryDecision && (g.Route == delivery.RouteInject || strings.HasPrefix(g.Route, delivery.RouteWake)) {
+			if told, err = a.alreadyAsked(tx, d); err != nil {
+				return false, err
+			}
+		}
+		if !told {
+			out = append(out, g)
+		}
 	}
 	for _, x := range out {
 		if _, _, err := a.o.Queue.CreateGated(tx, pol, x, t); err != nil {
 			return false, err
+		}
+	}
+	return true, nil
+}
+
+// alreadyAsked：Agent 层已经把这个事项的同一个问题（标题、问题、选项都相同）送到过，之后也没有回答过，
+// 就不在对话里再说一遍（事项被无关字段改动会让决策按新版本重发）。还没送到的不算；本人层照常重发（回答链接绑定版本）。
+func (a *Attention) alreadyAsked(tx *store.Tx, d domain.Delivery) (bool, error) {
+	var content string
+	var at int64
+	if err := scan(tx, func(r *store.Rows) error { return r.Scan(&content, &at) },
+		`SELECT content, created_at FROM delivery_delivery d WHERE item = ? AND class = 'decision' AND (route = ? OR route LIKE ?)
+		AND (external_ref != '' OR EXISTS (SELECT 1 FROM delivery_injection WHERE delivery_id = d.id))
+		ORDER BY rowid DESC LIMIT 1`, d.Item, delivery.RouteInject, delivery.RouteWake+"%"); err != nil || content == "" {
+		return false, err
+	}
+	var old domain.DeliveryContent
+	if err := json.Unmarshal([]byte(content), &old); err != nil {
+		return false, err
+	}
+	if old.Title != d.Content.Title || old.Summary != d.Content.Summary || !slices.Equal(old.Options, d.Content.Options) {
+		return false, nil
+	}
+	answered, err := eventlog.Query(tx, eventlog.Filter{Object: d.Item, Type: domain.EvDecisionResolved}, 0, 500)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range answered {
+		if e.Event.At.UnixNano() >= at {
+			return false, nil
 		}
 	}
 	return true, nil

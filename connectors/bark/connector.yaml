@@ -23,6 +23,7 @@ fields:
   - key: group
     kind: text
     label: {zh: 通知分组, en: Notification group}
+    hint: {zh: 留空就归到 APA 分组, en: "Left empty, pushes go to the APA group"}
     default: APA
     group: advanced
   - key: auth_user

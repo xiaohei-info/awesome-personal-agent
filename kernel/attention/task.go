@@ -6,7 +6,6 @@ package attention
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -19,12 +18,9 @@ import (
 // TaskID 是简报以外的定时任务产出（例行任务）的投递 id：一次产出只入队一次。
 func TaskID(item string) string { return "task:" + item }
 
-// 注入正文的长度取舍：全文不超过 fullRunes 就给全文，否则每节给标题与前 sectionLines 行（每行至多 lineRunes），另附全文位置（事项页的可点击链接，不是事项 id，也不是运行目录）。
-const (
-	fullRunes    = 1800
-	sectionLines = 2
-	lineRunes    = 120
-)
+// 注入正文的长度取舍：全文不超过 fullRunes 就给全文，否则第一节（要本人处理的）整节保留、其余节只留节名，
+// 不在行中间截断；另附全文位置（事项页链接，不是事项 id，也不是运行目录）。
+const fullRunes = 1800
 
 // taskLabel 是写在注入内容开头的任务类别。
 var taskLabel = map[string]string{"brief": "简报", "review": "复盘", "routine": "例行任务"}
@@ -55,7 +51,7 @@ func (a *Attention) taskDone(tx *store.Tx, pol policy.Policy, it domain.Item) (b
 		content: domain.DeliveryContent{Title: it.Title, WebURL: a.o.WebURL(it.ID)}})
 }
 
-// TaskContent 是注入主会话的产出内容：标题带类别（简报、复盘、例行任务），正文按长度取全文或每节摘要。
+// TaskContent 是注入主会话的产出内容：标题带类别（简报、复盘、例行任务），正文按长度取全文或首节加节名。
 func TaskContent(it domain.Item, pack, webURL string) domain.DeliveryContent {
 	label := taskLabel[pack]
 	if label == "" {
@@ -80,42 +76,35 @@ func TaskContent(it domain.Item, pack, webURL string) domain.DeliveryContent {
 			parts = append(parts, part{body: body})
 		}
 	}
-	render := func(short bool) string {
-		out := make([]string, 0, len(parts))
-		for _, p := range parts {
-			var rows []string
-			if p.head != "" {
-				rows = append(rows, "## "+p.head)
-			}
-			if !short {
-				out = append(out, strings.Join(append(rows, p.body), "\n"))
-				continue
-			}
-			var lines []string
-			for _, l := range strings.Split(p.body, "\n") {
-				if l = strings.TrimSpace(l); l != "" {
-					lines = append(lines, l)
-				}
-			}
-			for i, l := range lines {
-				if i == sectionLines {
-					rows = append(rows, "……（本节共 "+strconv.Itoa(len(lines))+" 行）")
-					break
-				}
-				if r := []rune(l); len(r) > lineRunes {
-					l = string(r[:lineRunes]) + "…"
-				}
-				rows = append(rows, l)
-			}
-			out = append(out, strings.Join(rows, "\n"))
+	render := func(p part) string {
+		if p.head != "" {
+			return strings.TrimSpace("## " + p.head + "\n" + p.body)
 		}
-		return strings.TrimSpace(strings.Join(out, "\n\n"))
+		return p.body
 	}
-	text := render(false)
+	all := make([]string, len(parts))
+	for i, p := range parts {
+		all[i] = render(p)
+	}
+	text := strings.TrimSpace(strings.Join(all, "\n\n"))
 	if utf8.RuneCountInString(text) > fullRunes {
-		text = render(true) + "\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：" + webURL + "）"
+		var rest []string
+		for _, p := range parts[1:] {
+			if p.head != "" {
+				rest = append(rest, p.head)
+			}
+		}
+		text = all[0]
+		if len(rest) > 0 {
+			text += "\n\n其余章节：" + strings.Join(rest, "、")
+		}
+		text += "\n\n全文 → " + webURL
 	}
-	return domain.DeliveryContent{Title: "【" + label + "】" + it.Title, Summary: text, WebURL: webURL}
+	title := it.Title
+	if !strings.HasPrefix(title, label) {
+		title = "【" + label + "】" + title
+	}
+	return domain.DeliveryContent{Title: title, Summary: text, WebURL: webURL}
 }
 
 func firstNonEmpty(v ...string) string {

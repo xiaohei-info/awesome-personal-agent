@@ -156,6 +156,17 @@ func (s *Service) rule() (r rule, ok bool) {
 	return rule{}, false
 }
 
+// waitingText 说清在等什么：只有等人与等外部时对象名是给人读的，执行者与时间的对象是 id 或规则名，不写出来。
+func waitingText(w domain.WaitingOn) string {
+	switch {
+	case w.Kind == domain.WaitingExecutor:
+		return "在等 Agent 的结果"
+	case w.Kind == domain.WaitingTime || strings.HasPrefix(w.Ref, "rule "):
+		return "在等的时间到了"
+	}
+	return "在等 " + w.Ref
+}
+
 // next 是从 now 起的下一轮跟进时刻（schedule 是时长或 cron，加载器已校验）。
 func (r rule) next(now time.Time) (time.Time, error) { return clock.Start(r.schedule, now) }
 
@@ -654,7 +665,7 @@ func (s *Service) Register() error {
 				return nil, invalid("pack " + s.o.Pack + " has no follow_up clock rule")
 			}
 			if err := s.o.Reminder.RemindWith(c.Tx, it, remindKind, v.Due, "该跟进了："+it.Title,
-				fmt.Sprintf("事项已等待 %s「%s」到期仍无进展，可以主动问一句。选「已催」记一条进展，「再等」等下一轮，「放弃」结束这件事。", it.WaitingOn.Kind, it.WaitingOn.Ref),
+				waitingText(*it.WaitingOn)+"，到期没动静 —— 可以问一句；回我「已催 / 再等 / 放弃」",
 				ReminderOptions); err != nil {
 				return nil, err
 			}

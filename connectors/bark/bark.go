@@ -5,6 +5,7 @@ package bark
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -28,6 +29,9 @@ func Plugin() conn.Plugin {
 	return conn.Plugin{Decl: connectors.MustParse(declaration), New: New}
 }
 
+// defaultGroup 是通知分组的缺省值：没填也归进它，手机上能和别的来源分开。
+const defaultGroup = "APA"
+
 // maxBody 是正文的截断长度（字符）。shortcut: 按推送载荷 4 KB 上限估的保守值，SPIKE-PUSH-PARAMS 实测后再调。
 const maxBody = 600
 
@@ -40,7 +44,7 @@ type channel struct {
 // New 按一次调用的配置构造插件实例；只在这次调用里存活。
 func New(cfg conn.Config) (conn.Channel, error) {
 	c := &channel{server: strings.TrimRight(cfg.Settings["server"], "/"), key: cfg.Secrets["device_key"],
-		user: cfg.Settings["auth_user"], pass: cfg.Secrets["auth_secret"], group: cfg.Settings["group"],
+		user: cfg.Settings["auth_user"], pass: cfg.Secrets["auth_secret"], group: cmp.Or(cfg.Settings["group"], defaultGroup),
 		timeSensitive: cfg.Settings["time_sensitive"] == "true",
 		hc: &http.Client{Timeout: 15 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}

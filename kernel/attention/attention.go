@@ -321,8 +321,9 @@ func (a *Attention) agentAnswered(tx *store.Tx, pol policy.Policy, it domain.Ite
 			answer = o.Label
 		}
 	}
+	undo := strings.TrimSuffix(a.o.WebURL(""), "/items/") + "/agent-changes"
 	return a.offer(tx, pol, held{id: id, item: it.ID, class: domain.DeliveryReminder, priority: it.Priority, version: ver,
-		content: domain.DeliveryContent{Title: "Agent 替你答了：" + it.Title, Summary: it.Ask.Question + " → " + answer, WebURL: "/agent-changes"}})
+		content: domain.DeliveryContent{Title: "Agent 替你答了：" + it.Title, Summary: "已按「" + answer + "」处理 —— 不对可" + domain.MDLink("撤回", undo), WebURL: "/agent-changes"}})
 }
 
 // answeredByPerson：只有本人在 Web 给出了真实回答才算（渠道回答自己已经 Confirm 过）。
@@ -372,7 +373,12 @@ func (a *Attention) remindOverdue(tx *store.Tx, pol policy.Policy) error {
 		}
 		for _, it := range list {
 			if d := it.Deadline; d != nil && !d.After(now) && !overdueAtLastChange(it, *d) {
-				if err := a.remind(tx, pol, it, "due", *d, "截止已过："+it.Title, "事项截止时间 "+d.UTC().Format(time.RFC3339)+" 已过"); err != nil {
+				l := d.In(time.Local)
+				day := l.Format("01-02 15:04")
+				if l.Hour() == 23 && l.Minute() == 59 && l.Second() == 59 { // 只到日的截止
+					day = l.Format("01-02")
+				}
+				if err := a.remind(tx, pol, it, "due", *d, "截止已过："+it.Title, "原定 "+day+" 截止，还没完成 —— 完成、改期还是放弃？"); err != nil {
 					return err
 				}
 			}
@@ -695,25 +701,32 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 	}
 	d := domain.Delivery{ID: hs[0].id, Item: hs[0].item, Class: hs[0].class, Version: hs[0].version, Content: hs[0].content, Origin: hs[0].origin}
 	if len(hs) > 1 {
-		titles := make([]string, len(hs))
+		lines := make([]string, len(hs))
 		ids := make([]string, len(hs))
 		class := domain.DeliveryHealth
 		for i, h := range hs {
-			titles[i], ids[i] = h.content.Title, h.id
+			one, _, _ := strings.Cut(h.content.Summary, "\n")
+			if r := []rune(domain.StripLinks(one)); len(r) > 80 {
+				one = string(r[:80]) + "…"
+			}
+			lines[i], ids[i] = "- "+h.content.Title, h.id
+			if one = strings.TrimPrefix(one, "- "); one != "" {
+				lines[i] += " —— " + one
+			}
 			if h.class != domain.DeliveryHealth { // 混有提醒类时按提醒类计日上限
 				class = domain.DeliveryReminder
 			}
 		}
 		sort.Strings(ids)
 		sum := sha256.Sum256([]byte(strings.Join(ids, "\n")))
-		title := fmt.Sprintf("%d 条低优先级提醒", len(hs))
+		title := fmt.Sprintf("%s 等 %d 条低优先级提醒", hs[0].content.Title, len(hs))
 		if throttleOf(hs[0].id).merge == mergeQuiet {
-			title = fmt.Sprintf("安静时段攒下的 %d 条推送", len(hs))
+			title = fmt.Sprintf("%s 等 %d 条（安静时段攒下）", hs[0].content.Title, len(hs))
 		} else {
 			class = hs[0].class
 		}
 		d = domain.Delivery{ID: "digest:" + hex.EncodeToString(sum[:8]), Item: DigestItem, Class: class, Version: 1,
-			Content: domain.DeliveryContent{Title: title, Summary: strings.Join(titles, "；")}}
+			Content: domain.DeliveryContent{Title: title, Summary: strings.Join(lines, "\n")}}
 	}
 	r, err := rowOf(tx, hs[0])
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -186,7 +185,6 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Notice,
 		Category string `json:"category"`
 		State    string `json:"state"`
 		RunID    string `json:"run_id"`
-		Error    string `json:"error"`
 	}
 	if json.Unmarshal(e.Payload, &pl) != nil || (pl.Category != "task" && pl.Category != "background") ||
 		(pl.State != string(domain.RunFailed) && pl.State != string(domain.RunTimeout)) {
@@ -204,23 +202,11 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Notice,
 	if !r.On {
 		return attention.Notice{}, false, nil
 	}
-	why := "运行失败"
-	if pl.Error != "" {
-		why += "：" + firstLine(pl.Error)
-	}
-	summary := why + "。去事项里看原因，决定重跑还是放弃。"
+	summary := "Agent 没跑成 —— 去事项里看原因，决定重跑还是放弃。"
 	if pl.State == string(domain.RunTimeout) {
 		// 超时不是失败：这条运行到点停止，事项状态未变，已写的进展保留（§15.2）。不露秒数与内部状态词。
-		summary = "运行到点停止，事项状态未变，可以继续。"
+		summary = "超过时限停下了，事项状态未变 —— 重跑还是放弃？"
 	}
 	return attention.Notice{ID: fmt.Sprintf("push:run:%s:%d", it.ID, e.At.Truncate(runCooldown).Unix()), Item: it.ID, Class: domain.DeliveryHealth,
 		Content: domain.DeliveryContent{Title: title, Summary: summary, WebURL: "/items/" + it.ID + "#agent"}}, true, nil
-}
-
-func firstLine(s string) string {
-	s, _, _ = strings.Cut(s, "\n")
-	if r := []rune(s); len(r) > 120 {
-		return string(r[:120]) + "…"
-	}
-	return s
 }

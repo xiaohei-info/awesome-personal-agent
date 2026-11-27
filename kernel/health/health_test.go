@@ -442,14 +442,26 @@ func TestEveryAlertYieldsOneHealthDeliveryExceptScreening(t *testing.T) {
 	if len(byItem["item_1"]) != 2 || len(byItem["src_a"]) != 1 || len(byItem["rule:inbound/x"]) != 1 || len(byItem["item_2"]) != 0 || len(byItem["item_3"]) != 1 {
 		t.Fatalf("by item = %+v", byItem)
 	}
-	if d := byItem["item_1"][0]; !strings.Contains(d.Content.Summary, "超过阈值 3") || d.Content.WebURL != "/items/item_1" {
+	if d := byItem["item_1"][0]; !strings.Contains(d.Content.Summary, "超过 3 层") || d.Content.WebURL != "/health" {
 		t.Fatalf("trip delivery = %+v", d)
 	}
-	if d := byItem["src_a"][0]; !strings.Contains(d.Content.Summary, "bad token") || d.Content.WebURL != "/health" {
+	if d := byItem["src_a"][0]; strings.Contains(d.Content.Title+d.Content.Summary, "bad token") || d.Content.WebURL != "/health" {
 		t.Fatalf("source delivery = %+v", d)
 	}
 	if again := e.sync(); len(again) != 5 {
 		t.Fatalf("repeat sync changed deliveries: %+v", again)
+	}
+}
+
+// 本人无事可做的告警（时钟迟到、回执被拒）不出投递；认不出的类别照样提醒，且不带原始原因。
+func TestAlertNoticeSpeaksToThePerson(t *testing.T) {
+	e := setup(t)
+	e.event(domain.EvHealthAlert, "itm_x", "timer due_itm_x fired 41h late", map[string]any{"kind": ClockLagKind})
+	e.event(domain.EvHealthAlert, "itm_x", "delegate.report rejected: needs evidence", map[string]any{"kind": command.ReceiptKind})
+	e.event(domain.EvHealthAlert, "itm_x", "something new broke", map[string]any{"kind": "brand_new"})
+	ds := e.sync()
+	if len(ds) != 1 || ds[0].Content.Title != "APA 有一处异常" || ds[0].Content.Summary != "去健康页看" {
+		t.Fatalf("deliveries = %+v", ds)
 	}
 }
 

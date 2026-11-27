@@ -24,6 +24,7 @@ before expiry. Decide/accept/dismiss under it return exit 4 from the kernel.
 
 Run-less deliveries on the same route (the kernel's proactive reminders, and brief/review/routine results the owner
 chose to push into the main session; design §7.4) are notices: claim → `ctx.inject_message(facts)` → ack
-(`external_ref` = `main-session`). No credential is exchanged, so nothing changes for the run boundary above. The text is
-the kernel's title and lines plus one sentence on what to do next. A refused injection is failed back (kernel backoff,
+(`external_ref` = `main-session`). No credential is exchanged, so nothing changes for the run boundary above. The text has two
+parts split by a `———` line: for the person (the kernel's title and lines; for a decision also the numbered options,
+the recommendation and the link), then for the Agent (item id, option ids, how to relay it). A refused injection is failed back (kernel backoff,
 then Web unread); a notice whose ack was lost is re-acked, not injected a second time, by the same gateway process.

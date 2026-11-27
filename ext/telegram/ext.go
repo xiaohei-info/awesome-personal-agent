@@ -159,12 +159,15 @@ func optionID(o string) string {
 	return id
 }
 
+// mdLink 匹配正文里的 Markdown 链接：纯文本消息只留文字，打开靠末尾的 Web 链接。
+var mdLink = regexp.MustCompile(`\[([^\[\]]*)\]\((?:https?://|/)[^()\s]*\)`)
+
 func (e *Ext) render(d *Delivery) string {
 	c := d.Content
 	var b strings.Builder
-	b.WriteString(c.Title)
+	b.WriteString("【APA】" + c.Title) // 来源标识：和同一台手机上的别的推送分得开
 	if c.Summary != "" {
-		b.WriteString("\n" + c.Summary)
+		b.WriteString("\n" + mdLink.ReplaceAllString(c.Summary, "$1"))
 	}
 	if !c.WebOnly && len(c.Options) > 0 { // 有选项就可作答；是否接受由内核按投递类别判定
 		b.WriteString("\n\n选项：")

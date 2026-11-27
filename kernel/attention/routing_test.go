@@ -304,8 +304,8 @@ func TestDigestOnlyMergesMembersWithTheSameTargets(t *testing.T) {
 	})
 	e.advance(31 * time.Minute)
 	ch, inj := e.drain("channel:chan"), e.injectable()
-	if len(ch) != 1 || !strings.HasPrefix(ch[0].ID, "digest:") || ch[0].Content.Summary != "t0；t2" ||
-		len(inj) != 1 || !strings.HasPrefix(inj[0].ID, "digest:") || inj[0].Content.Summary != "t1；t3" {
+	if len(ch) != 1 || !strings.HasPrefix(ch[0].ID, "digest:") || ch[0].Content.Summary != "- t0\n- t2" ||
+		len(inj) != 1 || !strings.HasPrefix(inj[0].ID, "digest:") || inj[0].Content.Summary != "- t1\n- t3" {
 		t.Fatalf("channel %+v\ninject %+v", ch, inj)
 	}
 }
@@ -348,7 +348,7 @@ func TestHealthPushesWaitForQuietEndAndMergeIntoOne(t *testing.T) {
 	}
 	e.advance(61 * time.Minute)
 	d := e.drain("channel:chan")
-	if len(d) != 1 || !strings.HasPrefix(d[0].ID, "digest:") || d[0].Class != domain.DeliveryHealth || d[0].Content.Summary != "s1 失败；s2 失败" {
+	if len(d) != 1 || !strings.HasPrefix(d[0].ID, "digest:") || d[0].Class != domain.DeliveryHealth || d[0].Content.Summary != "- s1 失败\n- s2 失败" {
 		t.Fatalf("after quiet: %+v", d)
 	}
 }

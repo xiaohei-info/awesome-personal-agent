@@ -510,11 +510,8 @@ func upgrade(t *testing.T) {
 		for _, d := range decode[struct {
 			Deliveries []delivery `json:"deliveries"`
 		}](t, body).Deliveries {
-			if d.Class == "health" && strings.Contains(d.Content.Summary, "切到 auto") {
-				merged++
-				if !strings.Contains(d.Content.Summary, followKey) {
-					t.Errorf("说明应列出被切换的规则: %s", d.Content.Summary)
-				}
+			if d.Class == "health" && strings.Contains(d.Content.Title, "已改为自动执行") {
+				merged++ // 推送不带规则 id；切换了哪些规则看健康页与操作记录
 			}
 		}
 		if merged != 1 {
