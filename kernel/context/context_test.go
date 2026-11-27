@@ -130,8 +130,11 @@ func TestCursorPerSessionOnlyDelta(t *testing.T) {
 	if r3 := e.build(t, Request{Session: "s1"}); !eq(ids(r3), []string{a}) || r3.Items[0].Phase != domain.PhaseDone {
 		t.Fatalf("only the changed item, with its new phase: %+v", r3.Items)
 	}
-	if other := e.build(t, Request{Session: "s2"}); len(other.Items) != 2 {
-		t.Fatalf("another session has its own cursor: %v", ids(other))
+	// 新游标（新会话、网关重启或压缩后换的键）只给现状：早已结束的事项不重放。
+	e.do(t, owner, "item.transition", map[string]any{"id": b, "to": "dropped", "reason": "不做了"})
+	c := e.item(t, map[string]any{"title": "C"})
+	if other := e.build(t, Request{Session: "s2"}); !eq(ids(other), []string{c}) {
+		t.Fatalf("a fresh cursor must skip closed items: %v", ids(other))
 	}
 }
 

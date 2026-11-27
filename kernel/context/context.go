@@ -209,7 +209,8 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			}
 			return res, err
 		}
-		if !inScope(it.Project) {
+		// 从头读（新会话、压缩或网关重启后的新游标）给的是现状摘要：早已结束的事项不是变化，不带。
+		if !inScope(it.Project) || after == 0 && (it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped) {
 			continue
 		}
 		e, _, err := entry(tx, it, pol, req.Reader)
