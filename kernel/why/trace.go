@@ -100,6 +100,7 @@ const (
 	KMerged    = "merged"    // item：并入已有建议
 	KDigest    = "digest"    // 放进简报的知会一节
 	KAlerted   = "alerted"   // 直接提醒
+	KReminded  = "reminded"  // 只口头提醒
 	KAttached  = "attached"  // item；args: via（follow、proposal）、fields（后续消息改写过的字段，旧数据）
 	KDrafted   = "drafted"   // args: outcome（ok、failed、skipped、unknown）、code
 	KSpot      = "spot"      // args: verdict（should_see、correct）；item（该看建出的建议）
@@ -488,6 +489,11 @@ func (b builder) disposed(en eventlog.Entry, d disposedPayload, recs map[string]
 		out = append(out, Entry{At: at, Who: who, Kind: KDigest})
 	case domain.DispositionAlerted:
 		out = append(out, Entry{At: at, Who: who, Kind: KAlerted})
+	case domain.DispositionReminded:
+		if en.Event.Actor.Type == domain.ActorAgent {
+			who = b.who(en)
+		}
+		out = append(out, Entry{At: at, Who: who, Kind: KReminded})
 	default:
 		if len(out) == 0 {
 			out = append(out, Entry{At: at, Who: b.who(en), Kind: KEvent, Args: map[string]any{"type": en.Event.Type}})

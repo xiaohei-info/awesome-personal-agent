@@ -35,50 +35,41 @@ def sections(core):
     return ctx.sections
 
 
-def test_register_adds_instruction_and_persona_sections(core):
+def test_register_adds_the_instruction_section(core):
     s = sections(core)
-    assert set(s) == {"apa.instructions", "apa.persona"}
-    assert all(callable(c) for c, _ in s.values())
-    assert s["apa.persona"][1]["max_chars"] == 4000
+    assert set(s) == {"apa.instructions"}
+    assert callable(s["apa.instructions"][0])
 
 
-def test_sections_render_apa_stdout(core, tmp_path, monkeypatch):
+def test_section_renders_apa_stdout(core, tmp_path, monkeypatch):
     monkeypatch.setattr(core.apa, "TIMEOUT_SECS", 20)  # timeout itself is tested below; avoid load flakes
     monkeypatch.setenv("APA_BIN", fake_apa(
-        tmp_path, 'if [ "$1" = guide ]; then echo "GUIDE $APA_SESSION $APA_HARNESS"; else echo "PERSONA"; fi'))
+        tmp_path, 'echo "GUIDE $APA_SESSION $APA_HARNESS"'))
     s = sections(core)
     assert s["apa.instructions"][0]({"session_id": "s1"}) == "GUIDE s1 hermes"
-    assert s["apa.persona"][0]({"session_id": "s1"}) == "PERSONA"
 
 
 def test_nonzero_exit_yields_no_section(core, tmp_path, monkeypatch):
     monkeypatch.setenv("APA_BIN", fake_apa(tmp_path, "echo partial; exit 7"))
     s = sections(core)
-    assert s["apa.persona"][0]({}) == ""
     assert s["apa.instructions"][0]({}) == ""
 
 
 def test_missing_binary_yields_no_section(core, tmp_path, monkeypatch):
     monkeypatch.setenv("APA_BIN", str(tmp_path / "nope"))
-    assert sections(core)["apa.persona"][0]({}) == ""
+    assert sections(core)["apa.instructions"][0]({}) == ""
 
 
-def test_slow_persona_is_abandoned_after_two_seconds(core, tmp_path, monkeypatch):
+def test_slow_apa_is_abandoned_after_two_seconds(core, tmp_path, monkeypatch):
     monkeypatch.setenv("APA_BIN", fake_apa(tmp_path, "sleep 10; echo late"))
     start = time.monotonic()
-    assert sections(core)["apa.persona"][0]({}) == ""
+    assert sections(core)["apa.instructions"][0]({}) == ""
     assert time.monotonic() - start < 4
 
 
-def test_empty_persona_means_no_section_content(core, tmp_path, monkeypatch):
+def test_empty_output_means_no_section_content(core, tmp_path, monkeypatch):
     monkeypatch.setenv("APA_BIN", fake_apa(tmp_path, "exit 0"))
-    assert sections(core)["apa.persona"][0]({}) == ""
-
-
-def test_submodules_register_independently(core):
-    ctx = Ctx()
-    core.instructions.register(ctx)
-    assert set(ctx.sections) == {"apa.instructions"}
+    assert sections(core)["apa.instructions"][0]({}) == ""
 
 
 # ACT-HCTX-09：钩子发出的 apa 调用带 APA_SESSION、APA_HARNESS；会话类型不参与判定（§14.3），插件不从会话绑定推算它。
@@ -92,7 +83,7 @@ def test_hook_calls_carry_session_identity(core, tmp_path, monkeypatch):
     mod.get_session_env = lambda name, default="": bound.get(name, default)
     monkeypatch.setitem(sys.modules, "gateway", types.ModuleType("gateway"))
     monkeypatch.setitem(sys.modules, "gateway.session_context", mod)
-    render = sections(core)["apa.persona"][0]
+    render = sections(core)["apa.instructions"][0]
     assert render({"session_id": "s1"}) == "s1 hermes []"
 
 

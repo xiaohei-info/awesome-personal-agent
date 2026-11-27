@@ -204,7 +204,7 @@ func TestSeedDeliveryAdoptsSuggestedOnceAndOnlyWhenItDiffers(t *testing.T) {
 	if seed() {
 		t.Fatal("a fresh install must not get a matrix")
 	}
-	must(t, s, func(p *Policy) error { p.Persona = "x"; return nil })
+	must(t, s, func(p *Policy) error { p.BackgroundRunTimeoutSec = 1000; return nil })
 	if seed() {
 		t.Fatal("factory routes: suggested equals derived, nothing to write")
 	}

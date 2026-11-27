@@ -1,4 +1,4 @@
-// Package context 实现 `apa context` 与 `apa persona`（附录 B.1、设计 §7.6、§11.2）。
+// Package context 实现 `apa context`（附录 B.1、设计 §7.6）。
 // 薄客户端：增量、游标、注入渲染、目录到项目的映射都在内核（GET /v1/context）。
 // 这里只把明确给出的 session、scope、project 与当前目录/主机名搬进请求，不猜、不计算。
 package context
@@ -17,14 +17,11 @@ import (
 
 func init() {
 	client.Register("context", contextUsage, run)
-	client.Register("persona", personaUsage, persona)
 }
 
 func usage(why, usageText string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, usageText)
 }
-
-const personaUsage = "usage: apa persona [--lang zh|en]"
 
 const contextUsage = "usage: apa context [--session ID] [--scope project|cwd|item|all] [--item ID] [--project ID] [--path DIR] [--host H] [--instruction N] [--format json|inject]"
 
@@ -113,37 +110,4 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
-}
-
-// persona 输出当前人格：本人写的，没写则是内置默认（附录 B.1）。语言取 --lang，其次 Web 里的设置，
-// 再其次进程的区域设置（LC_ALL、LC_MESSAGES、LANG，作为 locale 交给内核），都没有按英文。
-func persona(c *client.Ctx, args []string) error {
-	fs := flag.NewFlagSet("persona", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	lang := fs.String("lang", "", "")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		return usage("invalid arguments for persona", personaUsage)
-	}
-	q := url.Values{}
-	if *lang != "" {
-		q.Set("lang", *lang)
-	}
-	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-		if v := c.Env.Getenv(k); v != "" {
-			q.Set("locale", v)
-			break
-		}
-	}
-	path := "/context/persona"
-	if len(q) > 0 {
-		path += "?" + q.Encode()
-	}
-	var out struct {
-		Persona string `json:"persona"`
-	}
-	if err := c.Do(context.Background(), "GET", path, nil, &out); err != nil {
-		return err
-	}
-	_, err := io.WriteString(c.Env.Stdout, out.Persona+"\n")
-	return err
 }

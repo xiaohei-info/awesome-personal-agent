@@ -100,6 +100,11 @@ _CLI_TOOLS = {
                           {"id": _s("Source event id")},
                           ["id"],
                           lambda a: ["source", "ignore", a["id"]]),
+    "apa_source_remind": ("Record a queued/running or backlog source event as only mentioned to the user, with no suggestion (apa source remind). "
+                          "You must mention it in your summary.",
+                          {"id": _s("Source event id")},
+                          ["id"],
+                          lambda a: ["source", "remind", a["id"]]),
     "apa_source_attach": ("Attach a queued/running or backlog source event to an existing open item (apa source attach).",
                           {"id": _s("Source event id"), "to": _s("Existing open item id"), "reason": _REASON},
                           ["id", "to"],

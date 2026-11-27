@@ -103,7 +103,7 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		attempts := []struct {
 			token, method, path, body, reason string
 		}{
-			{k.DELO, "PUT", "/v1/settings/policy", `{"persona":"hijacked"}`, "tier_closed"},
+			{k.DELO, "PUT", "/v1/settings/policy", `{"background_run_timeout_sec":1800}`, "tier_closed"},
 			{k.DELO, "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, "hard_line"},
 			{k.DEL, "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, "hard_line"},
 			{k.DEL, "PUT", "/v1/settings/projects/" + k.Projects["acc-work"] + "/allowed-executors", `{"executors":["` + otherHost + `"]}`, "tier_closed"},
@@ -124,7 +124,7 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		// 验收文档字面写的是 PATCH /v1/settings/policy 与 PATCH .../allowed-executors；实现的路由是 PUT（附录 B.2 只列路径）。
 		// 字面方法没有路由，同样不能生效，并如实记为文档与实现不一致（ACT-REL-03 的文档漂移，不记为功能失败）。
 		for _, a := range []struct{ path, body string }{
-			{"/v1/settings/policy", `{"persona":"hijacked"}`},
+			{"/v1/settings/policy", `{"background_run_timeout_sec":1800}`},
 			{"/v1/settings/projects/" + k.Projects["acc-work"] + "/allowed-executors", `{"executors":["` + otherHost + `"]}`},
 		} {
 			r := k.APIRaw("PATCH", a.path, a.body, k.DELO)

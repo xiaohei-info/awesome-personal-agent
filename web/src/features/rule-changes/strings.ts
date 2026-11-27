@@ -25,6 +25,7 @@ const zh = {
     "source.set_enabled": "来源启停",
     "source.rename": "来源改名",
     "source.set_content_retention": "原文保留期",
+    "source.set_handling_mode": "来源处理方式",
     "instance.create": "新建安排",
     "instance.update": "改安排",
     "instance.toggle": "安排启停",
@@ -50,8 +51,6 @@ const zh = {
     forward_allowlist: "信任的发件人",
     judgment: "自动处理与抽检",
     models_paused: "模型开关",
-    persona: "说话的语气",
-    persona_lang: "说话的语言",
   } as Record<string, string>,
 };
 
@@ -78,6 +77,7 @@ const en: typeof zh = {
     "source.set_enabled": "Source on/off",
     "source.rename": "Source name",
     "source.set_content_retention": "Original-text retention",
+    "source.set_handling_mode": "Source handling",
     "instance.create": "New schedule",
     "instance.update": "Schedule edit",
     "instance.toggle": "Schedule on/off",
@@ -103,8 +103,6 @@ const en: typeof zh = {
     forward_allowlist: "Trusted senders",
     judgment: "Auto-handling and spot checks",
     models_paused: "Models on/off",
-    persona: "Tone",
-    persona_lang: "Language",
   },
 };
 

@@ -8,7 +8,7 @@ agent: task
 - 本批提示词只列出事件的元信息（事件 id、来源、类型、时间、等级），不附原文；需要看原文时主动调用 `apa` 命令读取。
 
 ## 零、怎么调用
-下面按 `apa` 命令行写。没有终端时用同名的 APA 工具，参数一一对应：`apa source event` 即 `apa_source_event`，`apa item list/show/update/progress` 即 `apa_item_list`、`apa_item_show`、`apa_item_update`、`apa_item_progress`，`apa source propose/ignore/attach` 即 `apa_source_propose`、`apa_source_ignore`、`apa_source_attach`；看项目用 `apa_project_list`、`apa_project_show`（代替 `apa context`）。
+下面按 `apa` 命令行写。没有终端时用同名的 APA 工具，参数一一对应：`apa source event` 即 `apa_source_event`，`apa item list/show/update/progress` 即 `apa_item_list`、`apa_item_show`、`apa_item_update`、`apa_item_progress`，`apa source propose/remind/ignore/attach` 即 `apa_source_propose`、`apa_source_remind`、`apa_source_ignore`、`apa_source_attach`；看项目用 `apa_project_list`、`apa_project_show`（代替 `apa context`）。
 
 ## 一、怎么查资料
 1. 读本批每条事件的原文与上下文：
@@ -20,6 +20,10 @@ agent: task
    - `apa item show <事项 id>` 看具体事项的进展、关联键与来源
 
 ## 二、怎么落账（每条待处理事件必须有明确去向）
+**只有需要持续跟进的事才进事项或建议。** 一次性知会、看一眼就完的消息、在原来的 App 里已经有记录并会自己提醒的事（例如提醒事项、日历日程），口头提醒一下就够了。
+
+本批清单里标 `mode=remind_only` 的事件，来源已被本人设为"只口头提醒"：只能走下面第 1 条（挂到已有事项）、第 4 条（口头提醒）或第 5 条（纯噪声才忽略），**不得建建议或并入建议**，内核会拒绝，也不要改用别的命令另建。
+
 按以下优先级逐条研判，同一批里属于同一件事的多条事件合并处理：
 
 1. **属于已有进行中/等待中/待决定事项的后续进展或跟进**：
@@ -33,7 +37,9 @@ agent: task
    - 先用 `apa source propose <事件 id>` 转为新建议（如果本批有多条属于同一件新事，先对第一条 `apa source propose <事件1>` 得到新建议 id，其余事件全部 `apa source propose <事件k> --into <新建议 id>`）；
    - 再用 `apa item update <新建议 id> --title "<清晰标题>" --summary "<一句话摘要与判断依据>" --project <项目 id> --priority <low|medium|high|urgent> [--deadline ...] [--planned-for ...] [--planned-slot ...] --reason "<理由>"` 补全标题、摘要、项目、时间和优先级；
    - 只有原文明确提到的日期、截止或时段才填，拿不准的留空，不猜测估算。
-4. **不值得保留的事件**（重复通知、已办结事项的回音、纯噪声、广告、已处理完的对话）：
+4. **本人需要知道、但不需要持续跟进的事件**：
+   - 用 `apa source remind <事件 id>` 记为"已口头提醒"，并在最后结论里把要点说清楚（什么事、关键时间）；记了就必须在结论里提到。
+5. **不值得保留的事件**（重复通知、已办结事项的回音、纯噪声、广告、已处理完的对话）：
    - 用 `apa source ignore <事件 id>` 忽略。
 
 ## 三、合并的硬边界
@@ -48,9 +54,10 @@ agent: task
 ## 五、最终输出（直接推送给主会话的结论）
 你的最后一段输出会直接作为知会推给主会话转告本人，请严格遵守：
 - 用自然、简洁的日常语言，**绝对不要出现任何裸 id**（不要写 `sev_...`、`itm_...`、`prj_...`、`run_...`）。
-- 说清五件事（没有的项省略不写）：
+- 说清六件事（没有的项省略不写）：
   1. 本批共处理了几条；
   2. 新建了哪些建议（说标题、归属项目、关键时间或要点）；
   3. 哪些并入了已有建议或补到了已有事项；
-  4. 忽略了几条（一句话概括原因）；
-  5. 哪些需要本人重点看或拍板，以及有没有被权限拦下或未做成的事。
+  4. 口头提醒：逐件说要点和关键时间（这些没有建建议）；
+  5. 忽略了几条（一句话概括原因）；
+  6. 哪些需要本人重点看或拍板，以及有没有被权限拦下或未做成的事。

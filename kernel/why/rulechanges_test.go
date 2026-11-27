@@ -34,13 +34,16 @@ func TestRuleChangesListAndReverse(t *testing.T) {
 		b, _ := json.Marshal(map[string]any{"id": "ins", "enabled": on})
 		return b
 	}
-	var personaSeq, toggleSeq, runSeq int64
+	var allowSeq, toggleSeq, runSeq int64
 	if err := st.Update(ctx, func(tx *store.Tx) error {
-		if _, err := policy.UpdateWith(tx, agent, rules, "t", func(p *policy.Policy) error { p.Persona = "terse"; return nil }); err != nil {
+		if _, err := policy.UpdateWith(tx, agent, rules, "t", func(p *policy.Policy) error {
+			p.ForwardAllowlist = map[string][]string{"mail": {"a@example.invalid"}}
+			return nil
+		}); err != nil {
 			return err
 		}
 		es, _ := eventlog.Query(tx, eventlog.Filter{Type: domain.EvPolicyChanged}, 0, 10)
-		personaSeq = es[len(es)-1].Event.Seq
+		allowSeq = es[len(es)-1].Event.Seq
 		cmd := func(c, typ string, payload json.RawMessage) int64 {
 			b := *rules
 			b.Command = c
@@ -69,8 +72,8 @@ func TestRuleChangesListAndReverse(t *testing.T) {
 		if err != nil || rv == nil || rv.Command != "instance.toggle" || string(rv.Input) != `{"enabled":false,"id":"ins"}` {
 			t.Fatalf("toggle reversal: %+v %v", rv, err)
 		}
-		rc, rv, err := ReverseOf(tx, personaSeq)
-		if err != nil || rv == nil || len(rv.Sections) != 1 || rv.Sections[0] != "persona" || string(rc.Before) != `{"persona":""}` {
+		rc, rv, err := ReverseOf(tx, allowSeq)
+		if err != nil || rv == nil || len(rv.Sections) != 1 || rv.Sections[0] != "forward_allowlist" || string(rc.Before) != `{"forward_allowlist":{}}` {
 			t.Fatalf("policy reversal: %+v %+v %v", rc, rv, err)
 		}
 		from, err := policy.At(tx, rv.From)
@@ -81,8 +84,8 @@ func TestRuleChangesListAndReverse(t *testing.T) {
 			return err
 		}
 		_, p, err := policy.Stored(tx)
-		if p.Persona != "" {
-			t.Fatalf("persona not restored: %q", p.Persona)
+		if len(p.ForwardAllowlist) != 0 {
+			t.Fatalf("allowlist not restored: %v", p.ForwardAllowlist)
 		}
 		// 之后又改过：再撤回就会盖掉后来的改动。
 		if _, err := eventlog.Append(tx, domain.Event{Type: "instance.toggled", Object: "ins", Actor: agent, Payload: tog(false), At: at}); err != nil {

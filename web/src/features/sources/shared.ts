@@ -27,6 +27,7 @@ export interface Source {
   stats?: Stats;
   outbound?: Outbound;
   default_project?: string; // 规则没给项目时归到这里（§9.1）；空为不归
+  handling_mode?: "normal" | "remind_only"; // 处理方式（§9.3），只有本人能改
   // 发件人可信的结论（§9.1），由来源程序的接入声明给出，本人不能改
   sender?: { trust: "verified" | "unverified"; hint?: { zh: string; en: string }; self?: string };
 }

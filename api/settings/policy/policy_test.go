@@ -160,18 +160,18 @@ func TestSettingsRejectNonWebCallers(t *testing.T) {
 		mod := e.bearer(kind)
 		for _, p := range routes {
 			for _, m := range []string{"GET", "PUT"} {
-				rec := e.do(m, p, `{"persona":"x"}`, mod)
+				rec := e.do(m, p, `{"background_run_timeout_sec":1800}`, mod)
 				if rec.Code != 403 || !refused(errCode(t, rec)) {
 					t.Fatalf("%s %s as %s: %d %s", m, p, kind, rec.Code, rec.Body)
 				}
 			}
 		}
 	}
-	if rec := e.do("PUT", routes[0], `{"persona":"x"}`, nil); rec.Code != 401 {
+	if rec := e.do("PUT", routes[0], `{"background_run_timeout_sec":1800}`, nil); rec.Code != 401 {
 		t.Fatalf("anonymous: %d", rec.Code)
 	}
 	// Cookie 写请求缺 CSRF 令牌同样被骨干拒绝。
-	if rec := e.do("PUT", routes[0], `{"persona":"x"}`, func(r *http.Request) { r.AddCookie(e.cookie) }); rec.Code != 403 {
+	if rec := e.do("PUT", routes[0], `{"background_run_timeout_sec":1800}`, func(r *http.Request) { r.AddCookie(e.cookie) }); rec.Code != 403 {
 		t.Fatalf("no csrf: %d", rec.Code)
 	}
 	if v, _ := e.current(); v != 0 {
@@ -214,14 +214,14 @@ func TestWebWritesNewPolicyVersionAndEvent(t *testing.T) {
 		t.Fatalf("initial GET: %d %s", rec.Code, rec.Body)
 	}
 
-	body := `{"persona":"简洁"}`
+	body := `{"background_run_timeout_sec":1800}`
 	rec = e.do("PUT", routes[0], body, e.web)
 	if rec.Code != 200 {
 		t.Fatalf("PUT: %d %s", rec.Code, rec.Body)
 	}
 	v, p := e.current()
-	if v != 1 || p.Persona != "简洁" {
-		t.Fatalf("stored v%d %+v", v, p.Persona)
+	if v != 1 || p.BackgroundRunTimeoutSec != 1800 {
+		t.Fatalf("stored v%d %+v", v, p.BackgroundRunTimeoutSec)
 	}
 	if ev := e.eventTypes(); len(ev) != 1 || ev[0] != string(domain.EvPolicyChanged) {
 		t.Fatalf("events %v", ev)
@@ -237,54 +237,27 @@ func TestWebWritesNewPolicyVersionAndEvent(t *testing.T) {
 	}
 }
 
-// 未出现的段不动；persona 写入后可读回。
+// 未出现的段不动；写入后可读回。
 func TestPartialPutKeepsOtherSections(t *testing.T) {
 	e := setup(t)
-	e.do("PUT", routes[0], `{"persona_lang":"en"}`, e.web)
-	rec := e.do("PUT", routes[0], `{"persona":"简洁、直接"}`, e.web)
-	if rec.Code != 200 {
+	e.do("PUT", routes[0], `{"default_harness":"host"}`, e.web)
+	if rec := e.do("PUT", routes[0], `{"background_run_timeout_sec":1800}`, e.web); rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	v, p := e.current()
-	if v != 2 || p.Persona != "简洁、直接" || p.PersonaLang != "en" {
-		t.Fatalf("v%d persona=%q lang=%q", v, p.Persona, p.PersonaLang)
-	}
-	rec = e.do("GET", routes[0], "", e.web)
-	if !strings.Contains(rec.Body.String(), "简洁、直接") {
-		t.Fatalf("GET lacks persona: %s", rec.Body)
+	if v, p := e.current(); v != 2 || p.BackgroundRunTimeoutSec != 1800 || p.DefaultHarness != "host" {
+		t.Fatalf("v%d %+v", v, p)
 	}
 }
 
-// 助手说哪种语言：只收 zh、en 与空串（跟随系统），其余 400 且不写版本；新账本读作空串。
-func TestPersonaLang(t *testing.T) {
+// 已下掉的语气与语言段不再接受，也不写版本。
+func TestRemovedPersonaSectionsRejected(t *testing.T) {
 	e := setup(t)
-	if _, p := e.current(); p.PersonaLang != "" {
-		t.Fatalf("fresh ledger: %q", p.PersonaLang)
+	for _, body := range []string{`{"persona":"x"}`, `{"persona_lang":"zh"}`} {
+		if rec := e.do("PUT", routes[0], body, e.web); rec.Code != 400 || errCode(t, rec) != domain.CodeInvalidRequest {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
+		}
 	}
-	if rec := e.do("PUT", routes[0], `{"persona_lang":"fr"}`, e.web); rec.Code != 400 || errCode(t, rec) != domain.CodeInvalidRequest {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	if rec := e.do("PUT", routes[0], `{"persona_lang":"zh"}`, e.web); rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	if v, p := e.current(); v != 1 || p.PersonaLang != "zh" {
-		t.Fatalf("v%d lang=%q", v, p.PersonaLang)
-	}
-}
-
-// 人格超长被拒（§11.2），错误为 invalid_request，且不写版本。
-func TestPersonaTooLongRejected(t *testing.T) {
-	e := setup(t)
-	long, _ := json.Marshal(map[string]string{"persona": strings.Repeat("好", kpolicy.MaxPersonaTokens+1)})
-	rec := e.do("PUT", routes[0], string(long), e.web)
-	if rec.Code != 400 || errCode(t, rec) != domain.CodeInvalidRequest || strings.Contains(rec.Body.String(), "好好") {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	ok, _ := json.Marshal(map[string]string{"persona": strings.Repeat("好", kpolicy.MaxPersonaTokens)})
-	if rec := e.do("PUT", routes[0], string(ok), e.web); rec.Code != 200 {
-		t.Fatalf("limit-sized persona: %d %s", rec.Code, rec.Body)
-	}
-	if v, _ := e.current(); v != 1 {
+	if v, _ := e.current(); v != 0 {
 		t.Fatalf("version %d", v)
 	}
 }
@@ -298,8 +271,8 @@ func TestMalformedBodies(t *testing.T) {
 		{routes[0], `{"web_only":{"categories":["funds"],"bogus":1}}`},
 		{routes[0], `{}`},
 		{routes[0], `null`},
-		{routes[0], `{"persona":"a"} {}`},
-		{routes[0], `{"persona":5}`},
+		{routes[0], `{"background_run_timeout_sec":1800} {}`},
+		{routes[0], `{"background_run_timeout_sec":"x"}`},
 		{routes[0], `{"web_only":{"categories":[]}}`},
 		{routes[2], `{"model_endpoint":{"url":"ftp://x","screening_timeout_ms":10}}`},
 		{routes[3], `{"permission_cap":{"default":"root","by_harness":{}}}`},

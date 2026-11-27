@@ -10,7 +10,7 @@ import { strings } from "./strings";
 import { ago, when, type SourceEvent } from "./shared";
 
 // 最近的消息（设计 §15.1、§9.3）：这个来源进来的全部消息，从新到旧；每条标明队列状态（待处理/处理中/已处理）与去向，点一行就地展开处理经过。
-const FILTERS: Record<string, string> = { all: "", proposed: "proposed", ignored: "ignored", attached: "attached", backlog: "unjudged,expired" };
+const FILTERS: Record<string, string> = { all: "", proposed: "proposed", ignored: "ignored", attached: "attached", reminded: "reminded", backlog: "unjudged,expired" };
 const PAGE = 20;
 
 function Destination({ id }: { id: string }) {
@@ -25,8 +25,19 @@ function Destination({ id }: { id: string }) {
   );
 }
 
-function Row({ v }: { v: SourceEvent }) {
+function Row({ v, onChanged }: { v: SourceEvent; onChanged: () => void }) {
   const t = useT(strings);
+  const { api } = useSession();
+  const [error, setError] = useState<unknown>(null);
+  const propose = async () => {
+    setError(null);
+    try {
+      await api.post(`/source-events/${encodeURIComponent(v.id)}/propose`);
+      onChanged(); // 以服务端状态为准
+    } catch (e) {
+      setError(e);
+    }
+  };
   const [open, setOpen] = useState(false);
   const subject = v.subject || v.type;
   const target = v.item || v.items?.[0] || "";
@@ -50,6 +61,8 @@ function Row({ v }: { v: SourceEvent }) {
         <time className="sub" dateTime={v.occurred_at} title={when(v.occurred_at)}>{ago(v.occurred_at)}</time>
       </button>
       {target && <Destination id={target} />}
+      {v.disposition === "reminded" && <button type="button" onClick={() => void propose()}>{t.remindedPropose}</button>}
+      {error !== null && <ErrorNote error={error} />}
       {open && (
         <div role="region" aria-label={t.traceOf(subject)}>
           <TraceView path={`/source-events/${encodeURIComponent(v.id)}/trace`} />
@@ -105,7 +118,7 @@ export function RecentMessages({ source }: { source: string }) {
         <p className="sub">{t.noRecent}</p>
       ) : (
         <ul className="rows" aria-label={t.recent}>
-          {items.map((v) => <Row key={v.id} v={v} />)}
+          {items.map((v) => <Row key={v.id} v={v} onChanged={() => load()} />)}
         </ul>
       )}
       {next !== null && <p><button type="button" onClick={() => load(next)}>{t.loadMore}</button></p>}

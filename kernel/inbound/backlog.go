@@ -30,6 +30,8 @@ const (
 	// CmdBacklogRules 是积压放开的第 1 步（§9.3）：只跑规则，不调模型。由本人显式触发（只接受本人原话）。
 	// 输入不带 event 时只过授权与校验；带 event 时把这一条积压事件按规则出口结清，操作者是调用者。
 	CmdBacklogRules = "inbound.backlog_rules"
+	// CmdRemind 把处理中或积压里的事件记为已口头提醒：不建事项，之后仍可补建建议（§9.3）。
+	CmdRemind = "inbound.remind"
 	// EvRequeued 是重判入队的审计记录。
 	EvRequeued = "inbound.requeued"
 )
@@ -99,6 +101,19 @@ func (s *Service) registerBacklog(x *command.Executor) error {
 			Apply: func(c *command.Ctx) (any, error) {
 				v, _ := parseBacklog(c.Input)
 				return nil, settle(c, v.Event, domain.DispositionExpired, v.Reason)
+			}}),
+		x.Register(command.Spec{Name: CmdRemind, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
+			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+				v, err := parseBacklog(in)
+				return authz.Object{ID: v.Event}, err
+			},
+			Validate: func(tx *store.Tx, o authz.Object, _ json.RawMessage) error {
+				_, err := runner.Event(tx, o.ID)
+				return err
+			},
+			Apply: func(c *command.Ctx) (any, error) {
+				v, _ := parseBacklog(c.Input)
+				return nil, settle(c, v.Event, domain.DispositionReminded, orElse(v.Reason, "mentioned in the summary only; no suggestion"))
 			}}),
 		x.Register(command.Spec{Name: CmdIgnoreUnjudged, Action: authz.ActionManageSource, Group: authz.GroupSourceEvents,
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
@@ -418,6 +433,9 @@ func (s *Service) rulesOne(ctx context.Context, id command.Identity, sn snapshot
 	case rules.ExitDigest:
 		d.Disposition = domain.DispositionDigest
 	case rules.ExitProposed:
+		if src.HandlingMode == domain.HandlingRemindOnly { // 只口头提醒：不自动建建议，留在积压里（§9.3）
+			return false, false, nil
+		}
 		d.Disposition = domain.DispositionProposed
 		d.Item = sn.made[ev.ID] // 上次中途失败留下的事项：接上，不重建
 		if d.Item != "" {

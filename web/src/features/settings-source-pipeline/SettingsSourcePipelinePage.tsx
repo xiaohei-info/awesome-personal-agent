@@ -75,6 +75,7 @@ export function SettingsSourcePipelinePage() {
             hint={t.judgeHint}
             value={sp.judge_prompt ?? ""}
             packPath={JUDGE_PACK}
+            field="criteria"
             onSave={(text) => save({ judge_prompt: text })}
           />
           <PromptCard
@@ -82,6 +83,7 @@ export function SettingsSourcePipelinePage() {
             hint={t.batchPromptHint}
             value={sp.batch_prompt ?? ""}
             packPath={BATCH_PACK}
+            field="body"
             onSave={(text) => save({ batch_prompt: text })}
           />
           <details className="panel">
@@ -159,57 +161,48 @@ function ScheduleCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) 
   );
 }
 
-function PromptCard({ title, hint, value, packPath, onSave }: {
-  title: string;
-  hint: string;
-  value: string;
-  packPath: string;
-  onSave: (text: string) => Promise<number>;
-}) {
+type PromptProps = { title: string; hint: string; value: string; onSave: (text: string) => Promise<number> };
+
+/** 提示词框里就是当前生效的全文：没改过是内置默认（取能力包提示词的 field 字段），先读到默认才能编辑。 */
+function PromptCard({ packPath, field, ...p }: PromptProps & { packPath: string; field: "body" | "criteria" }) {
   const t = useT(strings);
   const { api } = useSession();
-  const [text, setText, dirty] = useDraft(value, () => value);
   const [builtin, setBuiltin] = useState<string | null>(null);
-  const [builtinErr, setBuiltinErr] = useState(false);
-
-  const loadBuiltin = () => {
-    if (builtin !== null) return;
-    api.get<{ body: string }>(packPath).then(
-      (r) => { setBuiltin(r.body.trim()); setBuiltinErr(false); },
-      () => setBuiltinErr(true),
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    api.get<Record<string, string>>(packPath).then(
+      (r) => setBuiltin((r[field] ?? "").trim()),
+      () => setFailed(true),
     );
-  };
+  }, [api, packPath, field]);
+  if (builtin !== null) return <PromptEditor {...p} builtin={builtin} />;
+  return (
+    <section aria-label={p.title} className="panel">
+      <h2>{p.title}</h2>
+      <p className="sub" role={failed ? "alert" : "status"}>{failed ? t.builtinFailed : t.builtinLoading}</p>
+    </section>
+  );
+}
+
+function PromptEditor({ title, hint, value, builtin, onSave }: PromptProps & { builtin: string }) {
+  const t = useT(strings);
+  const [text, setText, dirty] = useDraft(value, () => value || builtin);
 
   const submit = () => {
     const trimmed = text.trim();
     if (trimmed.length > MAX_PROMPT) return reject(t.promptTooLong(MAX_PROMPT));
-    return onSave(trimmed);
+    // 与内置默认相同按没改过存，以后内置默认升级能跟着走。
+    return onSave(trimmed === builtin ? "" : trimmed);
   };
 
   return (
     <Card title={title} hint={hint} dirty={dirty} onSave={submit}>
-      <textarea
-        rows={6}
-        aria-label={title}
-        placeholder={t.promptPlaceholder}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
+      <textarea rows={16} aria-label={title} value={text} onChange={(e) => setText(e.target.value)} />
       <div className="actions">
-        {text.trim() !== "" && (
-          <button type="button" className="quiet" onClick={() => setText("")}>{t.resetDefault}</button>
+        {text.trim() !== builtin && (
+          <button type="button" className="quiet" onClick={() => setText(builtin)}>{t.resetDefault}</button>
         )}
       </div>
-      <details onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) loadBuiltin(); }}>
-        <summary>{t.viewBuiltin}</summary>
-        {builtinErr ? (
-          <p className="sub">{t.builtinFailed}</p>
-        ) : builtin === null ? (
-          <p className="sub">{t.builtinLoading}</p>
-        ) : (
-          <pre className="prompt-preview">{builtin}</pre>
-        )}
-      </details>
     </Card>
   );
 }

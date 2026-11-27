@@ -1,7 +1,7 @@
 """APA core plugin for Hermes: one submodule per capability, each exposing register(ctx)."""
-from . import instructions, persona
+from . import instructions
 
-_SUBMODULES = (instructions, persona)
+_SUBMODULES = (instructions,)
 
 
 def register(ctx):

@@ -1,7 +1,7 @@
 import type { Dict } from "../../app/i18n";
 import { common, shared } from "../../app/strings";
 
-// 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表是分工、Agent 一行一个、权限总览、替我动手、所有 Agent 共用的语言与语气、很少用到的钥匙；
+// 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表是分工、Agent 一行一个、权限总览、替我动手、所有 Agent 共用的后台运行时限、很少用到的钥匙；
 // 一个 Agent 一页：接入清单、基本信息、钥匙、权限卡与限制清单、在哪里做、被谁使用、高级。
 const zh = {
   ...shared.zh,
@@ -51,14 +51,8 @@ const zh = {
   runTimeoutUnit: "小时（0.25–24，默认 4）",
   runTimeoutNote: "已在跑的运行不受影响",
   runTimeoutBad: "请填写 0.25 到 24 之间的数字",
-  personaLang: "对我说话的语言",
-  personaLangSystem: "跟随系统",
-  personaLangHint: "跟随系统按 Agent 所在机器的设置",
-  persona: "对我说话的语气",
-  personaHint: "只影响说话方式，不改变任何权限",
-  personaDefault: "默认",
-  personaRestore: "恢复默认",
-  personaUsed: (n: number, max: number) => `约 ${n} / ${max}`,
+  runTimeoutDefault: "默认",
+  runTimeoutRestore: "恢复默认",
   // 一个 Agent 的页面
   back: "‹ 全部 Agent",
   notFound: "没有这个 Agent",
@@ -223,14 +217,8 @@ const en: typeof zh = {
   runTimeoutUnit: "hours (0.25–24, default 4)",
   runTimeoutNote: "Runs already in progress are unaffected",
   runTimeoutBad: "Enter a number between 0.25 and 24",
-  personaLang: "Language they use with me",
-  personaLangSystem: "Follow the system",
-  personaLangHint: "The system means the Agent's machine",
-  persona: "Tone they use with me",
-  personaHint: "Changes how it talks, never what it may do",
-  personaDefault: "Default",
-  personaRestore: "Restore default",
-  personaUsed: (n, max) => `about ${n} / ${max}`,
+  runTimeoutDefault: "Default",
+  runTimeoutRestore: "Restore default",
   back: "‹ All Agents",
   notFound: "No such Agent",
   connect: "Connect",

@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -32,13 +33,21 @@ func registerPropose(x *command.Executor) error {
 				return err
 			}
 			d := ev.Disposition
-			if d != domain.DispositionUnjudged && d != domain.DispositionExpired && d != domain.DispositionDigest && !runner.Running(ev) {
-				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(d)+", not unjudged, digest or running in queue", "re-read the source event")
+			if d != domain.DispositionUnjudged && d != domain.DispositionExpired && d != domain.DispositionDigest && d != domain.DispositionReminded && !runner.Running(ev) {
+				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(d)+", not unjudged, digest, reminded or running in queue", "re-read the source event")
 			}
 			return nil
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parseDispose(c.Input)
+			cur, err := runner.Event(c.Tx, v.Event)
+			if err != nil {
+				return nil, err
+			}
+			// 建事项之前的预检（不带 item）就在这里拦下，被拒的调用者不会留下事项。
+			if err := registry.CheckProposal(c.Tx, c.Caller.Level, cur.SourceID); err != nil {
+				return nil, err
+			}
 			if v.Item == "" {
 				return nil, nil
 			}
