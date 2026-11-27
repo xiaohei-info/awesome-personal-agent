@@ -55,7 +55,7 @@ def tools():
 def test_registers_the_apa_tools(tools):
     assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
                           "apa_report", "apa_dispatch", "apa_item_history", "apa_attach", "apa_proposals_apply", "apa_item_progress",
-                          "apa_item_list", "apa_item_show", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search", "apa_source_propose", "apa_source_ignore", "apa_source_attach"}
+                          "apa_item_list", "apa_item_show", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search", "apa_source_propose", "apa_source_ignore", "apa_source_attach", "apa_source_remind"}
 
 
 def test_query_tools_map_to_read_commands(tools, apa):

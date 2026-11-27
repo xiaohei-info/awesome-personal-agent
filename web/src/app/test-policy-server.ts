@@ -1,12 +1,12 @@
 // Test double for the settings pages that edit the policy document (not shipped: only imported by tests).
 // It answers like api/settings/policy: three routes read and replace whole sections, keys are masked,
-// an over-long persona is rejected and nothing is saved, GET /agents lists the Agent cards with their permission card,
+// GET /agents lists the Agent cards with their permission card,
 // and a non-Web session gets 403 web_only (error bodies follow appendix B.3).
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
 
 export const SECTIONS: Record<string, string[]> = {
-  "/v1/settings/policy": ["disturb", "persona", "persona_lang", "background_run_timeout_sec", "channels", "default_harness", "main_session_launch", "rule_agent"],
+  "/v1/settings/policy": ["disturb", "background_run_timeout_sec", "channels", "default_harness", "main_session_launch", "rule_agent"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
   "/v1/settings/access-limits": ["agent_cards"],
 };
@@ -14,8 +14,6 @@ export const SECTIONS: Record<string, string[]> = {
 export function initialDoc(): Record<string, any> {
   return {
     disturb: { routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 20, mutes: [] },
-    persona: "Be brief.",
-    persona_lang: "",
     background_run_timeout_sec: 14400,
     channels: {},
     default_harness: "",
@@ -160,7 +158,6 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
     }
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
-    if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: (doc.persona_lang || (url.endsWith("locale=zh") ? "zh" : "en")) === "zh" ? "Default tone (zh)" : "Default tone (en)" });
     if (url === "/v1/agents") return opts.webOnlyDenied ? err(403, "web_only", "settings can only be used by the owner in the Web UI") : json(200, { agents: opts.agents ?? [], selected: {}, reason: "" });
     const keys = SECTIONS[url];
     if (!keys) return err(404, "not_found", "no such route");
@@ -172,7 +169,6 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
     if (method === "GET") return json(200, render());
     const body = JSON.parse(init.body as string);
     puts.push({ path: url, body, csrf: (init.headers as Record<string, string>)["X-CSRF-Token"] });
-    if (typeof body.persona === "string" && body.persona.length > 400) return err(400, "invalid_request", "persona is about 500 tokens, limit 400");
     const apply = { ...body };
     if (body.disturb) {
       const { delivery_saved: _s, ...next } = body.disturb;

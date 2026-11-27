@@ -563,17 +563,17 @@ func (s *Service) judgeCalls(src domain.Source, ev domain.SourceEvent, hint stri
 	in := eventInput(src, ev, hint, nil)
 	mat := materialSource(ev, o)
 	scope := direct.Scope{Source: src.ID}
-	extra := pol.SourcePipeline.JudgePrompt
+	criteria := pol.SourcePipeline.JudgePrompt
 	q1 = direct.JudgeCall{
 		Pack: DefaultPack, Template: Template, Input: in, MaterialSource: mat,
 		Subject: ev.ID, Source: src.ID, Scope: scope,
-		UnjudgedOnUnavailable: true, CriteriaExtra: extra, OnUndecided: "yes",
+		UnjudgedOnUnavailable: true, Criteria: criteria, OnUndecided: "yes",
 	}
 	q2 = direct.JudgeCall{
 		Pack: DefaultPack, Template: Template, Use: UseUrgent, Question: urgentQuestion,
 		Input: in, MaterialSource: mat,
 		Subject: ev.ID, Source: src.ID, Scope: scope,
-		UnjudgedOnUnavailable: false, CriteriaExtra: extra, OnUndecided: "no",
+		UnjudgedOnUnavailable: false, Criteria: criteria, OnUndecided: "no",
 	}
 	return q1, q2
 }

@@ -19,12 +19,6 @@ interface Case { name: string; at: string; card: string; edit?: Edit; path: stri
 
 const CASES: Case[] = [
   // 不改直接保存
-  // 对我说话的语言与语气移到设置 › Agent（界面设计 §4），按 §6.1 没有改动时不能保存，所以只比改过之后的载荷。
-  {
-    name: "Agent 的语言：改选", at: "/settings/agents", card: "对我说话的语言", path: "/v1/settings/policy",
-    edit: async (c) => { await userEvent.click(c.getByRole("button", { name: "English" })); },
-    body: { persona_lang: "en" },
-  },
   // 与改版前测试相同的编辑
   // 设计 v2：各类提醒的去处搬到各自的页面（单选，见各页测试）；设置页只剩全局项。默认渠道一节发整段 disturb，矩阵只换 default_channel。
   {
@@ -55,15 +49,6 @@ const CASES: Case[] = [
     },
     body: { disturb: { ...DISTURB, mutes: [{ scope: "project", id: "acc-home" }] } },
   },
-  {
-    name: "人格：改写", at: "/settings/agents", card: "对我说话的语气", path: "/v1/settings/policy",
-    edit: async (c) => {
-      const box = c.getByRole("textbox", { name: "对我说话的语气" });
-      await userEvent.clear(box);
-      await userEvent.type(box, "直接");
-    },
-    body: { persona: "直接" },
-  },
 ];
 
 beforeEach(() => sessionStorage.clear());
@@ -85,91 +70,5 @@ describe("改版前后 PUT 载荷逐字段一致", () => {
     expect(s.puts[0].path).toBe(path);
     expect(s.puts[0].body).toEqual(body);
     expect(s.puts[0].csrf).toBe("tok-1");
-  });
-});
-
-describe("设置 › Agent › 对我说话的语气（所有 Agent 共用）", () => {
-  it("flow-bg-guards ACT-BGG-08: 超限被服务端拒绝，显示原因且不保存，草稿保留；计数按同一规则估算", async () => {
-    const s = policyServer();
-    sessionStorage.setItem("apa.csrf", "tok-1");
-    render(
-      <MemoryRouter initialEntries={["/settings/agents"]}>
-        <App features={[agents]} fetchImpl={withSession(s.impl)} />
-      </MemoryRouter>,
-    );
-    const c = within(await screen.findByRole("region", { name: "对我说话的语气" }));
-    const box = c.getByRole("textbox", { name: "对我说话的语气" });
-    expect(c.getByText("约 2 / 400")).toBeInTheDocument(); // "Be brief."：8 个非空白 ASCII → (8+3)/4 = 2，同 kernel/policy.EstimateTokens
-    await userEvent.clear(box);
-    await userEvent.click(box);
-    await userEvent.paste("长".repeat(500));
-    expect(c.getByText("约 500 / 400")).toBeInTheDocument();
-    await userEvent.click(c.getByRole("button", { name: "保存对我说话的语气" }));
-    expect(await c.findByRole("alert")).toHaveTextContent("limit 400");
-    expect(s.doc.persona).toBe("Be brief.");
-    expect(box).toHaveValue("长".repeat(500));
-  });
-
-  async function open(persona: string) {
-    const s = policyServer();
-    s.doc.persona = persona;
-    sessionStorage.setItem("apa.csrf", "tok-1");
-    render(
-      <MemoryRouter initialEntries={["/settings/agents"]}>
-        <App features={[agents]} fetchImpl={withSession(s.impl)} />
-      </MemoryRouter>,
-    );
-    const c = within(await screen.findByRole("region", { name: "对我说话的语气" }));
-    const box = await c.findByRole("textbox", { name: "对我说话的语气" });
-    await waitFor(() => expect(box).toHaveValue(persona || "Default tone (zh)"));
-    return { s, c, box };
-  }
-
-  it("没自定义：显示内置默认并标「默认」，没有「恢复默认」；没改动时不能保存（界面设计 §6.1），不写任何东西", async () => {
-    const { s, c } = await open("");
-    expect(c.getByText("默认")).toBeInTheDocument();
-    expect(c.queryByRole("button", { name: "恢复默认" })).toBeNull();
-    expect(c.getByRole("button", { name: "保存对我说话的语气" })).toBeDisabled();
-    expect(s.puts).toHaveLength(0);
-  });
-
-  it("改了就是自定义（「默认」标记换成「恢复默认」）；恢复默认后回到默认并存回空串", async () => {
-    const { s, c, box } = await open("");
-    await userEvent.type(box, "!");
-    expect(c.queryByText("默认")).toBeNull();
-    await userEvent.click(c.getByRole("button", { name: "保存对我说话的语气" }));
-    await c.findByRole("status");
-    expect(s.puts[0].body).toEqual({ persona: "Default tone (zh)!" });
-    await userEvent.click(await c.findByRole("button", { name: "恢复默认" }));
-    expect(box).toHaveValue("Default tone (zh)");
-    expect(c.getByText("默认")).toBeInTheDocument();
-    await userEvent.click(c.getByRole("button", { name: "保存对我说话的语气" }));
-    await waitFor(() => expect(s.puts).toHaveLength(2));
-    expect(s.puts[1].body).toEqual({ persona: "" });
-    expect(s.doc.persona).toBe("");
-  });
-
-  it("助手语言：只发自己的段；存下后没自定义的默认文字换成那种语言，已改的不动", async () => {
-    const { s, c, box } = await open("");
-    const l = within(screen.getByRole("region", { name: "对我说话的语言" }));
-    await userEvent.click(l.getByRole("button", { name: "English" }));
-    await userEvent.click(l.getByRole("button", { name: "保存对我说话的语言" }));
-    await waitFor(() => expect(s.puts).toHaveLength(1));
-    expect(s.puts[0].body).toEqual({ persona_lang: "en" });
-    await waitFor(() => expect(box).toHaveValue("Default tone (en)"));
-    await userEvent.type(box, "!");
-    await userEvent.click(l.getByRole("button", { name: "中文" }));
-    await userEvent.click(l.getByRole("button", { name: "保存对我说话的语言" }));
-    await waitFor(() => expect(s.puts).toHaveLength(2));
-    expect(s.puts[1].body).toEqual({ persona_lang: "zh" });
-    expect(box).toHaveValue("Default tone (en)!");
-    expect(c.queryByText("默认")).toBeNull();
-  });
-
-  it("已自定义：显示自己的文字、不标「默认」，可恢复默认", async () => {
-    const { c, box } = await open("Be brief.");
-    expect(c.queryByText("默认")).toBeNull();
-    await userEvent.click(c.getByRole("button", { name: "恢复默认" }));
-    expect(box).toHaveValue("Default tone (zh)");
   });
 });

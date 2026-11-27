@@ -15,6 +15,7 @@
 //	GET /source-events/{id}/outbound-preview  一条事件在 full、excerpt、meta 下送给模型的内容（只读）
 //	POST /source-events/{id}/propose    把未判定事件或 digest 事件转为建议
 //	POST /source-events/{id}/ignore     忽略一条未判定事件
+//	POST /source-events/{id}/remind     记为已口头提醒
 //	POST /source-events/ignore          批量忽略未判定积压：按来源或全部
 //
 // 路由只做传输：解码、选命令、渲染。授权与校验都在内核命令管线：可执行命令（script 来源）走只 Web 的命令，
@@ -203,6 +204,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/attach", MaxBody: 1 << 10, Handler: a.attachEvent})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/remind", MaxBody: 1 << 10, Handler: a.remindEvent})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/split", MaxBody: 1 << 10, Handler: a.split})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/unmerge", MaxBody: 1 << 10, Handler: a.unmerge})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
@@ -460,9 +462,11 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 	}
 	enabled, hasEnabled := in["enabled"]
 	name, hasName := in["name"] // 显示名走 source.rename，不进登记内容的更新（类型、命令等）
+	mode, hasMode := in["handling_mode"]
+	delete(in, "handling_mode")
 	delete(in, "enabled")
 	delete(in, "name")
-	if len(in) == 0 && !hasEnabled && !hasName {
+	if len(in) == 0 && !hasEnabled && !hasName && !hasMode {
 		return invalid("nothing to update", "send at least one field")
 	}
 	var res command.Result
@@ -480,6 +484,13 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 		n := map[string]json.RawMessage{"name": name}
 		n["id"], _ = json.Marshal(id)
 		if res, err = a.run(r, p, registry.CmdRename, n, true); err != nil {
+			return err
+		}
+	}
+	if hasMode {
+		m := map[string]json.RawMessage{"mode": mode}
+		m["id"], _ = json.Marshal(id)
+		if res, err = a.run(r, p, registry.CmdSetHandling, m, true); err != nil {
 			return err
 		}
 	}
@@ -781,9 +792,9 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 			d := domain.Disposition(x)
 			switch d {
 			case domain.DispositionPending, domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored,
-				domain.DispositionUnjudged, domain.DispositionExpired, domain.DispositionDigest, domain.DispositionAlerted:
+				domain.DispositionUnjudged, domain.DispositionExpired, domain.DispositionDigest, domain.DispositionAlerted, domain.DispositionReminded:
 			default:
-				return invalid("disposition is not valid", "use pending, attached, proposed, ignored, digest, alerted, unjudged or expired, comma separated")
+				return invalid("disposition is not valid", "use pending, attached, proposed, ignored, digest, alerted, reminded, unjudged or expired, comma separated")
 			}
 			ds = append(ds, d)
 		}
@@ -923,6 +934,21 @@ func (a *api) ignoreOne(w http.ResponseWriter, r *http.Request, p *core.Principa
 	in := map[string]json.RawMessage{}
 	in["event"], _ = json.Marshal(id)
 	if _, err := a.run(r, p, inbound.CmdIgnoreUnjudged, in, true); err != nil {
+		return err
+	}
+	var ev domain.SourceEvent
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, id); return }); err != nil {
+		return err
+	}
+	return a.writeEvent(w, r, p, ev)
+}
+
+// remindEvent 把处理中或积压里的一条事件记为已口头提醒，返回更新后的来源事件。
+func (a *api) remindEvent(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	id := r.PathValue("id")
+	in := map[string]json.RawMessage{}
+	in["event"], _ = json.Marshal(id)
+	if _, err := a.run(r, p, inbound.CmdRemind, in, true); err != nil {
 		return err
 	}
 	var ev domain.SourceEvent

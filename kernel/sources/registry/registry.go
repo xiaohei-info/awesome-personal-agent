@@ -39,6 +39,7 @@ const (
 	CmdSetOutbound  = "source.set_outbound"          // 外发范围，只 Web（§14.14）
 	CmdRename       = "source.rename"                // 显示名；空名表示改回内核生成的名字
 	CmdSetRetention = "source.set_content_retention" // 原文保留天数，只 Web（§6.15）
+	CmdSetHandling  = "source.set_handling_mode"     // 处理方式，只有 Web 上的本人（§9.3）
 )
 
 // 事件类型是本模块内部的账本记录，不在对外稳定表里。
@@ -82,6 +83,10 @@ ALTER TABLE sources_registry_source ADD COLUMN outbound_external TEXT NOT NULL D
 	// 账本结构版本 8（§6.15，变更清单 WB-07）：来源原文保留天数。NULL 即不清理，已有来源都是 NULL。
 	Version: 4, Ledger: 8, Name: "ledger-v8-content-retention",
 	SQL: `ALTER TABLE sources_registry_source ADD COLUMN content_retention_days INTEGER;`,
+}, {
+	// 账本结构版本 13（§9.3）：来源处理方式。已有来源都是常规处理。
+	Version: 5, Ledger: 13, Name: "ledger-v13-handling-mode",
+	SQL: `ALTER TABLE sources_registry_source ADD COLUMN handling_mode TEXT NOT NULL DEFAULT 'normal';`,
 }}}
 
 // Options 是登记所需的外部事实。
@@ -220,7 +225,13 @@ func Register(x *command.Executor, o Options) error {
 			_, _, err := planRetention(tx, in)
 			return err
 		},
-		Apply: applyRetention})
+		Apply: applyRetention},
+		command.Spec{Name: CmdSetHandling, Action: authz.ActionChangeSettings, Group: authz.GroupRules, Page: "/sources", Object: objectOf,
+			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+				_, _, err := planHandling(tx, in)
+				return err
+			},
+			Apply: applyHandling})
 	for _, s := range specs {
 		if err := x.Register(s); err != nil {
 			return err
@@ -295,7 +306,7 @@ func (m *mod) plan(tx *store.Tx, o op, exec bool, in json.RawMessage) (domain.So
 		}
 		s = domain.Source{ID: r.ID, Name: name, Type: r.Type, SourceKind: r.SourceKind, Command: r.Command, Schedule: r.Schedule,
 			Timeout: r.Timeout, CredentialsPath: r.CredentialsPath, DedupeDomain: r.DedupeDomain, DefaultProject: r.DefaultProject,
-			Outbound: domain.Outbound{Local: ScopeFull}, Config: r.Config, Enabled: true}
+			Outbound: domain.Outbound{Local: ScopeFull}, Config: r.Config, Enabled: true, HandlingMode: domain.HandlingNormal}
 		if r.Enabled != nil {
 			s.Enabled = *r.Enabled
 		}
@@ -695,6 +706,63 @@ func applyRetention(c *command.Ctx) (any, error) {
 	return s, nil
 }
 
+type handlingInput struct {
+	ID   string `json:"id"`
+	Mode string `json:"mode"`
+}
+
+func planHandling(tx *store.Tx, in json.RawMessage) (domain.Source, string, error) {
+	var h handlingInput
+	if err := strict(in, &h); err != nil {
+		return domain.Source{}, "", err
+	}
+	s, err := Get(tx, h.ID)
+	if err != nil {
+		return s, "", err
+	}
+	if h.Mode != domain.HandlingNormal && h.Mode != domain.HandlingRemindOnly {
+		return s, "", invalid("handling_mode must be normal or remind_only", "fix handling_mode")
+	}
+	return s, h.Mode, nil
+}
+
+// applyHandling 只接受 Web 上的本人：否则被开放了"改日常规则"的 Agent 能先切回常规处理再建建议（§14.3）。
+func applyHandling(c *command.Ctx) (any, error) {
+	if c.Caller.Level != authz.LevelWeb {
+		e := domain.NewError(domain.CodeWebOnly, "only the owner can change how a source is handled, in the Web UI", "give the sources page to the owner and stop; do not retry")
+		e.Reason = domain.ReasonHardLine
+		return nil, e
+	}
+	s, mode, err := planHandling(c.Tx, c.Input)
+	if err != nil || s.HandlingMode == mode { // 未变不记事件（幂等）
+		return s, err
+	}
+	if _, err := c.Tx.Exec(`UPDATE sources_registry_source SET handling_mode = ? WHERE id = ?`, mode, s.ID); err != nil {
+		return nil, err
+	}
+	s.HandlingMode = mode
+	if _, err := c.Emit(domain.Event{Type: EvUpdated, Object: s.ID, Payload: snapshot(s)}); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// CheckProposal 拒绝 Web 本人以外的调用者为"只口头提醒"来源的事件建建议（§9.3）；不在登记表里的来源（对话捕获）不受限。
+func CheckProposal(tx *store.Tx, level authz.Level, source string) error {
+	if level == authz.LevelWeb {
+		return nil
+	}
+	s, err := Get(tx, source)
+	if isNotFound(err) {
+		return nil
+	}
+	if err != nil || s.HandlingMode != domain.HandlingRemindOnly {
+		return err
+	}
+	return domain.NewError(domain.CodeConflict, "the owner set this source to remind only: no proposal can be made from its events",
+		"mention it in your summary and run apa source remind <event>, or apa source attach <event> --to <item> if it belongs to an existing item")
+}
+
 func derefIntOr(p *int, d int) int {
 	if p == nil {
 		return d
@@ -778,7 +846,7 @@ func save(tx *store.Tx, s domain.Source, insert bool) error {
 
 // ---- 读取（供调度、Ingest 等模块使用；只读） ----
 
-const cols = `id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats, COALESCE(content_retention_days, 0)`
+const cols = `id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats, COALESCE(content_retention_days, 0), handling_mode`
 
 func scan(r *store.Rows) (domain.Source, error) {
 	var (
@@ -789,7 +857,7 @@ func scan(r *store.Rows) (domain.Source, error) {
 		retention        int64
 	)
 	if err := r.Scan(&s.ID, &s.Name, &typ, &s.SourceKind, &s.Command, &s.Schedule, &timeout, &s.CredentialsPath,
-		&s.DedupeDomain, &s.DefaultProject, &s.Outbound.Local, &ext, &cfg, &s.Cursor, &enabled, &stats, &retention); err != nil {
+		&s.DedupeDomain, &s.DefaultProject, &s.Outbound.Local, &ext, &cfg, &s.Cursor, &enabled, &stats, &retention, &s.HandlingMode); err != nil {
 		return s, err
 	}
 	if retention > 0 {

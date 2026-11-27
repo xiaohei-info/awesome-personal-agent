@@ -14,7 +14,7 @@ import { setChoice } from "../../app/i18n";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the request" });
 
-interface Src { name: string; default_project?: string; outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
+interface Src { name: string; default_project?: string; outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown>; handling_mode?: string }
 interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
 interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; queue?: string; queue_level?: string; item?: string; unjudged_reason?: string }
 
@@ -99,6 +99,7 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
       if (!p[2] && method === "PATCH") {
         if ("enabled" in body) s.enabled = body.enabled;
         if ("default_project" in body) s.default_project = body.default_project;
+        if ("handling_mode" in body) s.handling_mode = body.handling_mode;
         if ("name" in body) {
           if (sources.some((x) => x !== s && x.name.toLowerCase() === String(body.name).trim().toLowerCase())) return err(409, "conflict", "another source is already named " + body.name);
           s.name = String(body.name).trim();
@@ -139,7 +140,7 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
     if (pr && method === "POST") {
       const e = events.find((x) => x.id === pr[1]);
       if (!e) return err(404, "not_found", "event not found");
-      if (e.disposition !== "unjudged" && e.disposition !== "digest") return err(409, "conflict", `event is ${e.disposition}, not unjudged or digest`);
+      if (e.disposition !== "unjudged" && e.disposition !== "digest" && e.disposition !== "reminded") return err(409, "conflict", `event is ${e.disposition}, not unjudged or digest`);
       e.disposition = "proposed";
       e.item = "item_" + e.id;
       return json(200, e);
@@ -388,6 +389,30 @@ describe("来源归到哪个项目、只进了简报的（§9.1、§9.3）", () 
     await userEvent.click(within(region.getByRole("group", { name: "处理 d1" })).getByRole("button", { name: "转为建议" }));
     await waitFor(() => expect(region.queryByText(/subject-d1/)).not.toBeInTheDocument());
     expect(b.events.find((e) => e.id === "d1")).toMatchObject({ disposition: "proposed" });
+  });
+});
+
+describe("只口头提醒（§9.3）", () => {
+  it("处理方式默认常规处理；切成只口头提醒时 PATCH 只带 handling_mode，以服务端回读为准", async () => {
+    const b = backend({ sources: [{ ...rss }] });
+    mount(b.impl);
+    await details("新闻订阅");
+    const group = within(await screen.findByRole("group", { name: "处理方式" }));
+    expect(group.getByRole("button", { name: "常规处理" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(group.getByRole("button", { name: "只口头提醒" }));
+    await waitFor(() => expect(within(screen.getByRole("group", { name: "处理方式" })).getByRole("button", { name: "只口头提醒" })).toHaveAttribute("aria-pressed", "true"));
+    expect(b.calls.find((c) => c.method === "PATCH")!.body).toEqual({ handling_mode: "remind_only" });
+  });
+
+  it("最近的消息标「已口头提醒」，可事后补建建议", async () => {
+    const b = backend({ sources: [rss], events: [ev("m1", "reminded")] });
+    mount(b.impl);
+    await details("新闻订阅");
+    const recent = within(await screen.findByRole("list", { name: "最近的消息" }));
+    expect(recent.getByText("已口头提醒")).toBeInTheDocument();
+    await userEvent.click(recent.getByRole("button", { name: "补建建议" }));
+    await waitFor(() => expect(b.events[0].disposition).toBe("proposed"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "补建建议" })).not.toBeInTheDocument());
   });
 });
 

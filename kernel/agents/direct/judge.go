@@ -68,8 +68,8 @@ type JudgeCall struct {
 	UnjudgedOnUnavailable bool
 	// Question 非空时替换模板正文作为本次题面（用于同一模板的多题判定，如 judge 的第二题"急不急"）。
 	Question string
-	// CriteriaExtra 非空时附在模板判据后面（用于本人在设置页写的判断标准，保留模板里的安全边界）。
-	CriteriaExtra string
+	// Criteria 非空时代替模板判据（本人在设置页改过的判断标准）；模板正文里的安全边界不受影响。
+	Criteria string
 	// OnUndecided 非空时覆盖模板的保守默认（如 judge 第一题取 yes、第二题取 no）。
 	OnUndecided string
 }
@@ -273,15 +273,10 @@ func (p *pending) question() string {
 }
 
 func (p *pending) criteria() string {
-	base := strings.TrimSpace(p.meta.Criteria)
-	extra := strings.TrimSpace(p.c.CriteriaExtra)
-	if extra == "" {
-		return base
+	if c := strings.TrimSpace(p.c.Criteria); c != "" {
+		return c
 	}
-	if base == "" {
-		return extra
-	}
-	return base + "\n" + extra
+	return strings.TrimSpace(p.meta.Criteria)
 }
 
 func (p *pending) onUndecided() string {

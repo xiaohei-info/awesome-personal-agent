@@ -175,61 +175,12 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 	}
 }
 
-// 人格超过约 400 token 拒绝保存；恰好在限内可存，且只写入 policy.changed。
-func TestPersonaLimit(t *testing.T) {
-	s := open(t)
-	ok := strings.Repeat("好", MaxPersonaTokens)
-	if v := must(t, s, func(p *Policy) error { p.Persona = ok; return nil }); v != 1 {
-		t.Fatalf("version = %d", v)
-	}
-	for _, long := range []string{ok + "好", strings.Repeat("word ", 500)} {
-		if _, err := update(t, s, owner, func(p *Policy) error { p.Persona = long; return nil }); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("err = %v", err)
-		}
-	}
-	if _, p := current(t, s); p.Persona != ok {
-		t.Fatal("persona changed by rejected write")
-	}
-	if got := strings.Join(types(events(t, s)), ","); got != "policy.changed" {
-		t.Fatalf("events = %s", got)
-	}
-}
-
-// 内置默认语气：空白人格用默认（中英各一份，取不到按英文）；自定义优先；恢复默认只是把人格清空；默认文本不超上限且不含权限类内容；
-// 默认不写进账本，所以空白人格的策略文档里仍是空串。
-func TestDefaultPersona(t *testing.T) {
-	zh, en := DefaultPersona("zh_CN.UTF-8"), DefaultPersona("en")
-	if zh == en || DefaultPersona("") != en || DefaultPersona("fr") != en || DefaultPersona("ZH") != zh {
-		t.Fatalf("lang pick: zh=%q en=%q", zh, en)
-	}
-	for _, d := range []string{zh, en} {
-		if n := EstimateTokens(d); n == 0 || n > MaxPersonaTokens {
-			t.Fatalf("default persona is %d tokens, limit %d: %q", n, MaxPersonaTokens, d)
-		}
-	}
-	s := open(t)
-	_, p := current(t, s)
-	if p.Persona != "" || PersonaText(p, "zh") != PersonaDeclaration+"\n"+zh {
-		t.Fatalf("fresh ledger: persona %q, text %q", p.Persona, PersonaText(p, "zh"))
-	}
-	must(t, s, func(p *Policy) error { p.Persona = "mine"; return nil })
-	_, p = current(t, s)
-	if PersonaText(p, "zh") != PersonaDeclaration+"\nmine" {
-		t.Fatalf("custom must win: %q", PersonaText(p, "zh"))
-	}
-	must(t, s, func(p *Policy) error { p.Persona = ""; return nil })
-	_, p = current(t, s)
-	if PersonaText(p, "en") != PersonaDeclaration+"\n"+en {
-		t.Fatalf("restore default: %q", PersonaText(p, "en"))
-	}
-}
-
 // 事务回滚时版本与事件一并回滚（同一事务提交）。
 func TestRollbackDropsVersionAndEvent(t *testing.T) {
 	s := open(t)
 	boom := errors.New("boom")
 	err := s.Update(ctx, func(tx *store.Tx) error {
-		if _, err := Update(tx, owner, "x", func(p *Policy) error { p.Persona = "hi"; return nil }); err != nil {
+		if _, err := Update(tx, owner, "x", func(p *Policy) error { p.BackgroundRunTimeoutSec = 1000; return nil }); err != nil {
 			return err
 		}
 		return boom
@@ -245,8 +196,8 @@ func TestRollbackDropsVersionAndEvent(t *testing.T) {
 // Update 的调用方持有的快照不会被变更函数污染，历史版本留在表里不被改写。
 func TestHistoryAppendOnly(t *testing.T) {
 	s := open(t)
-	must(t, s, func(p *Policy) error { p.Persona = "one"; return nil })
-	must(t, s, func(p *Policy) error { p.Persona = "two"; return nil })
+	must(t, s, func(p *Policy) error { p.BackgroundRunTimeoutSec = 1000; return nil })
+	must(t, s, func(p *Policy) error { p.BackgroundRunTimeoutSec = 2000; return nil })
 	var docs []string
 	err := s.View(ctx, func(tx *store.Tx) error {
 		r, err := tx.Query("SELECT doc FROM policy_version ORDER BY version")
@@ -263,14 +214,8 @@ func TestHistoryAppendOnly(t *testing.T) {
 		}
 		return r.Err()
 	})
-	if err != nil || len(docs) != 2 || !strings.Contains(docs[0], `"persona":"one"`) || !strings.Contains(docs[1], `"persona":"two"`) {
+	if err != nil || len(docs) != 2 || !strings.Contains(docs[0], `"background_run_timeout_sec":1000`) || !strings.Contains(docs[1], `"background_run_timeout_sec":2000`) {
 		t.Fatalf("docs=%v err=%v", docs, err)
-	}
-}
-
-func TestEstimateTokens(t *testing.T) {
-	if EstimateTokens("") != 0 || EstimateTokens("abcd") != 1 || EstimateTokens("你好") != 2 || EstimateTokens("a b") != 1 {
-		t.Fatal("estimate off")
 	}
 }
 

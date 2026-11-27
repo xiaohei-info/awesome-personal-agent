@@ -1018,19 +1018,20 @@ func Repoint(tx *store.Tx, id, from, to string) error {
 }
 
 // Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored、digest 时接受 unjudged 与 expired
-// （本人处理、只跑规则），proposed 同时关联事项，并且也接受 digest（简报"知会"条目转为建议，§3.12）。不记事件，调用方自己负责留痕。
+// （本人处理、只跑规则），proposed 同时关联事项，并且也接受 digest（简报"知会"条目转为建议，§3.12）与 reminded（口头提醒后补建）。
+// ignored 与 reminded 还接受队列处理中的事件。不记事件，调用方自己负责留痕。
 func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error {
 	from := `disposition IN ('unjudged', 'expired')`
 	switch to {
 	case domain.DispositionExpired:
 		from = `disposition = 'unjudged'`
 	case domain.DispositionProposed:
-		from = `(disposition IN ('unjudged', 'expired', 'digest') OR (disposition = 'pending' AND queue_state = 'running'))`
-	case domain.DispositionIgnored:
+		from = `(disposition IN ('unjudged', 'expired', 'digest', 'reminded') OR (disposition = 'pending' AND queue_state = 'running'))`
+	case domain.DispositionIgnored, domain.DispositionReminded:
 		from = `(disposition IN ('unjudged', 'expired') OR (disposition = 'pending' AND queue_state = 'running'))`
 	case domain.DispositionDigest:
 	default:
-		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored, digest or expired")
+		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored, reminded, digest or expired")
 	}
 	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ?,
 		queue_state = CASE WHEN queue_state <> '' THEN 'done' ELSE queue_state END WHERE id = ? AND `+from, string(to), item, id)

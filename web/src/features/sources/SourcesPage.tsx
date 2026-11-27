@@ -12,7 +12,7 @@ import { strings } from "./strings";
 import { ago, period, when, type Source } from "./shared";
 import { BacklogFlow, IgnoreAll, inProgress, SourceBacklog, type Models } from "./Backlog";
 import { Ingests, Registration, Rejects, RestorePanel, WebhookKey } from "./Advanced";
-import { DefaultProject, Digest } from "./Digest";
+import { DefaultProject, Digest, HandlingMode } from "./Digest";
 import { TrustedSenders } from "./TrustedSenders";
 import { Link, Route, Routes, useNavigate, useSearchParams } from "react-router-dom";
 import { RecentMessages } from "./Recent";
@@ -106,6 +106,7 @@ function Detail({ source, rejudgeDays, add, onChooseOutbound, onSaved }: { sourc
       <h3>{source.name}{raw && <code className="raw-id">{source.id}</code>}</h3>
       {source.type === "webhook" && <WebhookKey source={source} />}
       <DefaultProject source={source} onSaved={onSaved} />
+      <HandlingMode source={source} onSaved={onSaved} />
       <TrustedSenders source={source} add={add} />
       <RecentMessages source={source.id} />
       <SourceBacklog source={source.id} rejudgeDays={rejudgeDays} onChooseOutbound={onChooseOutbound} />

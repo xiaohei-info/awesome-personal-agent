@@ -22,6 +22,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -61,7 +62,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, runner.Module, proc.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, runner.Module, proc.Module, registry.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -281,6 +282,32 @@ func TestOnlyTheOwnerOnWebCanReview(t *testing.T) {
 	}
 	if e.d.calls != 0 || e.event(evID).Disposition != domain.DispositionIgnored || e.rec(jd).Review != nil {
 		t.Fatalf("rejected review left traces: calls %d", e.d.calls)
+	}
+}
+
+// "只口头提醒"来源（§9.3）：开放了"改日常规则"的 Agent 也不能用"该看"给它建建议；本人可以。
+func TestShouldSeeOnRemindOnlySourceIsOwnerOnly(t *testing.T) {
+	e := setup(t)
+	evID, jd := e.judged(1, nil, domain.DispositionIgnored)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO sources_registry_source (id, type, source_type, command, schedule, timeout, credentials_path,
+			dedupe_domain, config, cursor, enabled, stats, handling_mode) VALUES ('src_1', 'script', '', 'x', '1m', 30, '', '', '', '', 1, '', 'remind_only')`); err != nil {
+			return err
+		}
+		_, err := policy.Update(tx, web.Actor, "card", func(p *policy.Policy) error {
+			p.AgentCards = map[string]policy.Card{"agent_a": {Groups: map[string]policy.GroupGrant{policy.GroupRules: {}}, Tool: policy.PermRead}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a", Via: domain.ViaCLI}, Level: authz.LevelDelegate, CredentialAgentID: "agent_a"}
+	if _, err := e.svc.Review(bg, agent, jd, ShouldSee, ""); code(err) != domain.CodeConflict || e.d.calls != 0 || e.event(evID).Disposition != domain.DispositionIgnored {
+		t.Fatalf("agent: %v calls %d", err, e.d.calls)
+	}
+	if _, err := e.svc.Review(bg, web, jd, ShouldSee, ""); err != nil || e.event(evID).Disposition != domain.DispositionProposed {
+		t.Fatalf("owner: %v", err)
 	}
 }
 

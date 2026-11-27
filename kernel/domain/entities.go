@@ -207,14 +207,14 @@ type DeliveryOrigin struct {
 type RunCategory string
 
 const (
-	RunJudge      RunCategory = "judge"
-	RunGenerate   RunCategory = "generate"
+	RunJudge       RunCategory = "judge"
+	RunGenerate    RunCategory = "generate"
 	RunTask        RunCategory = "task"
 	RunBackground  RunCategory = "background"
 	RunSourceBatch RunCategory = "source_batch"
 	RunSource      RunCategory = "source"
-	RunTransform  RunCategory = "transform"
-	RunReader     RunCategory = "reader"
+	RunTransform   RunCategory = "transform"
+	RunReader      RunCategory = "reader"
 )
 
 type RunState string
@@ -306,11 +306,13 @@ type Source struct {
 	DefaultProject  string     `json:"default_project"`
 	Outbound        Outbound   `json:"outbound"`
 	// ContentRetentionDays 是来源原文保留天数；nil 不清理（默认），只在 Web 设（§6.15）。
-	ContentRetentionDays *int            `json:"content_retention_days,omitempty"`
-	Config               json.RawMessage `json:"config,omitempty"`
-	Cursor               string          `json:"cursor,omitempty"`
-	Enabled              bool            `json:"enabled"`
-	Stats                json.RawMessage `json:"stats,omitempty"`
+	ContentRetentionDays *int `json:"content_retention_days,omitempty"`
+	// HandlingMode 是本人给来源设的处理方式（§9.3）：HandlingNormal 或 HandlingRemindOnly。
+	HandlingMode string          `json:"handling_mode,omitempty"`
+	Config       json.RawMessage `json:"config,omitempty"`
+	Cursor       string          `json:"cursor,omitempty"`
+	Enabled      bool            `json:"enabled"`
+	Stats        json.RawMessage `json:"stats,omitempty"`
 }
 
 // Outbound 是来源内容可以送给模型端点的范围，按端点位置分别设置（§6.10、§14.14）。
@@ -329,6 +331,12 @@ func ValidOutboundScope(s string) bool {
 	return false
 }
 
+// 来源的处理方式（§9.3）。
+const (
+	HandlingNormal     = "normal"
+	HandlingRemindOnly = "remind_only" // 只口头提醒：进队列但不建建议
+)
+
 type Disposition string
 
 const (
@@ -342,6 +350,8 @@ const (
 	// DispositionDigest 汇入简报的"知会"一节，不建事项、不提醒；DispositionAlerted 已直接提醒本人（§6.10、§9.3）。
 	DispositionDigest  Disposition = "digest"
 	DispositionAlerted Disposition = "alerted"
+	// DispositionReminded 是已在批处理结论里口头提醒过，不建事项；之后仍可补建建议（§9.3）。
+	DispositionReminded Disposition = "reminded"
 )
 
 // 未判定的原因（§6.10 unjudged_reason）。

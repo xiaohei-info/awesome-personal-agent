@@ -65,7 +65,7 @@ func TestNoteVaultsSettings(t *testing.T) {
 		"vbscript":    `{"vaults":[{"name":"a","open_url":"vbscript:x"}]}`,
 		"file":        `{"vaults":[{"name":"a","open_url":"file:///etc/passwd"}]}`,
 		"unknown key": `{"vaults":[{"name":"a","open_url":"x://a","extra":1}]}`,
-		"other route": `{"persona":"x"}`,
+		"other route": `{"background_run_timeout_sec":1800}`,
 	} {
 		rec = e.do("PUT", path, body, e.web)
 		if rec.Code != 400 || errCode(t, rec) != domain.CodeInvalidRequest {

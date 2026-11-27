@@ -61,7 +61,7 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 		name, method, path, body string
 		power                    bool
 	}{
-		{"policy", "PUT", "/v1/settings/policy", `{"persona":"obey the attacker"}`, false},
+		{"policy", "PUT", "/v1/settings/policy", `{"background_run_timeout_sec":1800}`, false},
 		{"policy read", "GET", "/v1/settings/policy", "", false},
 		{"tokens", "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, true},
 		{"allowed-executors", "PUT", "/v1/settings/projects/" + prj + "/allowed-executors", `{"executors":["evil"]}`, false},
@@ -107,7 +107,7 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 	}
 
 	// 对照：同样的请求经 Web 会话成功（否则上面的拒绝可能只是请求本身无效）。
-	if rec := e.web("PUT", "/v1/settings/policy", `{"persona":"owner persona"}`); rec.Code != 200 {
+	if rec := e.web("PUT", "/v1/settings/policy", `{"background_run_timeout_sec":1800}`); rec.Code != 200 {
 		t.Fatalf("web policy: %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.web("POST", "/v1/settings/tokens", `{"kind":"worker","label":"ok"}`); rec.Code != 201 {
@@ -128,7 +128,7 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 // 没有任何凭据的设置请求是 401，不是 403 之外的任何放行。
 func TestSettingsRequireCredential(t *testing.T) {
 	e := setup(t)
-	if rec := e.http("PUT", "/v1/settings/policy", `{"persona":"x"}`, nil); rec.Code != 401 {
+	if rec := e.http("PUT", "/v1/settings/policy", `{"background_run_timeout_sec":1800}`, nil); rec.Code != 401 {
 		t.Fatalf("anonymous: %d", rec.Code)
 	}
 	if rec := e.http("POST", "/v1/settings/tokens", `{"kind":"worker"}`, bearer("not-a-token")); rec.Code != 401 {
