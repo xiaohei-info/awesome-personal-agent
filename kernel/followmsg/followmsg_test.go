@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1101,4 +1102,49 @@ func TestSourceUpdateRefreshesTimesUnlessChangedByHand(t *testing.T) {
 	if it.PlannedFor != "2027-01-01" || it.PlannedSlot != "08:00 - 08:30" || it.Deadline == nil || it.Deadline.Format(time.DateOnly) != "2027-01-02" {
 		t.Fatalf("hand edit must win %+v", it)
 	}
+}
+
+// 上游终态（§9.4）：合并、关闭、提醒完成挂到仍是建议、来源都指向该对象的事项上时自动关掉并留来源痕迹；
+// 已接受的事项、以及并进了别的对象的建议不动。
+func TestUpstreamEndedDropsOnlyUntouchedProposals(t *testing.T) {
+	e := newEnv(t)
+	for i, typ := range []string{"pr.merged", "pr.closed", "reminder.completed"} {
+		key := fmt.Sprintf("org/app#%d", i+1)
+		open, end := fmt.Sprintf("up-open-%d", i), fmt.Sprintf("up-end-%d", i)
+		e.emit(reply(open, "mail.received", key))
+		item := e.propose(open)
+		e.emit(reply(end, typ, key))
+
+		m := e.msg(end)
+		if it := e.item(item); it.Phase != domain.PhaseDropped || m.Item != item || m.Disposition != domain.DispositionAttached {
+			t.Fatalf("%s: item %s message %+v", typ, it.Phase, m)
+		}
+		pe := e.phaseEvents(item)
+		if last := pe[len(pe)-1]; last.Actor.Type != domain.ActorSystem || !strings.Contains(last.Reason, m.ID) || !strings.Contains(last.Reason, typ) {
+			t.Fatalf("%s: drop must name the source event: %+v", typ, last)
+		}
+	}
+
+	e.emit(reply("up-acc", "mail.received", "org/app#10"))
+	accepted := e.propose("up-acc")
+	e.must(owner, "item.transition", map[string]any{"id": accepted, "to": "open", "reason": "接受"})
+	e.emit(reply("up-acc-end", "pr.merged", "org/app#10"))
+	if it := e.item(accepted); it.Phase != domain.PhaseOpen || e.msg("up-acc-end").Item != accepted {
+		t.Fatalf("accepted item must stay: %s", it.Phase)
+	}
+
+	e.emit(reply("up-a", "mail.received", "org/app#11"), reply("up-b", "mail.received", "org/app#12"))
+	mixed := e.propose("up-a")
+	other := e.msg("up-b").ID
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, _, err := items.AddProposalSource(tx, mixed, other, nil, e.Now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.emit(reply("up-a-end", "pr.merged", "org/app#11"))
+	if it := e.item(mixed); it.Phase != domain.PhaseProposed {
+		t.Fatalf("a proposal that also covers another object must stay: %s", it.Phase)
+	}
+	e.noErrs()
 }

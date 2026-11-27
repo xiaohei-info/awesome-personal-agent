@@ -290,6 +290,7 @@ const (
 	SourcePull    SourceType = "pull"
 	SourceScript  SourceType = "script"
 	SourceWebhook SourceType = "webhook"
+	SourceCapture SourceType = "capture" // 对话捕获的内部来源，只用来存处理方式（§9.3）
 )
 
 // Source 是来源登记。SourceKind 是能力包规则匹配用的语义类型，内核只当字符串比较。

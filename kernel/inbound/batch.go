@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -223,13 +222,13 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 			return err
 		}
 		remindOnly := map[string]bool{}
-		srcs, err := registry.List(tx)
-		if err != nil {
-			return err
-		}
-		for _, src := range srcs {
-			if src.HandlingMode == domain.HandlingRemindOnly && slices.ContainsFunc(evs, func(e domain.SourceEvent) bool { return e.SourceID == src.ID }) {
-				remindOnly[src.ID] = true
+		for _, e := range evs {
+			mode, err := registry.HandlingMode(tx, e.SourceID)
+			if err != nil {
+				return err
+			}
+			if mode == domain.HandlingRemindOnly {
+				remindOnly[e.SourceID] = true
 			}
 		}
 		prompt := buildBatchPrompt(basePrompt, evs, remindOnly)
