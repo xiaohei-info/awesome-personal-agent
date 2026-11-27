@@ -634,3 +634,42 @@ pre.raw-text { margin: 6px 0; max-height: 32em; overflow: auto; font: 13px/1.5 v
 .item-pick-menu li[aria-selected="true"] small { color: inherit; opacity: .75; }
 .item-pick-menu li[data-picked="true"]:not([aria-selected="true"]) { background: var(--sunken); font-weight: 600; }
 .item-pick-empty { margin: 0; padding: 10px 12px; font-size: 13px; color: var(--ink-3); }
+
+/* 用量页：控制条、4 张数字卡（手机 2×2）、图与图例、横向条。颜色只用主题变量，不用朱砂。 */
+.usage-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; margin-bottom: 6px; }
+.usage-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.usage-card.panel { margin: 0; padding: 12px 14px; min-width: 0; overflow-wrap: anywhere; }
+main .usage-card h2 { margin: 0; font: 500 12px/1.5 var(--sans); color: var(--ink-3); }
+.usage-card b { display: block; margin: 2px 0; font: 600 19px/1.35 var(--serif); }
+.usage-card p { margin: 0; font-size: 12px; color: var(--ink-2); }
+.usage-card p > .usage-warn { display: block; }
+.usage-warn { color: var(--warn); }
+main .usage-trend h2, main .usage-split h2 { margin: 0 0 10px; }
+.usage-trend > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+main .usage-trend > header h2 { margin: 0; }
+.usage-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; padding: 0; list-style: none; font-size: 12px; color: var(--ink-2); }
+.usage-legend i, .usage-models i { display: inline-block; flex: none; width: 9px; height: 9px; margin-right: 5px; border-radius: 2px; }
+.usage-legend i.hollow { border: 2px solid var(--warn); border-radius: 50%; }
+.usage-picked { margin: 0; min-height: 3.3em; font-size: 12.5px; color: var(--ink-2); }
+.usage-split { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); margin-bottom: 14px; }
+.usage-split > .panel { min-width: 0; }
+.usage-list, .usage-models { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 13px; }
+.usage-list > li > div:first-child { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 10px; overflow-wrap: anywhere; }
+.usage-bar { display: flex; height: 7px; margin-top: 3px; border-radius: 3px; background: var(--sunken); overflow: hidden; }
+.usage-bar.silent { background: none; border: 1px dashed var(--line-2); }
+.usage-list + details { margin-top: 10px; }
+.usage-list + details .usage-list { margin-top: 10px; }
+.usage-donut { position: relative; width: 160px; margin: 0 auto 10px; }
+.usage-donut > b { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; font: 600 15px/1 var(--serif); }
+.usage-models > li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; overflow-wrap: anywhere; }
+.usage-models small { grid-column: 2; color: var(--ink-3); }
+.usage-models small .usage-warn { display: inline-block; margin-left: 6px; }
+.usage-empty { padding: 40px 16px; text-align: center; color: var(--ink-3); border: 1px dashed var(--line-2); border-radius: var(--r); }
+.usage-details > summary { cursor: pointer; }
+.usage-details table { display: block; overflow-x: auto; margin-top: 12px; }
+.usage-details th, .usage-details td { padding: 7px 10px; white-space: nowrap; }
+@media (max-width: 820px) {
+  .usage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .usage-controls fieldset.seg-radio label, .usage-details > summary, .usage-split summary { min-height: 44px; }
+  .usage-split summary, .usage-details > summary { align-content: center; }
+}
