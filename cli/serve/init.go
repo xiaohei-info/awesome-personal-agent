@@ -25,9 +25,11 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
+const initUsage = "usage: apa init [--reset-password] [--password-stdin]"
+
 func init() {
-	client.Register("init", initCmd)
-	client.Register("serve", serveCmd)
+	client.Register("init", initUsage, initCmd)
+	client.Register("serve", "usage: apa serve", serveCmd)
 	doctor.UseRegistry(registry)
 	doctor.UseConnectors(builtinConnectors)
 	backup.UseRegistry(registry) // `apa backup` 与启动时的升级前快照认同一份迁移链
@@ -51,7 +53,7 @@ func initCmd(c *client.Ctx, args []string) error {
 	fromStdin := fs.Bool("password-stdin", false, "")
 	reset := fs.Bool("reset-password", false, "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		return usage("invalid arguments for init", "usage: apa init [--reset-password] [--password-stdin]")
+		return usage("invalid arguments for init", initUsage)
 	}
 	home, err := config.ResolveHome(c.Env.Getenv, c.Env.UserHome)
 	if err != nil {

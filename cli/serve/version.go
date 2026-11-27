@@ -5,7 +5,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 )
 
-func init() { client.Register("version", versionCmd) }
+func init() { client.Register("version", "usage: apa version", versionCmd) }
 
 // schemaLedger 是 registry() 登记的全部迁移里最高的账本结构版本，即发布物的 `schema.ledger`。
 func schemaLedger() (int, error) {

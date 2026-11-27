@@ -26,8 +26,8 @@ const materialUsage = "usage: apa material add --repo R --path P [--project ID] 
 const blobUsage = "usage: apa blob put <file> | get <sha256> [--out FILE]"
 
 func init() {
-	client.Register("material", material)
-	client.Register("blob", blob)
+	client.Register("material", materialUsage, material)
+	client.Register("blob", blobUsage, blob)
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }

@@ -19,10 +19,10 @@ import (
 )
 
 func init() {
-	client.Register("item", item)
-	client.Register("today", today)
-	client.Register("propose", propose)
-	client.Register("inbox", inbox)
+	client.Register("item", itemHelp, item)
+	client.Register("today", "usage: apa today", today)
+	client.Register("propose", addUsage("propose"), propose)
+	client.Register("inbox", "usage: apa inbox", inbox)
 }
 
 var bg = context.Background()
@@ -30,6 +30,25 @@ var bg = context.Background()
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
 const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+
+// 各写子命令的完整用法：参数错误时放进 next，-h / --help 时整段输出。
+const (
+	updateUsage     = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --daily-at <HH:MM, empty clears; a planned date clears it> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
+	progressUsage   = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>]"
+	transitionUsage = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <note or result evidence> --version <n>]"
+	relateUsage     = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove]"
+)
+
+// itemHelp 是 `apa item … --help` 的输出：总览加各写子命令的全部参数。
+var itemHelp = strings.Join([]string{itemUsage, addUsage("item add"), updateUsage, progressUsage, transitionUsage, relateUsage}, "\n")
+
+func addUsage(name string) string {
+	u := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --planned-slot <HH:MM - HH:MM> --daily-at <HH:MM, no date> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
+	if name == "item add" {
+		u += " [--phase <phase>]"
+	}
+	return u + " [--evidence <note or result evidence>]"
+}
 
 func item(c *client.Ctx, args []string) error {
 	if len(args) == 0 {
@@ -163,13 +182,11 @@ var itemFields = []string{"kind", "title", "summary", "body", "status-label", "p
 
 // add 实现 item add 与 propose：POST /items。propose 不带 --phase，由内核缺省为 proposed。
 func add(c *client.Ctx, args []string, name string) error {
-	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --planned-slot <HH:MM - HH:MM> --daily-at <HH:MM, no date> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
+	hint := addUsage(name)
 	fields := itemFields
 	if name == "item add" {
 		fields = append([]string{"phase"}, fields...)
-		hint += " [--phase <phase>]"
 	}
-	hint += " [--evidence <note or result evidence>]"
 	f, _ := newForm(name, fields, []string{"idempotency-key"}, nil)
 	if _, err := f.parse(args, false, hint); err != nil {
 		return err
@@ -190,16 +207,16 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	switch sub {
 	case "update":
 		fields = itemFields[1:]
-		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --daily-at <HH:MM, empty clears; a planned date clears it> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
+		hint = updateUsage
 	case "progress":
 		fields = []string{"text", "on"}
-		hint = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>]"
+		hint = progressUsage
 	case "transition":
 		fields = []string{"to", "reason", "waiting-on"}
-		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <note or result evidence> --version <n>]"
+		hint = transitionUsage
 	case "relate":
 		fields, bools = []string{"to", "type", "reason", "key", "domain"}, []string{"remove"}
-		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove]"
+		hint = relateUsage
 	}
 	f, rm := newForm("item "+sub, fields, []string{"version", "idempotency-key"}, bools)
 	id, err := f.parse(args, true, hint)

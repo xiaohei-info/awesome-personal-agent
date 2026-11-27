@@ -15,7 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-func init() { client.Register("handback", handback) }
+func init() { client.Register("handback", handbackUsage, handback) }
 
 const handbackUsage = "usage: apa handback <message> --reason <text> [--idempotency-key <k>]"
 

@@ -11,7 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-func init() { client.Register("health", run) }
+func init() { client.Register("health", "usage: apa health [--pretty]", run) }
 
 type report struct {
 	Healthy bool `json:"healthy"`

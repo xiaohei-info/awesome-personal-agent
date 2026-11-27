@@ -15,7 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-func init() { client.Register("project", run) }
+func init() { client.Register("project", usageText, run) }
 
 const usageText = "usage: apa project list | show <id> | create --name N [--intro T] [--tag T]... [--status S] | " +
 	"update <id> [--name N] [--intro T] [--tag T]... [--status S] [--capture=bool] | " +

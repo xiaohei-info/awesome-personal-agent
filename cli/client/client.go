@@ -54,14 +54,17 @@ func OSEnv() Env {
 // Command 是一条子命令；args 不含子命令名自身。
 type Command func(c *Ctx, args []string) error
 
-var registry = map[string]Command{}
+var (
+	registry = map[string]Command{}
+	helps    = map[string]string{}
+)
 
-// Register 登记顶层子命令。各命令组在自己的文件 init() 里调用，入口不改。重名是编程错误。
-func Register(name string, cmd Command) {
+// Register 登记顶层子命令与它的用法（-h / --help 由入口统一应答）。各命令组在自己的文件 init() 里调用，入口不改。重名是编程错误。
+func Register(name, usage string, cmd Command) {
 	if _, dup := registry[name]; dup {
 		panic("client: duplicate command " + name)
 	}
-	registry[name] = cmd
+	registry[name], helps[name] = cmd, usage
 }
 
 // Ctx 是命令执行上下文。
@@ -164,7 +167,24 @@ func (c *Ctx) dispatch(args []string) error {
 	if !ok {
 		return usage("unknown command", "run `apa guide`; available commands: "+strings.Join(commandNames(), ", "))
 	}
+	if wantsHelp(args[1:]) { // 在任何命令代码之前应答：不读凭据、不连内核、不写任何东西
+		_, err := fmt.Fprintln(c.Env.Stdout, helps[args[0]])
+		return err
+	}
 	return cmd(c, args[1:])
+}
+
+func isHelp(a string) bool { return a == "-h" || a == "--help" }
+
+// wantsHelp：出现单独的 -h / --help。紧跟在不带 "=" 的 --flag 之后的可能是它的值（如 --text -h），不算帮助，
+// 免得一条写命令什么都没做却以 0 退出。
+func wantsHelp(args []string) bool {
+	for i, a := range args {
+		if isHelp(a) && (i == 0 || !strings.HasPrefix(args[i-1], "--") || strings.Contains(args[i-1], "=")) {
+			return true
+		}
+	}
+	return false
 }
 
 func commandNames() []string {

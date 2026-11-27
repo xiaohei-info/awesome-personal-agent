@@ -20,7 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-func init() { client.Register("agents", cmd) }
+func init() { client.Register("agents", usageHint, cmd) }
 
 const (
 	usageHint  = "usage: apa agents list|check|sync [--repo <remote url>] [--file <path>] [--host <name>]"

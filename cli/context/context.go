@@ -16,13 +16,15 @@ import (
 )
 
 func init() {
-	client.Register("context", run)
-	client.Register("persona", persona)
+	client.Register("context", contextUsage, run)
+	client.Register("persona", personaUsage, persona)
 }
 
 func usage(why, usageText string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, usageText)
 }
+
+const personaUsage = "usage: apa persona [--lang zh|en]"
 
 const contextUsage = "usage: apa context [--session ID] [--scope project|cwd|item|all] [--item ID] [--project ID] [--path DIR] [--host H] [--instruction N] [--format json|inject]"
 
@@ -120,7 +122,7 @@ func persona(c *client.Ctx, args []string) error {
 	fs.SetOutput(io.Discard)
 	lang := fs.String("lang", "", "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		return usage("invalid arguments for persona", "usage: apa persona [--lang zh|en]")
+		return usage("invalid arguments for persona", personaUsage)
 	}
 	q := url.Values{}
 	if *lang != "" {

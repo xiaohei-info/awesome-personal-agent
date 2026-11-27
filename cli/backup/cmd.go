@@ -11,7 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-func init() { client.Register("backup", backupCmd) }
+func init() { client.Register("backup", usageText, backupCmd) }
 
 // registryFn 供出内核当前装配的全部迁移；由 cli/serve 在 init 里登记（它是唯一装配内核的地方），避免本包反向依赖 serve。
 var registryFn func() (*store.Registry, error)

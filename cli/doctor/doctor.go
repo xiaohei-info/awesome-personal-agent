@@ -33,7 +33,7 @@ import (
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 )
 
-func init() { client.Register("doctor", doctorCmd) }
+func init() { client.Register("doctor", usageText, doctorCmd) }
 
 var registryFn func() (*store.Registry, error)
 

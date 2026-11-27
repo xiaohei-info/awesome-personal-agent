@@ -20,11 +20,11 @@ import (
 )
 
 func init() {
-	client.Register("executors", executors)
-	client.Register("delegate", delegate)
-	client.Register("report", report)
-	client.Register("declare", declare)
-	client.Register("dispatch", dispatch)
+	client.Register("executors", executorsUsage, executors)
+	client.Register("delegate", delegateUsage, delegate)
+	client.Register("report", reportUsage, report)
+	client.Register("declare", declareUsage, declare)
+	client.Register("dispatch", dispatchUsage, dispatch)
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
