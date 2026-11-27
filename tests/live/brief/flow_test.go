@@ -91,9 +91,9 @@ func TestFlowBrief(t *testing.T) {
 		ch := f.APIRaw("GET", "/v1/deliveries/next?wait=1", "", f.CHAN)
 		claimed := ch.Code == http.StatusOK && strings.Contains(ch.Body, `"brief"`)
 		// 新开 Hermes 会话（inject 插件在会话开始注入账本增量，简报标题在其中）。
-		ans := f.hermesChat("不要调用任何工具。逐字复述你在本次对话开头收到的“APA 账本增量”里出现的、以“brief ”开头的事项标题（形如 brief 2026-..）。没有就回答 NONE。")
+		ans := f.hermesChat("不要调用任何工具。逐字复述你在本次对话开头收到的“APA 账本增量”里出现的、以“简报 ”开头的事项标题（形如 简报 2026-..）。没有就回答 NONE。")
 		f.saveEvidence("act-brf-02-session.txt", ans)
-		injected := strings.Contains(ans, "brief 20")
+		injected := strings.Contains(ans, "简报 20")
 		f.evidence["ACT-BRF-02"] = map[string]any{"injected": injected, "web_unread": inWeb, "channel_claimed": claimed}
 		if !injected && !inWeb && !claimed {
 			t.Errorf("会话注入、Web 未读、渠道领取三者都没有简报: %s", ans)
@@ -132,7 +132,7 @@ func TestFlowBrief(t *testing.T) {
 				down++
 			}
 			// 标题是到期周期（UTC 分钟）：停机期间错过的周期，重启后最多补一份。
-			due, err := time.Parse("2006-01-02 15:04", strings.TrimPrefix(b.Title, "brief "))
+			due, err := time.Parse("2006-01-02 15:04", strings.TrimPrefix(b.Title, "简报 "))
 			if err == nil && !at.Before(back) && due.After(stop.Add(-time.Minute).UTC()) && due.Before(back.UTC()) {
 				caught++
 			}
@@ -224,7 +224,7 @@ func TestFlowBrief(t *testing.T) {
 		f.waitFor("两份已写回的复盘（真实模型每份要数分钟）", 25*time.Minute, func() bool {
 			periods = map[string]bool{}
 			for _, b := range f.briefs() {
-				if strings.HasPrefix(b.Title, "review") {
+				if strings.HasPrefix(b.Title, "复盘") {
 					if p, _ := b.Spec["period"].(string); p != "" {
 						periods[p] = true
 					}
@@ -235,7 +235,7 @@ func TestFlowBrief(t *testing.T) {
 		// 已写回 spec 的复盘，其运行可能还在收尾：等它们都离开 open 再断言最终阶段。
 		f.waitFor("复盘运行收尾", 10*time.Minute, func() bool {
 			for _, b := range f.briefs() {
-				if p, _ := b.Spec["period"].(string); strings.HasPrefix(b.Title, "review") && p != "" && b.Phase == "open" {
+				if p, _ := b.Spec["period"].(string); strings.HasPrefix(b.Title, "复盘") && p != "" && b.Phase == "open" {
 					return false
 				}
 			}
@@ -243,7 +243,7 @@ func TestFlowBrief(t *testing.T) {
 		})
 		final := map[string]string{}
 		for _, b := range f.briefs() {
-			if p, _ := b.Spec["period"].(string); strings.HasPrefix(b.Title, "review") && p != "" {
+			if p, _ := b.Spec["period"].(string); strings.HasPrefix(b.Title, "复盘") && p != "" {
 				final[b.Title] = b.Phase
 				for _, r := range f.runs("--target", b.ID) {
 					out, _ := os.ReadFile(filepath.Join(f.Home, "runs", r.ID, "output.txt"))

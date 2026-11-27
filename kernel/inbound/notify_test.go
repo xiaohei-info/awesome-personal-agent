@@ -69,6 +69,24 @@ func TestBatchResultNotificationAndDeliveryRouting(t *testing.T) {
 		t.Fatalf("expected delivery to agent route (inject or wake), got %q", deliveries[0].Route)
 	}
 
+	// "无需告知"整段不投递
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if err := att.SourceResult(tx, "run_quiet", "无需告知。\n"); err != nil {
+			return err
+		}
+		r, err := tx.Query(`SELECT 1 FROM delivery_delivery WHERE id = ?`, attention.BatchResultID("run_quiet"))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if r.Next() {
+			t.Error("nothing to tell must not be delivered")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// 2) 空输出：SettleBatch 用固定说明替代
 	var emptySummary string
 	e.svc.o.Batch.Notify = func(_ context.Context, _ domain.Run, summary string) error {

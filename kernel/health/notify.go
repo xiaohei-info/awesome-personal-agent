@@ -1,6 +1,7 @@
 package health
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,7 +11,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -76,7 +79,10 @@ func (n *Notifier) Sync(tx *store.Tx) error {
 		}
 		for _, en := range es {
 			after = en.Event.Seq
-			d, ok := alertNotice(en)
+			d, ok, err := alertNotice(tx, en)
+			if err != nil {
+				return err
+			}
 			if !ok {
 				continue
 			}
@@ -89,35 +95,82 @@ func (n *Notifier) Sync(tx *store.Tx) error {
 	return err
 }
 
-// alertNotice 把一条 health.alert 格式化成健康类提醒；初筛与起草失败不出投递。
-func alertNotice(en eventlog.Entry) (attention.Notice, bool) {
+// alertNotice 把一条 health.alert 按类别换成给本人看的健康类提醒：说清出了什么事、要做什么；原始原因只留健康页。
+// 本人无事可做的类别（初筛与起草失败、时钟迟到、回执被拒——执行者自己应重报）不出投递；认不出的类别照样提醒去健康页看。
+func alertNotice(tx *store.Tx, en eventlog.Entry) (attention.Notice, bool, error) {
 	e := en.Event
 	var p struct {
-		Kind string `json:"kind"`
+		Kind    string            `json:"kind"`
+		Code    domain.NoticeCode `json:"code"`
+		Item    string            `json:"item"`
+		Pack    string            `json:"pack"`
+		Dropped bool              `json:"dropped"`
 	}
 	if len(e.Payload) > 0 {
-		_ = json.Unmarshal(e.Payload, &p) // 墓碑化后没有内容：按通用格式出投递
+		_ = json.Unmarshal(e.Payload, &p) // 墓碑化后没有内容：按认不出的类别出投递
 	}
-	if p.Kind == ScreeningKind || p.Kind == DraftKind {
-		return attention.Notice{}, false
+	switch p.Kind {
+	case ScreeningKind, DraftKind, ClockLagKind, command.ReceiptKind:
+		return attention.Notice{}, false, nil
 	}
-	d := attention.Notice{
-		ID: fmt.Sprintf("health:%d", e.Seq), Item: e.Object, Class: domain.DeliveryHealth,
-		Content: domain.DeliveryContent{
-			Title:   "健康告警：" + e.Object,
-			Summary: e.Reason + "。修复入口见健康视图。",
-			WebURL:  "/health",
-		},
+	d := attention.Notice{ID: fmt.Sprintf("health:%d", e.Seq), Item: e.Object, Class: domain.DeliveryHealth}
+	say := func(title, action, url string) {
+		d.Content = domain.DeliveryContent{Title: title, Summary: action, WebURL: url}
 	}
-	if t, ok := chain.TripOf(en); ok {
-		d.Content.Title = "链路熔断：" + t.Object
-		d.Content.Summary = fmt.Sprintf("自动链路深度 %d 超过阈值 %d，已只记录、不再派发。需要继续时请在 Web 重新委派，新链路从头计数。",
-			t.Depth, t.Threshold)
-		if t.Object != t.Command { // 没有对象的命令拦下时，Object 是命令名，不是事项
-			d.Content.WebURL = "/items/" + t.Object
+	say("APA 有一处异常", "去健康页看", "/health")
+
+	// 告警说的是哪件事：有标题就用标题，链接指向它。
+	subject, itemURL := "", ""
+	for _, id := range []string{p.Item, e.Object} {
+		it, err := items.Get(tx, id)
+		if isNotFound(err) {
+			continue
 		}
+		if err != nil {
+			return d, false, err
+		}
+		subject, itemURL = "「"+it.Title+"」", "/items/"+it.ID
+		break
 	}
-	return d, true
+	named := cmp.Or(subject, "一条自动处理")
+
+	if t, ok := chain.TripOf(en); ok {
+		say(named+"连着触发太多层，已停下", fmt.Sprintf("超过 %d 层就只记录不派发 —— 要继续就在页面上重新委派", t.Threshold), cmp.Or(itemURL, "/health"))
+		return d, true, nil
+	}
+	switch {
+	case p.Kind == "source":
+		src, err := registry.Get(tx, e.Object)
+		if isNotFound(err) {
+			return d, true, nil
+		} else if err != nil {
+			return d, false, err
+		}
+		say("来源「"+cmp.Or(src.Name, src.ID)+"」已停用", "遇到无法自动恢复的问题 —— 去来源页看原因，修好后重新启用", "/sources/"+src.ID)
+	case p.Kind == "pack":
+		say("能力包「"+p.Pack+"」没加载上", "仍在用上一版 —— 去健康页看原因，改好后生效", "/health")
+	case p.Kind == "source_batch_blocked":
+		say("来源消息在排队，处理的 Agent 起不来", "去设置里检查处理来源的 Agent", "/settings/source-pipeline")
+	case p.Kind == "source_names":
+		say("有来源还没起名字", "先按类型命名了 —— 去来源页改成认得出的名字", "/sources")
+	case p.Kind == "rules_upgrade":
+		say("提醒类自动规则已改为自动执行", "不想要的可以到提醒设置里关掉", "/settings/notify")
+	case e.Reason == RuleFallbackReason:
+		say("一条自动处理规则改过内容，已暂停自动执行", "去设置里确认是否重新开启", "/settings/agents")
+	case p.Code == domain.NoticeResumeRefused:
+		say(named+"没能自动接着做", "去事项里决定是否重新派给 Agent", cmp.Or(itemURL, "/health"))
+	case p.Code == domain.NoticeModelUnset:
+		say(named+"没做：需要的模型还没接", "去模型设置接上", "/settings/models")
+	case p.Code == domain.NoticeModelsPaused:
+		say(named+"没做：模型已暂停", "去模型设置恢复", "/settings/models")
+	case p.Code == domain.NoticeOutboundBlocked:
+		say(named+"没做：内容不允许送给模型", "去来源页选外发范围", "/sources")
+	case p.Code != "" && p.Dropped:
+		say(named+"这一份没生成", "去定时安排点「立即跑一次」，或看事项里的原因", cmp.Or(itemURL, "/health"))
+	case p.Code != "":
+		say(named+"的自动处理没做成", "去事项里看原因，决定自己处理还是放弃", cmp.Or(itemURL, "/health"))
+	}
+	return d, true, nil
 }
 
 // PackRejected 记一条能力包加载失败的 health.alert，作为 packs.Options.OnReject 的落账函数；

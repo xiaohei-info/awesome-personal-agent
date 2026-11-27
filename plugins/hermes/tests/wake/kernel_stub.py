@@ -8,6 +8,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PLUGIN_TOKEN = "plugin-token"
+NOTICE_TITLE = "现在开始：写周报（到 15:00）"
+NOTICE_LINE = "- [写周报](https://apa.example/items/it1) —— 14:00–15:00 开始"
 
 
 class Kernel:
@@ -75,9 +77,9 @@ class Kernel:
 
     def wake(self, did="wake_r1", run="r1", version=1):
         self.deliveries.append({"id": did, "item": "it1", "run": run, "class": "wake", "route": "wake", "version": version,
-                                "content": {"title": f"wake {run}"}})
+                                "content": {"title": "写周报"}})
 
-    def notice(self, did="schedbatch:1", cls="reminder", title="到点提醒：1 件事", summary="· [14:00] 开始｜14:00 - 15:00 写周报（it1）"):
+    def notice(self, did="schedbatch:1", cls="reminder", title=NOTICE_TITLE, summary=NOTICE_LINE):
         """A run-less delivery on the wake route (the kernel's proactive reminder or a scheduled-task output)."""
         self.deliveries.append({"id": did, "item": "attention:schedule", "run": "", "class": cls, "route": "wake", "version": 1,
                                 "content": {"title": title, "summary": summary}})

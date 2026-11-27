@@ -1034,7 +1034,7 @@ func TestImportedEventsDoNotTriggerRules(t *testing.T) {
 func TestInstanceTitleUsesScheduleZone(t *testing.T) {
 	due := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
 	f := &Fired{Pack: "brief", Params: json.RawMessage(`{"schedule":"CRON_TZ=Asia/Shanghai 0 8 * * *"}`), Due: due}
-	if got := instanceTitle(f); got != "brief 2026-11-17 08:00" {
+	if got := instanceTitle(f); got != "简报 2026-11-17 08:00" {
 		t.Fatalf("title: %q", got)
 	}
 }

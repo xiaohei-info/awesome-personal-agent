@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 
@@ -44,7 +45,7 @@ func Main(ctx context.Context, env func(string) string, stderr io.Writer, st Sto
 		}
 		defer fb.Close()
 		fb.OnSend = func(b *fakebot.Bot, s fakebot.Sent) {
-			if len(s.Buttons) > 0 && len(s.Text) >= len(checkAnswerTitle) && s.Text[:len(checkAnswerTitle)] == checkAnswerTitle {
+			if len(s.Buttons) > 0 && strings.HasPrefix(s.Text, "【APA】"+checkAnswerTitle) {
 				b.Press(s.Chat, s.ID, models.User{ID: checkSenderID, Username: "check-user"}, s.Buttons[0])
 			}
 		}

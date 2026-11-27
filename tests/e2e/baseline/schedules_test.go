@@ -15,7 +15,7 @@ func TestDefaultSchedulesPaused(t *testing.T) {
 	e := Setup(t)
 	e.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub"}`, 200)
 	week := func() { e.TCAdvance(8 * 24 * 60 * 60) }
-	// 简报与复盘建的事项 kind 都是 brief，标题以包名开头。
+	// 简报与复盘建的事项 kind 都是 brief，标题以类别名开头。
 	briefs := func() string {
 		r := e.Apa(e.OBS, "", "item", "list", "--kind", "brief")
 		if r.Code != 0 {
@@ -43,7 +43,7 @@ func TestDefaultSchedulesPaused(t *testing.T) {
 	week()
 	if !e.WaitFor(30*time.Second, func() bool {
 		out := briefs()
-		return strings.Contains(out, `"title":"brief `) && strings.Contains(out, `"title":"review `)
+		return strings.Contains(out, `"title":"简报 `) && strings.Contains(out, `"title":"复盘 `)
 	}) {
 		t.Errorf("重新启用后拨一周应出现简报与复盘事项: %s\n%s", briefs(), e.ServiceLog())
 	}

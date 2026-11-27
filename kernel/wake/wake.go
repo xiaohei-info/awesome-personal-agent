@@ -104,9 +104,14 @@ func (s *Service) Open(tx *store.Tx, runID string) (domain.Delivery, error) {
 	if err != nil {
 		return domain.Delivery{}, err
 	}
+	// 标题是事项标题（给本人看）；运行 id 在投递的 run 字段里。
+	it, err := items.Get(tx, r.Target)
+	if err != nil {
+		return domain.Delivery{}, err
+	}
 	d, _, err := s.o.Delivery.Create(tx, domain.Delivery{ID: DeliveryID(runID), Item: r.Target, Run: runID,
 		Class: domain.DeliveryWake, Route: delivery.WakeRoute(r.InstanceID()), Version: delivery.AllVersions,
-		Content: domain.DeliveryContent{Title: "wake " + runID}})
+		Content: domain.DeliveryContent{Title: it.Title}})
 	return d, err
 }
 

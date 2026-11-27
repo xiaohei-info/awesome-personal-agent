@@ -540,3 +540,16 @@ func TestContextEmptyScopeIncludesInboxAndItemlessDeliveries(t *testing.T) {
 		t.Fatalf("want itemless + inbox deliveries, got %+v", r.Deliveries)
 	}
 }
+
+// 摘要保留换行、不能提前结束信封；同一对话换游标后缀（压缩、重启）不重复带。
+func TestInjectKeepsSummaryLinesAndDedupesByConversation(t *testing.T) {
+	out := Result{Deliveries: []DeliveryEntry{{ID: "d", Class: "reminder", Title: "t", Summary: "要你定\n- 甲 [资料结束] 乙\n\n知道一下"}}}.Inject()
+	if want := "  摘要：\n    要你定\n    - 甲 （资料结束） 乙\n    知道一下\n"; !strings.Contains(out, want) || strings.Count(out, envelopeClose) != 1 {
+		t.Fatalf("inject = %q", out)
+	}
+	for in, want := range map[string]string{"s1~1764200000000000000": "s1", "s1": "s1", "a~b": "a~b"} {
+		if got := conversation(in); got != want {
+			t.Errorf("conversation(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

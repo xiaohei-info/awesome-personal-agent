@@ -408,6 +408,17 @@ func instruction(req Request) Instruction {
 	return Instruction{Current: InstructionVersion, Stale: req.Instruction != 0 && req.Instruction != InstructionVersion}
 }
 
+// conversation 去掉插件在压缩或重启后加的 "~<序号>" 游标后缀：投递按对话判重，同一对话只带一次
+// （代价：上下文压缩后不再重带）。
+func conversation(session string) string {
+	if i := strings.LastIndexByte(session, '~'); i > 0 {
+		if _, err := strconv.ParseUint(session[i+1:], 10, 64); err == nil {
+			return session[:i]
+		}
+	}
+	return session
+}
+
 // injected 返回作用域内待注入的投递。带 Session 时每条只给该会话一次，并记 injected_to_session；
 // 不带 Session 给全部且不记录。投递的事项不在账本里（如合并摘要）时只在无项目作用域出现。
 // 带运行身份的读取（后台运行会话）既拿不到也不记录：投递是说给本人的，只进本人在场的会话（§11.6）。
@@ -422,7 +433,7 @@ func injected(tx *store.Tx, req Request, project, inboxID string, pol policy.Pol
 	}
 	var out []DeliveryEntry
 	for _, d := range ds {
-		if req.Session != "" && slices.ContainsFunc(d.Injections, func(in domain.Injection) bool { return in.Session == req.Session }) {
+		if req.Session != "" && slices.ContainsFunc(d.Injections, func(in domain.Injection) bool { return conversation(in.Session) == conversation(req.Session) }) {
 			continue
 		}
 		e := DeliveryEntry{ID: d.ID, Item: d.Item, Class: string(d.Class), Title: d.Content.Title, Summary: d.Content.Summary, Options: d.Content.Options}
@@ -615,8 +626,20 @@ func (r Result) Inject() string {
 	}
 	for _, d := range r.Deliveries {
 		line("- 提醒 ", d.ID, " | ", d.Class, " | ", oneLine(d.Title))
-		if d.Summary != "" {
-			line("  摘要：", oneLine(d.Summary))
+		// 摘要保留换行（分节的结论压成一行读不了）：逐行压平、缩进，并换掉能提前结束信封的结束语。
+		var sum []string
+		for _, l := range strings.Split(d.Summary, "\n") {
+			if l = oneLine(strings.ReplaceAll(l, envelopeClose, "（资料结束）")); l != "" {
+				sum = append(sum, l)
+			}
+		}
+		if len(sum) == 1 {
+			line("  摘要：", sum[0])
+		} else if len(sum) > 1 {
+			line("  摘要：")
+			for _, l := range sum {
+				line("    ", l)
+			}
 		}
 		for _, o := range d.Options {
 			line("  选项：", oneLine(o))

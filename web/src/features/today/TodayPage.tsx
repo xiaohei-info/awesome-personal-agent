@@ -182,6 +182,9 @@ export function TodayPage() {
   );
 }
 
+/** 提醒正文里的 Markdown 链接只留文字：这一行有自己的"打开"。 */
+const plainLinks = (s: string) => s.replace(/\[([^[\]]*)\]\((?:https?:\/\/|\/)[^()\s]*\)/g, "$1");
+
 /** 模板型运行的事项：成功就是结果本身（在简报页），只有没出来时才要本人知道。 */
 const TEMPLATE_KINDS = new Set(["brief", "routine"]);
 
@@ -283,7 +286,7 @@ function Reminders({ list }: { list: Reminder[] }) {
           <li key={d.id} className="act-row" aria-label={d.content.title}>
             <div>
               <span>{d.content.title}</span>
-              {d.content.summary && <span className="sub">{d.content.summary}</span>}
+              {d.content.summary && <span className="sub">{plainLinks(d.content.summary)}</span>}
               <span className="sub">
                 <Val k="deliveryClass" id={d.class} />
                 {d.suppressed && <> · <Val k="suppressed" id={d.suppressed} /></>}

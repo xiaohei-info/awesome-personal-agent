@@ -8,9 +8,9 @@ The plugin only
   4. keeps the credential in memory and hands it only to `apa_wake_cli`, which runs `apa` with APA_RUN/APA_TOKEN.
 The credential is never put in the message, the environment of the gateway, or other tools.
 
-Deliveries on the same route that carry no run (class reminder, brief or health: the kernel's proactive reminders and
+Deliveries on the same route that carry no run (class decision, reminder, brief or health: the kernel's proactive reminders and
 scheduled-task outputs routed to the main session, design §7.4) are notices, not runs: the plugin injects their facts
-(title and summary as the kernel wrote them) and acks; no credential is exchanged. The main session then acts with its
+(title, summary, options and link as the kernel wrote them) and acks; no credential is exchanged. The main session then acts with its
 own tools as in chat. A notice whose ack was lost is not injected twice by this process (it only re-acks).
 
 Explicit opt-in: the loop starts only when readiness.py finds nothing missing (APA_WAKE_SESSION_KEY names the main
@@ -94,25 +94,61 @@ def exchange(run_id):
 
 
 def message(d):
-    """Facts only; no credential, no instructions beyond how to reach the ledger as this run."""
+    """What it is for the person, then facts for the Agent: no credential, no instructions beyond how to reach the
+    ledger as this run. The first and last words are fixed: apa-capture cuts the whole block by them."""
     run, item = d["run"], d["item"]
     title = (d.get("content") or {}).get("title", "")
-    return (f"[APA wake] Background run {run} woke this session for item {item}. {title}\n"
+    what = f"后台任务要接着处理「{title}」" if title else "后台任务要接着处理一件事"
+    return (f"[APA wake] {what}\n———\n"
+            f"Agent 备查（不转给本人）：Background run {run} woke this session for item {item}.\n"
             f"Handle it as in chat: read `apa context`, then report. Run every apa command through the "
             f"`apa_wake_cli` tool with run_id={run}; it carries the run identity and the same permission card as this Agent.")
 
 
-NOTICE_KIND = {"reminder": "APA 提醒", "brief": "APA 简报", "health": "APA 需要你看一下"}
+NOTICE_KIND = {"decision": "APA 提醒", "reminder": "APA 提醒", "brief": "APA 简报", "health": "APA 需要你看一下"}
+# The one place that says how the main session relays a notice. It must end with "不必回复 APA。" (apa-capture).
+RELAY = ("只把横线前的内容转给本人：保留顺序和标题，不加 ID、命令名和系统内部词；一条推送一条回复，不夹带别的后台进展；"
+         "提醒里的事已经完成的，只说一句或不提；同一问题问过且没有变化，只说“仍在等你定”并带上选项；待决定必须带选项和推荐；"
+         "随上下文带来的处理结果，只提要本人定或要本人知道的，放在回答本人问题之后。要看详情、改期、标完成，照常用 apa 命令"
+         "（如 apa item show <事项 id>）。不必回复 APA。")
+
+
+def _choices(c):
+    """Decision options ("<id>: <label>") as numbered lines for the person, and the number-to-id map for the Agent."""
+    lines, ids, recommend = [], [], (c.get("recommend") or "").strip()
+    reason = recommend
+    for n, option in enumerate(c.get("options") or [], 1):
+        oid, sep, label = option.partition(": ")
+        mark = ""
+        if recommend == oid or recommend.startswith(oid + ": "):
+            mark, reason = "（推荐）", recommend[len(oid) + 2:]
+        lines.append(f"- {n} {label if sep else option}{mark}")
+        ids.append(f"{n}={oid}")
+    if reason:
+        lines.append(f"推荐理由：{reason}")
+    return lines, ids
 
 
 def notice(d):
-    """A run-less delivery as one short message: what it is, the kernel's lines, and what can be done next."""
+    """A run-less delivery in two parts: the kernel's lines for the person, then what only the Agent needs."""
     c = d.get("content") or {}
-    head = f"[{NOTICE_KIND.get(d.get('class'), 'APA')}] {c.get('title', '')}".rstrip()
-    body = (c.get("summary") or "").strip()
-    tail = ("这是 APA 主动推来的消息，转告本人即可；要看详情、改期、标完成，照常用 apa 命令"
-            "（如 apa item show <事项 id>）。不必回复 APA。")
-    return "\n".join(x for x in (head, body, tail) if x)
+    cls, title, summary = d.get("class"), (c.get("title") or "").strip(), (c.get("summary") or "").strip()
+    item, agent = d.get("item") or "", []
+    if item and ":" not in item:  # "attention:schedule" and the like are placeholders, not items
+        agent.append(f"事项 {item}")
+    if cls == "decision":
+        title = "要你定：" + title
+    body = [f"[{NOTICE_KIND.get(cls, 'APA')}] {title}".rstrip(), summary]
+    if cls == "decision":
+        lines, ids = _choices(c)
+        body += lines + ["要你做：选一个，或说别的想法"]
+        if ids:
+            agent.append("选项编号对应事项选项 " + "、".join(ids))
+    url = c.get("web_url") or ""
+    if url.startswith("http") and url not in summary:
+        body.append(f"详情 → {url}")
+    note = "Agent 备查（不转给本人）：" + "；".join(agent) + ("。" if agent else "")
+    return "\n".join(x for x in (*body, "———", note + RELAY) if x)
 
 
 def handle_notice(ctx, d, session_key):

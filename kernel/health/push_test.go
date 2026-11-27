@@ -326,7 +326,7 @@ func TestPushRunTimeoutUsesStoppedAtLimitCopy(t *testing.T) {
 		}
 		return row.Err()
 	})
-	if want := "运行到点停止，事项状态未变，可以继续。"; summary != want {
+	if want := "超过时限停下了，事项状态未变 —— 重跑还是放弃？"; summary != want {
 		t.Fatalf("summary %q, want %q", summary, want)
 	}
 }

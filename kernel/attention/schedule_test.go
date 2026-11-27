@@ -108,7 +108,7 @@ func TestScheduleDateOnlyAtWorkStart(t *testing.T) {
 	none(t, e.wakes(), "before work start")
 	e.to(local("2026-11-23", "09:00"))
 	d := onlyBatch(t, e.wakes(), 1)
-	if want := "· [09:00] 开始｜计划 2026-11-23 做 写周报（" + id + "）"; d.Content.Summary != want || d.Content.Title != "到点提醒：1 件事" {
+	if want := "- [写周报](/items/" + id + ") —— 计划今天做"; d.Content.Summary != want || d.Content.Title != "今天要做：写周报" {
 		t.Fatalf("content = %q / %q, want %q", d.Content.Title, d.Content.Summary, want)
 	}
 	e.to(local("2026-11-23", "12:00"))
@@ -123,7 +123,7 @@ func TestScheduleDailyTimeEveryDay(t *testing.T) {
 	id := e.item(map[string]any{"title": "喝水", "daily_at": "10:30"})
 	e.enable()
 	e.to(local("2026-11-23", "10:30"))
-	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "· [10:30] 开始｜每天 10:30 喝水（"+id+"）" {
+	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "- [喝水](/items/"+id+") —— 每天 10:30" {
 		t.Fatalf("summary = %q", d.Content.Summary)
 	}
 	e.to(local("2026-11-24", "10:29"))
@@ -144,7 +144,7 @@ func TestScheduleDateAndTimeExact(t *testing.T) {
 	e.to(local("2026-11-23", "13:59"))
 	none(t, e.wakes(), "13:59")
 	e.to(local("2026-11-23", "14:00"))
-	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "· [14:00] 开始｜14:00 - 15:00 评审（"+id+"）" {
+	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "- [评审](/items/"+id+") —— 14:00–15:00 开始" || d.Content.Title != "现在开始：评审（到 15:00）" {
 		t.Fatalf("summary = %q", d.Content.Summary)
 	}
 	e.to(local("2026-11-23", "15:00"))
@@ -163,7 +163,7 @@ func TestScheduleSlotStartAndEnd(t *testing.T) {
 	e.to(local("2026-11-23", "14:49"))
 	none(t, e.wakes(), "before end-lead")
 	e.to(local("2026-11-23", "14:50"))
-	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "· [14:50] 截止｜时段 14:00 - 15:00 结束 评审（"+id+"）" {
+	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "- [评审](/items/"+id+") —— 时段 14:00–15:00 到点，做完了就说一声" {
 		t.Fatalf("summary = %q", d.Content.Summary)
 	}
 
@@ -175,7 +175,7 @@ func TestScheduleSlotStartAndEnd(t *testing.T) {
 	f.to(local("2026-11-23", "14:30"))
 	none(t, f.wakes(), "start switch off")
 	f.to(local("2026-11-23", "15:00"))
-	if d := onlyBatch(t, f.wakes(), 1); !strings.Contains(d.Content.Summary, "截止｜") {
+	if d := onlyBatch(t, f.wakes(), 1); !strings.Contains(d.Content.Summary, "到点") {
 		t.Fatalf("summary = %q", d.Content.Summary)
 	}
 }
@@ -190,7 +190,7 @@ func TestScheduleNonWorkdayShifts(t *testing.T) {
 	e.to(local("2026-11-28", "09:01")) // 周六
 	none(t, e.wakes(), "saturday")
 	e.to(local("2026-11-30", "09:00")) // 周一
-	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "· [09:00] 开始｜计划 2026-11-28 做（非工作日，顺延到今天） 整理照片（"+id+"）" {
+	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "- [整理照片](/items/"+id+") —— 原计划 2026-11-28，非工作日顺延到今天（原定 11-30 09:00）" && d.Content.Summary != "- [整理照片](/items/"+id+") —— 原计划 2026-11-28，非工作日顺延到今天" {
 		t.Fatalf("summary = %q", d.Content.Summary)
 	}
 
@@ -245,7 +245,7 @@ func TestScheduleDedupWithinSixtyMinutes(t *testing.T) {
 	none(t, e.wakes(), "rescheduled 30 minutes later")
 	e.do(owner, "item.update", map[string]any{"id": id, "planned_slot": "15:10 - 15:30"})
 	e.to(local("2026-11-23", "15:10"))
-	if d := onlyBatch(t, e.wakes(), 1); !strings.Contains(d.Content.Summary, "15:10 - 15:30") {
+	if d := onlyBatch(t, e.wakes(), 1); !strings.Contains(d.Content.Summary, "15:10–15:30") {
 		t.Fatalf("summary = %q", d.Content.Summary)
 	}
 }
@@ -264,8 +264,62 @@ func TestScheduleQuietHoldsThenMerges(t *testing.T) {
 	none(t, e.wakes(), "quiet hours")
 	e.to(local("2026-11-23", "08:00"))
 	d := onlyBatch(t, e.wakes(), 2)
-	if l := lines(d); !strings.HasPrefix(l[0], "· [07:00] 开始｜每天 07:00 跑步") || !strings.HasPrefix(l[1], "· [07:30] 开始｜07:30 - 07:45 早会") {
+	if l := lines(d); !strings.HasPrefix(l[0], "- [跑步]") || !strings.HasPrefix(l[1], "- [早会]") || d.Content.Title != "到点提醒：跑步 等 2 件" {
 		t.Fatalf("lines = %q", l)
+	}
+}
+
+// 同一批里同一事项既有开始又有结束（静默、补发），只留结束那一行。
+func TestScheduleSameBatchKeepsOnlyTheEnd(t *testing.T) {
+	e := setup(t)
+	e.mainSession()
+	e.policy(func(p *policy.Policy) { p.Disturb.Quiet = &policy.Quiet{Start: "22:00", End: "08:00", Zone: "Local"} })
+	e.at(local("2026-11-23", "06:00"))
+	id := e.item(map[string]any{"title": "早会", "planned_for": "2026-11-23", "planned_slot": "07:00 - 07:30"})
+	e.enable()
+	e.to(local("2026-11-23", "07:00"))
+	e.to(local("2026-11-23", "07:30"))
+	e.to(local("2026-11-23", "08:00"))
+	if d := onlyBatch(t, e.wakes(), 1); d.Content.Summary != "- [早会](/items/"+id+") —— 时段 07:00–07:30 到点，做完了就说一声" {
+		t.Fatalf("summary = %q", d.Content.Summary)
+	}
+	e.advance(time.Minute)
+	none(t, e.wakes(), "the dropped start point must not come back")
+}
+
+// 同一个决策在对话里只说一次：事项被无关字段改动后手机层按新版本重发，Agent 层不重发；回答过再问是新的一次。
+func TestSameDecisionIsToldToTheAgentOnce(t *testing.T) {
+	e := setup(t)
+	e.mainSession()
+	e.matrix(map[string]policy.Target{policy.RowDecision: {Agent: policy.AgentMain, User: policy.UserDefault}})
+	e.toChannel()
+	e.matrix(map[string]policy.Target{policy.RowDecision: {Agent: policy.AgentMain, User: policy.UserDefault}})
+	id := e.asked(nil)
+	d := e.wakes()
+	if len(d) != 1 {
+		t.Fatalf("first = %+v", d)
+	}
+	e.do(owner, "item.update", map[string]any{"id": id, "tags": []string{"x"}})
+	if got := e.wakes(); len(got) != 1 {
+		t.Fatalf("not delivered yet, so it must not be skipped: %+v", got)
+	} else {
+		e.update(func(tx *store.Tx) error {
+			_, _, err := e.q.Ack(tx, got[0].ID, got[0].Version, "main-session")
+			return err
+		})
+	}
+	e.advance(time.Second)
+	e.drain("channel:chan")
+	e.do(owner, "item.update", map[string]any{"id": id, "tags": []string{"y"}})
+	none(t, e.wakes(), "same question already told")
+	if got := e.drain("channel:chan"); len(got) != 1 {
+		t.Fatalf("the phone layer is re-sent: %+v", got)
+	}
+	e.advance(time.Second)
+	e.do(owner, "decision.answer", map[string]any{"id": id, "choice": "A"})
+	e.ask(id, nil)
+	if got := e.wakes(); len(got) != 1 {
+		t.Fatalf("asked again after an answer: %+v", got)
 	}
 }
 
@@ -286,7 +340,7 @@ func TestScheduleDailyCapDefersToNextWorkStart(t *testing.T) {
 	e.to(local("2026-11-29", "09:00")) // 周日不是工作日
 	none(t, e.wakes(), "sunday")
 	e.to(local("2026-11-30", "09:00"))
-	if d := onlyBatch(t, e.wakes(), 2); !strings.Contains(d.Content.Summary, late) || !strings.Contains(d.Content.Summary, "11-27 10:00") {
+	if d := onlyBatch(t, e.wakes(), 2); !strings.Contains(d.Content.Summary, late) || !strings.Contains(d.Content.Summary, "（原定 11-27 10:00）") {
 		t.Fatalf("deferred batch = %q", d.Content.Summary)
 	}
 
@@ -318,7 +372,7 @@ func TestScheduleRescheduleVoidsOldReminder(t *testing.T) {
 	e.to(local("2026-11-23", "08:00"))
 	none(t, e.wakes(), "old point after reschedule")
 	e.to(local("2026-11-23", "09:30"))
-	if d := onlyBatch(t, e.wakes(), 1); !strings.Contains(d.Content.Summary, "09:30 - 09:45") {
+	if d := onlyBatch(t, e.wakes(), 1); !strings.Contains(d.Content.Summary, "09:30–09:45") {
 		t.Fatalf("summary = %q", d.Content.Summary)
 	}
 
@@ -427,18 +481,19 @@ func TestBriefGoesToMainSessionOnlyOnce(t *testing.T) {
 	none(t, e.wakes(), "same brief again")
 }
 
-// 复盘标明复盘；长正文给每节摘要与全文位置。
+// 复盘标题不重复类别；长正文给首节全文、其余节名与全文位置。
 func TestReviewLabelAndLongBodySummary(t *testing.T) {
 	e := setup(t)
 	e.mainSession()
 	long := strings.Repeat("- 一行很长的复盘内容，说明本周完成的事情与原因。\n", 80)
-	id := e.briefDone(map[string]any{"title": "review 2026-11-27", "origin": e.task("ins_r", "review"),
-		"spec": map[string]any{"period": "p", "sections": []map[string]any{{"title": "完成了什么", "body": long}}}})
+	id := e.briefDone(map[string]any{"title": "复盘 2026-11-27", "origin": e.task("ins_r", "review"),
+		"spec": map[string]any{"period": "p", "sections": []map[string]any{{"title": "建议先做", "body": "- 先交回执"}, {"title": "完成了什么", "body": long}}}})
 	d := e.wakes()
-	if len(d) != 1 || d[0].Content.Title != "【复盘】review 2026-11-27" {
+	if len(d) != 1 || d[0].Content.Title != "复盘 2026-11-27" {
 		t.Fatalf("review = %+v", d)
 	}
-	if want := "## 完成了什么\n- 一行很长的复盘内容，说明本周完成的事情与原因。\n- 一行很长的复盘内容，说明本周完成的事情与原因。\n……（本节共 80 行）\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：/items/" + id + "）"; d[0].Content.Summary != want {
+	// 第一节整节保留（不在行中间截断），其余节只留节名。
+	if want := "## 建议先做\n- 先交回执\n\n其余章节：完成了什么\n\n全文 → /items/" + id; d[0].Content.Summary != want {
 		t.Fatalf("summary = %q", d[0].Content.Summary)
 	}
 }
@@ -495,7 +550,7 @@ func TestTaskContentLongBodyPointsToItemURL(t *testing.T) {
 	long := strings.Repeat("- 一行很长的内容，说明事情与原因，凑够长度。\n", 80)
 	spec, _ := json.Marshal(map[string]any{"sections": []map[string]any{{"title": "今天", "body": long}}})
 	c := TaskContent(domain.Item{ID: "itm_x", Title: "t", Spec: spec}, "brief", "https://apa.example/items/itm_x")
-	if want := "\n\n（正文较长，以上是摘要；全文在 APA 的这件事项里：https://apa.example/items/itm_x）"; !strings.HasSuffix(c.Summary, want) {
+	if want := "\n\n全文 → https://apa.example/items/itm_x"; !strings.HasSuffix(c.Summary, want) {
 		t.Fatalf("summary tail = %q", c.Summary[len(c.Summary)-80:])
 	}
 }

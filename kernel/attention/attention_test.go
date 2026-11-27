@@ -1183,7 +1183,7 @@ func TestAgentAnswerPushesWhatItAnswered(t *testing.T) {
 	agent := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "cred_ag", Via: domain.ViaCLI}, Level: authz.LevelDelegate, CredentialAgentID: "ag"}
 	e.do(agent, "decision.answer", map[string]any{"id": id, "choice": "A"})
 	d := e.claim("channel:chan")
-	if d == nil || d.Class != domain.DeliveryReminder || !strings.HasPrefix(d.Content.Title, "Agent 替你答了") || !strings.HasSuffix(d.Content.Summary, "→ yes") || d.Content.WebURL != "/agent-changes" {
+	if d == nil || d.Class != domain.DeliveryReminder || !strings.HasPrefix(d.Content.Title, "Agent 替你答了") || !strings.HasPrefix(d.Content.Summary, "已按「yes」处理") || d.Content.WebURL != "/agent-changes" {
 		t.Fatalf("want one agent-answer reminder, got %+v", d)
 	}
 	e.do(owner, "item.update", map[string]any{"id": id, "title": "t2"})
