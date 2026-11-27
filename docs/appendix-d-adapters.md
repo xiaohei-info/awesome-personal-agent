@@ -209,6 +209,8 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 | `messages` | Anthropic Messages | Anthropic Messages API（`/v1/messages`），及讲同一形状的网关 | 版本头 `anthropic-version: 2023-06-01`，密钥放 `x-api-key`；`max_tokens` 固定 16384；输出工具名 `output`；裸根地址默认补 `/v1` |
 | `generate-content` | Google Gemini 原生 | Google Gemini 原生 API（`/v1beta/models/{model}:generateContent`），及讲同一形状的网关 | 密钥放 `x-goog-api-key`；`systemInstruction` 放系统段，`contents` 放用户段，`generationConfig` 设 `responseMimeType: "application/json"` 与 `responseJsonSchema`；响应过滤 `thought: true` 思考段，读取 `usageMetadata`，安全拦截或空候选报错；裸根地址默认补 `/v1beta`（已带 `/v1` 或 `/v1beta` 原样保留） |
 
+**`responses` 协议的思考强度与输出上限（实测，2026-11-27，经一个自建网关调用一个外部托管的推理模型）**：`reasoning.effort` 透传到上游并生效，设 `low` 后单次输出由不设时的上千到数万 token 降到约 235–1091 token、3.7–11.9 秒；`max_output_tokens` 被上游静默丢弃（请求上限 64 时仍输出 1091 token、状态 `completed`），内核因此不发它。
+
 **消息接口里结构化输出与思考的处理**。依据：[Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)、[Thinking in tool and multi-turn workflows](https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows)、[Define tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools)、[Claude Haiku 5.5 迁移指南](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide)。
 
 - 显式开启的手动思考（`thinking: {type: "enabled"}`）不接受强制工具调用（`tool_choice` 为 `any` 或指名工具），会返回错误。内核因此不带 `thinking` 字段。
