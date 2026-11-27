@@ -529,7 +529,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 - 邮件线程关联键一律带尖括号；`apple-pim-source` 以前写出的无尖括号键不改写，升级后的回信不再与升级前按旧写法建出的 iCloud 类邮件事项按线程键相连（通知邮件仍可按 `owner/repo#N` 相连）。通知邮件新增 `owner/repo#N` 关联键。`apple-pim-source` 事件的 `headers` 改为原始邮件的全部信头。来源程序要换新版本。
 - 本人事项关闭时不再把挂靠消息退回判断流（委派事项不变）；`owner/repo#N` 在本去重域无命中时跨域匹配。
-- 判断模板新增 `inbound-triage/triage-urgent`（第二题，默认带 0.15–0.80，判断记录用途仍是 `inbound_urgent`）；`triage-screen` 去掉 `event_stats` 与第二题判据。覆盖了 `inbound-triage` 的同名包要自带 `triage-urgent`，否则急不急一题不问、一律按普通进队列。按模板名设过的 `triage-screen` 不确定带与影子模式只作用于第一题。`source_pipeline.judge_prompt` 只代替第一题的判据；原来写在里面的紧急判据不再生效。
+- 判断模板新增 `inbound-triage/triage-urgent`（第二题，默认带 0.15–0.80，判断记录用途仍是 `inbound_urgent`）；`triage-screen` 去掉 `event_stats` 与第二题判据。覆盖了 `inbound-triage` 的同名包要自带 `triage-urgent`，否则急不急一题不问、一律按普通进队列。按模板名设过的 `triage-screen` 不确定带与影子模式只作用于第一题。`source_pipeline.judge_prompt` 只代替第一题的判据；原来写在里面的紧急判据不再生效。`source_pipeline` 新增 `owner_identity`（字符串，默认空，上限同两份提示词），两道题的判据后都附它；`judge_prompt` 整段原样作第一题判据，内核不拆段，原来写在里面的本人身份要移到 `owner_identity`，第二题判据与 stats 字样要删掉。
 - 来源规则 `where[]` 新增 `contains`、`prefix`；`GET /packs` 的每个包增 `source_rules`。
 
 账本结构版本 13（来源处理方式与下掉语气设置，2026-11-27，主文档 §9.3）：`sources_registry_source` 新增 `handling_mode TEXT NOT NULL DEFAULT 'normal'`，不回填、不改已有数据。新增来源事件处置 `reminded`、命令 `inbound.remind` 与 `source.set_handling_mode`、路由 `POST /source-events/{id}/remind`、命令行 `apa source remind`。破坏性改动：`apa persona`、`GET /context/persona` 与策略段 `persona`、`persona_lang` 删除（`PUT` 带它们为 400）；已存策略版本里的旧值原样保留、读取时忽略；已装的旧版插件读语气失败时放行。`source_pipeline.judge_prompt` 的含义从"附在内置判据后"改为"整段代替内置判据"；内置判据并入 `triage-screen` 模板的 `criteria`。

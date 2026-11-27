@@ -29,6 +29,8 @@ const zh = {
 
   judgeTitle: "判断标准（哪些值得处理）",
   judgeHint: "修改后只影响之后新进来的消息。",
+  identityTitle: "本人身份",
+  identityHint: "写名字、昵称、常用邮箱，用来认出消息是不是在找你。两道题都参考，只影响之后的新消息。",
   batchPromptTitle: "给处理 Agent 的说明",
   batchPromptHint: "修改后从下一批开始生效。",
   promptTooLong: (max: number) => `最多 ${max} 个字`,
@@ -127,6 +129,8 @@ const en: typeof zh = {
 
   judgeTitle: "Screening criteria (worth handling)",
   judgeHint: "Applies to new messages going forward.",
+  identityTitle: "Who you are",
+  identityHint: "Your name, nicknames and usual emails, to tell if a message is aimed at you. Both questions use it; new messages only.",
   batchPromptTitle: "Instructions for the handling Agent",
   batchPromptHint: "Applies from the next batch.",
   promptTooLong: (max) => `At most ${max} characters`,

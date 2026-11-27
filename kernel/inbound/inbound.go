@@ -558,7 +558,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 }
 
 // judgeCalls 构造统一 judge 的两道是非题（§9.3）：内置包 inbound-triage 的 triage-screen 问"要不要处理"（未定按 yes），
-// triage-urgent 问"急不急"（未定按 no）。来源处理设置里可编辑的判据只用于第一题。recipients 是邮件的收件信头。
+// triage-urgent 问"急不急"（未定按 no）。来源处理设置里可编辑的判据只用于第一题，本人身份两题共用。recipients 是邮件的收件信头。
 func (s *Service) judgeCalls(src domain.Source, ev domain.SourceEvent, hint, recipients string, o domain.Outbound, pol policy.Policy) (q1, q2 direct.JudgeCall) {
 	// 当前时间取到小时：它进指纹，同一小时内的批量预取与逐条作答仍复用同一结果。
 	in := eventInput(src, ev, hint, map[string]any{"now": s.o.Now().In(time.Local).Format("2006-01-02T15:00-07:00 Monday")})
@@ -567,12 +567,12 @@ func (s *Service) judgeCalls(src domain.Source, ev domain.SourceEvent, hint, rec
 	q1 = direct.JudgeCall{
 		Pack: DefaultPack, Template: Template, Input: in, MaterialSource: mat,
 		Subject: ev.ID, Source: src.ID, Scope: scope,
-		UnjudgedOnUnavailable: true, Criteria: pol.SourcePipeline.JudgePrompt,
+		UnjudgedOnUnavailable: true, Criteria: pol.SourcePipeline.JudgePrompt, Identity: pol.SourcePipeline.OwnerIdentity,
 	}
 	q2 = direct.JudgeCall{
 		Pack: DefaultPack, Template: UrgentTemplate, Use: UseUrgent,
 		Input: in, MaterialSource: mat,
-		Subject: ev.ID, Source: src.ID, Scope: scope,
+		Subject: ev.ID, Source: src.ID, Scope: scope, Identity: pol.SourcePipeline.OwnerIdentity,
 	}
 	return q1, q2
 }

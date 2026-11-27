@@ -100,6 +100,16 @@ describe("设置 › 来源处理", () => {
     );
   });
 
+  it("本人身份单独保存，不混进判断标准", async () => {
+    const s = server();
+    open(s.impl);
+    const card = await screen.findByRole("region", { name: "本人身份" });
+    await userEvent.type(within(card).getByRole("textbox", { name: "本人身份" }), "  昵称阿江  ");
+    await userEvent.click(within(card).getByRole("button", { name: /^保存/ }));
+    await waitFor(() => expect(s.puts.at(-1)?.body.source_pipeline.owner_identity).toBe("昵称阿江"));
+    expect(s.puts.at(-1)?.body.source_pipeline.judge_prompt).toBeUndefined();
+  });
+
   it("提示词框填着生效的全文；恢复默认只换框里内容，保存与默认相同的内容按没改过存", async () => {
     const s = server({ batch_prompt: "我的说明" });
     open(s.impl);

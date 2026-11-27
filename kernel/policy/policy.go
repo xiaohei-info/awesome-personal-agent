@@ -122,6 +122,7 @@ type SourcePipeline struct {
 	MaxRetries      *int   `json:"max_retries,omitempty"`
 	DailyBatchLimit int    `json:"daily_batch_limit,omitempty"`
 	JudgePrompt     string `json:"judge_prompt,omitempty"`
+	OwnerIdentity   string `json:"owner_identity,omitempty"`
 	BatchPrompt     string `json:"batch_prompt,omitempty"`
 }
 
@@ -658,6 +659,9 @@ func normalizeSourcePipeline(sp *SourcePipeline) error {
 	}
 	if len([]rune(sp.JudgePrompt)) > MaxPipelinePrompt {
 		return invalid("source_pipeline judge_prompt exceeds %d characters", MaxPipelinePrompt)
+	}
+	if len([]rune(sp.OwnerIdentity)) > MaxPipelinePrompt {
+		return invalid("source_pipeline owner_identity exceeds %d characters", MaxPipelinePrompt)
 	}
 	if len([]rune(sp.BatchPrompt)) > MaxPipelinePrompt {
 		return invalid("source_pipeline batch_prompt exceeds %d characters", MaxPipelinePrompt)

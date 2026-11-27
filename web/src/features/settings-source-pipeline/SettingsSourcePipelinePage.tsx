@@ -20,6 +20,7 @@ export interface SourcePipeline {
   max_retries?: number;
   daily_batch_limit?: number;
   judge_prompt?: string;
+  owner_identity?: string;
   batch_prompt?: string;
 }
 
@@ -80,6 +81,7 @@ export function SettingsSourcePipelinePage() {
             field="criteria"
             onSave={(text) => save({ judge_prompt: text })}
           />
+          <IdentityCard sp={sp} save={save} />
           <PromptCard
             title={t.batchPromptTitle}
             hint={t.batchPromptHint}
@@ -206,6 +208,17 @@ function PromptEditor({ title, hint, value, builtin, onSave }: PromptProps & { b
           <button type="button" className="quiet" onClick={() => setText(builtin)}>{t.resetDefault}</button>
         )}
       </div>
+    </Card>
+  );
+}
+
+function IdentityCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) {
+  const t = useT(strings);
+  const [text, setText, dirty] = useDraft(sp.owner_identity ?? "", () => sp.owner_identity ?? "");
+  const submit = () => (text.trim().length > MAX_PROMPT ? reject(t.promptTooLong(MAX_PROMPT)) : save({ owner_identity: text.trim() }));
+  return (
+    <Card title={t.identityTitle} hint={t.identityHint} dirty={dirty} onSave={submit}>
+      <textarea rows={6} aria-label={t.identityTitle} value={text} onChange={(e) => setText(e.target.value)} />
     </Card>
   );
 }

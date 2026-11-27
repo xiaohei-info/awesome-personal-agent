@@ -79,6 +79,7 @@ func setupUnifiedJudgeEnv(t *testing.T, cls *spyClassifier, chat *spyChat, extra
 				p.GenerateEndpoint = policy.GenerateEndpoint{URL: "http://chat.local", Model: "m", Locality: policy.LocalityLocal}
 			}
 			p.SourcePipeline.JudgePrompt = judgePrompt
+			p.SourcePipeline.OwnerIdentity = "昵称阿江"
 			return nil
 		})
 		return err
@@ -175,7 +176,10 @@ func TestUnifiedJudgeTwoQuestionsAndUndecidedDefaults(t *testing.T) {
 	for i, q := range cls.batches[0] {
 		// 本人改过的判断标准整段代替第一题的内置判据；第二题用自己的判据。题面里的安全约定不受影响。
 		urgent := strings.HasPrefix(q.Question, "这条来源事件需要今天之内")
-		if (q.Criteria == "发票和报销单都算需要处理") == urgent || !strings.Contains(q.Question, "安全约定") ||
+		if strings.Contains(q.Criteria, "昵称阿江") == false {
+			t.Fatalf("question %d: owner identity is shared by both questions: %q", i, q.Criteria)
+		}
+		if strings.HasPrefix(q.Criteria, "发票和报销单都算需要处理") == urgent || !strings.Contains(q.Question, "安全约定") ||
 			urgent && !strings.Contains(q.Criteria, "已经恢复的告警") {
 			t.Fatalf("question %d: judge_prompt applies to Q1 only: %q / %q", i, q.Criteria, q.Question)
 		}

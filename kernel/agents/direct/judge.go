@@ -68,6 +68,8 @@ type JudgeCall struct {
 	UnjudgedOnUnavailable bool
 	// Criteria 非空时代替模板判据（本人在设置页改过的判断标准）；模板正文里的安全边界不受影响。
 	Criteria string
+	// Identity 非空时附在判据后面（本人身份，用来判断事件是否与本人有关），两道题共用。
+	Identity string
 	// OnUndecided 非空时覆盖模板的保守默认（如 judge 第一题取 yes、第二题取 no）。
 	OnUndecided string
 }
@@ -267,10 +269,14 @@ func (p *pending) question() string {
 }
 
 func (p *pending) criteria() string {
-	if c := strings.TrimSpace(p.c.Criteria); c != "" {
-		return c
+	c := strings.TrimSpace(p.c.Criteria)
+	if c == "" {
+		c = strings.TrimSpace(p.meta.Criteria)
 	}
-	return strings.TrimSpace(p.meta.Criteria)
+	if id := strings.TrimSpace(p.c.Identity); id != "" {
+		c += "\n\n本人身份（用来判断事件是否与本人有关，例如群聊是否点名本人）：\n" + id
+	}
+	return c
 }
 
 func (p *pending) onUndecided() string {
