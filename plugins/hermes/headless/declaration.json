@@ -2,30 +2,34 @@
   "harness": "hermes",
   "name": {"zh": "Hermes", "en": "Hermes"},
   "headless": {
-    "command": ["hermes", "chat", "--oneshot", "-q", "{prompt}"],
+    "command": ["hermes", "chat", "--oneshot", "--reasoning", "medium", "-q", "{prompt}"],
     "output": ["--format", "stream-json"],
     "final_text": "$.text",
     "usage": {"file": "usage.json", "input": "$.input_tokens", "output": "$.output_tokens", "cache_read": "$.cache_read_tokens", "cache_write": "$.cache_write_tokens", "model": "$.model"},
     "session": {"extract": "$.session_id"},
     "resume": ["--resume", "{session_id}"],
     "access": {
-      "read": ["-t", "apa,web"],
-      "edit": ["-t", "apa,web,file,terminal,delegation"],
-      "full": ["--yolo", "-t", "apa,web,file,terminal,delegation"]
+      "read": ["-t", "apa,no_mcp"],
+      "edit": ["-t", "apa,file,terminal,no_mcp"],
+      "full": ["--yolo", "-t", "apa,file,terminal,no_mcp"]
     },
+    "no_persona": ["--ignore-rules"],
     "tools": {
-      "read": [{"zh": "APA", "en": "APA"}, {"zh": "网页", "en": "Web"}],
-      "edit": [{"zh": "APA", "en": "APA"}, {"zh": "网页", "en": "Web"}, {"zh": "文件", "en": "Files"}, {"zh": "终端", "en": "Terminal"}, {"zh": "委派", "en": "Delegation"}],
-      "full": [{"zh": "APA", "en": "APA"}, {"zh": "网页", "en": "Web"}, {"zh": "文件", "en": "Files"}, {"zh": "终端", "en": "Terminal"}, {"zh": "委派", "en": "Delegation"}]
+      "read": [{"zh": "APA", "en": "APA"}],
+      "edit": [{"zh": "APA", "en": "APA"}, {"zh": "文件", "en": "Files"}, {"zh": "终端", "en": "Terminal"}],
+      "full": [{"zh": "APA", "en": "APA"}, {"zh": "文件", "en": "Files"}, {"zh": "终端", "en": "Terminal"}]
     },
     "tool_notes": {"full": {"zh": "不再逐项问你", "en": "Stops asking you each time"}},
     "credential": "env",
-    "exit_codes": {"ok": [0], "session_missing": [1]},
-    "exit_output": {"session_missing": ["No session found matching"]}
+    "exit_codes": {"ok": [0], "session_missing": [1, 2]},
+    "exit_output": {"session_missing": ["No session found matching", "Resume retains gateway session policy"]}
   },
   "instance_options": {
-    "fields": {"model": {"label": {"zh": "模型", "en": "Model"}, "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._:/@+-]*", "display_as": "model"}},
-    "args_if_set": {"model": ["--model", "{model}"]}
+    "fields": {
+      "model": {"label": {"zh": "模型", "en": "Model"}, "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._:/@+-]*", "display_as": "model"},
+      "reasoning": {"label": {"zh": "后台思考强度（不选为 medium）", "en": "Background thinking effort (medium if unset)"}, "type": "enum", "choices": ["minimal", "low", "medium", "high", "xhigh"]}
+    },
+    "args_if_set": {"model": ["--model", "{model}"], "reasoning": ["--reasoning", "{reasoning}"]}
   },
   "main_session": {}
 }

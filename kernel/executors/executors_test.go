@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -59,6 +60,24 @@ func TestSameHostCardsResolveIndependently(t *testing.T) {
 			}
 			if selected.Card.Rev > 0 && (selected.AccessReason("edit") == "" || len(selected.Args) != 2 || selected.Args[1] != selected.Snapshot.ConfiguredModel || selected.Env["HOST_MODEL"] != selected.Card.Name) {
 				t.Fatalf("wrong options or inherited privileges: %+v", selected)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 默认不带人格和记忆：拉起参数追加声明的 headless.no_persona；本人开了就不追加。
+	declaration.Headless.NoPersona = []string{"--bare"}
+	e.must(t, owner, "executor.register", declaration)
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		for persona, want := range map[bool]bool{false: true, true: false} {
+			pol.BackgroundPersona = persona
+			selected, err := Resolve(tx, pol, Selection{})
+			if err != nil {
+				return err
+			}
+			if slices.Contains(selected.Args, "--bare") != want {
+				t.Fatalf("persona=%v args=%v", persona, selected.Args)
 			}
 		}
 		return nil

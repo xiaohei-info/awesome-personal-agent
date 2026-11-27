@@ -27,7 +27,7 @@ func TestDeclarationIsAcceptedByKernel(t *testing.T) {
 		}
 	}
 	// The tool list shown to the owner must match the -t toolsets: edit/full grant a terminal.
-	if d.Name == nil || d.Name.Zh != "Hermes" || len(h.Tools["edit"]) != 5 || h.Tools["edit"][3].Zh != "终端" || h.ToolNotes["full"].Zh == "" {
+	if d.Name == nil || d.Name.Zh != "Hermes" || len(h.Tools["edit"]) != 3 || h.Tools["edit"][2].Zh != "终端" || h.ToolNotes["full"].Zh == "" {
 		t.Fatalf("name/tools for the Agent card: %+v %+v %+v", d.Name, h.Tools, h.ToolNotes)
 	}
 	// Hermes exits 1 on every failure; only the measured "No session found" text marks a lost session.
@@ -39,6 +39,8 @@ func TestDeclarationIsAcceptedByKernel(t *testing.T) {
 		"deleted or unknown session": {1, "Error: No session found matching 'local-0f3a'. Use 'hermes sessions list' to see available sessions", true},
 		"model endpoint unreachable": {1, "custom didn't respond in time on any of 3 attempts\n\nProvider said: Connection error.", false},
 		"storage error":              {1, "Error: storage_unavailable", false},
+		"resume with changed flags":  {2, "Error: Resume retains gateway session policy; creation overrides are unsupported on resume. -t/--toolsets differs", true},
+		"other usage error":          {2, "Error: Unsupported gateway CLI options: --x", false},
 		"interrupted":                {130, "No session found matching 'x'", false},
 	}
 	for name, c := range lost {

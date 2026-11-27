@@ -17,7 +17,7 @@ def test_declaration_is_accepted_by_the_kernel_parser():
 def test_kernel_argv_per_tier_and_resume():
     decl = json.loads((HEADLESS / "declaration.json").read_text())
     read = kernel_argv(decl, "do it", "read")
-    assert read[:5] == ["hermes", "chat", "--oneshot", "-q", "do it"] and "--format" in read
+    assert read[:7] == ["hermes", "chat", "--oneshot", "--reasoning", "medium", "-q", "do it"] and "--format" in read
     assert "terminal" not in read[read.index("-t") + 1] and "--yolo" not in read
     assert "terminal" in kernel_argv(decl, "p", "edit")[-1] and "--yolo" not in kernel_argv(decl, "p", "edit")
     assert "--yolo" in kernel_argv(decl, "p", "full")

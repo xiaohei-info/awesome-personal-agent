@@ -65,15 +65,17 @@ type Session struct {
 
 // Headless 是无头运行声明（A.2）。Command 是命令模板，只作数据保存。
 type Headless struct {
-	Command    []string            `json:"command"`
-	Output     []string            `json:"output,omitempty"`
-	FinalText  string              `json:"final_text,omitempty"`
-	Usage      *UsageSource        `json:"usage,omitempty"`
-	Session    Session             `json:"session"`
-	Resume     []string            `json:"resume,omitempty"`
-	Access     map[string][]string `json:"access"`
-	Credential string              `json:"credential,omitempty"`
-	ExitCodes  map[string][]int    `json:"exit_codes,omitempty"`
+	Command   []string            `json:"command"`
+	Output    []string            `json:"output,omitempty"`
+	FinalText string              `json:"final_text,omitempty"`
+	Usage     *UsageSource        `json:"usage,omitempty"`
+	Session   Session             `json:"session"`
+	Resume    []string            `json:"resume,omitempty"`
+	Access    map[string][]string `json:"access"`
+	// NoPersona 是本人没开"后台运行带人格和记忆"时追加的标志（附录 A.2）；未声明表示这个宿主不区分。
+	NoPersona  []string         `json:"no_persona,omitempty"`
+	Credential string           `json:"credential,omitempty"`
+	ExitCodes  map[string][]int `json:"exit_codes,omitempty"`
 	// ExitOutput 收窄 exit_codes 的同名语义：声明后，还要求 stdout 或 stderr 含其中任一片段（附录 A.2）。
 	ExitOutput map[string][]string `json:"exit_output,omitempty"`
 	// Tools 与 ToolNotes 只供界面展示每一档给 Agent 的工具（附录 A.2），内核不解释。
@@ -542,6 +544,9 @@ func (h *Headless) validate() error {
 		if !l.valid() {
 			return invalid("headless.tool_notes.%s needs both zh and en", tier)
 		}
+	}
+	if slices.Contains(h.NoPersona, "") {
+		return invalid("headless.no_persona has an empty element")
 	}
 	if h.Credential != "" && h.Credential != "env" && h.Credential != "file" {
 		return invalid("headless.credential must be env or file")

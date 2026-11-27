@@ -63,7 +63,7 @@ No tool takes the owner's words, a grant or a session kind: the kernel decides f
 
 `APA_REQUIRE_LIVE=1 HERMES_SRC=<hermes checkout> python3 -m pytest -q plugins/hermes/tests/tools/test_tools_live.py`
 
-## Read tier (`-t apa,web`)
+## Read tier (`-t apa,no_mcp`)
 
 Hermes has no read-only file toolset, and task runs with `access: read` (brief, review, guideline-draft) must still read
 `{materials_path}` and write their result back. The `apa` toolset covers that without `file` or `terminal`:
