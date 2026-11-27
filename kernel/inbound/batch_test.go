@@ -43,7 +43,7 @@ func registerBatchAgent(t *testing.T, e *env, sp policy.SourcePipeline) (*spyBat
 		Headless: &executors.Headless{
 			Command: []string{"/bin/echo", "{prompt}"},
 			Session: executors.Session{Extract: "--session-id"},
-			Access:  map[string][]string{"read": {}, "edit": {}},
+			Access:  map[string][]string{"read": {}, "edit": {}, "full": {}},
 		},
 	}
 	e.must("executor.register", decl)
@@ -382,5 +382,34 @@ func TestBatchBlockedWritesOneHealthAlert(t *testing.T) {
 	}
 	if q.dispatched != 1 || alerts() != 1 {
 		t.Fatalf("recovered: dispatched=%d alerts=%d", q.dispatched, alerts())
+	}
+}
+
+// 未指定处理 Agent：用默认 Agent 和它权限卡上的工具档位，不借主 Agent 更高的权限。
+func TestBatchWithoutAgentUsesDefaultAgentNotMain(t *testing.T) {
+	e := setupUnifiedJudgeEnv(t, nil, nil, "", "")
+	registerBatchAgent(t, e, policy.SourcePipeline{BatchSize: 1})
+	res := e.must("agent.configure", map[string]any{"harness": "stub-harness", "name": "daily", "enabled": true})
+	var card struct{ ID string }
+	if err := json.Unmarshal(res, &card); err != nil || card.ID == "" {
+		t.Fatalf("card: %s %v", res, err)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "roles", func(p *policy.Policy) error {
+			main := "legacy:stub-harness"
+			p.DefaultAgentID, p.MainAgentID = &card.ID, &main
+			p.AgentCards = map[string]policy.Card{main: {Tool: "full"}, card.ID: {Tool: "edit"}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	enqueueEvent(t, e, "ev_d", runner.LevelNormal, "x", e.now)
+	if err := e.svc.TickQueue(bg); err != nil {
+		t.Fatal(err)
+	}
+	if r := latestBatchRun(t, e).Run; r.AgentID != card.ID || r.Access != "edit" {
+		t.Fatalf("agent=%s access=%s", r.AgentID, r.Access)
 	}
 }

@@ -81,21 +81,6 @@ func (s *Service) batchPromptTemplate() (packs.Prompt, bool) {
 	return packs.Prompt{}, false
 }
 
-// resolveBatchAgent 解析来源批处理使用的无头 Agent：优先策略 source_pipeline.agent，其次主 Agent，再其次默认 Agent。
-func resolveBatchAgent(tx *store.Tx, pol policy.Policy) (executors.Selected, error) {
-	if pol.SourcePipeline.Agent != "" {
-		return executors.Resolve(tx, pol, executors.Selection{Item: pol.SourcePipeline.Agent})
-	}
-	sel, err := executors.Resolve(tx, pol, executors.Selection{Runner: "main_session"})
-	if err != nil {
-		return sel, err
-	}
-	if sel.Reason != "" && pol.MainAgentID == nil {
-		return executors.Resolve(tx, pol, executors.Selection{})
-	}
-	return sel, nil
-}
-
 // buildBatchPrompt 组装批处理提示词：正文取本人在设置页自定义的说明或内置模板正文，后面只附本批事件的元信息
 // （事件 id、来源、类型、时间、等级），绝不打包事件正文或原文（§9.3、§13.6）。
 func buildBatchPrompt(base string, evs []domain.SourceEvent) string {
@@ -168,7 +153,8 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 				return err
 			}
 		}
-		selected, err = resolveBatchAgent(tx, pol)
+		// 没指定处理 Agent 时与其他后台运行同一口径：默认 Agent（default_agent_id），不借主会话的身份与权限（§9.3）。
+		selected, err = executors.Resolve(tx, pol, executors.Selection{Item: pol.SourcePipeline.Agent})
 		return err
 	}); err != nil {
 		return err
