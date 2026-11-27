@@ -383,8 +383,12 @@ func instruction(req Request) Instruction {
 }
 
 // injected 返回作用域内待注入的投递。带 Session 时每条只给该会话一次，并记 injected_to_session；
-// 不带 Session（运行者读取）给全部且不记录。投递的事项不在账本里（如合并摘要）时只在无项目作用域出现。
+// 不带 Session 给全部且不记录。投递的事项不在账本里（如合并摘要）时只在无项目作用域出现。
+// 带运行身份的读取（后台运行会话）既拿不到也不记录：投递是说给本人的，只进本人在场的会话（§11.6）。
 func injected(tx *store.Tx, req Request, project, inboxID string, pol policy.Policy) ([]DeliveryEntry, error) {
+	if req.Reader.Run != "" {
+		return nil, nil
+	}
 	q := delivery.New(delivery.Options{})
 	ds, err := q.Injectable(tx)
 	if err != nil {

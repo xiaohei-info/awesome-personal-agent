@@ -2,6 +2,7 @@
 // 状态机：pending → claimed（租约）→ delivered（ext 回报送达）→ acknowledged（本人确认）；
 // 失败按退避重试（默认 1、3、7、15、30 分钟共 5 次），超限或无人领取转 fallback_web（Web 未读）；
 // 本人确认只有 Confirm 一个入口（Web 点击、Web/聊天/渠道回答），任何未作废的状态都能转 acknowledged，包括退回 Web 的 fallback_web；
+// 注入路由的投递没有领取方：不算积压，超过无人领取时限后注入过会话的收尾为 delivered，没注入过的转 Web 未读；
 // 事项变化后旧版本转 superseded，被本人直接回答的那条记 acknowledged。注入只记 injections，不改状态。
 // 本包只管投递表，在调用方事务内读写；内核不主动推送，何时产出投递由触达决定。
 package delivery
@@ -429,7 +430,14 @@ func (q *Queue) Supersede(tx *store.Tx, item string, below int64) (int64, error)
 // Sweep 把可领已超过 UnclaimedAfter 仍无人领取的投递转 fallback_web，返回条数：
 // pending 的可领时间（新建为创建时间，失败后为退避到期时间）已过期太久，
 // 以及领取后租约过期仍不回报的 claimed（消费者崩溃）。
+// 注入路由上已经带进过对话的不算无人领取：同样过了时限就收尾为 delivered（不再带给新会话，也不进 Web 未读），不计入返回值。
 func (q *Queue) Sweep(tx *store.Tx) (int64, error) {
+	if _, err := tx.Exec(`UPDATE delivery_delivery SET state = 'delivered', next_attempt_at = 0
+		WHERE route = ? AND state = 'pending' AND next_attempt_at <= ?
+		AND EXISTS (SELECT 1 FROM delivery_injection WHERE delivery_id = delivery_delivery.id)`,
+		RouteInject, ns(q.o.Now().Add(-q.o.UnclaimedAfter))); err != nil {
+		return 0, err
+	}
 	return tx.Exec(`UPDATE delivery_delivery SET state = 'fallback_web', next_attempt_at = 0, lease_until = 0
 		WHERE (state = 'pending' AND next_attempt_at <= ?) OR (state = 'claimed' AND lease_until <= ? AND created_at <= ?)`,
 		ns(q.o.Now().Add(-q.o.UnclaimedAfter)), ns(q.o.Now()), ns(q.o.Now().Add(-q.o.UnclaimedAfter)))
@@ -457,7 +465,7 @@ func (q *Queue) Inject(tx *store.Tx, id, session string) (domain.Delivery, error
 // Injectable 返回注入路由上尚未确认或作废的投递，供 apa context 带上。"下次对话时带上"不因一直没有对话而丢：
 // 无人领取转了 Web 未读（Sweep）但还没注入过任何会话、本人也没在 Web 读过的，下一次对话照样带上一次。
 func (q *Queue) Injectable(tx *store.Tx) ([]domain.Delivery, error) {
-	return q.list(tx, `WHERE route = ? AND (state IN ('pending', 'claimed', 'delivered')
+	return q.list(tx, `WHERE route = ? AND (state IN ('pending', 'claimed')
 		OR state = 'fallback_web' AND read_at = 0 AND NOT EXISTS (SELECT 1 FROM delivery_injection WHERE delivery_id = delivery_delivery.id))
 		ORDER BY created_at, rowid`, RouteInject)
 }
@@ -468,8 +476,9 @@ func (q *Queue) Unread(tx *store.Tx) ([]domain.Delivery, error) {
 }
 
 // Backlog 返回还没送出的投递（pending 与 claimed），按创建顺序；健康视图只读。
+// 注入路由在等下一次对话，不是积压。
 func (q *Queue) Backlog(tx *store.Tx) ([]domain.Delivery, error) {
-	return q.list(tx, "WHERE state IN ('pending','claimed') ORDER BY created_at, rowid")
+	return q.list(tx, "WHERE state IN ('pending','claimed') AND route != ? ORDER BY created_at, rowid", RouteInject)
 }
 
 // SupersedeID 作废一条还没被领取的投递（pending，含退避等待中的），返回条数；已领取、已送达或已终结的不动。

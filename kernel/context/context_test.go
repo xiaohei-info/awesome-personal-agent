@@ -405,6 +405,32 @@ func TestInjectRoutedDeliveriesOncePerSession(t *testing.T) {
 	}
 }
 
+// 带运行身份的读取（后台运行会话）拿不到注入投递，也不写注入记录；之后本人在场的会话照样带上。
+func TestRunIdentityDoesNotConsumeInjections(t *testing.T) {
+	e := setup(t)
+	item := e.item(t, map[string]any{"title": "x"})
+	q := delivery.New(delivery.Options{})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, _, err := q.Create(tx, domain.Delivery{ID: "d1", Item: item, Class: domain.DeliveryReminder, Route: delivery.RouteInject, Version: 1,
+			Content: domain.DeliveryContent{Title: "result"}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range []Request{{Session: "bg", Reader: Reader{Run: "run_x"}}, {Reader: Reader{Run: "run_x"}}} {
+		if r := e.build(t, req); len(r.Deliveries) != 0 {
+			t.Fatalf("a run session got deliveries: %+v", r.Deliveries)
+		}
+	}
+	var d domain.Delivery
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { d, err = q.Get(tx, "d1"); return }); err != nil || len(d.Injections) != 0 {
+		t.Fatalf("injection recorded for a run: %+v %v", d.Injections, err)
+	}
+	if r := e.build(t, Request{Session: "main"}); len(r.Deliveries) != 1 {
+		t.Fatalf("the main session must still get it: %+v", r.Deliveries)
+	}
+}
+
 // ACT-BGG-03：事项上有排队中（算在途）的运行时，context 的事项条目与注入文本都给出在途运行提示。
 func TestInFlightRunIsHinted(t *testing.T) {
 	e := setup(t)

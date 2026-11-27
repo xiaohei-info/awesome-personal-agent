@@ -433,6 +433,32 @@ func TestInjectDoesNotAcknowledge(t *testing.T) {
 	}
 }
 
+// 等下一次对话的投递不是积压；过了无人领取时限，带进过对话的收尾为 delivered，没带过的转 Web 未读且仍等下一次对话。
+func TestInjectRouteIsNotBacklogAndSweepsByInjection(t *testing.T) {
+	e := newEnv(t, Options{})
+	e.create("seen", "i1", RouteInject, 1)
+	e.create("unseen", "i2", RouteInject, 1)
+	e.update(func(tx *store.Tx) error { _, err := e.q.Inject(tx, "seen", "main"); return err })
+	var list []domain.Delivery
+	e.view(func(tx *store.Tx) (err error) { list, err = e.q.Backlog(tx); return })
+	if len(list) != 0 {
+		t.Fatalf("waiting for the next conversation is not backlog: %+v", list)
+	}
+	e.now = e.now.Add(time.Hour)
+	e.update(func(tx *store.Tx) error { _, err := e.q.Sweep(tx); return err })
+	if s, u := e.get("seen").State, e.get("unseen").State; s != domain.DeliveryDelivered || u != domain.DeliveryFallbackWeb {
+		t.Fatalf("seen=%s unseen=%s", s, u)
+	}
+	e.view(func(tx *store.Tx) (err error) { list, err = e.q.Unread(tx); return })
+	if len(list) != 1 || list[0].ID != "unseen" {
+		t.Fatalf("unread: %+v", list)
+	}
+	e.view(func(tx *store.Tx) (err error) { list, err = e.q.Injectable(tx); return })
+	if len(list) != 1 || list[0].ID != "unseen" {
+		t.Fatalf("injectable: %+v", list)
+	}
+}
+
 // 投递写在调用方事务内：事务回滚则投递一并回滚。
 func TestRollback(t *testing.T) {
 	e := newEnv(t, Options{})
