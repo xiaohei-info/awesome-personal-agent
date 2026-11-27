@@ -52,7 +52,7 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
     expect(within(rows[1]).getByLabelText("发送者")).toHaveTextContent("mallory");
     expect(within(rows[1]).getByLabelText("核实状态")).toHaveTextContent("未核实");
     expect(within(rows[1]).getByLabelText("Agent 后台运行能否读到")).toHaveTextContent("Agent 后台运行读不到");
-    expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("待转给 Agent");
+    expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("未确认，可交回");
     // T17：未核实的发件人加进名单也不生效，不给入口
     expect(within(rows[1]).queryByRole("link", { name: "加入可读名单" })).toBeNull();
     // 已核实但不在名单里：入口指向该来源的「信任的发件人」，带上要加的人
