@@ -88,7 +88,7 @@ func TestMidBodyIsCopiedWhole(t *testing.T) {
 func TestOutboundPreviewAppliesScope(t *testing.T) {
 	body := numbered(20000)
 	ev := domain.SourceEvent{ID: "sev_o9", SourceID: "src_x", Type: "x.obd", Subject: "范围先于预算", Detail: body, Link: "https://example.test/a"}
-	pv := OutboundPreview(ev)
+	pv := OutboundPreview(ev, "")
 	full, excerpt, meta := pv["full"], pv["excerpt"], pv["meta"]
 	if len([]rune(full.Material)) < 10000 {
 		t.Fatalf("full preview too short: %d", len([]rune(full.Material)))

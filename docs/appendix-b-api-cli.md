@@ -525,6 +525,13 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 ## B.6 v0.2.0 对已有契约的改动
 
+来源处理线小改（2026-11-27，主文档 §9.3、§9.4、附录 D.2）不改账本结构、不迁移：
+
+- 邮件线程关联键一律带尖括号；`apple-pim-source` 以前写出的无尖括号键不改写，升级后的回信不再与升级前按旧写法建出的 iCloud 类邮件事项按线程键相连（通知邮件仍可按 `owner/repo#N` 相连）。通知邮件新增 `owner/repo#N` 关联键。`apple-pim-source` 事件的 `headers` 改为原始邮件的全部信头。来源程序要换新版本。
+- 本人事项关闭时不再把挂靠消息退回判断流（委派事项不变）；`owner/repo#N` 在本去重域无命中时跨域匹配。
+- 判断模板新增 `inbound-triage/triage-urgent`（第二题，默认带 0.15–0.80，判断记录用途仍是 `inbound_urgent`）；`triage-screen` 去掉 `event_stats` 与第二题判据。覆盖了 `inbound-triage` 的同名包要自带 `triage-urgent`，否则急不急一题不问、一律按普通进队列。按模板名设过的 `triage-screen` 不确定带与影子模式只作用于第一题。`source_pipeline.judge_prompt` 只代替第一题的判据；原来写在里面的紧急判据不再生效。
+- 来源规则 `where[]` 新增 `contains`、`prefix`；`GET /packs` 的每个包增 `source_rules`。
+
 账本结构版本 13（来源处理方式与下掉语气设置，2026-11-27，主文档 §9.3）：`sources_registry_source` 新增 `handling_mode TEXT NOT NULL DEFAULT 'normal'`，不回填、不改已有数据。新增来源事件处置 `reminded`、命令 `inbound.remind` 与 `source.set_handling_mode`、路由 `POST /source-events/{id}/remind`、命令行 `apa source remind`。破坏性改动：`apa persona`、`GET /context/persona` 与策略段 `persona`、`persona_lang` 删除（`PUT` 带它们为 400）；已存策略版本里的旧值原样保留、读取时忽略；已装的旧版插件读语气失败时放行。`source_pipeline.judge_prompt` 的含义从"附在内置判据后"改为"整段代替内置判据"；内置判据并入 `triage-screen` 模板的 `criteria`。
 
 账本结构版本 12（token 用量统计，2026-11-27，主文档 §8.6）：新模块 `usage` 的迁移 1 建表 `usage_record` 与两个索引；不改已有表、不回填，数据从升级后开始记。只做加法：新增路由 `GET /usage`；无头运行声明增可选字段 `headless.usage`（附录 A.2），未声明的 Agent 运行记为未回报——已生效的旧声明没有它，插件重新提交且本人在 Web 确认后才开始记用量。**升级顺序**：先升级内核再换插件（旧内核拒收带未知字段的声明）。**回滚**：账本从 v11 升到 v12 不可原地降级；回滚须同时恢复旧二进制、旧插件与升级前备份的账本快照。

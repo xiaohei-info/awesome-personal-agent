@@ -92,8 +92,8 @@ describe("设置 › 来源处理", () => {
     );
 
     await screen.findByDisplayValue("内置判断标准");
-    const judgeCard = screen.getByRole("region", { name: "判断标准（哪些值得处理、哪些算紧急）" });
-    await userEvent.type(await screen.findByRole("textbox", { name: "判断标准（哪些值得处理、哪些算紧急）" }), "  报销和合同都算紧急  ");
+    const judgeCard = screen.getByRole("region", { name: "判断标准（哪些值得处理）" });
+    await userEvent.type(await screen.findByRole("textbox", { name: "判断标准（哪些值得处理）" }), "  报销和合同都算紧急  ");
     await userEvent.click(within(judgeCard).getByRole("button", { name: /^保存/ }));
     await waitFor(() =>
       expect(s.puts.at(-1)?.body.source_pipeline.judge_prompt).toBe("内置判断标准  报销和合同都算紧急"),
@@ -103,8 +103,8 @@ describe("设置 › 来源处理", () => {
   it("提示词框填着生效的全文；恢复默认只换框里内容，保存与默认相同的内容按没改过存", async () => {
     const s = server({ batch_prompt: "我的说明" });
     open(s.impl);
-    expect(await screen.findByRole("textbox", { name: "判断标准（哪些值得处理、哪些算紧急）" })).toHaveValue("内置判断标准");
-    const judge = within(screen.getByRole("region", { name: "判断标准（哪些值得处理、哪些算紧急）" }));
+    expect(await screen.findByRole("textbox", { name: "判断标准（哪些值得处理）" })).toHaveValue("内置判断标准");
+    const judge = within(screen.getByRole("region", { name: "判断标准（哪些值得处理）" }));
     expect(judge.queryByRole("button", { name: "恢复默认" })).toBeNull();
     const box = await screen.findByRole("textbox", { name: "给处理 Agent 的说明" });
     const batch = within(screen.getByRole("region", { name: "给处理 Agent 的说明" }));
@@ -136,7 +136,7 @@ describe("设置 › 来源处理", () => {
       expect(s.puts.at(-1)?.body.source_pipeline).toMatchObject({ max_retries: 4, daily_batch_limit: 15 }),
     );
 
-    const bandCard = screen.getByRole("region", { name: "拿不准的范围" });
+    const bandCard = screen.getByRole("region", { name: "要不要处理：拿不准的范围" });
     const lo = within(bandCard).getByLabelText("下限");
     await userEvent.clear(lo);
     await userEvent.type(lo, "0.2");
@@ -146,6 +146,19 @@ describe("设置 › 来源处理", () => {
         url: "/v1/settings/judgment",
         body: { bands: [{ template: "triage-screen", low: 0.2, high: 0.6 }] },
       }),
+    );
+    // 急不急一题默认放行上限 0.80，单独保存，不盖掉另一题刚存的值。
+    const urgent = screen.getByRole("region", { name: "急不急：拿不准的范围" });
+    const hi = within(urgent).getByLabelText("上限");
+    expect(hi).toHaveValue(0.8);
+    await userEvent.clear(hi);
+    await userEvent.type(hi, "0.9");
+    await userEvent.click(within(urgent).getByRole("button", { name: /^保存/ }));
+    await waitFor(() =>
+      expect(s.puts.at(-1)?.body.bands).toEqual([
+        { template: "triage-screen", low: 0.2, high: 0.6 },
+        { template: "triage-urgent", low: 0.15, high: 0.9 },
+      ]),
     );
   });
 

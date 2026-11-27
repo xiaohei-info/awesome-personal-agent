@@ -362,7 +362,7 @@ func TestOutboundPreviewMatchesWhatIsSent(t *testing.T) {
 	ev := domain.SourceEvent{ID: "sev_p", SourceID: "mail", Type: "message", Subject: "renewal", Sender: "a@example.com",
 		Summary: "please confirm", Detail: strings.Repeat("长", registry.ExcerptChars+20), Link: "https://docs.example.com/x?token=t",
 		OccurredAt: time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC), Messages: []domain.EventMessage{{Sender: "b@example.com", Text: "follow-up"}}}
-	pv := OutboundPreview(ev)
+	pv := OutboundPreview(ev, "")
 	if len(pv) != 3 {
 		t.Fatalf("preview has full, excerpt and meta only: %v", pv)
 	}

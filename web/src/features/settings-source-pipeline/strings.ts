@@ -27,7 +27,7 @@ const zh = {
   waitBad: "等待分钟数要是 1 到 1440 的整数",
   maxBatchBad: "每批最多条数要是 1 到 100 的整数",
 
-  judgeTitle: "判断标准（哪些值得处理、哪些算紧急）",
+  judgeTitle: "判断标准（哪些值得处理）",
   judgeHint: "修改后只影响之后新进来的消息。",
   batchPromptTitle: "给处理 Agent 的说明",
   batchPromptHint: "修改后从下一批开始生效。",
@@ -90,8 +90,10 @@ const zh = {
   retriesBad: "重试次数要是 0 到 10 的整数",
   dailyBad: "每天批数上限要是 0 到 1000 的整数",
 
-  bandTitle: "拿不准的范围",
-  bandHint: "判断得分落在这个区间内时按需要处理，留待复核。",
+  bandTitle: "要不要处理：拿不准的范围",
+  bandHint: "得分在区间内再复核一次，仍没结论按需要处理。",
+  urgentBandTitle: "急不急：拿不准的范围",
+  urgentBandHint: "高于上限直接算急；区间内再复核，没结论按不急。",
   bandLow: "下限",
   bandHigh: "上限",
   bandBad: "填 0 到 1 之间的两个数，且下限不大于上限",
@@ -123,7 +125,7 @@ const en: typeof zh = {
   waitBad: "Wait minutes must be an integer from 1 to 1440",
   maxBatchBad: "Max per batch must be an integer from 1 to 100",
 
-  judgeTitle: "Screening criteria (worth handling, urgent)",
+  judgeTitle: "Screening criteria (worth handling)",
   judgeHint: "Applies to new messages going forward.",
   batchPromptTitle: "Instructions for the handling Agent",
   batchPromptHint: "Applies from the next batch.",
@@ -184,8 +186,10 @@ const en: typeof zh = {
   retriesBad: "Retries must be an integer from 0 to 10",
   dailyBad: "Daily batch limit must be an integer from 0 to 1000",
 
-  bandTitle: "Uncertain score band",
-  bandHint: "Scores inside this range are kept for handling rather than dropped.",
+  bandTitle: "Worth handling: uncertain band",
+  bandHint: "Scores inside the band are rechecked; still unsure means handle it.",
+  urgentBandTitle: "Urgency: uncertain band",
+  urgentBandHint: "Above the high end is urgent; inside is rechecked, else not urgent.",
   bandLow: "Low",
   bandHigh: "High",
   bandBad: "Enter two numbers between 0 and 1, with low <= high",

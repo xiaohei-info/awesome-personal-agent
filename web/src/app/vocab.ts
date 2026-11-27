@@ -186,6 +186,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   ruleClass: { reminder: { label: "提醒我" }, action: { label: "替我动手" } },
   judgeUse: {
     inbound_screen: { label: "来源消息值不值得看" },
+    inbound_urgent: { label: "来源消息急不急" },
     capture_prescreen: { label: "聊天里有没有要记的事" },
     risk_screen: { label: "要不要你亲自确认" },
     delivery_defer: { label: "决策能不能晚点送" },
@@ -194,6 +195,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   },
   judgeTemplate: {
     "triage-screen": { label: "来源消息值不值得看" },
+    "triage-urgent": { label: "来源消息急不急" },
     "capture-prescreen": { label: "聊天里有没有要记的事" },
     "web-only-screening": { label: "要不要你亲自确认" },
     "delivery-defer": { label: "决策能不能晚点送" },
@@ -594,6 +596,7 @@ const en: typeof zh = {
   ruleClass: { reminder: { label: "Remind me" }, action: { label: "Act for me" } },
   judgeUse: {
     inbound_screen: { label: "Is this source message worth a look" },
+    inbound_urgent: { label: "Is this source message urgent" },
     capture_prescreen: { label: "Anything to note in this chat" },
     risk_screen: { label: "Must you confirm this yourself" },
     delivery_defer: { label: "Can this decision wait" },
@@ -602,6 +605,7 @@ const en: typeof zh = {
   },
   judgeTemplate: {
     "triage-screen": { label: "Is this source message worth a look" },
+    "triage-urgent": { label: "Is this source message urgent" },
     "capture-prescreen": { label: "Anything to note in this chat" },
     "web-only-screening": { label: "Must you confirm this yourself" },
     "delivery-defer": { label: "Can this decision wait" },
