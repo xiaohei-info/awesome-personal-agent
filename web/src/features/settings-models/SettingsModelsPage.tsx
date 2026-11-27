@@ -53,6 +53,8 @@ interface Endpoint {
   max_batch?: number;
   max_material_chars?: number;
   max_material_tokens?: number;
+  judge_effort?: string;
+  write_effort?: string;
 }
 interface Doc {
   version: number;
@@ -100,12 +102,17 @@ function posSec(v: string, what: string) {
 const sec = (ms: number) => String(ms / 1000);
 
 type Draft = Record<string, string>;
+const RESPONSES = "responses";
+const EFFORTS = ["off", "minimal", "low", "medium", "high"] as const;
+const DEFAULT_EFFORTS = { judge_effort: "low", write_effort: "medium" };
 const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", max_batch: "32", max_material_chars: "8000" };
 
 function draftOf(kind: Kind, e: Endpoint | null): Draft {
-  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { protocol: CHAT, url: "", model: "", locality: "", max_material_tokens: String(DEFAULT_BUDGET_TOKENS) };
+  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { protocol: CHAT, url: "", model: "", locality: "", max_material_tokens: String(DEFAULT_BUDGET_TOKENS), ...DEFAULT_EFFORTS };
   const d: Draft = { url: e.url ?? "", model: e.model ?? "", locality: e.locality ?? "" };
-  if (kind === "generate") Object.assign(d, { protocol: e.protocol || CHAT, max_material_tokens: String(e.max_material_tokens ?? DEFAULT_BUDGET_TOKENS) });
+  if (kind === "generate")
+    Object.assign(d, { protocol: e.protocol || CHAT, max_material_tokens: String(e.max_material_tokens ?? DEFAULT_BUDGET_TOKENS),
+      judge_effort: e.judge_effort || DEFAULT_EFFORTS.judge_effort, write_effort: e.write_effort || DEFAULT_EFFORTS.write_effort });
   if (kind === "judge")
     Object.assign(d, { protocol: e.protocol || PJ, timeout_ms: sec(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
   return d;
@@ -300,7 +307,9 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
   };
   const config = () => {
     const base = { url: d.url.trim(), api_key: apiKey, model: d.model.trim(), locality: d.locality };
-    if (kind === "generate") return { ...base, protocol: d.protocol, max_material_tokens: tokenBudget(d.max_material_tokens) };
+    // 思考强度只在这个协议下有设置项；不带时服务端保持已存的值。
+    const efforts = d.protocol === RESPONSES ? { judge_effort: d.judge_effort, write_effort: d.write_effort } : {};
+    if (kind === "generate") return { ...base, protocol: d.protocol, max_material_tokens: tokenBudget(d.max_material_tokens), ...efforts };
     return { ...base, protocol: d.protocol, timeout_ms: posSec(d.timeout_ms, t.timeoutMs), max_batch: posInt(d.max_batch, t.maxBatch), max_material_chars: posInt(d.max_material_chars, t.maxChars) };
   };
   const saver = useSaver(async () => {
@@ -448,6 +457,19 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
               <summary>{t.advanced}</summary>
               <label>{t.maxTokens}<input type="number" value={d.max_material_tokens} onChange={(e) => set("max_material_tokens", e.target.value)} /></label>
               <BudgetNote what={t.maxTokensWhat} model={d.model.trim()} />
+              {d.protocol === RESPONSES && (
+                <>
+                  {(["judge_effort", "write_effort"] as const).map((k) => (
+                    <label key={k}>
+                      {t[k]}
+                      <select value={d[k]} onChange={(e) => set(k, e.target.value)}>
+                        {EFFORTS.map((v) => <option key={v} value={v}>{t.efforts[v]}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                  <small className="sub">{t.effortNote}</small>
+                </>
+              )}
             </details>
           )}
           {kind === "judge" && (

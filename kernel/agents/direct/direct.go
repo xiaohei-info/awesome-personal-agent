@@ -572,6 +572,7 @@ func normalizeJudgement(raw json.RawMessage) json.RawMessage {
 
 // complete 带退避重试地调用模型。只重试端点侧的暂时性失败；模型已答复但不合 schema、请求本身不对都如实返回。
 func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request, attempts int, key kusage.Key) (model.Response, error) {
+	req.Effort = ep.Effort(key.Part == kusage.PartJudge)
 	wait := s.o.Backoff
 	var last error
 	for i := 0; i < attempts; i++ {

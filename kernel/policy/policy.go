@@ -276,6 +276,34 @@ type GenerateEndpoint struct {
 	MaxMaterialTokens int `json:"max_material_tokens,omitempty"`
 	// MaxMaterialChars 是旧版按字数存的预算，只读：读取时一次换算进 MaxMaterialTokens 并清空，之后存回的文档不再有它。
 	MaxMaterialChars int `json:"max_material_chars,omitempty"`
+	// JudgeEffort、WriteEffort 是判断类与写作类调用要求的思考强度，只有 responses 协议发送（§8.1）。
+	// 空取默认（判断 low、写作 medium），EffortOff 表示不发这个参数。
+	JudgeEffort string `json:"judge_effort,omitempty"`
+	WriteEffort string `json:"write_effort,omitempty"`
+}
+
+// 思考强度的默认值与"不发送"。
+const (
+	DefaultJudgeEffort = "low"
+	DefaultWriteEffort = "medium"
+	EffortOff          = "off"
+)
+
+// Efforts 返回生效的判断类与写作类思考强度。
+func (g GenerateEndpoint) Efforts() (judge, write string) {
+	return cmp.Or(g.JudgeEffort, DefaultJudgeEffort), cmp.Or(g.WriteEffort, DefaultWriteEffort)
+}
+
+// Effort 是一次调用要发给端点的思考强度；空表示不发。
+func (g GenerateEndpoint) Effort(judging bool) string {
+	judge, write := g.Efforts()
+	if !judging {
+		judge = write
+	}
+	if judge == EffortOff {
+		return ""
+	}
+	return judge
 }
 
 // MaterialBudget 是资料预算的实际取值（token）：未设置按默认值。
@@ -367,6 +395,9 @@ type Policy struct {
 	NoteVaults []NoteVault `json:"note_vaults"`
 	// BackgroundRunTimeoutSec 是所有后台运行的统一时限（秒）；旧策略版本没有此键，读作 DefaultBackgroundRunTimeoutSec（4 小时）。
 	BackgroundRunTimeoutSec int `json:"background_run_timeout_sec,omitempty"`
+	// BackgroundPersona 为真时后台运行带上 Agent 平时的人格、记忆与常驻说明；默认关，关着时拉起命令追加声明的
+	// headless.no_persona 标志（§13.6）。旧策略版本没有此键，读作关。
+	BackgroundPersona bool `json:"background_persona"`
 }
 
 // BackgroundRunTimeout 返回生效的后台运行时限；未设置时取 DefaultBackgroundRunTimeoutSec（4 小时）。
@@ -731,6 +762,11 @@ func normalizeEndpoints(p *Policy) (err error) {
 		}
 		if !oneOf(g.Protocol, "", ProtocolChatCompletions, ProtocolMessages, ProtocolResponses, ProtocolGenerateContent) {
 			return invalid("generate_endpoint protocol %q", g.Protocol)
+		}
+		for _, e := range []string{g.JudgeEffort, g.WriteEffort} {
+			if !oneOf(e, "", EffortOff, "minimal", "low", "medium", "high") {
+				return invalid("generate_endpoint effort %q: use off, minimal, low, medium or high", e)
+			}
 		}
 		if g.MaxMaterialTokens == 0 && g.MaxMaterialChars > 0 { // 旧文档：换算一次；有了 token 值就以它为准，所以重复读不会二次换算
 			// 旧值不受新范围约束，读取时落进范围，免得整份策略读不出来。

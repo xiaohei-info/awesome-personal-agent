@@ -297,3 +297,21 @@ func TestErrorMessageArrayWrapped(t *testing.T) {
 		t.Fatalf("got %q", msg)
 	}
 }
+
+// 思考强度只在 responses 协议里发；输出上限不发（上游丢弃，附录 D.7）。
+func TestResponsesSendsEffortOnly(t *testing.T) {
+	b := responsesBody("m", Request{User: "u", Effort: "low"}, nil)
+	if r, _ := b["reasoning"].(map[string]any); r["effort"] != "low" || b["max_output_tokens"] != nil {
+		t.Fatalf("body = %v", b)
+	}
+	if b := responsesBody("m", Request{User: "u"}, nil); b["reasoning"] != nil {
+		t.Fatalf("no effort must send no reasoning: %v", b)
+	}
+	var ep policy.GenerateEndpoint
+	if ep.Effort(true) != "low" || ep.Effort(false) != "medium" {
+		t.Fatalf("defaults = %q %q", ep.Effort(true), ep.Effort(false))
+	}
+	if ep.JudgeEffort = policy.EffortOff; ep.Effort(true) != "" {
+		t.Fatal("off must send nothing")
+	}
+}

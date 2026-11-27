@@ -140,6 +140,7 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 	if !real {
 		req = model.Request{System: sampleSystem, User: sampleUser, Schema: json.RawMessage(sampleSchema), Timeout: probeTimeout}
 	}
+	req.Effort = ep.Effort(false)
 	d.Data["sample"] = map[bool]string{true: "draft", false: "builtin"}[real]
 	resp, err := e.Model.Complete(ctx, ep, req)
 	ms := e.now().Sub(start).Milliseconds()

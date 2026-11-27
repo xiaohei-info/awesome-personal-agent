@@ -6,7 +6,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
 
 export const SECTIONS: Record<string, string[]> = {
-  "/v1/settings/policy": ["disturb", "background_run_timeout_sec", "channels", "default_harness", "main_session_launch", "rule_agent"],
+  "/v1/settings/policy": ["disturb", "background_run_timeout_sec", "background_persona", "channels", "default_harness", "main_session_launch", "rule_agent"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
   "/v1/settings/access-limits": ["agent_cards"],
 };
@@ -15,6 +15,7 @@ export function initialDoc(): Record<string, any> {
   return {
     disturb: { routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 20, mutes: [] },
     background_run_timeout_sec: 14400,
+    background_persona: false,
     channels: {},
     default_harness: "",
     main_session_launch: { by_harness: {}, by_rule: {} },

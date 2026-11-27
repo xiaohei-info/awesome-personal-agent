@@ -394,4 +394,16 @@ describe("设置 › 模型", () => {
     expect(sec.getByRole("listitem", { name: "绑定仓库项目" })).toBeInTheDocument();
     expect(sec.getByText("其他未绑定仓库的项目（1）")).toBeInTheDocument();
   });
+
+  it("思考强度只在 Responses 协议下可选：默认判断低、写作中，保存时带上", async () => {
+    const s = server();
+    mount(s.impl);
+    const card = await screen.findByRole("region", { name: "写作模型" });
+    expect(within(card).queryByLabelText("判断时的思考强度")).toBeNull();
+    await userEvent.selectOptions(within(card).getByLabelText("协议"), "responses");
+    expect(within(card).getByLabelText("判断时的思考强度")).toHaveValue("low");
+    await userEvent.selectOptions(within(card).getByLabelText("写作时的思考强度"), "high");
+    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ generate_endpoint: { judge_effort: "low", write_effort: "high" } }));
+  });
 });
