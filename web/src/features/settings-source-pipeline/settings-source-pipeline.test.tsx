@@ -43,6 +43,16 @@ function server(sp: Record<string, unknown> = {}) {
       bands = body.bands;
       return json(200, { version: ++version, bands });
     }
+    if (url === "/v1/sources") return json(200, { sources: [{ id: "src_0a1b", name: "工作邮箱" }] });
+    if (url === "/v1/rules") return json(200, { rules: [{ key: "mine/source_rules/hot", mode: "observe" }] });
+    if (url === "/v1/packs") {
+      return json(200, {
+        packs: [{ name: "mine", source_rules: [
+          { id: "noise", match: { source: "src_0a1b", event_type: ["mail.received"] }, where: [{ field: "subject", op: "contains", value: "验证码" }], then: "ignore" },
+          { id: "hot", match: { source_type: "chat" }, where: [{ field: "sender", op: "prefix", value: "告警" }], then: "alert" },
+        ] }],
+      });
+    }
     if (url === "/v1/settings/policy") return json(404, { code: "not_found", why: "no policy in unit double" });
     return json(404, { code: "not_found", why: url });
   }) as unknown as typeof fetch;
@@ -149,5 +159,20 @@ describe("设置 › 来源处理", () => {
     await userEvent.click(within(sched).getByRole("button", { name: /^保存/ }));
     expect(await within(sched).findByRole("alert")).toHaveTextContent("1 到 100");
     expect(s.puts).toHaveLength(0);
+  });
+
+  it("只读列出当前生效的来源规则：来源名、条件与出口用产品语言，id 与原始写法只在高级里", async () => {
+    open(server().impl);
+    const box = await screen.findByRole("region", { name: "当前生效的来源规则" });
+    const table = await within(box).findByRole("table");
+    await waitFor(() => expect(table).toHaveTextContent("工作邮箱"));
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("新邮件；且 标题包含「验证码」");
+    expect(rows[0]).toHaveTextContent("不用看");
+    expect(rows[1]).toHaveTextContent("即时消息");
+    expect(rows[1]).toHaveTextContent("发件人开头是「告警」");
+    expect(rows[1]).toHaveTextContent("观察中，还不会真的提醒");
+    expect(table).not.toHaveTextContent(/src_0a1b|source_rules|mine\/|mail\.received/);
+    expect(box.querySelector("details")).toHaveTextContent("mine/noise");
   });
 });

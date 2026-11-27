@@ -429,6 +429,8 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 `GET /agents-md?repo` 返回 `{"content": "…", "hash": "…", "rendered_at": "…", "last_check": {"state": "current|stale|drift", "file_hash": "…", "host": "…", "checked_at": "…"}}`。`last_check` 来自同一仓库最近一次 `POST /agents-md/check`，从未检查过时为 `null`。这两条路由的 `repo` 接受同一仓库的任一写法（主文档 §6.5）。
 
+`GET /packs` 的每个包带 `source_rules`：按声明顺序的 `{id, match, where?, then, accept?, on_update?}`（`then` 省略时给 `proposed`；字段见附录 C.5），包列表按包名排列即匹配顺序，"设置 › 来源处理"的只读清单读它。
+
 `GET /packs` 的每个包带 `views`，键是视图文件名去掉 `.yaml`，值只是声明性配置（附录 C.8），不含提示词正文与模板；未声明的列表返回 `[]`，没有视图的包返回 `{}`：
 
 ```json

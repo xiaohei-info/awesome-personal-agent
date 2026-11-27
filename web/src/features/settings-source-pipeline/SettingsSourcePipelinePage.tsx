@@ -6,6 +6,7 @@ import { Card, PolicyPage, reject, useDraft } from "../../app/policy-cards";
 import { AgentPick } from "../settings-agents/AgentPick";
 import { Reminder, ReminderScope } from "../settings-notify/Reminder";
 import { withBand, type Band } from "../judgment/JudgmentPage";
+import { SourceRules } from "./SourceRules";
 import { strings } from "./strings";
 
 // 设置 › 来源处理（§9.3）：读写 GET/PUT /settings/source-pipeline，结果提醒复用 Reminder(source_result)，
@@ -70,6 +71,7 @@ export function SettingsSourcePipelinePage() {
           <ReminderScope>
             <Reminder row="source_result" />
           </ReminderScope>
+          <SourceRules />
           <PromptCard
             title={t.judgeTitle}
             hint={t.judgeHint}
