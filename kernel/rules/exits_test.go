@@ -23,7 +23,7 @@ func TestExitNames(t *testing.T) {
 }
 
 func TestWhereOperators(t *testing.T) {
-	ev := domain.SourceEvent{Sender: "alice", Metrics: map[string]float64{"size": 10, "level": 2}}
+	ev := domain.SourceEvent{Sender: "alice", Subject: "【告警】已恢复正常", Metrics: map[string]float64{"size": 10, "level": 2}}
 	c := func(f, op string, v any) []packs.Condition { return []packs.Condition{{Field: f, Op: op, Value: v}} }
 	cases := []struct {
 		name   string
@@ -40,6 +40,11 @@ func TestWhereOperators(t *testing.T) {
 		{"lt boundary", c("metrics.size", "lt", 10), nil, false},
 		{"lte boundary", c("metrics.size", "lte", 10), nil, true},
 		{"eq numeric", c("metrics.size", "eq", 10.0), nil, true},
+		{"contains", c("subject", "contains", "恢复正常"), nil, true},
+		{"not contained", c("subject", "contains", "验证码"), nil, false},
+		{"prefix", c("subject", "prefix", "【告警】"), nil, true},
+		{"not a prefix", c("subject", "prefix", "恢复"), nil, false},
+		{"contains is case sensitive", c("sender", "contains", "ALI"), nil, false},
 		{"missing metric", c("metrics.none", "gte", 0), nil, false},
 		{"all must hold", append(c("metrics.size", "gte", 10), c("metrics.size", "lt", 10)...), nil, false},
 		{"changed without series", c("metrics.level", "changed", nil), nil, false},

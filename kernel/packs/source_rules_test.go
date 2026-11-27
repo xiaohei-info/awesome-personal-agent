@@ -18,6 +18,7 @@ func TestSourceRuleExitsAndWhereValidation(t *testing.T) {
 		"    where: [{field: sender, op: in, value: [bob, carol]}]\n",
 		"    where: [{field: metrics.size, op: gte, value: 10}, {field: metrics.size, op: lt, value: 20}]\n",
 		"    where: [{field: metrics.level, op: changed}]\n",
+		"    where: [{field: subject, op: contains, value: x}, {field: sender, op: prefix, value: y}]\n",
 		"    then: alert\n    mode: observe\n    where: [{field: metrics.value, op: crosses_above, value: 90}]\n",
 	}
 	for _, r := range ok {
@@ -32,6 +33,10 @@ func TestSourceRuleExitsAndWhereValidation(t *testing.T) {
 		{"    then: extract\n", "then"},
 		{"    then: alert\n", "alert rule must carry where[]"},
 		{"    where: [{field: sender, op: regex, value: a}]\n", "op"},
+		{"    where: [{field: metrics.size, op: contains, value: x}]\n", "compares text"},
+		{"    where: [{field: sender_verified, op: prefix, value: x}]\n", "compares text"},
+		{"    where: [{field: subject, op: contains, value: 5}]\n", "non-empty string"},
+		{"    where: [{field: subject, op: prefix, value: \"\"}]\n", "non-empty string"},
 		{"    where: [{field: subject, op: changed}]\n", "changed can only be used on metrics.<name>"},
 		{"    where: [{field: sender, op: crosses_below, value: 5}]\n", "metrics.<name>"},
 		{"    where: [{field: metrics.v, op: changed, value: 1}]\n", "takes no value"},

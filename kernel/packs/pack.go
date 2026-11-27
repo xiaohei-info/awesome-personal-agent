@@ -1053,6 +1053,13 @@ func (c Condition) check(where string) error {
 	_, isFloat := c.Value.(float64)
 	numeric := isInt || isFloat
 	switch c.Op {
+	case "contains", "prefix":
+		if isMetric || c.Field == "sender_verified" {
+			return fmt.Errorf("%s: op %s compares text and cannot be used on %s", where, c.Op, c.Field)
+		}
+		if s, ok := c.Value.(string); !ok || s == "" {
+			return fmt.Errorf("%s: op %s needs a non-empty string value", where, c.Op)
+		}
 	case "eq", "ne":
 		switch c.Value.(type) {
 		case string, bool, int, float64:
@@ -1084,7 +1091,7 @@ func (c Condition) check(where string) error {
 			return fmt.Errorf("%s: op %s needs a numeric value", where, c.Op)
 		}
 	default:
-		return fmt.Errorf("%s: op %q must be eq, ne, in, gt, gte, lt, lte, changed, crosses_above or crosses_below", where, c.Op)
+		return fmt.Errorf("%s: op %q must be eq, ne, in, contains, prefix, gt, gte, lt, lte, changed, crosses_above or crosses_below", where, c.Op)
 	}
 	return nil
 }
