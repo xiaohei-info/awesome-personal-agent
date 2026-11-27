@@ -286,7 +286,10 @@ func forExternal(s domain.Source) domain.Source {
 }
 
 func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	var out []sourceView
+	var (
+		out      []sourceView
+		captures []domain.Source // 对话捕获只给 Web 本人：来源页据此设处理方式
+	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
 		ss, err := registry.List(tx)
 		if err != nil {
@@ -311,11 +314,18 @@ func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) er
 			}
 			out = append(out, v)
 		}
-		return nil
+		if p.Web {
+			captures, err = registry.ListCapture(tx)
+		}
+		return err
 	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"sources": out})
+	res := map[string]any{"sources": out}
+	if len(captures) > 0 {
+		res["capture_sources"] = captures
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
 }
 
 // declaredName：按查询参数 type、command、source_type、config（JSON 对象）给出接入层声明的名字；没有声明时 name 为 null。
@@ -453,10 +463,6 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 	if err != nil {
 		return err
 	}
-	cur, err := a.source(r, id)
-	if err != nil {
-		return err
-	}
 	if err := a.rejectOutbound(r, p, id, in); err != nil {
 		return err
 	}
@@ -471,6 +477,10 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 	}
 	var res command.Result
 	if len(in) > 0 {
+		cur, err := a.source(r, id) // 只改处理方式时不查：对话捕获不是登记的来源
+		if err != nil {
+			return err
+		}
 		in["id"], _ = json.Marshal(id)
 		cmd := registry.CmdUpdate
 		if cur.Type == domain.SourceScript {

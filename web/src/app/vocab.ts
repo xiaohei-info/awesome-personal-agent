@@ -158,7 +158,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     internal: { label: "服务出错" },
     models_paused: { label: "模型已暂停，先去设置里恢复" },
   },
-  sourceType: { pull: { label: "定时拉取" }, script: { label: "自定义脚本" }, webhook: { label: "外部送来" } },
+  sourceType: { pull: { label: "定时拉取" }, script: { label: "自定义脚本" }, webhook: { label: "外部送来" }, capture: { label: "对话捕获" } },
   disposition: { pending: { label: "处理中" }, attached: { label: "已并入事项" }, proposed: { label: "已成建议" }, ignored: { label: "已跳过" }, unjudged: { label: "还没筛" }, expired: { label: "已过期" }, digest: { label: "只进了简报" }, alerted: { label: "已直接提醒" }, reminded: { label: "已口头提醒" } },
   queueStatus: { queued: { label: "待处理" }, running: { label: "处理中" }, done: { label: "已处理" } },
   // 之后会不会自动判断随运行配置，提示由 strings.ts:rejudgeHint 给，不写死在这里。
@@ -569,7 +569,7 @@ const en: typeof zh = {
     internal: { label: "Server error" },
     models_paused: { label: "Models are paused; resume them in settings" },
   },
-  sourceType: { pull: { label: "Scheduled pull" }, script: { label: "Custom script" }, webhook: { label: "Pushed in" } },
+  sourceType: { pull: { label: "Scheduled pull" }, script: { label: "Custom script" }, webhook: { label: "Pushed in" }, capture: { label: "Chat capture" } },
   disposition: { pending: { label: "In progress" }, attached: { label: "Added to an item" }, proposed: { label: "Became a proposal" }, ignored: { label: "Skipped" }, unjudged: { label: "Not judged yet" }, expired: { label: "Expired" }, digest: { label: "Brief only" }, alerted: { label: "Alerted directly" }, reminded: { label: "Mentioned only" } },
   queueStatus: { queued: { label: "Queued" }, running: { label: "Processing" }, done: { label: "Processed" } },
   unjudgedReason: {

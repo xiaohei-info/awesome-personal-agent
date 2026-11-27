@@ -321,14 +321,15 @@ func (s *Service) process() {
 
 // snapshot 是一轮处理开始时读到的账本事实。
 type snapshot struct {
-	events  []domain.SourceEvent
-	sources map[string]domain.Source
-	modes   map[string]string
-	made    map[string]string // 来源事件 id → 已为它建出的事项（上一轮中途失败留下的）
-	projs   []domain.Project
-	inboxID string
-	policy  int
-	locs    []string // 统一 judge 实际会调用的端点的位置：外发范围按它们取
+	captureModes map[string]string // 对话捕获来源的处理方式
+	events       []domain.SourceEvent
+	sources      map[string]domain.Source
+	modes        map[string]string
+	made         map[string]string // 来源事件 id → 已为它建出的事项（上一轮中途失败留下的）
+	projs        []domain.Project
+	inboxID      string
+	policy       int
+	locs         []string // 统一 judge 实际会调用的端点的位置：外发范围按它们取
 }
 
 func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
@@ -368,6 +369,14 @@ func (sn *snapshot) loadFacts(tx *store.Tx, _ time.Time) error {
 			break
 		}
 	}
+	captures, err := registry.ListCapture(tx)
+	if err != nil {
+		return err
+	}
+	sn.captureModes = map[string]string{}
+	for _, c := range captures {
+		sn.captureModes[c.ID] = c.HandlingMode
+	}
 	// shortcut: 每轮扫一遍全部事项找出已建事项；事项量大到拖慢时，给事项加按来源事件的索引。
 	its, err := items.List(tx, items.Filter{})
 	if err != nil {
@@ -395,6 +404,7 @@ func (sn *snapshot) source(id string) (domain.Source, error) {
 	}
 	if proj, isCapture := captureProject(id); isCapture {
 		src := captureSource(id)
+		src.HandlingMode = sn.captureModes[id]
 		src.Outbound = captureOutbound(sn.projs, proj)
 		return src, nil
 	}

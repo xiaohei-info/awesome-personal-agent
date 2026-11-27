@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -133,5 +134,79 @@ func TestAgentMayRemindAndLaterProposeOnNormalSource(t *testing.T) {
 	}
 	if ev, err := e.svc.ProposeInto(bg, agent, "ev_fyi", ""); err != nil || ev.Disposition != domain.DispositionProposed {
 		t.Fatalf("propose after remind on a normal source: %+v %v", ev, err)
+	}
+}
+
+// 对话捕获来源与其他来源同一机制（§9.3）：第一次捕获后即可由本人设"只口头提醒"，提示词标模式，Agent 建不了建议；
+// 它仍不是登记的来源。
+func TestRemindOnlyCaptureSource(t *testing.T) {
+	e := setupUnifiedJudgeEnv(t, nil, nil, "", "")
+	var proj struct{ ID string }
+	if err := json.Unmarshal(e.must("project.create", map[string]any{"name": "work"}), &proj); err != nil {
+		t.Fatal(err)
+	}
+	var out CaptureOut
+	if err := json.Unmarshal(e.must(CmdCapture, map[string]any{"project": proj.ID, "text": "user: 把周报发给团队"}), &out); err != nil || !out.Captured {
+		t.Fatalf("capture: %+v %v", out, err)
+	}
+	src := capturePrefix + out.Project
+	e.must(registry.CmdSetHandling, map[string]any{"id": src, "mode": domain.HandlingRemindOnly})
+	var again CaptureOut // 后续捕获不改回处理方式
+	if err := json.Unmarshal(e.must(CmdCapture, map[string]any{"project": proj.ID, "text": "user: 再提醒我一次"}), &again); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		if _, err := registry.Get(tx, src); err == nil {
+			t.Error("a capture source is not a registered source")
+		}
+		all, err := registry.List(tx)
+		if len(all) != 0 {
+			t.Errorf("capture sources must not be listed as registered: %+v", all)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, runsDir := registerBatchAgent(t, e, policy.SourcePipeline{BatchSize: 2})
+	if err := e.svc.Process(bg); err != nil {
+		t.Fatal(err)
+	}
+	var evs []domain.SourceEvent
+	for end := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		evs = e.events(src)
+		if len(evs) == 2 && evs[0].Disposition == domain.DispositionUnjudged && evs[1].Disposition == domain.DispositionUnjudged {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatalf("capture events did not settle: %+v", evs)
+		}
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error { // 本环境没有判断端点：直接放进队列
+		for _, x := range evs {
+			if _, err := tx.Exec(`UPDATE sources_runner_event SET disposition = 'pending', unjudged_reason = '' WHERE id = ?`, x.ID); err != nil {
+				return err
+			}
+			if err := runner.Enqueue(tx, x.ID, runner.LevelNormal); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.TickQueue(bg); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(runsDir, latestBatchRun(t, e).Run.ID, "prompt.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(prompt), "| mode=remind_only") != 2 {
+		t.Fatalf("capture events must be marked remind-only:\n%s", prompt)
+	}
+	agent := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent_1", Via: domain.ViaCLI}, Level: authz.LevelRun}
+	if _, err := e.svc.ProposeInto(bg, agent, evs[0].ID, ""); err == nil || !strings.Contains(err.Error(), "remind only") {
+		t.Fatalf("agent propose must be refused: %v", err)
 	}
 }

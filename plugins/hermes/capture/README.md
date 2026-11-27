@@ -9,6 +9,7 @@ Candidate capture (design §11.2, appendix A.5): at `on_session_end` (turn level
 
 - On by default for every project (no per-project switch). A session whose directory matches no registered project repo falls back to the kernel's built-in Inbox project (`capture:<inbox_id>`), where extraction may still classify concrete items into a matching business project or leave them in Inbox. Under a run identity (`APA_RUN`, or the session's run context, see `tools/README.md`) the kernel never captures either, and the plugin only ever uses the run credential.
 - A turn that starts with an APA notice or wake message (`[APA ...]`, injected by `apa-wake`) is not captured (logged as `apa_notice`): it is APA talking, and capturing it would loop the result back into the source pipeline. The owner's next turn is captured as usual.
+- APA blocks that sit inside an otherwise human turn (a notice or wake message merged after the owner's words, a quoted ledger increment or follow-up envelope) are cut out of both the user and the assistant text before sending. Only complete blocks are recognised (fixed head and tail); a free-form restatement by the assistant carries no marker and is left to the source pipeline to ignore.
 - Asynchronous and invisible: the POST runs in a detached helper process with all output discarded.
 - No forced continuation (`inject_message`, `continue`, ...); no judgment logic; any failure is swallowed.
 

@@ -19,7 +19,7 @@ interface Rj { run_id: string; line: number; reason: string; raw: string; at: st
 interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; queue?: string; queue_level?: string; item?: string; unjudged_reason?: string }
 
 interface Models { judge?: boolean; generate?: boolean; paused?: boolean }
-function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number; rejudge_days?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
+function backend(o: { captures?: Src[]; projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number; rejudge_days?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
   const sources = o.sources ?? [];
   const events = o.events ?? [];
   const ingests = o.ingests ?? [];
@@ -65,7 +65,7 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
       if (!cmd.endsWith("apple-pim-source")) return json(200, { name: null });
       return json(200, { name: u.searchParams.get("source_type") === "calendar" ? { zh: "Apple 日历", en: "Apple Calendar" } : { zh: "Apple 邮件", en: "Apple Mail" } });
     }
-    if (u.pathname === "/v1/sources" && method === "GET") return json(200, { sources });
+    if (u.pathname === "/v1/sources" && method === "GET") return json(200, { sources, capture_sources: o.captures });
     if (u.pathname === "/v1/sources" && method === "POST") {
       if (o.webOnly) return err(403, "web_only", "custom commands can only be registered in the Web UI");
       if (body.outbound) return err(403, "web_only", "outbound is not part of the source registration");
@@ -94,7 +94,7 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
     }
     const p = u.pathname.match(/^\/v1\/sources\/([^/]+)(\/.*)?$/);
     if (p) {
-      const s = sources.find((x) => x.id === decodeURIComponent(p[1]));
+      const s = [...sources, ...(o.captures ?? [])].find((x) => x.id === decodeURIComponent(p[1]));
       if (!s) return err(404, "not_found", "source not found");
       if (!p[2] && method === "PATCH") {
         if ("enabled" in body) s.enabled = body.enabled;
@@ -413,6 +413,35 @@ describe("只口头提醒（§9.3）", () => {
     await userEvent.click(recent.getByRole("button", { name: "补建建议" }));
     await waitFor(() => expect(b.events[0].disposition).toBe("proposed"));
     await waitFor(() => expect(screen.queryByRole("button", { name: "补建建议" })).not.toBeInTheDocument());
+  });
+
+  it("点详情就在这一行下面展开并滚到可见处，处理方式排在最前，行上标出只口头提醒；再点收起", async () => {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.id); };
+    try {
+      const b = backend({ sources: [{ ...rss, handling_mode: "remind_only" }, hook] });
+      mount(b.impl);
+      const li = await row("新闻订阅");
+      expect(li.getByText("只口头提醒")).toBeInTheDocument();
+      await userEvent.click(li.getByRole("button", { name: "详情" }));
+      const detail = await li.findByRole("region", { name: "来源 新闻订阅" });
+      expect(detail.querySelector("h3 + .row")).toHaveTextContent("处理方式");
+      expect(scrolled).toContain("source-src_rss");
+      await userEvent.click(li.getByRole("button", { name: "详情" }));
+      expect(li.queryByRole("region", { name: "来源 新闻订阅" })).not.toBeInTheDocument();
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
+  it("对话捕获来源按项目称呼列出，同样能设只口头提醒", async () => {
+    const b = backend({ sources: [], projects: [{ id: "prj_a", name: "家务" }], captures: [{ id: "capture:prj_a", name: "", type: "capture", enabled: true, handling_mode: "normal" }] });
+    mount(b.impl);
+    const li = await row("对话捕获 · 家务");
+    expect(li.queryByRole("button", { name: "停用" })).not.toBeInTheDocument();
+    await userEvent.click(li.getByRole("button", { name: "详情" }));
+    await userEvent.click(within(await li.findByRole("group", { name: "处理方式" })).getByRole("button", { name: "只口头提醒" }));
+    await waitFor(() => expect(b.calls.find((c) => c.method === "PATCH")).toMatchObject({ path: "/v1/sources/capture%3Aprj_a", body: { handling_mode: "remind_only" } }));
   });
 });
 

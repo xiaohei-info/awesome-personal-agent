@@ -1351,3 +1351,24 @@ func TestSourceHandlingModeRoute(t *testing.T) {
 		t.Fatalf("web: %d %s", r.Code, r.Body)
 	}
 }
+
+// 对话捕获来源只对 Web 本人列出（单列在 capture_sources，不混进登记的来源），经同一条 PATCH 改处理方式（§9.3）。
+func TestCaptureSourceHandlingModeRoute(t *testing.T) {
+	e := setup(t)
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error { return registry.EnsureCapture(tx, "capture:prj_1") }); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.web("PATCH", "/v1/sources/capture:prj_1", `{"handling_mode":"remind_only"}`); r.Code != 200 {
+		t.Fatalf("patch: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PATCH", "/v1/sources/capture:prj_1", `{"enabled":false}`); r.Code != 404 {
+		t.Fatalf("only the handling mode can change: %d %s", r.Code, r.Body)
+	}
+	body := e.web("GET", "/v1/sources", "").Body.String()
+	if !strings.Contains(body, `"sources":[]`) || !strings.Contains(body, `"capture_sources":[{"id":"capture:prj_1"`) || !strings.Contains(body, `"handling_mode":"remind_only"`) {
+		t.Fatalf("web list: %s", body)
+	}
+	if r := e.do(e.token(auth.Delegate), "GET", "/v1/sources", ""); strings.Contains(r.Body.String(), "capture") {
+		t.Fatalf("keys must not see capture sources: %s", r.Body)
+	}
+}

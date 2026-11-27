@@ -6,7 +6,7 @@ import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { Val } from "../../app/values";
 import { useRaw } from "../../app/raw";
-import { forgetNames } from "../../app/names";
+import { forgetNames, useNames } from "../../app/names";
 import { rejudgeDays } from "../../app/status";
 import { strings } from "./strings";
 import { ago, period, when, type Source } from "./shared";
@@ -104,9 +104,9 @@ function Detail({ source, rejudgeDays, add, onChooseOutbound, onSaved }: { sourc
   return (
     <section role="region" aria-label={t.detail(source.name)} className="panel">
       <h3>{source.name}{raw && <code className="raw-id">{source.id}</code>}</h3>
+      <HandlingMode source={source} onSaved={onSaved} />
       {source.type === "webhook" && <WebhookKey source={source} />}
       <DefaultProject source={source} onSaved={onSaved} />
-      <HandlingMode source={source} onSaved={onSaved} />
       <TrustedSenders source={source} add={add} />
       <RecentMessages source={source.id} />
       <SourceBacklog source={source.id} rejudgeDays={rejudgeDays} onChooseOutbound={onChooseOutbound} />
@@ -129,6 +129,17 @@ function Detail({ source, rejudgeDays, add, onChooseOutbound, onSaved }: { sourc
   );
 }
 
+/** 对话捕获的内部来源：只有处理方式可设，名字按项目称呼。 */
+function CaptureDetail({ source, onSaved }: { source: Source; onSaved: () => void }) {
+  const t = useT(strings);
+  return (
+    <section role="region" aria-label={t.detail(source.name)} className="panel">
+      <HandlingMode source={source} onSaved={onSaved} />
+      <RecentMessages source={source.id} />
+    </section>
+  );
+}
+
 /** 消息来源：来源列表；/sources/events/:id 是一条消息的处理经过。 */
 export function SourcesPage() {
   return (
@@ -143,6 +154,8 @@ function SourcesHome() {
   const t = useT(strings);
   const { api } = useSession();
   const [sources, setSources] = useState<Source[] | null>(null);
+  const [captures, setCaptures] = useState<Source[]>([]);
+  const nameOf = useNames("source");
   const [error, setError] = useState<unknown>(null);
   const [params] = useSearchParams(); // 挂靠消息的「加入可读名单」带 ?open=<来源>&add=<发件人>
   const [selected, setSelected] = useState<string | null>(params.get("open"));
@@ -156,8 +169,11 @@ function SourcesHome() {
 
   const load = useCallback(
     () =>
-      api.get<{ sources: Source[] }>("/sources").then(
-        (r) => setSources(r.sources),
+      api.get<{ sources: Source[]; capture_sources?: Source[] }>("/sources").then(
+        (r) => {
+          setSources(r.sources);
+          setCaptures(r.capture_sources ?? []);
+        },
         (e) => setError(e),
       ),
     [api],
@@ -200,7 +216,15 @@ function SourcesHome() {
     loadBacklog();
   };
 
-  const current = sources?.find((s) => s.id === selected);
+  // 展开哪一行就把那一行滚到顶上：列表长时详情否则落在首屏之外。
+  const loaded = sources !== null;
+  useEffect(() => {
+    if (selected && loaded) document.getElementById(`source-${selected}`)?.scrollIntoView?.({ block: "start" });
+  }, [selected, loaded]);
+  const detailsButton = (id: string) => (
+    <button aria-expanded={selected === id} onClick={() => setSelected(selected === id ? null : id)}>{t.details}</button>
+  );
+  const reminding = (s: Source) => s.handling_mode === "remind_only" && <span className="badge">{t.handlingRemind}</span>;
   const waiting = backlog?.outbound_unset ?? 0;
   const total = backlog?.count ?? 0;
   const ignoreAll = total > 0 && (
@@ -225,7 +249,7 @@ function SourcesHome() {
       <section role="region" aria-label={t.list}>
         {sources === null ? (
           error === null && <p role="status">{t.loading}</p>
-        ) : sources.length === 0 ? (
+        ) : sources.length === 0 && captures.length === 0 ? (
           <div className="empty">
             <p>{t.none}</p>
             <button
@@ -241,20 +265,30 @@ function SourcesHome() {
         ) : (
           <ul className="rows">
             {sources.map((s) => (
-              <li key={s.id} aria-label={s.name}>
+              <li key={s.id} id={`source-${s.id}`} aria-label={s.name}>
                 <span aria-hidden="true">{ICON[s.source_type ?? s.type] ?? "\ud83d\udcf0"}</span>{" "}
                 <Rename s={s} onSaved={() => { forgetNames(api, "source"); void load(); }} />{" "}
-                <span className="sub">{(s.source_type && t.kinds[s.source_type]) || <Val k="sourceType" id={s.type} />}</span> <Schedule s={s.schedule} /> <Status s={s} />
-                <div role="group" aria-label={t.ops(s.name)}>
-                  <button onClick={() => toggle(s)}>{s.enabled ? t.disable : t.enable}</button> <button onClick={() => setSelected(s.id)}>{t.details}</button>
+                <span className="sub">{(s.source_type && t.kinds[s.source_type]) || <Val k="sourceType" id={s.type} />}</span> <Schedule s={s.schedule} /> <Status s={s} /> {reminding(s)}
+                <div role="group" aria-label={t.ops(s.name)} className="ops">
+                  <button onClick={() => toggle(s)}>{s.enabled ? t.disable : t.enable}</button> {detailsButton(s.id)}
                 </div>
+                {selected === s.id && <Detail key={rev} source={s} add={s.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={chooseOutbound} onSaved={() => void load()} />}
               </li>
             ))}
+            {captures.map((c) => {
+              const s = { ...c, name: nameOf(c.id) };
+              return (
+                <li key={s.id} id={`source-${s.id}`} aria-label={s.name}>
+                  <span aria-hidden="true">{"\ud83d\udcac"}</span> <strong>{s.name}</strong> {reminding(s)}
+                  <div role="group" aria-label={t.ops(s.name)} className="ops">{detailsButton(s.id)}</div>
+                  {selected === s.id && <CaptureDetail source={s} onSaved={() => void load()} />}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
       {(total > 0 || inProgress()) && models && <BacklogFlow total={total} models={models} onChanged={changed} ignoreAll={ignoreAll} />}
-      {current && <Detail key={`${current.id}:${rev}`} source={current} add={current.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={chooseOutbound} onSaved={() => void load()} />}
       <details ref={advanced}>
         <summary>{t.advanced}</summary>
         <RestorePanel sources={sources ?? []} onRestored={changed} />
