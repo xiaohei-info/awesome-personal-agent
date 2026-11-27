@@ -280,6 +280,34 @@ func TestChatBadJSONIsUndecided(t *testing.T) {
 	if v.DecidedBy != "default" || !v.LowConfidence || r.Levels[1].Outcome != "error" || r.Levels[1].ErrorCode != "schema" || v.Unavailable {
 		t.Fatalf("%+v %+v", v, r.Levels)
 	}
+	if n := len(e.stub.Requests()); n != 2 { // 重问一次，不再多
+		t.Fatalf("chat endpoint was asked %d times, want 2", n)
+	}
+}
+
+type flakySchema struct {
+	Completer
+	calls int
+}
+
+func (f *flakySchema) Complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request) (model.Response, error) {
+	if f.calls++; f.calls == 1 {
+		return model.Response{}, &model.SchemaError{Detail: "flaky"}
+	}
+	return f.Completer.Complete(ctx, ep, req)
+}
+
+// 对话端点偶发一次不合 schema：重问一次，第二次的答复照常定案。
+func TestChatSchemaViolationRetriedOnce(t *testing.T) {
+	e := setupJudge(t, true, true)
+	f := &flakySchema{Completer: e.svc.o.Model}
+	e.svc.o.Model = f
+	e.cls.PYes(modelstub.Key{Contains: "cas-flaky"}, 0.40)
+	e.chat("cas-flaky", "no", true)
+	v := e.judge(t, jc("screen", "cas-flaky"))
+	if v.DecidedBy != "chat" || v.Answer != "no" || f.calls != 2 {
+		t.Fatalf("%+v calls %d", v, f.calls)
+	}
 }
 
 // ACT-CAS-16：两级都不可用时入站不取默认、不写记录（未判定）；恢复后重判按新结果处置。

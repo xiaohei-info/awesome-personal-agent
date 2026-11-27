@@ -735,7 +735,11 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 		if p.meta.SingleShot {
 			attempts = 1
 		}
-		resp, err := s.complete(ctx, ep, req, attempts, kusage.Key{Part: kusage.PartJudge, Purpose: p.use()})
+		key := kusage.Key{Part: kusage.PartJudge, Purpose: p.use()}
+		resp, err := s.complete(ctx, ep, req, attempts, key)
+		if errors.Is(err, model.ErrSchema) && !p.meta.SingleShot { // 偶发的不合规输出重问一次
+			resp, err = s.complete(ctx, ep, req, 1, key)
+		}
 		lv.DurationMs = s.o.Now().Sub(t0).Milliseconds()
 		switch {
 		case ctx.Err() != nil:
