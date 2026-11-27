@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -298,10 +299,27 @@ func (s *ClsStub) control(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// sharedCriteria 把按编号指向 state 的判据还原成原文，题目匹配仍按判据内容。
+func sharedCriteria(state, ref string) string {
+	_, name, _ := strings.Cut(ref, "`")
+	name, _, _ = strings.Cut(name, "`")
+	_, rest, ok := strings.Cut(state, "\n\n"+name+":\n")
+	if name == "" || !ok {
+		return ref
+	}
+	if loc := nextCriteria.FindStringIndex(rest); loc != nil {
+		return rest[:loc[0]]
+	}
+	return rest
+}
+
+var nextCriteria = regexp.MustCompile(`\n\ncriteria_\d+:\n`)
+
 // systemOneQuestions 把 system-one 请求里的具名 noul 题转成按题配置能匹配的形状；model 缺失或题型不是 noul 视为不合规。
 func systemOneQuestions(raw []byte) ([]clsQuestion, error) {
 	var req struct {
 		Model     string `json:"model"`
+		State     string `json:"state"`
 		Questions map[string]struct {
 			Type         string `json:"type"`
 			Instructions struct {
@@ -325,7 +343,7 @@ func systemOneQuestions(raw []byte) ([]clsQuestion, error) {
 		if q.Type != "noul" {
 			return nil, fmt.Errorf("question %s: type %q", id, q.Type)
 		}
-		out = append(out, clsQuestion{ID: id, Question: q.Instructions.Question, Criteria: q.Criteria.True, Input: q.Instructions.Input, Material: q.Instructions.Material})
+		out = append(out, clsQuestion{ID: id, Question: q.Instructions.Question, Criteria: sharedCriteria(req.State, q.Criteria.True), Input: q.Instructions.Input, Material: q.Instructions.Material})
 	}
 	return out, nil
 }

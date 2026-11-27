@@ -20,16 +20,21 @@ import (
 
 func init() {
 	client.Register("item", itemHelp, item)
-	client.Register("today", "usage: apa today", today)
+	client.Register("today", todayUsage, today)
 	client.Register("propose", addUsage("propose"), propose)
-	client.Register("inbox", "usage: apa inbox", inbox)
+	client.Register("inbox", inboxUsage, inbox)
 }
 
 var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --full] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+
+const (
+	todayUsage = "usage: apa today [--full]"
+	inboxUsage = "usage: apa inbox [--full]"
+)
 
 // 各写子命令的完整用法：参数错误时放进 next，-h / --help 时整段输出。
 const (
@@ -289,8 +294,8 @@ func show(c *client.Ctx, args []string) error {
 }
 
 func list(c *client.Ctx, args []string) error {
-	f, _ := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for", "from", "to", "origin-source", "origin-ref"}, nil, nil)
-	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>] [--from <YYYY-MM-DD> --to <YYYY-MM-DD>, at most 62 days] [--origin-source <source, e.g. import:notes>] [--origin-ref <external id>]"); err != nil {
+	f, bools := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for", "from", "to", "origin-source", "origin-ref"}, nil, []string{"full"})
+	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>] [--from <YYYY-MM-DD> --to <YYYY-MM-DD>, at most 62 days] [--origin-source <source, e.g. import:notes>] [--origin-ref <external id>] [--full]; without --full each item omits body, spec, ext and proposal: read one with apa item show <id>"); err != nil {
 		return err
 	}
 	q := url.Values{}
@@ -303,35 +308,72 @@ func list(c *client.Ctx, args []string) error {
 	if err := c.Do(bg, "GET", "/items?"+q.Encode(), nil, &out); err != nil {
 		return err
 	}
+	if !*bools["full"] {
+		compact(out["items"])
+		// 建议的来源与分组是给建议页用的，条数一多就比事项本身还大。
+		delete(out, "origins")
+		delete(out, "groups")
+	}
 	return c.Print(out)
 }
 
-// today：GET /today 原样输出四组（planned、due、pending、stale）。
+// compact 从列表里的事项去掉大字段（设计 §17）：列表只给判断与引用够用的字段，全文用 item show 或 --full。
+func compact(list any) {
+	items, _ := list.([]any)
+	for _, v := range items {
+		if m, ok := v.(map[string]any); ok {
+			for _, k := range []string{"body", "spec", "ext", "proposal"} {
+				delete(m, k)
+			}
+		}
+	}
+}
+
+// fullFlag 解析只接受 --full 的读命令。
+func fullFlag(name, hint string, args []string) (bool, error) {
+	f, bools := newForm(name, nil, nil, []string{"full"})
+	if _, err := f.parse(args, false, hint); err != nil {
+		return false, err
+	}
+	return *bools["full"], nil
+}
+
+// today：GET /today 的各组事项，默认精简。
 func today(c *client.Ctx, args []string) error {
-	if len(args) != 0 {
-		return usage("today takes no arguments", "usage: apa today")
+	full, err := fullFlag("today", todayUsage, args)
+	if err != nil {
+		return err
 	}
 	var out map[string]any
 	if err := c.Do(bg, "GET", "/today", nil, &out); err != nil {
 		return err
+	}
+	if !full {
+		for _, group := range out {
+			compact(group)
+		}
 	}
 	return c.Print(out)
 }
 
 // inbox：待决 = needs_input，建议 = proposed。
 func inbox(c *client.Ctx, args []string) error {
-	if len(args) != 0 {
-		return usage("inbox takes no arguments", "usage: apa inbox")
+	full, err := fullFlag("inbox", inboxUsage, args)
+	if err != nil {
+		return err
 	}
-	res := map[string][]json.RawMessage{}
+	res := map[string][]any{}
 	for key, phase := range map[string]string{"pending": "needs_input", "suggestions": "proposed"} {
 		var l struct {
-			Items []json.RawMessage `json:"items"`
+			Items []any `json:"items"`
 		}
 		if err := c.Do(bg, "GET", "/items?phase="+phase, nil, &l); err != nil {
 			return err
 		}
-		res[key] = append([]json.RawMessage{}, l.Items...)
+		if !full {
+			compact(l.Items)
+		}
+		res[key] = append([]any{}, l.Items...)
 	}
 	return c.Print(res)
 }

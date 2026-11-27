@@ -2,12 +2,13 @@ package model
 
 // system-one 适配器（§8.8）：原生分类模型服务的判断接口。POST <url>/systemone，
 // 请求 {model, state, questions:{<题号>: {type: noul, instructions, criteria}}}，响应 {model, answers:{<题号>: {type: noul, noul}}}。
-// 一批是同模板、不同资料的题，state 由批内各题共享，所以每题的 input 与已裁剪的 material 放进它自己的 instructions 对象，
-// state 只放固定说明：每题的上下文只含自己的资料，不被别题撑大，也不串题。
+// state 由批内各题共享，所以每题的 input 与已裁剪的 material 放进它自己的 instructions 对象：每题的资料只含自己的，
+// 不串题。判据在批内大量重复，每种只在 state 里放一份并编号，题的 criteria 按编号指过去。
 
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"unicode/utf8"
@@ -18,6 +19,7 @@ import (
 const (
 	systemOnePath  = "/systemone"
 	systemOneState = "Each question carries its own `input` and `material` in its instructions; judge each question only against them."
+	systemOneTrue  = "The criteria for yes in `%s` in state are met."
 	systemOneFalse = "The criteria for yes are not met."
 	// systemOneBatchChars 是一批题的字符预算：接口按每请求的上下文长度限制（而不是题数）拒绝请求，
 	// 预算按每字符至多约 1.5 个 token 估，留在 64k token 的默认上限以内。
@@ -37,6 +39,7 @@ func (systemOneWire) url(ep policy.JudgeEndpoint) string {
 	return SystemOneBase(ep.URL) + systemOnePath
 }
 
+// shortcut: 拆批预算仍按每题带一份判据估，只会让批偏小；批量成为瓶颈时改成每种判据只计一次。
 func (systemOneWire) chunks(qs []Question, size int) [][2]int {
 	return pack(qs, size, systemOneBatchChars, func(q Question) int {
 		return utf8.RuneCountInString(q.Question) + utf8.RuneCountInString(q.Criteria) + utf8.RuneCount(q.Input) + utf8.RuneCountInString(q.Material)
@@ -66,14 +69,22 @@ func (systemOneWire) encode(ep policy.JudgeEndpoint, qs []Question) ([]byte, err
 		Criteria     map[string]string `json:"criteria,omitempty"`
 	}
 	questions := make(map[string]noul, len(qs))
+	state := systemOneState
+	names := map[string]string{} // 判据原文 → state 里的编号
 	for _, q := range qs {
 		n := noul{Type: "noul", Instructions: instructions{q.Question, q.Input, q.Material, q.Truncated}}
 		if q.Criteria != "" {
-			n.Criteria = map[string]string{"true": q.Criteria, "false": systemOneFalse}
+			name := names[q.Criteria]
+			if name == "" {
+				name = fmt.Sprintf("criteria_%d", len(names)+1)
+				names[q.Criteria] = name
+				state += "\n\n" + name + ":\n" + q.Criteria
+			}
+			n.Criteria = map[string]string{"true": fmt.Sprintf(systemOneTrue, name), "false": systemOneFalse}
 		}
 		questions[q.ID] = n
 	}
-	return json.Marshal(map[string]any{"model": ep.Model, "state": systemOneState, "questions": questions})
+	return json.Marshal(map[string]any{"model": ep.Model, "state": state, "questions": questions})
 }
 
 // decode 与 probability-judgment/1 同样严格：任何一题的答案不合形状，整批按 protocol_error 处理。

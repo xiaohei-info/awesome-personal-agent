@@ -25,7 +25,7 @@ type briefItem struct {
 func (f *fx) briefs(titlePrefix string) []briefItem {
 	f.t.Helper()
 	var out []briefItem
-	for _, b := range decode[struct{ Items []briefItem }](f.t, f.apa(f.DEL, 0, "item", "list", "--kind", "brief").Stdout).Items {
+	for _, b := range decode[struct{ Items []briefItem }](f.t, f.apa(f.DEL, 0, "item", "list", "--kind", "brief", "--full").Stdout).Items {
 		if strings.HasPrefix(b.Title, titlePrefix) {
 			out = append(out, b)
 		}

@@ -257,7 +257,7 @@ type ledgerItem struct {
 
 func (k *kit) items(kind string) []ledgerItem {
 	k.t.Helper()
-	args := []string{"item", "list"}
+	args := []string{"item", "list", "--full"}
 	if kind != "" {
 		args = append(args, "--kind", kind)
 	}

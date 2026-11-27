@@ -375,6 +375,33 @@ describe("设置 › Agent › 所有 Agent 共用 › Agent 后台运行时限"
   });
 });
 
+describe("设置 › Agent › 所有 Agent 共用 › Agent 后台运行的人格和记忆", () => {
+  it("默认关；本人勾选保存后只写 background_persona", async () => {
+    const s = server({ live: [hermes(1, "active")] });
+    mount(s.impl, "/settings/agents");
+    const card = await screen.findByRole("region", { name: "Agent 后台运行的人格和记忆" });
+    const box = within(card).getByRole("checkbox", { name: "Agent 后台运行带上人格和记忆" });
+    expect(box).not.toBeChecked();
+    await userEvent.click(box);
+    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(writes(s, "/settings/policy")).toContainEqual({ method: "PUT", url: "/v1/settings/policy", body: { background_persona: true } }));
+  });
+});
+
+describe("设置 › Agent › 所有 Agent 共用 › 思考强度", () => {
+  it("三项各选低/中/高并标出默认；保存写 thinking", async () => {
+    const s = server({ live: [hermes(1, "active")] });
+    mount(s.impl, "/settings/agents");
+    const card = await screen.findByRole("region", { name: "思考强度" });
+    expect(within(card).getByLabelText("判断要不要处理、急不急")).toHaveValue("low");
+    expect(within(card).getByRole("option", { name: "低（默认）" })).toBeInTheDocument();
+    expect(within(card).getAllByRole("option", { name: "不指定" })).toHaveLength(3);
+    await userEvent.selectOptions(within(card).getByLabelText("后台 Agent 运行"), "high");
+    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(writes(s, "/settings/policy")).toContainEqual({ method: "PUT", url: "/v1/settings/policy", body: { thinking: { judge: "low", write: "medium", background: "high" } } }));
+  });
+});
+
 describe("设置 › Agent：同页多处保存共用的策略版本号", () => {
   // 按内核的乐观并发：带了过期 version 的写入 409；每次写策略（含权限卡）版本号加一。
   function versioned(o: Opts) {

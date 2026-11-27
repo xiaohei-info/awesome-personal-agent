@@ -312,6 +312,11 @@ func TestRelateAndListFilters(t *testing.T) {
 	if l := list("--sort", "planned_for", "--phase", "open"); len(l) != 2 || l[0].(map[string]any)["id"] != child {
 		t.Fatalf("--sort planned_for = %v", l)
 	}
+	// 默认列表不带大字段，--full 带全量。
+	body := func(args ...string) any { return list(append(args, "--q", "护照")...)[0].(map[string]any)["body"] }
+	if body() != nil || body("--full") != "护照续签" {
+		t.Fatalf("compact/full body = %v / %v", body(), body("--full"))
+	}
 	if r := k.apa(auth.Observer, "item", "list", "--sort", "bogus"); r.code == 0 {
 		t.Fatal("unknown sort must fail")
 	}

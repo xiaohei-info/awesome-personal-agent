@@ -1,6 +1,7 @@
 // Package summaries 是 decision-card 包的两个生成型摘要（设计 §6.3、§8.1、§12.4、§7.6）：
 //
-//   - 一句话摘要：事项缺 summary 时起草，经 item.update 只写 summary 字段。触发是事项新建、标题或正文变化、阶段变化，
+//   - 一句话摘要：事项缺 summary 时起草，经 item.update 只写 summary 字段。资料是正文加最近几条进展，两样都没有
+//     就不调模型；简报与复盘（kind=brief）正文在 spec 里，不起草。触发是事项新建、标题或正文变化、阶段变化，
 //     只给 open 与 waiting 的事项起草：proposed 多为来源批量产生，被接受转 open 时再起草；needs_input 的投递内容由
 //     决策卡片负责，改 summary 会让待决决策按新版本重发；已结束的不再需要。
 //   - 材料修订摘要：自有型材料每条新修订（direct 生效、proposed 入队、回退）起草变更摘要，经 revision.summarize 写回；
@@ -16,6 +17,7 @@
 package summaries
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,6 +38,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
+
+// summaryProgress 是起草一句话摘要时附带的最近进展条数。
+const summaryProgress = 3
 
 // 生成型提示词由 decision-card 内置包声明（附录 C.14）。
 const (
@@ -214,14 +219,28 @@ func (s *Service) item(ctx context.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		if skip = it.Summary != "" || (it.Phase != domain.PhaseOpen && it.Phase != domain.PhaseWaiting); skip {
+		if skip = it.Summary != "" || it.Kind == domain.KindBrief || (it.Phase != domain.PhaseOpen && it.Phase != domain.PhaseWaiting); skip {
+			return nil
+		}
+		prog, err := items.Progress(tx, id)
+		if err != nil {
+			return err
+		}
+		material := []string{}
+		if strings.TrimSpace(it.Body) != "" {
+			material = append(material, it.Body)
+		}
+		for _, p := range prog[max(0, len(prog)-summaryProgress):] {
+			material = append(material, "进展（"+cmp.Or(p.On, p.At.In(time.Local).Format(time.DateOnly))+"）："+p.Text)
+		}
+		if skip = len(material) == 0; skip {
 			return nil
 		}
 		if ver, err = command.Version(tx, id); err != nil {
 			return err
 		}
 		in, _ := json.Marshal(map[string]any{"item": it.ID, "kind": it.Kind, "title": it.Title, "project": it.Project, "tags": it.Tags})
-		call, err = s.call(tx, TemplateItem, it.ID, it.Project, in, it.Body)
+		call, err = s.call(tx, TemplateItem, it.ID, it.Project, in, strings.Join(material, "\n\n"))
 		return err
 	}); err != nil || skip {
 		return err

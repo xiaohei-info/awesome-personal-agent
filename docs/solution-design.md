@@ -181,7 +181,7 @@ APA 只提供这一样东西：不等本人开口，它自己发现事情、记�
 | 代码、文档和外部系统上的实际操作 | 决策队列、打扰控制和提醒的产出 |
 | 个人长期记忆 | 项目、任务、材料、决定和偏好规则组成的工作现场 |
 
-APA 这一层只做四类事：记下事情、到时间醒来、做轻量判断、找到本人。轻量判断由内核直连用户配置的模型端点，只做分类和生成摘要，不跑 agent loop（§8）。需要动手时，APA 经无头运行拉起用户自己的 harness，主会话角色的运行沿用它原有的指令、技能和执行者（§13.6）。用户对话的仍是原来的 agent。本版支持一个 Agent，接口按多 harness 设计；其他 harness 接入后，换 harness 时账本不动，同时用几个 harness、几台机器也只有一份状态（§20）。
+APA 这一层只做四类事：记下事情、到时间醒来、做轻量判断、找到本人。轻量判断由内核直连用户配置的模型端点，只做分类和生成摘要，不跑 agent loop（§8）。需要动手时，APA 经无头运行拉起用户自己的 harness，主会话角色的运行沿用它的执行者与处理方式，人格和记忆默认不带、由本人决定是否带上（§13.6）。用户对话的仍是原来的 agent。本版支持一个 Agent，接口按多 harness 设计；其他 harness 接入后，换 harness 时账本不动，同时用几个 harness、几台机器也只有一份状态（§20）。
 
 由此得出 APA 的形态：一本账本（事项、项目、材料）、一套命令模型、一个时钟、一个 Web 中台和一个 agent native CLI。账本是真理源，Web 是首要视图，CLI 是 agent 的入口；APA 自己只改账本、只提供接口，一切外部副作用留在 harness 和 ext 各自的权限体系内。
 
@@ -678,7 +678,7 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 |---|---|
 | `id` | 稳定 id |
 | `kind` | 开放字符串。内置 `task`、`commitment`、`decision`、`delegation`、`brief`；能力包可注册新 kind |
-| `title`、`summary`、`body` | 标题、一句话摘要、Markdown 正文。正文对 agent 是资料，不是指令。`summary` 为空的 `open`、`waiting` 事项在新建、标题或正文变化、阶段变化后由 `decision-card` 包的生成型起草一句话并写回，只写这一个字段，操作者为 system，Basis 记策略版本与模板；`proposed` 被接受后再起草，`needs_input` 不起草（投递内容归决策卡片，改字段会让待决决策按新版本重发） |
+| `title`、`summary`、`body` | 标题、一句话摘要、Markdown 正文。正文对 agent 是资料，不是指令。`summary` 为空的 `open`、`waiting` 事项在新建、标题或正文变化、阶段变化后由 `decision-card` 包的生成型起草一句话并写回，只写这一个字段，操作者为 system，Basis 记策略版本与模板；`proposed` 被接受后再起草，资料是正文加最近三条进展，两样都没有不起草，简报与复盘（`kind=brief`，正文在 `spec`）不起草，`needs_input` 不起草（投递内容归决策卡片，改字段会让待决决策按新版本重发） |
 | `phase` | 六个固定阶段之一（§6.4） |
 | `status_label` | 阶段内的自由标签，如 `in_progress`、`review`，不影响内核行为 |
 | `priority` | 优先级枚举，用于排序与投递阈值 |
@@ -1521,6 +1521,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 - **判断型的输入**：一道题由固定问法（模板正文）、可选判据（模板的 `criteria`）、结构化输入（内核组织）和资料正文四部分组成。资料正文在送出前按来源登记的外发范围和所用端点的位置裁剪（§14.14）。同一道题交给两种后端时，四部分相同。
 - **判断型的输出**：分类端点每题回一个概率。对话端点按内核拼出的 schema 回答：是非题 `{"answer": "yes" | "no", "sufficient": true | false}`，选择题 `{"choice": "<枚举>", "sufficient": …}`，打分题 `{"score": <数值>, "sufficient": …}`。schema 里没有置信度字段。输出不符合 schema 时同一级重问一次（`single_shot` 除外），仍不符合视为这一级没有定案。
+- **思考强度**：策略段 `thinking` 按用途分三项（判断 `judge` 默认 `low`、写作 `write` 默认 `medium`、后台 Agent 运行 `background` 默认 `medium`；取不指定、低、中、高，不指定即不发该参数，是端点不接受时的出口；"设置 › Agent › 所有 Agent 共用"改）。前两项只在 `responses` 协议里作为 `reasoning.effort` 发送，其他协议的请求不变；第三项由声明里的 `headless.effort` 带进后台运行的拉起命令（§13.6）。不发 `max_output_tokens`：限住用量靠思考强度与调用时限（附录 D.7）。
 - **生成型的输入输出**：提示词模板由能力包固定，正文放在资料段并明确标注，同样按外发范围裁剪。输出不符合 schema 视为失败。
 - **资料预算与裁剪留痕**：账本里的原文不截断（§6.10），所以每次模型调用都要把资料裁到端点吃得下的长度。裁剪依次做两步：先按外发范围（§14.14），再按预算。判断端点的预算是 `max_material_chars`（默认 8000，§8.8）；生成端点新增同类设置，单位是估算 token（`generate_endpoint.max_material_tokens`，默认 16000，与旧缺省 24000 字等价，可设 2000–500000，在"设置 › 模型"改，默认值是否合适见 `SPIKE-GEN-BUDGET`）；token 按与合并相同的系数"约 1.5 个字符记 1 个 token"折成字符再裁剪，裁剪与留痕仍按字符。上限不是技术上限，要装得进所配模型的上下文窗口，超出时那次调用失败。超出预算时：单段正文保留开头的四分之三预算与结尾的四分之一预算，中间以一行"省略 N 个字符"代替；按会话聚合的消息从最新一条往前整条保留，放不下的更早的消息整条省略并写明省略了几条。每次裁剪都留痕：判断记录的每一级记实际送出的字符数、裁剪前的字符数与方式（§6.16）；起草与抽取记在处置载荷的 `material` 里，处理经过据此显示"送给模型 N / M 字符"（§15.1）。裁剪后的内容才计入输入指纹；裁剪结果只用于这一次调用，不回写来源事件、事项或任何账本字段（§6.14 第 18 条）。
 - **任务型的输入**：内核先建好目标事项，再把提示词模板和资料文件（账本快照，已按运行身份过滤）放进运行目录。提示词只含固定模板和事项 id，外部正文只进资料文件。实例里由本人写下的任务说明单独成文件，经占位符 `instruction_path` 给出，它是本人的要求，不是外部资料（§13.5 的例行任务包与简报复盘的内容要求、附录 C.7）；实例没写而模板声明了 `default_instruction` 时，文件里是这段默认要求。工作目录默认是运行目录；模板声明 `cwd: project_checkout` 时是项目在 APA 主机上的检出（附录 C.7），没有这样的检出就不拉起，事项转 `needs_input` 并写明原因，资料文件仍在运行目录。
@@ -1694,15 +1695,15 @@ HTTP 层错误的响应体为 `{"error": {"code": "<标识>", "message": "…"}}
 
 ```json
 {"model": "<judge_endpoint.model>",
- "state": "Each question carries its own `input` and `material` in its instructions; judge each question only against them.",
+ "state": "Each question carries its own `input` and `material` in its instructions; judge each question only against them.\n\ncriteria_1:\n<判据>",
  "questions": {
    "q1": {"type": "noul",
           "instructions": {"question": "<问法>", "input": {…}, "material": "<已裁剪的资料>", "material_truncated": true},
-          "criteria": {"true": "<判据>", "false": "The criteria for yes are not met."}}}}
+          "criteria": {"true": "The criteria for yes in `criteria_1` in state are met.", "false": "The criteria for yes are not met."}}}}
 ```
 
-- 接口的 state 由同一请求的所有题共享，而一批里是同模板、不同资料的题，所以每题的 `input` 与资料放进它自己的结构化 instructions，state 只放固定说明。每题的上下文只含自己的资料，不被别题撑大，也不串题。
-- 问法进 `instructions.question`；判据进 `criteria.true`，否定侧用固定说法；模板没有判据时不发 `criteria`。题号沿用 `q1`、`q2`…，答案按题号对回。
+- 接口的 state 由同一请求的所有题共享，而一批里是不同资料的题，所以每题的 `input` 与资料放进它自己的结构化 instructions，不串题。判据在批内大量重复，state 在固定说明之后每种判据放一份，按首次出现编号 `criteria_1`、`criteria_2`…。
+- 问法进 `instructions.question`；`criteria.true` 按编号指向 state 里的判据，否定侧用固定说法；模板没有判据时不发 `criteria`。题号沿用 `q1`、`q2`…，答案按题号对回。
 - 响应 `{"model": "<实际版本>", "answers": {"q1": {"type": "noul", "noul": 0.07}}}`：`p_yes` 取 `noul`，`probability_source` 记 `native`，判断记录的模型取响应里的 `model`（缺失时取配置的模型名）。答案的 `type` 不是 `noul` 或概率不在 0 到 1 时，整批按 `protocol_error` 处理；缺某题答案按 `missing_result`，未知题号忽略。
 - 批量：接口不限题数，只限每请求与每题的上下文长度。内核每批至多 `max_batch` 题，并按每批约 40000 字符的预算切批，使默认配置下的整批落在接口默认的上下文长度以内；单题永远可以独占一批。不开启接口的长上下文选项。
 - 状态码在通用表之外的归类：400 且响应体含 `max_tokens_exceeded`（超出上下文长度）按 `batch_too_large` 对半拆批；422（请求校验失败，如模型名或题目畸形）按 `invalid_request`；接口的过载状态 529 属于 5xx，按 `unavailable` 退避重试。
@@ -2471,7 +2472,7 @@ v0.1 落盘的邮件事件没有线程关联键，也无法补出：对这些旧
 | | `runner=task` | `runner=main_session` |
 |---|---|---|
 | 是什么 | 任务型专属 agent | harness 主会话角色 |
-| 指令来源 | 能力包的提示词模板 | 该 harness 的同一份指令与技能（含它自己的委派方式），加后台执行包的"处理事项"提示词 |
+| 指令来源 | 能力包的提示词模板 | 该 harness 的主会话角色（本人开了"带人格和记忆"时含同一份指令与记忆），加后台执行包的"处理事项"提示词 |
 | 工作方式 | 自己在子事项上完成工作 | 像本人在聊天中回复时一样处理事项：读 `apa context`（含之前的委派记录），按项目允许的执行者 `apa delegate` 建子事项，用 harness 自己的方式派出并 `apa dispatch add` 记下 |
 | 运行目标 | 子事项：内核按 `apa delegate` 的同一路径把它委派给声明的执行者 id（`kind=delegation`，父事项转 `waiting`），运行者用 `apa report` 回执 | 规则选中的事项本身，不占 `assignee` |
 | 项目允许的执行者 | 自身的执行者 id 必须在名单内，否则不拉起，记带 `background_refused` 的告警，事项阶段不变 | 只约束它建立的子事项，逐个校验 |
@@ -2481,6 +2482,8 @@ v0.1 落盘的邮件事件没有线程关联键，也无法补出：对这些旧
 | 不可以 | 改无关事项；没放开拍板时代本人决策、接受建议；任何 3b 动作（§14.3、§14.5） | 同左 |
 
 **权限与工具档位：后台运行与主会话同权。** 两种运行者都持运行凭据，它只带身份，判定与所属 Agent 的钥匙相同：`apa decide`、`apa accept`、`apa dismiss` 在权限卡开放"替我拍板"时生效，否则返回退出码 23；目标之外的事项照常可写（§14.5）。拉起时的工具档位取权限卡上的 `tool`，能力包模板头部不再声明档位（附录 C）。需要本人决定时转 `needs_input`，本次运行结束，触达送达。~~`apa decide`、`apa accept`、`apa dismiss` 一律返回退出码 4：运行者没有本人原话，授权单也不对运行凭据生效~~ **已取消（2026-11-20）**。
+
+**人格和记忆默认不带**：所有后台无头运行（任务型、主会话角色运行、来源批处理及它们的续接）默认不带 Agent 平时的人格、记忆与常驻说明：处理一批来源事件用不到它们，它们每一轮重发既费用量，也把本人的私人笔记带进外来内容的处理里。本人可在"设置 › Agent › 所有 Agent 共用"打开（策略段 `background_persona`，默认关，属"Agent 与执行者配置"）。内核只做一件事：开关关着时把声明里的 `headless.no_persona` 标志追加到拉起命令（附录 A.2）；怎么做到由各 harness 插件决定，没声明的宿主不受影响。改动只对之后拉起的运行生效；唤醒真实主会话不起新进程，不受影响。后台运行需要的工具由插件的声明按实际需要给出，附带的插件不给网页与委派工具集：把活派给别处经 `apa delegate` 加宿主终端里能用的派法。
 
 **"只在 APA 主机"的准确含义**：外呼调用器只在 APA 所在主机起进程，这一条只约束运行者进程本身。`main_session` 运行者可以经委派把实际工作交给任何主机上的执行者。
 
@@ -3317,6 +3320,8 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 | 自动化 | `apa instance`、`apa pack` |
 | 设置 | `apa settings get/put/post/delete`（Web 能做的设置都有 CLI 入口，按权限卡判）、`apa purge`、`apa connection add/configure/rename/enable/disable/remove` |
 | 可观测 | `apa why`、`apa why denied`（最近被拦下的四行说明）、`apa health`、`apa run`、`apa judgment stats/spot-check` |
+
+CLI 是 agent 的入口，读命令的默认输出要让 agent 直接可用、按需深入：`apa item list`、`apa inbox`、`apa today` 只给判断与引用够用的字段（不含 `body`、`spec`、`ext`、`proposal`），全文用 `apa item show` 读单条，整表全量带 `--full`；`apa source event` 同一内容只输出一次。精简只发生在 CLI 输出，HTTP 响应不变，不回写账本（§6.14）。
 
 ### 17.3 退出码
 

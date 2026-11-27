@@ -351,7 +351,7 @@ func (k *kit) proposed() []itemView {
 	var out struct {
 		Items []itemView `json:"items"`
 	}
-	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "list", "--phase", "proposed").Stdout), &out))
+	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "list", "--phase", "proposed", "--full").Stdout), &out))
 	return out.Items
 }
 

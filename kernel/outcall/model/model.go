@@ -116,6 +116,8 @@ type Request struct {
 	User    string
 	Schema  json.RawMessage // JSON Schema（对象）；空表示自由文本
 	Timeout time.Duration
+	// Effort 是要求的思考强度，空表示不发；只有 responses 协议发送。
+	Effort string
 }
 
 // Usage 是端点回报的 token 用量；端点未回报时各字段为零。InputTokens 含缓存读写的部分（CacheReadTokens、CacheWriteTokens）。

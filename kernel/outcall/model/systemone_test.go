@@ -96,7 +96,7 @@ func TestSystemOneMapsQuestionsAndAnswers(t *testing.T) {
 	q1, q2 := r.Questions["q1"], r.Questions["q22"]
 	if r.Model != "jev-latest" || r.State == "" || q1.Type != "noul" || q1.Instructions.Question != "值不值得看？" ||
 		q1.Instructions.Material != "正文 A" || string(q1.Instructions.Input) != `{"subject":"A"}` ||
-		q1.Criteria["true"] != "需要本人做事的算" || q1.Criteria["false"] == "" {
+		!strings.Contains(q1.Criteria["true"], "`criteria_1`") || q1.Criteria["false"] == "" || !strings.HasSuffix(r.State, "\n\ncriteria_1:\n需要本人做事的算") {
 		t.Fatalf("q1 wire = %+v", r)
 	}
 	if q2.Criteria != nil || q2.Instructions.Material != "" {
@@ -106,6 +106,20 @@ func TestSystemOneMapsQuestionsAndAnswers(t *testing.T) {
 	ep.URL += "/systemone/"
 	if _, err := c.Judge(context.Background(), ep, qs[:1], JudgeOptions{}); err != nil || f.paths[1] != "/v1/systemone" {
 		t.Fatalf("path=%v err=%v", f.paths, err)
+	}
+}
+
+// 同一份判据在一次请求里只发一份：题按编号指向 state。
+func TestSystemOneSendsEachCriteriaOnce(t *testing.T) {
+	f, ep, c, _ := soSetup(t, answerAll)
+	qs := []Question{{ID: "a", Question: "?", Criteria: "判据甲"}, {ID: "b", Question: "?", Criteria: "判据乙"}, {ID: "c", Question: "?", Criteria: "判据甲"}}
+	if _, err := c.Judge(context.Background(), ep, qs, JudgeOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	r := f.reqs[0]
+	if strings.Count(r.State, "判据甲") != 1 || strings.Count(r.State, "判据乙") != 1 || !strings.Contains(r.State, "criteria_2:\n判据乙") ||
+		r.Questions["a"].Criteria["true"] != r.Questions["c"].Criteria["true"] || !strings.Contains(r.Questions["b"].Criteria["true"], "`criteria_2`") {
+		t.Fatalf("wire = %+v", r)
 	}
 }
 

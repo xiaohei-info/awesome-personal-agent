@@ -57,6 +57,9 @@ Permission card: every command belongs to one group; the user allows or disallow
   Background runs have the same card as your main session. apa why denied lists what was refused and why.
   What the user said in chat is not a basis for anything; there is no --evidence or --grant.
 
+Lists are compact: apa item list, apa inbox and apa today omit body, spec, ext and proposal. Read one item with apa item show <id>;
+  pass --full only when you need those fields for every row.
+
 Scheduling: --planned-for <YYYY-MM-DD> is the day to do it; --planned-slot "HH:MM - HH:MM" (same day, no midnight crossing, needs a date) is when.
   A date without a slot means that day, no fixed time. Neither sets a reminder; --deadline does. What is planned next week: apa item list --from <Mon> --to <Sun>.
 
