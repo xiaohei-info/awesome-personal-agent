@@ -243,10 +243,10 @@ func (f *fx) buildLedger() fixtureIDs {
 	f.addItem("--title", "已过期", "--phase", "open", "--project", work, "--deadline", yesterday)
 	// 当天完成的事项与写下的进展（两个项目）。
 	ids.workDone = f.addItem("--title", "今天完成 W", "--phase", "open", "--project", work)
-	f.apa(f.DEL, 0, "item", "progress", ids.workDone, "--text", "进展 W1")
+	f.apa(f.DEL, 0, "item", "comment", ids.workDone, "--text", "进展 W1")
 	f.apa(f.DEL, 0, "item", "transition", ids.workDone, "--to", "done", "--reason", "完成")
 	ids.openDone = f.addItem("--title", "今天完成 O", "--phase", "open", "--project", open)
-	f.apa(f.DEL, 0, "item", "progress", ids.openDone, "--text", "进展 O1")
+	f.apa(f.DEL, 0, "item", "comment", ids.openDone, "--text", "进展 O1")
 	f.apa(f.DEL, 0, "item", "transition", ids.openDone, "--to", "done", "--reason", "完成")
 	// 一批导入的历史事件：给已完成事项的一条进展，与把另一件事记为完成。
 	ids.importedDone = f.addItem("--title", "导入时记为完成的事项", "--phase", "open", "--project", open)
@@ -281,7 +281,7 @@ func (f *fx) proposedTitles() []string {
 	var out []string
 	for _, it := range decode[struct {
 		Items []item `json:"items"`
-	}](f.t, f.apa(f.OBS, 0, "item", "list", "--phase", "proposed").Stdout).Items {
+	}](f.t, f.apa(f.OBS, 0, "item", "list", "--phase", "proposed", "--full", "--limit", "200").Stdout).Items {
 		out = append(out, it.Title)
 	}
 	return out

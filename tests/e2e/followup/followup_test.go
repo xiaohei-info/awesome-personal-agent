@@ -118,7 +118,7 @@ func TestFlowFollowUp(t *testing.T) {
 
 	step(t, "ACT-FUP-03 选已催：记一条进展并排下一轮", func(t *testing.T) {
 		before := len(f.show(fu1).Progress)
-		f.webOK("POST", "/items/"+fu1+"/progress", `{"text":"已催：电话问过装修公司"}`, 201)
+		f.webOK("POST", "/items/"+fu1+"/comments", `{"text":"已催：电话问过装修公司"}`, 201)
 		it := f.show(fu1)
 		if len(it.Progress) != before+1 || it.Phase != "waiting" {
 			t.Fatalf("已催应新增一条进展且仍 waiting: progress %d→%d phase=%s", before, len(it.Progress), it.Phase)
@@ -178,7 +178,7 @@ func TestFlowFollowUp(t *testing.T) {
 			t.Fatalf("决策待办里没有 FU-4: %s", inbox)
 		}
 		for _, label := range []string{"继续等", "我来处理", "放弃"} {
-			if raw := f.apa(f.OBS, 0, "item", "show", fu4).Stdout; !strings.Contains(raw, label) {
+			if raw := f.apa(f.OBS, 0, "item", "show", fu4, "--full").Stdout; !strings.Contains(raw, label) {
 				t.Errorf("决策请求缺少选项 %q: %s", label, raw)
 			}
 		}
@@ -194,7 +194,7 @@ func TestFlowFollowUp(t *testing.T) {
 			"--project", f.Projects["acc-work"]).Stdout).ID
 		f.wait(fu5)
 		f.advanceUntilReminded(fu5, 1)
-		f.apa(f.WRK, 0, "item", "progress", fu5, "--text", "对方说周五给")
+		f.apa(f.WRK, 0, "item", "comment", fu5, "--text", "对方说周五给")
 		f.advanceUntilReminded(fu5, 2)
 		f.advanceUntilReminded(fu5, 3)
 		f.TCAdvance(65)

@@ -117,10 +117,10 @@ func TestFlowMaterialHosted(t *testing.T) {
 
 	t.Run("ACT-HST-07 托管型只索引元信息", func(t *testing.T) {
 		type hits struct{ Hits []map[string]any }
-		eq(t, "正文词不命中", len(decode[hits](t, f.apa(f.OBS, 0, "material", "search", "zebra-ledger").Stdout).Hits), 0)
-		raw := f.apa(f.OBS, 0, "material", "search", "design.md").Stdout
+		eq(t, "正文词不命中", len(decode[hits](t, f.apa(f.OBS, 0, "search", "zebra-ledger", "--type", "material").Stdout).Hits), 0)
+		raw := f.apa(f.OBS, 0, "search", "design.md", "--type", "material").Stdout
 		h := decode[hits](t, raw).Hits
-		if len(h) != 1 || h[0]["id"] != design || h[0]["hosted"] != true {
+		if len(h) != 1 || h[0]["id"] != design || h[0]["path"] == nil || h[0]["snippet"] != nil {
 			t.Fatalf("路径片段应命中该托管材料: %v", h)
 		}
 		contains(t, "命中回路径", raw, designDoc)

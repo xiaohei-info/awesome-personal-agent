@@ -8,14 +8,14 @@ agent: task
 - 本批提示词只列出事件的元信息（事件 id、来源、类型、时间、等级），不附原文；需要看原文时主动调用 `apa` 命令读取。
 
 ## 零、怎么调用
-下面按 `apa` 命令行写。没有终端时用同名的 APA 工具，参数一一对应：`apa source event` 即 `apa_source_event`，`apa item list/show/update/progress` 即 `apa_item_list`、`apa_item_show`、`apa_item_update`、`apa_item_progress`，`apa source propose/remind/ignore/attach` 即 `apa_source_propose`、`apa_source_remind`、`apa_source_ignore`、`apa_source_attach`；看项目用 `apa_project_list`、`apa_project_show`（代替 `apa context`）。
+下面按 `apa` 命令行写。没有终端时用同名的 APA 工具，参数一一对应：`apa source event` 即 `apa_source_event`，`apa search` 即 `apa_search`，`apa item list/show/update/comment` 即 `apa_item_list`、`apa_item_show`、`apa_item_update`、`apa_item_comment`，`apa source propose/remind/ignore/attach` 即 `apa_source_propose`、`apa_source_remind`、`apa_source_ignore`、`apa_source_attach`；看项目用 `apa_project_list`、`apa_project_show`（代替 `apa context`）。
 
 **参数速查**（照抄即可，不用再查 `--help`；没列出的参数不接受）：
 - `apa source event <事件 id> [--part body|messages]`
 - `apa source propose <事件 id> [--into <建议 id>]`：没有 `--reason`
 - `apa source remind <事件 id>`、`apa source ignore <事件 id>`：只有 id，没有 `--reason`
 - `apa source attach <事件 id> --to <事项 id> --reason "<理由>"`
-- `apa item progress <事项 id> --text "<一句话>"`：没有 `--reason`
+- `apa item comment <事项 id> --text "<一句话>"`：没有 `--reason`
 - `apa item update <事项或建议 id> --reason "<理由>" [--title --summary --project --priority --deadline --planned-for --planned-slot]`
 
 **少走轮次**：互不依赖的读取放在同一轮里并行发多个调用；落账同样可以合在一轮。单条命令的输出太大会被截断（实测超过约 30 KB 就可能读不全，截断提示里给的文件路径也读不到）：事件原文与事项列表分开调用，不拼进同一条命令；事项列表每个阶段单独一条；事件原文按大小分几条命令读（小的可用 `for` 循环合读，单个就超过的分段读）。读到截断就拆小重读。
@@ -26,7 +26,8 @@ agent: task
    - 如果事件的状态已经不是 `pending`（例如上一次失败重跑前已被处理过），直接跳过，绝不重复建建议。
 2. 查账本里的现有事项与建议，避免重复立项或错并：
    - `apa context` 看全局项目与背景
-   - `apa item list --phase open` / `--phase waiting` / `--phase needs_input` / `--phase proposed`（可按 `--project`、`--q` 筛选）。列表是精简的（没有正文与建议详情），直接看输出即可；要细节再单看那一条
+   - `apa search "<事件里的关键词或一句话>"` 跨项目找同一件事的事项与建议，按相关度排；已放弃的默认不出（输出里写明有几条）
+   - `apa item list --phase open` / `--phase waiting` / `--phase needs_input` / `--phase proposed`（可按 `--project`、`--q` 筛选）。列表是精简的短行（没有正文与建议详情），每页 30 条，`total` 与 `next` 写明还剩多少，没列完时按 `next` 续页；要细节再单看那一条
    - `apa item show <事项 id>` 看具体事项的进展、关联键与来源
 
 ## 二、怎么落账（每条待处理事件必须有明确去向）
@@ -40,7 +41,7 @@ agent: task
 
 1. **属于已有进行中/等待中/待决定事项的后续进展或跟进**：
    - 用 `apa source attach <事件 id> --to <事项 id> --reason "<简短理由>"` 把事件挂到原事项；
-   - 如果带来新的实质进展或信息，再用 `apa item progress <事项 id> --text "<一句话进展>"` 记录；
+   - 如果带来新的实质进展或信息，再用 `apa item comment <事项 id> --text "<一句话进展>"` 记录；
    - 不要新建重复建议。
 2. **属于已有待确认建议（`proposed`）的同一件事**：
    - 用 `apa source propose <事件 id> --into <建议 id>` 并入该建议，保留来源留痕与「合并自 N 条」；

@@ -75,7 +75,7 @@ function Confirm() {
           <button type="button" className="primary" onClick={() => run(() => api.post(path + "/transition", { to: "done", reason: t.doneReason }, ifMatch), t.doneOk)}>{t.confirmDone}</button>
         )
       ) : act === "progress" ? (
-        <ProgressForm onSubmit={(b) => run(() => api.post(path + "/progress", b), t.progressOk)} />
+        <ProgressForm onSubmit={(b) => run(() => api.post(path + "/comments", b), t.progressOk)} />
       ) : (
         <PlanForm initial={item.planned_for ?? ""} onSubmit={(v) => run(() => api.patch(path, { planned_for: v }, ifMatch), t.planOk)} />
       )}

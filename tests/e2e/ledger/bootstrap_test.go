@@ -237,7 +237,7 @@ func TestFlowBootstrap(t *testing.T) {
 			}
 		}
 		// 登录保存的凭据确实可用：不设 APA_TOKEN 也能读到事项。
-		show := e.Apa("", "", "item", "show", itemID)
+		show := e.Apa("", "", "item", "show", itemID, "--full")
 		if show.Code != 0 || !strings.Contains(show.Stdout, marker) {
 			t.Errorf("login 保存的凭据读不到事项: %d %s %s", show.Code, show.Stdout, show.Stderr)
 		}
@@ -276,7 +276,7 @@ func TestFlowBootstrap(t *testing.T) {
 		if r := e.Apa(obs, "", "inbox"); r.Code != 0 {
 			t.Errorf("重启后 inbox 退出码 %d: %s", r.Code, r.Stderr)
 		}
-		if r := e.Apa(obs, "", "item", "show", itemID); r.Code != 0 || !strings.Contains(r.Stdout, marker) {
+		if r := e.Apa(obs, "", "item", "show", itemID, "--full"); r.Code != 0 || !strings.Contains(r.Stdout, marker) {
 			t.Errorf("重启后停机前的数据丢失: %d %s", r.Code, r.Stdout)
 		}
 	})

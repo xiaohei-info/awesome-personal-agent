@@ -79,7 +79,7 @@ func TestFlowDelegateRecover(t *testing.T) {
 		eq(t, "子事项 assignee", it["assignee"], "work-host.cli")
 		eq(t, "子事项 project", it["project"], work)
 		eq(t, "父事项阶段", f.phase(parent), "waiting")
-		contains(t, "父事项 waiting_on 指向执行者", f.apa(f.OBS, 0, "item", "show", parent).Stdout, "work-host.cli")
+		contains(t, "父事项 waiting_on 指向执行者", f.apa(f.OBS, 0, "item", "show", parent, "--full").Stdout, "work-host.cli")
 	})
 
 	t.Run("ACT-DLG-03 执行者拿到项目上下文，不含材料正文", func(t *testing.T) {
@@ -99,7 +99,7 @@ func TestFlowDelegateRecover(t *testing.T) {
 		lacks(t, "上下文不带材料正文", itemCtx+projCtx, "MARKER-BODY")
 	})
 
-	t.Run("ACT-DLG-04 执行者回执并附证据；无结果证据的完成回执被拒", func(t *testing.T) {
+	t.Run("ACT-DLG-04 执行者回执并附证据；没有证据时摘要就是结果（2026-11-28）", func(t *testing.T) {
 		f.apa(f.WRK, 0, "report", child, "--outcome", "done", "--summary", "已修复", "--pr", "https://example.invalid/acc/pr/42")
 		eq(t, "子事项阶段", f.phase(child), "done")
 		eq(t, "父事项阶段", f.phase(parent), "open")
@@ -109,9 +109,9 @@ func TestFlowDelegateRecover(t *testing.T) {
 		}
 		p4 := f.workItem("DLG4 无证据完成")
 		c4 := f.delegate(p4, "work-host.cli")
-		f.apa(f.WRK, 2, "report", c4, "--outcome", "done", "--summary", "已修复")
-		eq(t, "无证据完成回执后的子事项阶段", f.phase(c4), "open")
-		eq(t, "无证据完成回执后的回执事件数", len(f.events(c4, "delegation.reported")), 0)
+		f.apa(f.WRK, 0, "report", c4, "--outcome", "done", "--summary", "已评估：方案可行")
+		eq(t, "无证据完成回执后的子事项阶段", f.phase(c4), "done")
+		eq(t, "无证据完成回执后的回执事件数", len(f.events(c4, "delegation.reported")), 1)
 	})
 
 	t.Run("ACT-DLG-05 回收结果注入主会话", func(t *testing.T) {

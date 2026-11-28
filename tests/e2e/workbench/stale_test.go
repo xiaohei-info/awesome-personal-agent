@@ -111,7 +111,7 @@ func TestFlowStale(t *testing.T) {
 		eq(t, "ST-5 阶段", k.phase(st[5]), "waiting")
 		// 之后 4 分钟内不碰 ST-1..ST-6，只在第 2 分钟给 ST-2 写一条进展。
 		k.advance(120, 30)
-		k.webOK("POST", "/items/"+st[2]+"/progress", `{"text":"有进展"}`, 201)
+		k.webOK("POST", "/items/"+st[2]+"/comments", `{"text":"有进展"}`, 201)
 		k.advance(120, 30)
 	})
 
@@ -146,7 +146,7 @@ func TestFlowStale(t *testing.T) {
 			t.Errorf("提醒没有链接到\"今天\"的久未推进一组: %s", k.unreadRaw())
 		}
 		// 同一批再检查一次不重复：给 ST-2 再写一条进展让它仍不算久未推进，批保持 {ST-1, ST-3}。
-		k.webOK("POST", "/items/"+st[2]+"/progress", `{"text":"还在做"}`, 201)
+		k.webOK("POST", "/items/"+st[2]+"/comments", `{"text":"还在做"}`, 201)
 		k.advance(150, 30)
 		eq(t, "第二次检查后的提醒条数", k.remindersMentioning("ST-1", "ST-3"), 1)
 		eq(t, "CLS_LOG 行数", len(k.Cls.Batches()), cls0)
@@ -175,7 +175,7 @@ func TestFlowStale(t *testing.T) {
 			t.Fatal("ST-7 没有进入久未推进组")
 		}
 		// "今天"页的批量提交逐条调既有接口：继续=记一条进展，改期=设计划日期，放弃=转 dropped；每条一个 Event。
-		k.webOK("POST", "/items/"+st[1]+"/progress", `{"text":"继续"}`, 201)
+		k.webOK("POST", "/items/"+st[1]+"/comments", `{"text":"继续"}`, 201)
 		k.webOK("PATCH", "/items/"+st[3], `{"planned_for":"`+day2+`"}`, 200)
 		k.webOK("POST", "/items/"+st[7]+"/transition", `{"to":"dropped","reason":"久未推进，本人选择放弃"}`, 200)
 		eq(t, "ST-1 阶段", k.phase(st[1]), "open")

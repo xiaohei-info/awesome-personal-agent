@@ -106,7 +106,7 @@ func (f *fx) outputs(item string) []string {
 		Relations []struct {
 			From, To, Type string
 		} `json:"relations"`
-	}](f.t, f.apa(f.OBS, 0, "item", "show", item).Stdout).Relations {
+	}](f.t, f.apa(f.OBS, 0, "item", "show", item, "--full").Stdout).Relations {
 		if r.Type == "output" && r.From == item {
 			out = append(out, r.To)
 		}
@@ -146,5 +146,5 @@ func (f *fx) phase(item string) string {
 		Item struct {
 			Phase string `json:"phase"`
 		} `json:"item"`
-	}](f.t, f.apa(f.OBS, 0, "item", "show", item).Stdout).Item.Phase
+	}](f.t, f.apa(f.OBS, 0, "item", "show", item, "--full").Stdout).Item.Phase
 }

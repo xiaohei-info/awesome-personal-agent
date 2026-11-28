@@ -161,7 +161,7 @@ type UserPack struct {
 func (f *fx) baseline() {
 	m := f.m
 	m.Tables = map[string]int{}
-	r, err := f.tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'material_search_%' ORDER BY name`)
+	r, err := f.tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'material\_search%' ESCAPE '\' AND name NOT LIKE 'search\_%' ESCAPE '\' ORDER BY name`)
 	if err != nil {
 		panic(err)
 	}

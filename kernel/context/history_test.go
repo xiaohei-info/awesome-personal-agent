@@ -68,9 +68,20 @@ func TestDispatchHistory(t *testing.T) {
 	if got[d1] != "item" || got[d2] != "parent" || got[d3] != "continues" || got[d4] != "" || len(got) != 3 {
 		t.Fatalf("sequence %v (d1 %s d2 %s d3 %s)", got, d1, d2, d3)
 	}
-	first := r.History[0].Dispatches[0]
-	if first.ID != d3 || first.Executor.Label != "Paseo · quick @ mbp" || string(first.Executor.Handle) != `{"mech":"paseo","profile":"quick"}` {
-		t.Fatalf("newest first with the executor's registration: %+v", first)
+	ds := r.History[0].Dispatches
+	if first := ds[0]; first.ID != d1 || first.Executor.Label != "Paseo · quick @ mbp" || string(first.Executor.Handle) != `{"mech":"paseo","profile":"quick"}` {
+		t.Fatalf("the item's own record first, with the executor's registration: %+v", first)
+	}
+	if ds[1].ID != d3 || ds[2].ID != d2 {
+		t.Fatalf("then the rest newest first: %s %s", ds[1].ID, ds[2].ID)
+	}
+	// 兄弟子事项刚刚派出（更晚）：c1 的"上次"仍是它自己的记录，增量与 --scope item 一致。
+	if r.Items[0].Last == nil || r.Items[0].Last.Session != "agt_1" || r.Items[0].Last.Item != c1 {
+		t.Fatalf("last dispatch of c1 must be its own: %+v", r.Items[0].Last)
+	}
+	sib := e.build(t, Request{ItemScope: true, Item: c2, Reader: Reader{Level: authz.LevelDelegate, Principal: "dlg", Harness: "hermes"}})
+	if l := sib.Items[0].Last; l == nil || l.Item != c2 || l.Session != "" {
+		t.Fatalf("last dispatch of the sibling c2 is its own (no session), not c1's: %+v", l)
 	}
 
 	// 别的 harness 读：own 为假，注入标"仅供参考"，且不带句柄。

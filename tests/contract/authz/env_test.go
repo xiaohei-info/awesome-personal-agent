@@ -41,6 +41,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
@@ -77,7 +78,7 @@ func setupWith(t *testing.T, decisions bool) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, materials.Module, executors.Module, delegation.Module, proc.Module, runidentity.Module, runner.Module, instances.Module, core.Module} {
+		items.Module, materials.Module, executors.Module, delegation.Module, proc.Module, runidentity.Module, runner.Module, instances.Module, core.Module, search.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

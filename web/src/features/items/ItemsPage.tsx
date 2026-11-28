@@ -438,7 +438,7 @@ export function ItemDetail({ embedded }: { embedded?: string } = {}) {
                 <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), credential(p.actor), when(p.at, p.precision)].filter(Boolean).join(" · ")}</span></li>
               ))}
             </ul>
-            <ProgressForm onSubmit={(b) => act(() => api.post(path + "/progress", b))} />
+            <ProgressForm onSubmit={(b) => act(() => api.post(path + "/comments", b))} />
           </section>
 
           <section aria-label={t.changes}>

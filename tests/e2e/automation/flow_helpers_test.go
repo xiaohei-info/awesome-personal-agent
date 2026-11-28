@@ -271,7 +271,7 @@ func (k *kit) items(kind string) []ledgerItem {
 
 func (k *kit) show(id string) (it ledgerItem, raw string) {
 	k.t.Helper()
-	raw = k.apa(k.OBS, 0, "item", "show", id).Stdout
+	raw = k.apa(k.OBS, 0, "item", "show", id, "--full").Stdout
 	var out struct {
 		Item ledgerItem `json:"item"`
 	}

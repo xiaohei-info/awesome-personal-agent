@@ -45,7 +45,7 @@ func (f *fx) why(token, id string) (string, []whyStep) {
 }
 
 func (f *fx) itemExists(id string) bool {
-	return f.Apa(f.OBS, "", "item", "show", id).Code == 0
+	return f.Apa(f.OBS, "", "item", "show", id, "--full").Code == 0
 }
 
 // blobPut 以 WRK 上传一个附件，返回 sha256。

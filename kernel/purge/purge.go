@@ -5,7 +5,7 @@
 //
 // 授权是 change_settings：只有 Web 上的本人可执行，delegate 得到退出码 20，其余级别被拒绝。
 // 本包不写自己的表，也不直写其他模块的数据：投影、正文、委派记录和 blob 文件的删除分别由 items、materials、delegation、blobs 提供入口，
-// Event 墓碑由 eventlog 提供。
+// Event 墓碑由 eventlog 提供，检索索引的清除由 search 提供。
 package purge
 
 import (
@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -154,6 +155,10 @@ func apply(c *command.Ctx, blobDir string, v in) (any, error) {
 
 	n, err := eventlog.Tombstone(c.Tx, tomb...)
 	if err != nil {
+		return nil, err
+	}
+	// 检索索引是派生数据，被删对象不会再有新事件：在同一事务里清掉，删完立即检索不到（§6.15）。
+	if err := search.Forget(c.Tx, tomb...); err != nil {
 		return nil, err
 	}
 	res := Result{Object: id, Kind: kind, Events: n}

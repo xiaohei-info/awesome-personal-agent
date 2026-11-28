@@ -367,7 +367,8 @@ func snapshot(t *testing.T, st *store.Store) pre {
 	return pre{tableCounts(t, st),
 		strCol(t, st, "SELECT module||'/'||version||'/'||checksum FROM store_migrations ORDER BY 1"),
 		strCol(t, st, "SELECT version||':'||doc FROM policy_version ORDER BY version"),
-		strCol(t, st, "SELECT m.name||'.'||c.name FROM sqlite_master m, pragma_table_info(m.name) c WHERE m.type = 'table' ORDER BY 1")}
+		strCol(t, st, `SELECT m.name||'.'||c.name FROM sqlite_master m, pragma_table_info(m.name) c WHERE m.type = 'table'
+			AND m.name NOT LIKE 'material\_search%' ESCAPE '\' ORDER BY 1`)} // 旧的材料索引是派生数据，结构版本 15 整张换成统一索引（§16.5）
 }
 
 // 从版本 2 与每个结构版本的夹具升到主干最新，各自满足 §5.2 里账本层面的要求。

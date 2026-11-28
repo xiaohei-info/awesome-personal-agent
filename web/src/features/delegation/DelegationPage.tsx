@@ -8,6 +8,7 @@ import { codeText, lang, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { Val, useLabel } from "../../app/values";
 import { useNames } from "../../app/names";
+import { evidenceEntries, type Evidence } from "../../app/evidence";
 
 // 形状对应 GET /v1/items?kind=delegation、GET /v1/audit/events?type=delegation.reported、GET /v1/executors?project=、
 // PATCH /v1/items/{id}（改派，If-Match）、POST /v1/delegations（重新委派）。
@@ -21,7 +22,6 @@ interface Child {
   project?: string;
   assignee?: string;
 }
-interface Evidence { commit?: string; pr?: string; branch?: string; link?: string }
 interface Report { outcome: string; summary: string; evidence: Evidence }
 interface Step { seq: number; type: string; object: string; at: string; payload?: { report?: Report } }
 interface Executor { id: string; kind: string; host?: string; allowed?: boolean }
@@ -47,7 +47,7 @@ function Row({ c, report, kinds, stalled, onDone }: { c: Child; report?: Step; k
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const r = report?.payload?.report;
-  const ev = r?.evidence ?? {};
+  const ev = evidenceEntries(r?.evidence);
   const terminal = TERMINAL.has(c.phase);
 
   const open = async (m: "reassign" | "redelegate") => {
@@ -100,12 +100,9 @@ function Row({ c, report, kinds, stalled, onDone }: { c: Child; report?: Step; k
         {c.status_label || t.noReport}
         {r && t.report(label("outcome", r.outcome), new Date(report!.at).toLocaleString(locale()))}
       </p>
-      {(ev.commit || ev.pr || ev.branch || ev.link) && (
+      {ev.length > 0 && (
         <ul aria-label={t.evidence}>
-          {ev.commit && <li>commit{t.colon}{ev.commit}</li>}
-          {ev.pr && <li>PR{t.colon}{ev.pr}</li>}
-          {ev.branch && <li>{t.branch}{t.colon}{ev.branch}</li>}
-          {ev.link && <li>{t.link}{t.colon}{ev.link}</li>}
+          {ev.map(([k, v], i) => <li key={i}>{k === "branch" ? t.branch : k === "link" ? t.link : k === "pr" ? "PR" : k}{t.colon}{v}</li>)}
         </ul>
       )}
       {!mode && (

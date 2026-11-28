@@ -21,11 +21,11 @@ function server(list: It[]) {
     calls.push({ method, path: url, body, ifMatch: (init.headers as Record<string, string> | undefined)?.["If-Match"] });
     if (url === "/v1/projects") return json(200, { projects: [{ id: "p-work", name: "工作" }, { id: "p-home", name: "家务" }] });
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items: [...items.values()] });
-    const m = /^\/v1\/items\/([^/]+)(\/transition|\/progress)?$/.exec(url);
+    const m = /^\/v1\/items\/([^/]+)(\/transition|\/comments)?$/.exec(url);
     const it = m && items.get(m[1]);
     if (!it) return json(404, { code: "not_found", why: "no route", next: "x" });
     if (method === "GET") return json(200, { item: it, relations: [] });
-    if (m![2] === "/progress") return json(201, { id: it.id });
+    if (m![2] === "/comments") return json(201, { id: it.id });
     if (m![2]) it.phase = body.to;
     else for (const [k, v] of Object.entries(body)) if (k !== "reason") it[k] = v;
     it.version++;
@@ -94,7 +94,7 @@ describe("事项列表（对齐工作台任务库）", () => {
     await user.click(within(row).getByRole("button", { name: "记进展" }));
     await user.type(within(within(row).getByRole("group", { name: "记进展：甲" })).getByLabelText("进展"), "联调通过");
     await user.click(within(row).getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/progress", body: { text: "联调通过" }, ifMatch: undefined }]));
+    await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/comments", body: { text: "联调通过" }, ifMatch: undefined }]));
     await waitFor(() => expect(within(row).queryByRole("group", { name: "记进展：甲" })).toBeNull());
     expect(s.calls.filter((c) => c.path === "/v1/items")).toHaveLength(1);
   });
@@ -234,7 +234,7 @@ describe("事项列表（对齐工作台任务库）", () => {
       expect(within(prog).getByLabelText("进展")).toHaveFocus();
       await user.type(within(prog).getByLabelText("进展"), "窄屏进度");
       await user.click(within(prog).getByRole("button", { name: "保存" }));
-      await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/progress", body: { text: "窄屏进度" }, ifMatch: undefined }]));
+      await waitFor(() => expect(writes(s)).toEqual([{ method: "POST", path: "/v1/items/a/comments", body: { text: "窄屏进度" }, ifMatch: undefined }]));
 
       await user.click(more);
       await user.click(within(within(row).getByRole("menu")).getByRole("menuitem", { name: "删除…" }));

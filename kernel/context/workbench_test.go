@@ -111,8 +111,18 @@ func TestUnattachedDispatchEveryTurnAndInjectBudget(t *testing.T) {
 		many = append(many, Entry{ID: fmt.Sprintf("itm_%04d", i), Title: long, Phase: domain.PhaseOpen, Action: "apa item show x"})
 	}
 	out := Result{Items: many}.Inject()
-	if n := len([]rune(out)); n > InjectBudget+80 || !strings.Contains(out, "条未列出：apa context --scope all") || !strings.HasSuffix(out, envelopeClose+"\n") {
+	if n := len([]rune(out)); n > InjectBudget || !strings.Contains(out, "条未列出：apa context --scope all") || !strings.HasSuffix(out, envelopeClose+"\n") {
 		t.Fatalf("budget: %d runes\n%s", n, out[len(out)-200:])
+	}
+	// 工作台概览：多组都满、每组另有未列出的；说明行也计入，整份仍不超过上限。
+	var groups []OverviewGroup
+	for g := 0; g < 8; g++ {
+		groups = append(groups, OverviewGroup{Key: GroupProject, Project: fmt.Sprintf("prj_%d", g), Name: long, Items: many[:OverviewGroupRows], More: 37,
+			Query: "apa item list --phase open --project prj_x"})
+	}
+	ov := Result{Overview: groups}.Inject()
+	if n := len([]rune(ov)); n > InjectBudget || !strings.Contains(ov, "条未列出") || !strings.HasSuffix(ov, envelopeClose+"\n") {
+		t.Fatalf("overview budget: %d runes", n)
 	}
 }
 

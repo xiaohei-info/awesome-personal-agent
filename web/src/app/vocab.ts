@@ -243,7 +243,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   },
   fixedRule: {
     runs_not_captured: { label: "Agent 后台运行里的对话不会被记成新的来源事件" },
-    done_needs_evidence: { label: "报「完成」必须带结果证据" },
+    done_needs_evidence: { label: "报「完成」要有依据：交给别人做的事写明结果即可，其他事项要带 PR、提交或链接" },
     same_account_host: { label: "它和 APA 在同一台电脑上运行时，有终端就能直接碰到数据文件" },
   },
   revertWhy: {
@@ -653,7 +653,7 @@ const en: typeof zh = {
   },
   fixedRule: {
     runs_not_captured: { label: "Chats inside background runs are not recorded as new source events" },
-    done_needs_evidence: { label: "Reporting done needs result evidence" },
+    done_needs_evidence: { label: "Reporting done needs a basis: for handed-over work the written result is enough; other items need a PR, commit or link" },
     same_account_host: { label: "When it runs on the same computer as APA, a terminal can reach the data files directly" },
   },
   revertWhy: {

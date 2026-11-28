@@ -6,8 +6,18 @@ import { useRaw } from "../../app/raw";
 import { useSession } from "../../app/session";
 import { entryOf } from "../../app/values";
 import { Donut, MODEL_COLORS, PART_COLORS, SEGMENT_COLORS, Trend, type Bucket, type Series } from "./charts";
-import { cacheRate, PARTS, rank, SEGMENTS, split, sum, total, type Counts, type Group, type Part, type Row, type Summary } from "./data";
+import { allUnprovided, cacheRate, PARTS, rank, SEGMENTS, split, sum, total, unprovided, unreported, type Counts, type Group, type Part, type Row, type Summary } from "./data";
 import { strings } from "./strings";
+
+type T = (typeof strings)["zh"];
+/** 一次都没有用量时怎么写：全是未提供写"未提供"，否则"未回报"。 */
+const noneOf = (t: T, c: Counts, agent: boolean) => (allUnprovided(c) ? (agent ? t.agentNotProvided : t.notProvided) : agent ? t.noAgentUsage : t.noUsage);
+/** 部分没有用量时的提示，未回报与未提供分开写。 */
+function Gaps({ c, hideUnreported }: { c: Counts; hideUnreported?: boolean }) {
+  const t = useT(strings);
+  const parts = [!hideUnreported && unreported(c) > 0 && t.unreported(unreported(c)), unprovided(c) > 0 && t.unprovided(unprovided(c))].filter(Boolean);
+  return parts.length ? <span className="usage-warn"> {parts.join(" · ")}</span> : null;
+}
 
 type Days = 1 | 7 | 30;
 type Use = "all" | Part;
@@ -107,7 +117,7 @@ function Report({ data, days, use, week }: { data: Summary; days: Days; use: Use
     );
   // 一次都没回报时按次数画：画 0 会读成没用量。
   const byCount = !all.reported;
-  const none = use === "agent" ? t.noAgentUsage : t.noUsage;
+  const none = noneOf(t, all, use === "agent");
   return (
     <>
       <Cards rows={rows} all={all} use={use} none={none} />
@@ -124,7 +134,6 @@ function Report({ data, days, use, week }: { data: Summary; days: Days; use: Use
 function Cards({ rows, all, use, none }: { rows: Row[]; all: Counts; use: Use; none: string }) {
   const t = useT(strings);
   const name = useNames();
-  const missing = all.requests - all.reported;
   const rate = cacheRate(all);
   const byCount = !all.reported;
   const top = rank(rows, (r) => (use === "all" ? t.uses[r.part] : name(r)), byCount)[0];
@@ -137,7 +146,7 @@ function Cards({ rows, all, use, none }: { rows: Row[]; all: Counts; use: Use; n
       </Card>
       <Card label={t.calls} value={t.times(num(all.requests))}>
         {use === "all" && t.callSplit(num(all.requests - runs), num(runs))}
-        {missing > 0 && <span className="usage-warn">{t.unreported(missing)}</span>}
+        <Gaps c={all} />
       </Card>
       <Card label={t.cacheRate} value={rate === undefined ? "—" : percent(rate)}>
         {rate === undefined ? t.noCache : t.readTokens(short(all.cache_read_tokens))}
@@ -213,7 +222,7 @@ function TrendPanel({ data, days, use, byCount }: { data: Summary; days: Days; u
         {!sel ? t.pick : (
           <>
             <b>{tick(sel.slot)}</b>
-            {!sel.counts.requests ? ` ${t.noneShort}` : !sel.counts.reported ? ` ${t.times(num(sel.counts.requests))} · ${t.noUsage}` : (
+            {!sel.counts.requests ? ` ${t.noneShort}` : !sel.counts.reported ? ` ${t.times(num(sel.counts.requests))} · ${noneOf(t, sel.counts, false)}` : (
               <>
                 {` ${t.totalShort(num(total(sel.counts)))}`}
                 {series.map((s) => ` · ${s.label} ${num(sel.values[s.key])}`)}
@@ -236,21 +245,20 @@ function Uses({ rows, all, byCount }: { rows: Row[]; all: Counts; byCount: boole
   const max = Math.max(1, ...groups.map(size));
   const item = (g: Group<Row>) => {
     const silent = !g.reported;
-    const missing = g.requests - g.reported;
     const s = split(g);
     return (
       <li key={g.key}>
         <div>
           <span>{g.key}{raw && <small className="raw-id">{[...new Set(g.items.map((r) => r.purpose))].join(" ")}</small>}</span>
           <span>
-            {silent ? `${t.times(num(g.requests))} · ${g.items[0].part === "agent" ? t.noAgentUsage : t.noUsage}` : `${short(total(g))} · ${percent(total(g) / (total(all) || 1))}`}
+            {silent ? `${t.times(num(g.requests))} · ${noneOf(t, g, g.items[0].part === "agent")}` : `${short(total(g))} · ${percent(total(g) / (total(all) || 1))}`}
           </span>
         </div>
         <div className={silent && !byCount ? "usage-bar silent" : "usage-bar"} aria-hidden="true">
           {byCount ? <i style={{ width: `${(g.requests / max) * 100}%`, background: PART_COLORS[g.items[0].part] }} />
             : !silent && SEGMENTS.map((k) => <i key={k} style={{ width: `${(s[k] / max) * 100}%`, background: SEGMENT_COLORS[k] }} />)}
         </div>
-        {!silent && missing > 0 && <small className="usage-warn">{t.unreported(missing)}</small>}
+        {!silent && <small><Gaps c={g} /></small>}
       </li>
     );
   };
@@ -290,9 +298,9 @@ function Models({ rows, all, byCount }: { rows: Row[]; all: Counts; byCount: boo
               <i style={{ background: g.fill }} />
               <span>{g.key}</span>
               <small>
-                {byCount ? `${t.times(num(g.requests))} · ${t.noUsage}` : !g.reported ? t.noUsage
+                {byCount ? `${t.times(num(g.requests))} · ${noneOf(t, g, false)}` : !g.reported ? noneOf(t, g, false)
                   : `${percent(total(g) / (total(all) || 1))} · ${rate === undefined ? t.noCacheShort : t.hit(percent(rate))}`}
-                {g.reported > 0 && g.reported < g.requests && <span className="usage-warn"> {t.unreported(g.requests - g.reported)}</span>}
+                {g.reported > 0 && <Gaps c={g} />}
               </small>
             </li>
           );
@@ -306,13 +314,14 @@ function Details({ data, rows, days, use, name }: { data: Summary; rows: Row[]; 
   const t = useT(strings);
   const raw = useRaw();
   const lines = rank(rows, (r) => JSON.stringify([r.part, name(r), r.model ?? ""]), false);
-  const heads = [t.calls, t.missing, t.input, t.segments.read, t.segments.write, t.output, t.cacheRate];
+  const heads = [t.calls, t.missing, t.notProvidedShort, t.input, t.segments.read, t.segments.write, t.output, t.cacheRate];
   /** 一次都没回报时不写 0：那会读成没用量。 */
   const cells = (c: Counts) => {
     const rate = cacheRate(c);
-    const token = (n: number) => (c.reported ? num(n) : t.silent);
-    return [num(c.requests), num(c.requests - c.reported), token(c.input_tokens), token(c.cache_read_tokens), token(c.cache_write_tokens),
-      token(c.output_tokens), !c.reported ? t.silent : rate === undefined ? "—" : percent(rate)].map((v, i) => <td key={i}>{v}</td>);
+    const silent = allUnprovided(c) ? t.notProvidedShort : t.silent;
+    const token = (n: number) => (c.reported ? num(n) : silent);
+    return [num(c.requests), num(unreported(c)), num(unprovided(c)), token(c.input_tokens), token(c.cache_read_tokens), token(c.cache_write_tokens),
+      token(c.output_tokens), !c.reported ? silent : rate === undefined ? "—" : percent(rate)].map((v, i) => <td key={i}>{v}</td>);
   };
   const slots = data.slots
     .map((slot) => ({ slot, c: sum(data.series.filter((p) => p.slot === slot && (use === "all" || p.part === use))) }))

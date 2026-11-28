@@ -1,4 +1,4 @@
-// Package materials 实现 `apa material add/commit/list/show/search` 与 `apa blob put/get`（附录 B.1「材料与规范」、设计 §12.3–12.4）。
+// Package materials 实现 `apa material add/commit/list/show` 与 `apa blob put/get`（检索并入 `apa search --type material`）（附录 B.1「材料与规范」、设计 §12.3–12.4）。
 // 只是内核 /v1/materials、/v1/blobs 的薄客户端：托管型 commit 返回 6、observer 提交返回 4、回退与确认只在 Web，都由内核判定。
 // show 不带托管型正文（正文只有 Web 能读），只回位置。
 package materials
@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
@@ -21,7 +20,7 @@ import (
 const materialUsage = "usage: apa material add --repo R --path P [--project ID] [--kind K] [--title T] [--tag T]... [--commit SHA] [--reason S] | " +
 	"add --link <vault:NAME/PATH|URL> --title T [--project ID] [--kind K] [--tag T]... [--reason S] | " +
 	"commit <id> --from FILE|- --reason S [--based-on REV] | commit --from FILE|- --reason S --kind K --title T [--project ID] [--tag T]... | " +
-	"list [--project ID] | show <id> [--rev REV] | search <query> [--project ID] [--kind K] [--tag T]... [--limit N]"
+	"list [--project ID] | show <id> [--rev REV]"
 
 const blobUsage = "usage: apa blob put <file> | get <sha256> [--out FILE]"
 
@@ -84,8 +83,6 @@ func material(c *client.Ctx, args []string) error {
 			return usage("show takes a material id and optional --rev", materialUsage)
 		}
 		return call(c, "GET", "/materials/"+url.PathEscape(id)+query(url.Values{"rev": {*rev}}), nil)
-	case "search":
-		return search(c, rest)
 	}
 	return usage("unknown material subcommand "+sub, materialUsage)
 }
@@ -226,25 +223,6 @@ func readFrom(c *client.Ctx, from string) ([]byte, error) {
 		return nil, usage("cannot read "+from, "give a readable file, or - for standard input")
 	}
 	return b, nil
-}
-
-func search(c *client.Ctx, args []string) error {
-	q, rest := splitID(args)
-	fs := newFlags("search")
-	var tags multi
-	project, kind, limit := fs.String("project", "", ""), fs.String("kind", "", ""), fs.Int("limit", 0, "")
-	fs.Var(&tags, "tag", "")
-	if err := fs.Parse(rest); err != nil || fs.NArg() != 0 || q == "" || *limit < 0 {
-		return usage("search takes a query and optional filters", materialUsage)
-	}
-	v := url.Values{"q": {q}, "project": {*project}, "kind": {*kind}}
-	if *limit > 0 {
-		v.Set("limit", strconv.Itoa(*limit))
-	}
-	for _, t := range tags {
-		v.Add("tag", t)
-	}
-	return call(c, "GET", "/materials/search"+query(v), nil)
 }
 
 func blob(c *client.Ctx, args []string) error {

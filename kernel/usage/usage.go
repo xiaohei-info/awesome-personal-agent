@@ -40,6 +40,11 @@ var Module = store.Module{Name: "usage", Migrations: []store.Migration{{
 );
 CREATE INDEX usage_record_at ON usage_record(at);
 CREATE UNIQUE INDEX usage_record_run ON usage_record(run_id) WHERE run_id <> '';`,
+}, {
+	// 账本结构版本 16：Agent 运行的执行者声明里没有 headless.usage 时记 1（"未提供"，与声明了但没读到的"未回报"分开）。
+	// 已有记录取 0，仍按未回报显示：当时是否声明没有留下。
+	Version: 2, Ledger: 16, Name: "ledger-v16-usage-undeclared",
+	SQL: `ALTER TABLE usage_record ADD COLUMN undeclared INTEGER NOT NULL DEFAULT 0;`,
 }}}
 
 // 三个部分。
@@ -49,11 +54,13 @@ const (
 	PartAgent = "agent" // Agent 后台运行
 )
 
-// Counts 是一组计数。Requests 是请求数（Agent 部分是运行次数），Reported 是其中回报了用量的次数；
+// Counts 是一组计数。Requests 是请求数（Agent 部分是运行次数），Reported 是其中回报了用量的次数，
+// Undeclared 是执行者声明里没有 headless.usage、所以不会有用量的运行次数（"未提供"；其余没回报的是"未回报"）；
 // InputTokens 含缓存读写的部分。
 type Counts struct {
 	Requests         int64 `json:"requests"`
 	Reported         int64 `json:"reported"`
+	Undeclared       int64 `json:"undeclared"`
 	InputTokens      int64 `json:"input_tokens"`
 	OutputTokens     int64 `json:"output_tokens"`
 	CacheReadTokens  int64 `json:"cache_read_tokens"`
@@ -63,6 +70,7 @@ type Counts struct {
 func (c *Counts) add(o Counts) {
 	c.Requests += o.Requests
 	c.Reported += o.Reported
+	c.Undeclared += o.Undeclared
 	c.InputTokens += o.InputTokens
 	c.OutputTokens += o.OutputTokens
 	c.CacheReadTokens += o.CacheReadTokens
@@ -87,9 +95,9 @@ type Record struct {
 // Add 写一条记录；同一运行已记过时什么都不做。
 func Add(tx *store.Tx, at time.Time, r Record) error {
 	_, err := tx.Exec(`INSERT OR IGNORE INTO usage_record (at, part, purpose, agent, model, run_id, requests, reported,
-		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, undeclared) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		at.UnixNano(), r.Part, r.Purpose, r.Agent, r.Model, r.Run, r.Requests, r.Reported,
-		r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens)
+		r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens, r.Undeclared)
 	return err
 }
 
@@ -113,8 +121,9 @@ func readUsageFile(path string) []byte {
 	return b
 }
 
-// AddRun 在一次 Agent 运行结束后记账：任务、后台运行与来源批处理，各记一次；用量按该 harness 生效声明的
-// headless.usage 从运行目录的文件或 stdout 取，没声明或取不到记为未回报。进程不在本机的运行不记。
+// AddRun 在一次 Agent 运行结束后记账：任务、后台运行与来源批处理，各记一次。任何注册的执行者都经它生效声明的
+// headless.usage 提供用量（从运行目录的文件或 stdout 取，内核不认识具体 harness）：没声明的记为未提供，声明了没取到的记为未回报，
+// 都不计 0、不估算。进程不在本机的运行不记。
 func AddRun(ctx context.Context, st *store.Store, runsDir string, res proc.Result, now time.Time) error {
 	run := res.Run
 	switch run.Category {
@@ -129,7 +138,7 @@ func AddRun(ctx context.Context, st *store.Store, runsDir string, res proc.Resul
 		now = *run.FinishedAt
 	}
 	return st.Update(ctx, func(tx *store.Tx) error {
-		r := Record{Key: Key{Part: PartAgent, Purpose: string(run.Category)}, Counts: Counts{Requests: 1}, Run: run.ID}
+		r := Record{Key: Key{Part: PartAgent, Purpose: string(run.Category)}, Counts: Counts{Requests: 1, Undeclared: 1}, Run: run.ID}
 		if a := run.AgentSnapshot; a != nil {
 			r.Agent, r.Model = a.AgentName, a.ConfiguredModel
 		}
@@ -149,6 +158,7 @@ func AddRun(ctx context.Context, st *store.Store, runsDir string, res proc.Resul
 			if h == nil || h.Usage == nil {
 				continue
 			}
+			r.Undeclared = 0
 			data := res.Stdout
 			if h.Usage.File != "" {
 				data = readUsageFile(filepath.Join(runsDir, run.ID, h.Usage.File))
@@ -220,7 +230,7 @@ func Summarize(tx *store.Tx, now time.Time, days int) (Summary, error) {
 		t := time.Unix(0, at).UTC()
 		s.Since = &t
 	}
-	rows, err := tx.Query(`SELECT at, part, purpose, agent, model, requests, reported, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+	rows, err := tx.Query(`SELECT at, part, purpose, agent, model, requests, reported, undeclared, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
 		FROM usage_record WHERE at >= ?`, from.UnixNano())
 	if err != nil {
 		return s, err
@@ -232,7 +242,7 @@ func Summarize(tx *store.Tx, now time.Time, days int) (Summary, error) {
 		var k Key
 		var c Counts
 		if err := rows.Scan(&at, &k.Part, &k.Purpose, &k.Agent, &k.Model,
-			&c.Requests, &c.Reported, &c.InputTokens, &c.OutputTokens, &c.CacheReadTokens, &c.CacheWriteTokens); err != nil {
+			&c.Requests, &c.Reported, &c.Undeclared, &c.InputTokens, &c.OutputTokens, &c.CacheReadTokens, &c.CacheWriteTokens); err != nil {
 			return s, err
 		}
 		g := groups[k]

@@ -127,7 +127,7 @@ func (k *kit) item(id string) map[string]any {
 	var out struct {
 		Item map[string]any `json:"item"`
 	}
-	r := k.apa(k.OBS, 0, "item", "show", id)
+	r := k.apa(k.OBS, 0, "item", "show", id, "--full")
 	if err := json.Unmarshal([]byte(r.Stdout), &out); err != nil || out.Item == nil {
 		k.t.Fatalf("item show %s 输出不是事项: %q", id, r.Stdout)
 	}

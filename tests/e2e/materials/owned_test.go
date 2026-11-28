@@ -186,15 +186,15 @@ func TestFlowMaterialOwned(t *testing.T) {
 		type hits struct {
 			Hits []map[string]any `json:"hits"`
 		}
-		cli := decode[hits](t, f.apa(f.OBS, 0, "material", "search", "超时").Stdout)
-		web := decode[hits](t, f.webOK("GET", "/materials/search?q=%E8%B6%85%E6%97%B6", "", http.StatusOK))
+		cli := decode[hits](t, f.apa(f.OBS, 0, "search", "超时", "--type", "material").Stdout)
+		web := decode[hits](t, f.webOK("GET", "/search?type=material&q=%E8%B6%85%E6%97%B6", "", http.StatusOK))
 		if len(cli.Hits) == 0 {
 			t.Fatal("中文关键词 超时 应命中纪要")
 		}
 		for _, h := range cli.Hits {
 			for k := range h {
 				switch k {
-				case "id", "title", "snippet", "kind", "project", "hosted", "tags", "path", "repo", "rank", "score", "updated_at", "at":
+				case "type", "id", "title", "snippet", "kind", "project", "project_name", "updated", "matched_in", "coverage", "path":
 				default:
 					t.Errorf("命中结果带了多余字段 %q（只应有 id、标题、片段等）", k)
 				}
@@ -215,7 +215,7 @@ func TestFlowMaterialOwned(t *testing.T) {
 		for _, m := range kinds {
 			eq(t, "项目筛选", m.Project, open)
 		}
-		only := decode[hits](t, f.apa(f.OBS, 0, "material", "search", "超时", "--kind", "design").Stdout)
+		only := decode[hits](t, f.apa(f.OBS, 0, "search", "超时", "--type", "material", "--kind", "design").Stdout)
 		eq(t, "kind=design 不应命中纪要", len(only.Hits), 0)
 		other := decode[struct {
 			Materials []material `json:"materials"`
@@ -261,11 +261,11 @@ func TestFlowMaterialOwned(t *testing.T) {
 		}](t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "依据材料的任务", "--phase", "open", "--assignee", "work-host.cli",
 			"--project", open).Stdout).ID
 		f.apa(f.WRK, 0, "item", "relate", item, "--to", plan.Material, "--type", "derived_from", "--reason", "依据该方案")
-		got := f.apa(f.OBS, 0, "item", "show", item).Stdout
+		got := f.apa(f.OBS, 0, "item", "show", item, "--full").Stdout
 		if !strings.Contains(got, plan.Material) || !strings.Contains(got, "derived_from") {
 			t.Errorf("事项一侧应看到带类型的关联: %s", got)
 		}
-		hit := f.webOK("GET", "/materials/search?q=%E6%96%B9%E6%A1%88&item="+item, "", http.StatusOK)
+		hit := f.webOK("GET", "/search?type=material&q=%E6%96%B9%E6%A1%88&item="+item, "", http.StatusOK)
 		if !strings.Contains(hit, plan.Material) {
 			t.Errorf("材料一侧（按关联事项筛选）应看到该材料: %s", hit)
 		}

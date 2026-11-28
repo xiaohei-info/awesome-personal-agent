@@ -7,26 +7,32 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apifm "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
+	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	ksearch "github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
@@ -50,7 +56,7 @@ type kernel struct {
 func newKernel(t *testing.T) *kernel {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, executors.Module, runner.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, executors.Module, runner.Module, core.Module, km.Module, ksearch.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +80,7 @@ func newKernel(t *testing.T) *kernel {
 	if err := inbound.RegisterAttach(k.x); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: k.auth, Groups: []core.RouteGroup{apiitems.Routes(k.x, st), apifm.Routes(k.x)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: k.auth, Groups: []core.RouteGroup{apiitems.Routes(k.x, st), apifm.Routes(k.x), apiwhy.Routes(st)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,6 +326,18 @@ func TestRelateAndListFilters(t *testing.T) {
 	if r := k.apa(auth.Observer, "item", "list", "--sort", "bogus"); r.code == 0 {
 		t.Fatal("unknown sort must fail")
 	}
+	// 有界：--limit 一页，带总数与续页命令；按续页能翻完（§17.2）。
+	page := k.ok(auth.Observer, "item", "list", "--limit", "2").json(t)
+	if len(page["items"].([]any)) != 2 || page["total"] != float64(3) || page["next_cursor"] != "2" ||
+		!strings.Contains(page["next"].([]any)[0].(string), "--cursor '2'") {
+		t.Fatalf("page 1 = %v", page)
+	}
+	if l := list("--limit", "2", "--cursor", "2"); len(l) != 1 {
+		t.Fatalf("page 2 = %v", l)
+	}
+	if r := k.apa(auth.Observer, "item", "list", "--limit", "201"); r.code != domain.ExitUsage {
+		t.Fatalf("limit over 200: %d", r.code)
+	}
 	k.ok(auth.Worker, "item", "relate", child, "--to", parent, "--type", "parent", "--remove", "--reason", "undo")
 	if rels := k.ok(auth.Observer, "item", "show", child).json(t)["relations"].([]any); len(rels) != 0 {
 		t.Fatalf("relation not removed: %v", rels)
@@ -511,7 +529,7 @@ func TestCommitmentNeedsDecideTier(t *testing.T) {
 	}
 }
 
-func (k *kernel) progress(id string) []any {
+func (k *kernel) progress(id string) []any { // item show 的 progress[]：讨论区里的发言
 	k.t.Helper()
 	return k.ok(auth.Observer, "item", "show", id).json(k.t)["progress"].([]any)
 }
@@ -547,31 +565,31 @@ func TestItemPlannedFor(t *testing.T) {
 	}
 }
 
-// ACT-WBN-09/10/11：progress 追加、未来日期退出码 2、越权 4、delegate 缺依据 23。
-func TestItemProgress(t *testing.T) {
+// ACT-WBN-09/10/11：发言追加、未来日期退出码 2、越权 4、delegate 缺依据 23。
+func TestItemComment(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem()
 	yday, tmrw := ymd(k.now.AddDate(0, 0, -1)), ymd(k.now.AddDate(0, 0, 1))
-	k.ok(auth.Worker, "item", "progress", id, "--text", "联系了供应商", "--on", yday)
+	k.ok(auth.Worker, "item", "comment", id, "--text", "联系了供应商", "--on", yday)
 	ps := k.progress(id)
 	p := ps[len(ps)-1].(map[string]any)
 	if k.phase(id) != "open" || len(ps) != 1 || p["text"] != "联系了供应商" || p["on"] != yday || p["actor"] != "wrk1" {
 		t.Fatalf("progress = %+v phase=%s", ps, k.phase(id))
 	}
-	if r := k.apa(auth.Worker, "item", "progress", id, "--text", "未来", "--on", tmrw); r.code != 2 || len(k.progress(id)) != 1 {
+	if r := k.apa(auth.Worker, "item", "comment", id, "--text", "未来", "--on", tmrw); r.code != 2 || len(k.progress(id)) != 1 {
 		t.Fatalf("future on: exit %d %s", r.code, r.errOut)
 	}
-	if r := k.apa(auth.Worker, "item", "progress", id); r.code != 2 {
+	if r := k.apa(auth.Worker, "item", "comment", id); r.code != 2 {
 		t.Fatalf("missing --text: exit %d", r.code)
 	}
 	other := k.openItem(map[string]any{"assignee": "someone-else"})
-	if r := k.apa(auth.Worker, "item", "progress", other, "--text", "x"); r.code != 4 {
+	if r := k.apa(auth.Worker, "item", "comment", other, "--text", "x"); r.code != 4 {
 		t.Fatalf("worker on another's item: exit %d %s", r.code, r.errOut)
 	}
 	// 写进展是一档：delegate 对任何事项都直接可写。
-	k.ok(auth.Delegate, "item", "progress", other, "--text", "已订")
+	k.ok(auth.Delegate, "item", "comment", other, "--text", "已订")
 	if len(k.progress(other)) != 1 {
-		t.Fatal("delegate progress missing")
+		t.Fatal("delegate comment missing")
 	}
 	var seen bool
 	_ = k.st.View(bg, func(tx *store.Tx) error {
@@ -583,6 +601,66 @@ func TestItemProgress(t *testing.T) {
 	})
 	if !seen {
 		t.Fatal("no item.progress_added event")
+	}
+}
+
+// 讨论区：发言与回复按回复关系出现在讨论流里；旧进展（没有 reply_to）照常出现；决定与发言在同一条流；
+// 回复只挂同一事项内已有的发言；一页不超过读取上限，用 --before 读更早的，单条过长只截正文。
+func TestItemThread(t *testing.T) {
+	k := newKernel(t)
+	id, other := k.openItem(), k.openItem()
+	k.own("item.progress", map[string]any{"id": id, "text": "旧进展"})
+	first := k.ok(auth.Worker, "item", "comment", id, "--text", "第一条发言").json(t)["comment"].(map[string]any)["id"].(string)
+	k.ok(auth.Delegate, "item", "comment", id, "--text", "回复第一条", "--reply-to", first)
+	otherC := k.ok(auth.Worker, "item", "comment", other, "--text", "别处").json(t)["comment"].(map[string]any)["id"].(string)
+	for _, bad := range []string{otherC, id + ".p000099"} {
+		if r := k.apa(auth.Worker, "item", "comment", id, "--text", "x", "--reply-to", bad); r.code != 2 || !strings.Contains(r.errOut, "reply_to") {
+			t.Fatalf("reply to %s: exit %d %s", bad, r.code, r.errOut)
+		}
+	}
+	k.own("decision.request", map[string]any{"id": id, "ask": map[string]any{"question": "q?", "options": []map[string]any{{"id": "A", "label": "a"}, {"id": "B", "label": "b"}}}})
+
+	th := k.ok(auth.Observer, "item", "thread", id).json(t)
+	var said []string
+	var replyOf string
+	kinds := map[string]bool{}
+	for _, raw := range th["entries"].([]any) {
+		e := raw.(map[string]any)
+		kinds[e["kind"].(string)] = true
+		if _, has := e["steps"]; has {
+			t.Fatalf("compact thread carries raw events: %v", e)
+		}
+		if e["kind"] == "progress" {
+			a := e["args"].(map[string]any)
+			said = append(said, a["text"].(string))
+			if a["text"] == "回复第一条" {
+				replyOf, _ = a["reply_to"].(string)
+			}
+		}
+	}
+	if strings.Join(said, "|") != "旧进展|第一条发言|回复第一条" || replyOf != first || !kinds["decision"] {
+		t.Fatalf("thread = %v, reply_to = %q, kinds = %v", said, replyOf, kinds)
+	}
+
+	long := strings.Repeat("长", 1500)
+	for range 4 {
+		k.ok(auth.Worker, "item", "comment", other, "--text", long)
+	}
+	r := k.ok(auth.Observer, "item", "thread", other)
+	page := r.json(t)
+	if n := utf8.RuneCountInString(r.out); n > kcontext.InjectBudget || page["more"] == nil || len(page["entries"].([]any)) < 2 {
+		t.Fatalf("first page: %d runes, more = %v, %d entries", n, page["more"], len(page["entries"].([]any)))
+	}
+	before := strconv.FormatInt(int64(page["before"].(float64)), 10)
+	older := k.ok(auth.Observer, "item", "thread", other, "--before", before).json(t)
+	if len(older["entries"].([]any)) == 0 {
+		t.Fatal("older page is empty")
+	}
+	k.ok(auth.Worker, "item", "comment", other, "--text", strings.Repeat("超", 5000))
+	r = k.ok(auth.Observer, "item", "thread", other, "--limit", "1")
+	last := r.json(t)["entries"].([]any)[0].(map[string]any)["args"].(map[string]any)
+	if n := utf8.RuneCountInString(r.out); n > kcontext.InjectBudget || last["truncated"] != true {
+		t.Fatalf("oversized comment: %d runes, args = %v", n, last["truncated"])
 	}
 }
 
@@ -678,13 +756,13 @@ func TestItemListByOrigin(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src")); len(got) != 3 {
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src", "--full")); len(got) != 3 {
 		t.Fatalf("by source: %v", got)
 	}
-	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src", "--origin-ref", "O-0001")); len(got) != 1 || got[0] != "O-0001" {
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src", "--origin-ref", "O-0001", "--full")); len(got) != 1 || got[0] != "O-0001" {
 		t.Fatalf("by source and ref: %v", got)
 	}
-	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "other")); len(got) != 0 {
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "other", "--full")); len(got) != 0 {
 		t.Fatalf("other source: %v", got)
 	}
 }
@@ -726,4 +804,40 @@ func agentAudience(k auth.Kind) string {
 		return auth.AudienceInternal
 	}
 	return ""
+}
+
+// item show 默认截正文前 2000 字、只给最近 5 条进展，写明总量并给出分段读取的命令；--part 分段取其余，--full 照旧给全部。
+func TestItemShowIsBoundedAndSegmented(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem()
+	long := strings.Repeat("长", 2500) + "尾"
+	k.ok(auth.Worker, "item", "update", id, "--body", long, "--reason", "r")
+	for i := range 7 {
+		k.ok(auth.Worker, "item", "comment", id, "--text", "进展"+strconv.Itoa(i))
+	}
+	out := k.ok(auth.Observer, "item", "show", id).json(t)
+	parts := out["parts"].(map[string]any)
+	if b := out["item"].(map[string]any)["body"].(string); utf8.RuneCountInString(b) != 2000 || parts["body"].(map[string]any)["chars"] != float64(2501) {
+		t.Fatalf("body head: %v", parts)
+	}
+	if ps := out["progress"].([]any); len(ps) != 5 || ps[4].(map[string]any)["text"] != "进展6" || parts["progress"].(map[string]any)["count"] != float64(7) {
+		t.Fatalf("latest progress: %v", ps)
+	}
+	if n := out["next"].([]any); n[0] != "apa item show "+id+" --part body --offset 2000" {
+		t.Fatalf("next: %v", n)
+	}
+	seg := k.ok(auth.Observer, "item", "show", id, "--part", "body", "--offset", "2000").json(t)
+	if seg["body"] != strings.Repeat("长", 500)+"尾" || len(seg["next"].([]any)) != 0 {
+		t.Fatalf("body segment: %v", seg)
+	}
+	older := k.ok(auth.Observer, "item", "show", id, "--part", "progress", "--offset", "5").json(t)
+	if ps := older["progress"].([]any); len(ps) != 2 || ps[0].(map[string]any)["text"] != "进展0" {
+		t.Fatalf("older progress: %v", older)
+	}
+	if full := k.ok(auth.Observer, "item", "show", id, "--full").json(t); full["item"].(map[string]any)["body"] != long || len(full["progress"].([]any)) != 7 {
+		t.Fatal("--full must give everything")
+	}
+	if r := k.apa(auth.Observer, "item", "show", id, "--part", "nope"); r.code != domain.ExitUsage {
+		t.Fatalf("bad part: %d", r.code)
+	}
 }

@@ -41,7 +41,7 @@ const (
 // reportSchema 是回报结构（JSON Schema）：声明以 {report_schema} 把它交给支持结构化输出的执行者，
 // 运行结束时内核按它从 stdout 兜底回执（Settle）。
 var reportSchema = json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string","enum":["progress","done","blocked"]},` +
-	`"summary":{"type":"string"},"pr":{"type":"string"},"commit":{"type":"string"},"branch":{"type":"string"},"link":{"type":"string"}},` +
+	`"summary":{"type":"string"},"pr":{"type":"string"},"commit":{"type":"string"},"branch":{"type":"string"},"link":{"type":"string"},"file":{"type":"string"}},` +
 	`"required":["outcome","summary"]}`)
 
 // Attach 把委派即开工接到命令模型上：delegate.create 带 start 时同事务复核并入队，提交后拉起进程。
@@ -247,7 +247,7 @@ func fallbackReport(stdout []byte) (map[string]string, bool) {
 			return nil, false
 		}
 		out := map[string]string{}
-		for _, k := range []string{"outcome", "summary", "pr", "commit", "branch", "link"} {
+		for _, k := range []string{"outcome", "summary", "pr", "commit", "branch", "link", "file"} {
 			if s, ok := v[k].(string); ok && strings.TrimSpace(s) != "" {
 				out[k] = strings.TrimSpace(s)
 			}

@@ -104,7 +104,7 @@ type itemFull struct {
 
 func (k *kit) itemFull(id string) itemFull {
 	k.t.Helper()
-	r := k.Apa(k.OBS, "", "item", "show", id)
+	r := k.Apa(k.OBS, "", "item", "show", id, "--full")
 	k.expect("item show "+id, r, 0)
 	var out struct {
 		Item itemFull `json:"item"`

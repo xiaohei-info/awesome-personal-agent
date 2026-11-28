@@ -1,18 +1,25 @@
-// GET /usage 的形状与图表用的整形。数字只做合计与分组；没回报用量的只计次数、不估算。
+// GET /usage 的形状与图表用的整形。数字只做合计与分组；没有用量数据的只计次数、不估算，分两种：
+// 未提供（执行者的声明里没有 headless.usage）与未回报（声明了、这次没读到）。
 export type Part = "judge" | "model" | "agent";
 export const PARTS: Part[] = ["judge", "model", "agent"];
-export interface Counts { requests: number; reported: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
+export interface Counts { requests: number; reported: number; undeclared?: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
 export interface Row extends Counts { part: Part; purpose: string; agent?: string; model?: string }
 export interface Point extends Counts { part: Part; slot: string }
 export interface Summary { since?: string; rows: Row[]; slots: string[]; series: Point[] }
 
-const KEYS = ["requests", "reported", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"] as const;
+const KEYS = ["requests", "reported", "undeclared", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"] as const;
 
 export function sum(list: Counts[]): Counts {
-  const out: Counts = { requests: 0, reported: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
-  for (const c of list) for (const k of KEYS) out[k] += c[k];
+  const out: Counts = { requests: 0, reported: 0, undeclared: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+  for (const c of list) for (const k of KEYS) out[k] = (out[k] ?? 0) + (c[k] ?? 0);
   return out;
 }
+
+/** 未提供：执行者没提供用量的次数；未回报：提供了但这次没读到的次数。 */
+export const unprovided = (c: Counts) => c.undeclared ?? 0;
+export const unreported = (c: Counts) => c.requests - c.reported - unprovided(c);
+/** 一次都没有用量时，全是未提供才写"未提供"，否则写"未回报"。 */
+export const allUnprovided = (c: Counts) => c.requests > 0 && unprovided(c) === c.requests - c.reported;
 
 export const total = (c: Counts) => c.input_tokens + c.output_tokens;
 

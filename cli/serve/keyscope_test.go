@@ -177,15 +177,15 @@ func TestExternalKeyItemsAndMaterialsTakeTheStrictestSource(t *testing.T) {
 	if code, _ := getAs(k, none, "/v1/materials/"+mr.Material); code != 403 {
 		t.Fatalf("unreachable material: %d", code)
 	}
-	for _, p := range []string{"/v1/materials", "/v1/materials/search?q=MATWORD", "/v1/materials/" + mr.Material + "/revisions"} {
+	for _, p := range []string{"/v1/materials", "/v1/search?type=material&q=MATWORD", "/v1/materials/" + mr.Material + "/revisions"} {
 		if b := getBody(k, none, p); strings.Contains(b, mr.Material) && !strings.Contains(b, "out_of_scope") {
 			t.Fatalf("%s must not show the unreachable material: %s", p, b)
 		}
 	}
-	if b := getBody(k, meta, "/v1/materials/search?q=MATWORD"); strings.Contains(b, mr.Material) {
+	if b := getBody(k, meta, "/v1/search?type=material&q=MATWORD"); strings.Contains(b, mr.Material) {
 		t.Fatalf("search must not reveal a material whose content the key cannot read: %s", b)
 	}
-	if b := getBody(k, internal, "/v1/materials/search?q=MATWORD"); !strings.Contains(b, mr.Material) {
+	if b := getBody(k, internal, "/v1/search?type=material&q=MATWORD"); !strings.Contains(b, mr.Material) {
 		t.Fatalf("internal search finds it: %s", b)
 	}
 }

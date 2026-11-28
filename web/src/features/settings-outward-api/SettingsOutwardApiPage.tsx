@@ -14,7 +14,11 @@ const eventsOnly = (scope: string) => scope === "forward" || scope.startsWith("f
 
 // 与 t.methods 一一对应。返回示例是形状示意，字段以实际返回为准。
 const METHODS = [
-  { path: "/items", params: "phase kind project tag q sort(updated|deadline|planned_for|priority) planned_for from to(≤62d) origin_source", example: "/items?phase=open&sort=deadline",
+  { path: "/search", params: "q type(item|material|project|source) project phase kind tag after before include_dropped limit(1–50, 10) cursor", example: "/search?q=renewal&type=item",
+    reply: `{"hits": [{"type": "item", "id": "itm_…", "title": "…", "project": "prj_…", "project_name": "…",
+  "phase": "open", "updated": "2026-11-27", "matched_in": ["title", "progress"], "coverage": "3/3", "snippet": "…"}],
+ "total": 12, "withheld": {"dropped": 4}, "next_cursor": "10"}` },
+  { path: "/items", params: "phase kind project tag q sort(updated|deadline|planned_for|priority) planned_for from to(≤62d) origin_source limit(1–200) cursor", example: "/items?phase=open&sort=deadline",
     reply: `{"items": [{"id": "itm_…", "kind": "task", "phase": "open", "title": "…", "project": "prj_…",
   "priority": "normal", "planned_for": "2026-11-23", "deadline": "2026-11-30T23:59:59+08:00",
   "tags": ["…"], "origin": {"source": "src_…", "ref": "…"}, "version": 3, "updated_at": "…"}],

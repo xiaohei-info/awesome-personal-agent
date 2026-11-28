@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	apisearch "github.com/xiaohei-info/awesome-personal-agent/api/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
@@ -32,6 +33,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -53,7 +55,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, km.Module, search.Module, proc.Module, delegation.Module, hosted.Module, core.Module} {
+		items.Module, executors.Module, km.Module, search.Module, runner.Module, proc.Module, delegation.Module, hosted.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +94,7 @@ func setup(t *testing.T) *env {
 	if err := st.Update(context.Background(), func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{Routes(st, x, hs)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{Routes(st, x, hs), apisearch.Routes(st)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,34 +355,33 @@ func TestSearchFiltersAndValidation(t *testing.T) {
 		want(t, rec, 201, "")
 	}
 	var out struct{ Hits []search.Hit }
-	into(t, e.do("obs", "GET", "/v1/materials/search?q=roadmap&kind=minutes&tag=team&project="+prj, ""), &out)
+	into(t, e.do("obs", "GET", "/v1/search?type=material&q=roadmap&kind=minutes&tag=team&project="+prj, ""), &out)
 	if len(out.Hits) != 1 || out.Hits[0].Title != "Alpha plan" || !strings.Contains(out.Hits[0].Snippet, "roadmap") {
 		t.Fatalf("hits: %+v", out)
 	}
-	into(t, e.do("obs", "GET", "/v1/materials/search?q=预算", ""), &out)
+	into(t, e.do("obs", "GET", "/v1/search?type=material&q=预算", ""), &out)
 	if len(out.Hits) != 1 {
 		t.Fatalf("CJK query: %+v", out)
 	}
-	into(t, e.do("obs", "GET", "/v1/materials/search?q=roadmap&tag=missing", ""), &out)
+	into(t, e.do("obs", "GET", "/v1/search?type=material&q=roadmap&tag=missing", ""), &out)
 	if out.Hits == nil || len(out.Hits) != 0 {
 		t.Fatalf("no match must be an empty list: %+v", out)
 	}
-	into(t, e.do("obs", "GET", "/v1/materials/search?limit=1", ""), &out)
+	into(t, e.do("obs", "GET", "/v1/search?type=material&limit=1", ""), &out)
 	if len(out.Hits) != 1 {
 		t.Fatalf("limit: %+v", out)
 	}
 	for _, q := range []string{"limit=0", "limit=x", "after=yesterday", "before=1", "q=%21%21"} {
-		want(t, e.do("obs", "GET", "/v1/materials/search?"+q, ""), 400, "invalid_request")
+		want(t, e.do("obs", "GET", "/v1/search?type=material&"+q, ""), 400, "invalid_request")
 	}
 	future := url(time.Now().Add(time.Hour))
-	into(t, e.do("obs", "GET", "/v1/materials/search?after="+future, ""), &out)
+	into(t, e.do("obs", "GET", "/v1/search?type=material&after="+future, ""), &out)
 	if len(out.Hits) != 0 {
 		t.Fatalf("after filter: %+v", out)
 	}
-	// search 是静态路径，不能被 {id} 吞掉。
-	want(t, e.do("obs", "GET", "/v1/materials/search?q=roadmap", ""), 200, "")
-	want(t, e.do("ext", "GET", "/v1/materials/search?q=roadmap", ""), 403, "permission_denied")
-	want(t, e.do("export", "GET", "/v1/materials/search?q=roadmap", ""), 200, "")
+	want(t, e.do("obs", "GET", "/v1/search?type=material&q=roadmap", ""), 200, "")
+	want(t, e.do("ext", "GET", "/v1/search?type=material&q=roadmap", ""), 403, "permission_denied")
+	want(t, e.do("export", "GET", "/v1/search?type=material&q=roadmap", ""), 200, "")
 	want(t, e.do("export", "GET", "/v1/materials", ""), 200, "")
 }
 
@@ -454,8 +455,8 @@ func TestHostedMaterial(t *testing.T) {
 
 	// 搜索命中托管型：回路径，不回片段。
 	var hits struct{ Hits []search.Hit }
-	into(t, e.do("obs", "GET", "/v1/materials/search?kind=design", ""), &hits)
-	if len(hits.Hits) != 1 || !hits.Hits[0].Hosted || hits.Hits[0].Path != repo+":docs/design.md" || hits.Hits[0].Snippet != "" {
+	into(t, e.do("obs", "GET", "/v1/search?type=material&kind=design", ""), &hits)
+	if len(hits.Hits) != 1 || hits.Hits[0].Path != repo+":docs/design.md" || hits.Hits[0].Snippet != "" {
 		t.Fatalf("hits: %+v", hits)
 	}
 

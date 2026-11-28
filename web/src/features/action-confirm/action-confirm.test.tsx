@@ -22,7 +22,7 @@ function server(o: { phase?: string; conflict?: boolean } = {}) {
     if (url === "/v1/items/gone") return json(404, { code: "not_found", why: "item not found", next: "check the id" });
     if (method !== "GET" && o.conflict) return json(409, { code: "conflict", why: "item changed", next: "reload and retry" });
     if (url === "/v1/items/it-1/transition") return json(200, { item: { id: "it-1", phase: "done", version: 8 } });
-    if (url === "/v1/items/it-1/progress") return json(201, { text: "x" });
+    if (url === "/v1/items/it-1/comments") return json(201, { text: "x" });
     if (url === "/v1/items/it-1" && method === "PATCH") return json(200, { item: { id: "it-1", version: 8 } });
     return json(404, { code: "not_found", why: "no such route", next: "-" });
   }) as unknown as typeof fetch;
@@ -73,7 +73,7 @@ describe("动作链接与确认页", () => {
     expect(screen.queryByRole("button", { name: "确认完成" })).not.toBeInTheDocument();
   });
 
-  it("写进展：POST progress {text,on}，空文本不提交", async () => {
+  it("写进展：POST comments {text,on}，空文本不提交", async () => {
     const s = server();
     mount(s, "/act/it-1?do=progress");
     const submit = await screen.findByRole("button", { name: "保存进展" });
@@ -83,7 +83,7 @@ describe("动作链接与确认页", () => {
     await userEvent.click(submit);
     expect(await screen.findByRole("status")).toHaveTextContent("已记录进展");
     expect(writes(s)).toHaveLength(1);
-    expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/it-1/progress", csrf: "tok-1", body: { text: "初稿完成", on: "2026-11-12" } });
+    expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/it-1/comments", csrf: "tok-1", body: { text: "初稿完成", on: "2026-11-12" } });
   });
 
   it("改计划日期：PATCH planned_for 带 If-Match", async () => {

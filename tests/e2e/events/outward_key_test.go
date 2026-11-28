@@ -14,7 +14,9 @@ func (f *fx) headSeq() int64 { _, next := f.feed(f.OBS, 0); return next }
 func TestOutwardExportKeyReadOnly(t *testing.T) {
 	f := setup(t)
 	exportKey := f.extKey("EXP", "export")
-	count := func() int { return strings.Count(f.apa(f.OBS, 0, "item", "list").Stdout, `"itm_`) }
+	count := func() int {
+		return strings.Count(f.apa(f.OBS, 0, "item", "list", "--full", "--limit", "200").Stdout, `"itm_`)
+	}
 	before := count()
 	body := `{"kind":"task","title":"越权写入","phase":"open"}`
 	if r := f.APIRaw("POST", "/v1/items", body, exportKey); r.Code != 403 && r.Code != 401 {

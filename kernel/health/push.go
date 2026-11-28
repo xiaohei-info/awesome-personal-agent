@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -193,6 +194,9 @@ func runPush(tx *store.Tx, pol policy.Policy, e domain.Event) (attention.Notice,
 	it, err := items.Get(tx, e.Object)
 	if err != nil || it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped {
 		return attention.Notice{}, false, nil
+	}
+	if started, err := delegation.Started(tx, it.ID); err != nil || started { // 结局只经委派结果通知告诉发起方
+		return attention.Notice{}, false, err
 	}
 	cat, title := policy.PushRunFailed, "Agent 没做完：「"+it.Title+"」"
 	if templateKinds[it.Kind] {

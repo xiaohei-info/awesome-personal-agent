@@ -117,12 +117,12 @@ func TestFlowDelegateRecover(t *testing.T) {
 		f.apa(f.WRK, 0, "report", child, "--outcome", "done", "--summary", "已修复", "--pr", "https://example.invalid/acc/pr/42")
 		eq(t, "子事项阶段", f.phase(child), "done")
 		eq(t, "父事项阶段", f.phase(parent), "open")
-		// 不带结果证据的完成回执：退出码 2，子事项不变。
+		// 不带结果证据的完成回执：摘要就是结果（2026-11-28），子事项完成。
 		p4 := f.add("acc-work", "DLG4-PARENT-QZK 无证据完成", "", "", "")
 		c4 := f.delegate(p4, "work-host.cli")
-		f.apa(f.WRK, 2, "report", c4, "--outcome", "done", "--summary", "已修复")
-		eq(t, "无证据完成回执后的子事项阶段", f.phase(c4), "open")
-		eq(t, "无证据完成回执后的回执事件数", len(f.events(c4, "delegation.reported")), 0)
+		f.apa(f.WRK, 0, "report", c4, "--outcome", "done", "--summary", "已修复")
+		eq(t, "无证据完成回执后的子事项阶段", f.phase(c4), "done")
+		eq(t, "无证据完成回执后的回执事件数", len(f.events(c4, "delegation.reported")), 1)
 		reps := f.events(child, "delegation.reported")
 		if len(reps) != 1 || !strings.Contains(toJSON(reps[0].Payload), "pr/42") {
 			t.Errorf("事件流应有带 PR 证据的 delegation.reported: %+v", reps)

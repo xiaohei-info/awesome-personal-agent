@@ -203,7 +203,7 @@ func TestFlowProposalTriage(t *testing.T) {
 	k.step("ACT-PROP-08 取得一份运行凭据", func(t *testing.T) {
 		var item string
 		runTok, runID, item = k.runCredential()
-		if r := k.apaRun(runTok, runID, "item", "show", item); r.Code != 0 {
+		if r := k.apaRun(runTok, runID, "item", "show", item, "--full"); r.Code != 0 {
 			t.Fatalf("运行凭据读不了自己的事项: %d %s%s", r.Code, r.Stdout, r.Stderr)
 		}
 	})

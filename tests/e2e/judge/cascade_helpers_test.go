@@ -194,7 +194,7 @@ func (f *fx) runFinished(category string) (out []auditEvent) {
 
 func (f *fx) item(id string) map[string]any {
 	f.t.Helper()
-	m := jsonMap(f.t, f.apa(f.OBS, 0, "item", "show", id).Stdout)
+	m := jsonMap(f.t, f.apa(f.OBS, 0, "item", "show", id, "--full").Stdout)
 	if it := sub(m, "item"); it != nil {
 		return it
 	}
@@ -224,7 +224,7 @@ func (f *fx) proposals() map[string]string {
 	var out struct {
 		Items []struct{ ID, Title string } `json:"items"`
 	}
-	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--phase", "proposed").Stdout), &out))
+	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--phase", "proposed", "--full", "--limit", "200").Stdout), &out))
 	m := map[string]string{}
 	for _, it := range out.Items {
 		m[it.ID] = it.Title
@@ -252,7 +252,7 @@ func (f *fx) hasPhase(title, phase string) bool {
 	var out struct {
 		Items []struct{ Title, Phase string } `json:"items"`
 	}
-	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list").Stdout), &out))
+	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--full", "--limit", "200").Stdout), &out))
 	for _, it := range out.Items {
 		if it.Title == title && it.Phase == phase {
 			return true

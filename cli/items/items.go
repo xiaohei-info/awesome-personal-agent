@@ -1,5 +1,5 @@
 // Package items 是 apa 的事项命令组（附录 B.1「事项」「上下文」）：
-// item show/list/add/update/transition/relate、propose、inbox。
+// item show/list/add/update/comment/thread/transition/relate、propose、inbox。
 //
 // 这里只做参数到 HTTP 请求的搬运：校验、授权、版本、幂等、到期时钟全部由内核判定，
 // 内核的错误体与退出码原样透出；不直接访问存储。
@@ -9,12 +9,18 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
+	"maps"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
@@ -29,7 +35,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --full] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> [--part body|progress|messages --offset --full] | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --limit --cursor --full] | add | update <id> | comment <id> --text <t> [--reply-to <comment id>] [--on <YYYY-MM-DD>] | thread <id> [--before <n> --limit <n> --full] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 const (
 	todayUsage = "usage: apa today [--full]"
@@ -39,13 +45,14 @@ const (
 // 各写子命令的完整用法：参数错误时放进 next，-h / --help 时整段输出。
 const (
 	updateUsage     = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --daily-at <HH:MM, empty clears; a planned date clears it> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
-	progressUsage   = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>]"
+	commentUsage    = "usage: apa item comment <id> --text <text> [--reply-to <comment id on the same item, from apa item thread>] [--on <YYYY-MM-DD, not later than today>]"
+	threadUsage     = "usage: apa item thread <id> [--before <before from the previous page>] [--limit <1-100, default 20>] [--full]; newest last, the page stays within the read budget; without --full each entry omits its raw events (steps)"
 	transitionUsage = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <note or result evidence> --version <n>]"
 	relateUsage     = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove]"
 )
 
 // itemHelp 是 `apa item … --help` 的输出：总览加各写子命令的全部参数。
-var itemHelp = strings.Join([]string{itemUsage, addUsage("item add"), updateUsage, progressUsage, transitionUsage, relateUsage}, "\n")
+var itemHelp = strings.Join([]string{itemUsage, addUsage("item add"), updateUsage, commentUsage, threadUsage, transitionUsage, relateUsage}, "\n")
 
 func addUsage(name string) string {
 	u := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --planned-slot <HH:MM - HH:MM> --daily-at <HH:MM, no date> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
@@ -69,8 +76,10 @@ func item(c *client.Ctx, args []string) error {
 		return add(c, args, "item add")
 	case "update":
 		return write(c, args, "update", "PATCH", "")
-	case "progress":
-		return write(c, args, "progress", "POST", "/progress")
+	case "comment":
+		return write(c, args, "comment", "POST", "/comments")
+	case "thread":
+		return thread(c, args)
 	case "transition":
 		return write(c, args, "transition", "POST", "/transition")
 	case "relate":
@@ -213,9 +222,9 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	case "update":
 		fields = itemFields[1:]
 		hint = updateUsage
-	case "progress":
-		fields = []string{"text", "on"}
-		hint = progressUsage
+	case "comment":
+		fields = []string{"text", "on", "reply-to"}
+		hint = commentUsage
 	case "transition":
 		fields = []string{"to", "reason", "waiting-on"}
 		hint = transitionUsage
@@ -232,7 +241,7 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	if err != nil {
 		return err
 	}
-	if sub == "progress" && body["text"] == nil {
+	if sub == "comment" && body["text"] == nil {
 		return usage("--text is required", hint)
 	}
 	if sub == "transition" {
@@ -273,29 +282,163 @@ func send(c *client.Ctx, f *form, method, path string, body map[string]any) erro
 	return c.Print(out)
 }
 
+// 单条读取与列表的默认上限（设计 §17.2）：只在命令行输出里截，HTTP 响应不变，不回写账本。
+const (
+	bodyHead     = 2000 // item show 默认给的正文字数
+	recentN      = 5    // item show 默认给的最近进展与挂靠消息条数
+	listDefault  = 30   // item list 默认条数
+	listMax      = 200  // item list 最多条数
+	summaryChars = 60   // item list 每行摘要的字数
+)
+
+const showUsage = "usage: apa item show <id> [--part body|progress|messages] [--offset <n>] [--full]; " +
+	"by default the body is cut to its first 2000 characters and only the latest 5 progress notes and messages are shown"
+
 func show(c *client.Ctx, args []string) error {
-	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		return usage("exactly one item id is required", "usage: apa item show <id>")
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return usage("an item id is required first", showUsage)
 	}
-	id := url.PathEscape(args[0])
+	id, rest := args[0], args[1:]
+	fs := flag.NewFlagSet("item show", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	part, full, offset := fs.String("part", "", ""), fs.Bool("full", false, ""), fs.Int("offset", 0, "")
+	if err := fs.Parse(rest); err != nil || fs.NArg() != 0 || *offset < 0 || *full && *part != "" ||
+		!slices.Contains([]string{"", "body", "progress", "messages"}, *part) {
+		return usage("invalid arguments for item show", showUsage)
+	}
+	path := "/items/" + url.PathEscape(id)
 	var out map[string]any
-	if err := c.Do(bg, "GET", "/items/"+id, nil, &out); err != nil {
+	if err := c.Do(bg, "GET", path, nil, &out); err != nil {
 		return err
 	}
 	// 挂靠消息另有路由，过滤在内核（§14.6）。
 	var msgs struct {
-		Messages json.RawMessage `json:"messages"`
+		Messages []any `json:"messages"`
 	}
-	if err := c.Do(bg, "GET", "/items/"+id+"/messages", nil, &msgs); err != nil {
+	if err := c.Do(bg, "GET", path+"/messages", nil, &msgs); err != nil {
 		return err
 	}
+	if msgs.Messages == nil {
+		msgs.Messages = []any{}
+	}
 	out["messages"] = msgs.Messages
+	if *full {
+		return c.Print(out)
+	}
+	it, _ := out["item"].(map[string]any)
+	body, _ := it["body"].(string)
+	progress, _ := out["progress"].([]any)
+	self := "apa item show " + id
+	switch *part {
+	case "body":
+		rs := []rune(body)
+		from := min(*offset, len(rs))
+		var seg map[string]any
+		// 一段取多少：从上限往下减，直到连同转义与续读命令整份不超过一次读取的上限。
+		for to := min(len(rs), from+kcontext.InjectBudget); ; to -= max(1, (to-from)/10) {
+			seg = map[string]any{"id": id, "body": string(rs[from:to]), "chars": len(rs), "offset": from, "next": []string{}}
+			if to < len(rs) {
+				seg["next"] = []string{self + " --part body --offset " + strconv.Itoa(to)}
+			}
+			if to <= from+1 || client.Size(seg) <= kcontext.InjectBudget {
+				break
+			}
+		}
+		return c.Print(seg)
+	case "progress", "messages":
+		list := progress
+		if *part == "messages" {
+			list = msgs.Messages
+		}
+		return c.Print(older(self, *part, list, *offset))
+	}
+	// 默认：正文前 bodyHead 字、最近 recentN 条进展与消息（消息不带正文预览），写明各部分的总量与给了多少。
+	parts := map[string]any{}
+	if n := utf8.RuneCountInString(body); n > bodyHead {
+		it["body"] = string([]rune(body)[:bodyHead])
+		parts["body"] = map[string]int{"chars": n, "shown": bodyHead}
+	}
+	if len(progress) > recentN {
+		out["progress"] = progress[len(progress)-recentN:]
+		parts["progress"] = map[string]int{"count": len(progress), "shown": recentN}
+	}
+	ms := msgs.Messages
+	if len(ms) > recentN {
+		ms = ms[len(ms)-recentN:]
+		parts["messages"] = map[string]int{"count": len(msgs.Messages), "shown": recentN}
+	}
+	for _, m := range ms {
+		if mm, ok := m.(map[string]any); ok {
+			delete(mm, "detail")
+			delete(mm, "content")
+		}
+	}
+	out["messages"] = ms
+	if len(parts) > 0 {
+		out["parts"] = parts
+	}
+	var next []string
+	if parts["body"] != nil {
+		next = append(next, self+" --part body --offset "+strconv.Itoa(bodyHead))
+	}
+	if parts["progress"] != nil {
+		next = append(next, self+" --part progress --offset "+strconv.Itoa(recentN))
+	}
+	if len(msgs.Messages) > 0 {
+		next = append(next, self+" --part messages")
+	}
+	out["next"] = append(next, "apa why "+id)[:min(3, len(next)+1)]
 	return c.Print(out)
 }
 
+// thread：GET /items/{id}/thread，讨论流的一页；页大小与字数上限由内核守住。
+func thread(c *client.Ctx, args []string) error {
+	f, bools := newForm("item thread", []string{"before", "limit"}, nil, []string{"full"})
+	id, err := f.parse(args, true, threadUsage)
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	for n, v := range f.vals {
+		if *v != "" {
+			q.Set(n, *v)
+		}
+	}
+	if *bools["full"] {
+		q.Set("full", "1")
+	}
+	var out map[string]any
+	if err := c.Do(bg, "GET", "/items/"+url.PathEscape(id)+"/thread?"+q.Encode(), nil, &out); err != nil {
+		return err
+	}
+	return c.Print(out)
+}
+
+// older 是进展或挂靠消息的一页：从最近的往前数，跳过 offset 条，按先后排列；连同续读命令整份不超过一次读取的上限。
+func older(self, part string, list []any, offset int) map[string]any {
+	end := max(0, len(list)-offset)
+	rows := list[max(0, end-listMax):end]
+	var out map[string]any
+	for {
+		out = map[string]any{part: rows, "count": len(list), "offset": offset, "next": []string{}}
+		if shown := offset + len(rows); shown < len(list) {
+			out["next"] = []string{self + " --part " + part + " --offset " + strconv.Itoa(shown)}
+		}
+		if len(rows) <= 1 || client.Size(out) <= kcontext.InjectBudget {
+			return out
+		}
+		rows = rows[1:] // 从最早的一端删，留下最近的
+	}
+}
+
+const listUsage = "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] " +
+	"[--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>] [--from <YYYY-MM-DD> --to <YYYY-MM-DD>, at most 62 days] " +
+	"[--origin-source <source, e.g. import:notes>] [--origin-ref <external id>] [--limit <1-200, default 30>] [--cursor <c>] [--full]; " +
+	"rows are short (no body, summary cut to 60 characters): read one with apa item show <id>, page with the cursor in next"
+
 func list(c *client.Ctx, args []string) error {
-	f, bools := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for", "from", "to", "origin-source", "origin-ref"}, nil, []string{"full"})
-	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>] [--from <YYYY-MM-DD> --to <YYYY-MM-DD>, at most 62 days] [--origin-source <source, e.g. import:notes>] [--origin-ref <external id>] [--full]; without --full each item omits body, spec, ext and proposal: read one with apa item show <id>"); err != nil {
+	f, bools := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for", "from", "to", "origin-source", "origin-ref", "limit", "cursor"}, nil, []string{"full"})
+	if _, err := f.parse(args, false, listUsage); err != nil {
 		return err
 	}
 	q := url.Values{}
@@ -304,20 +447,84 @@ func list(c *client.Ctx, args []string) error {
 			q.Set(strings.ReplaceAll(n, "-", "_"), *v)
 		}
 	}
+	if !q.Has("limit") {
+		q.Set("limit", strconv.Itoa(listDefault))
+	}
+	if n, err := strconv.Atoi(q.Get("limit")); err != nil || n < 1 || n > listMax {
+		return usage("--limit must be 1 to 200", listUsage)
+	}
 	var out map[string]any
 	if err := c.Do(bg, "GET", "/items?"+q.Encode(), nil, &out); err != nil {
 		return err
 	}
-	if !*bools["full"] {
-		compact(out["items"])
-		// 建议的来源与分组是给建议页用的，条数一多就比事项本身还大。
-		delete(out, "origins")
-		delete(out, "groups")
+	full := *bools["full"]
+	next := func() {
+		var cmds []string
+		if cur, _ := out["next_cursor"].(string); cur != "" {
+			nq := maps.Clone(q)
+			nq.Set("cursor", cur)
+			cmd := []string{"apa item list"}
+			for _, n := range slices.Sorted(maps.Keys(nq)) {
+				cmd = append(cmd, "--"+strings.ReplaceAll(n, "_", "-"), client.Quote(nq.Get(n)))
+			}
+			if full {
+				cmd = append(cmd, "--full")
+			}
+			cmds = append(cmds, strings.Join(cmd, " "))
+		}
+		if rows, _ := out["items"].([]any); len(rows) > 0 {
+			if m, ok := rows[0].(map[string]any); ok {
+				cmds = append(cmds, "apa item show "+fmt.Sprint(m["id"]))
+			}
+		}
+		out["next"] = append(cmds, "apa search <words>")
 	}
+	if full { // --full 是本人或脚本显式要完整的行：只按条数分页
+		next()
+		return c.Print(out)
+	}
+	rows, _ := out["items"].([]any)
+	for _, r := range rows {
+		slim(r)
+	}
+	// 建议的来源与分组是给建议页用的，条数一多就比事项本身还大。
+	delete(out, "origins")
+	delete(out, "groups")
+	offset, _ := strconv.Atoi(q.Get("cursor"))
+	server, _ := out["next_cursor"].(string)
+	client.Fit(out, "items", kcontext.InjectBudget, func(kept int) {
+		if out["next_cursor"] = server; kept < len(rows) {
+			out["next_cursor"] = strconv.Itoa(offset + kept)
+		}
+		if out["next_cursor"] == "" {
+			delete(out, "next_cursor")
+		}
+		next()
+	})
 	return c.Print(out)
 }
 
-// compact 从列表里的事项去掉大字段（设计 §17）：列表只给判断与引用够用的字段，全文用 item show 或 --full。
+// slimKeys 是列表默认每行留下的字段：判断与引用够用，全文用 item show 或 --full。
+// version、chain_depth、created_at 是 v0.1 列表就有的键，留着不破坏旧脚本（附录 B.6）。
+var slimKeys = []string{"id", "title", "phase", "kind", "project", "priority", "tags", "assignee", "status_label",
+	"deadline", "planned_for", "planned_slot", "daily_at", "version", "chain_depth", "created_at", "updated_at", "summary"}
+
+func slim(v any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	for k := range m {
+		if !slices.Contains(slimKeys, k) {
+			delete(m, k)
+		}
+	}
+	if s, _ := m["summary"].(string); utf8.RuneCountInString(s) > summaryChars {
+		m["summary"] = string([]rune(s)[:summaryChars]) + "…"
+	}
+}
+
+// compact 从列表里的事项去掉大字段（设计 §17）：today 与 inbox 只给判断与引用够用的字段，全文用 item show 或 --full。
 func compact(list any) {
 	items, _ := list.([]any)
 	for _, v := range items {

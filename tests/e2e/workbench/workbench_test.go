@@ -227,7 +227,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		}
 		// "改计划日期" / "写进展" / "完成" 调的就是这三个接口。
 		k.webOK("PATCH", "/items/"+wbA, fmt.Sprintf(`{"planned_for":%q}`, TMRW), 200)
-		k.webOK("POST", "/items/"+wbB+"/progress", `{"text":"已订酒店"}`, 201)
+		k.webOK("POST", "/items/"+wbB+"/comments", `{"text":"已订酒店"}`, 201)
 		k.webDone(wbB)
 
 		if has(k.webToday().ids("planned"), wbA) {
@@ -247,7 +247,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 	k.step("ACT-WBN-09 CLI 追加进展，不改阶段，记 item.progress_added", func(t *testing.T) {
 		phase0 := k.phase(wbF)
 		before := len(k.events(wbF, "item.progress_added"))
-		k.apa(k.WRK, 0, "item", "progress", wbF, "--text", "联系了供应商", "--on", YDAY)
+		k.apa(k.WRK, 0, "item", "comment", wbF, "--text", "联系了供应商", "--on", YDAY)
 		eq(t, "phase", k.phase(wbF), phase0)
 		pr := k.progress(wbF)
 		if len(pr) == 0 {
@@ -279,8 +279,8 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 
 	k.step("ACT-WBN-10 进展的所指日期不能晚于今天", func(t *testing.T) {
 		n := len(k.progress(wbF))
-		k.apa(k.WRK, exitUsage, "item", "progress", wbF, "--text", "未来", "--on", TMRW)
-		r := k.APIRaw("POST", "/v1/items/"+wbF+"/progress", fmt.Sprintf(`{"text":"未来","on":%q}`, TMRW), k.WRK)
+		k.apa(k.WRK, exitUsage, "item", "comment", wbF, "--text", "未来", "--on", TMRW)
+		r := k.APIRaw("POST", "/v1/items/"+wbF+"/comments", fmt.Sprintf(`{"text":"未来","on":%q}`, TMRW), k.WRK)
 		eq(t, "HTTP", r.Code, 400)
 		eq(t, "progress 条数", len(k.progress(wbF)), n)
 	})
@@ -289,14 +289,14 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 	// 记在 Agent 名下。仍然必须拒绝的是：钥匙够不着的写入（退出码 4）和档位没放开的拍板（退出码 23）；被拒的都不写入、都留 command.rejected。
 	k.step("ACT-WBN-11 进展的权限边界", func(t *testing.T) {
 		n, nb := len(k.progress(wbF)), len(k.progress(wbB))
-		k.apa(k.WRK2, exitDenied, "item", "progress", wbF, "--text", "x") // worker 只够得着自己的事项
-		k.apa(k.OBS, exitDenied, "item", "progress", wbB, "--text", "x")  // observer 只读与提建议
+		k.apa(k.WRK2, exitDenied, "item", "comment", wbF, "--text", "x") // worker 只够得着自己的事项
+		k.apa(k.OBS, exitDenied, "item", "comment", wbB, "--text", "x")  // observer 只读与提建议
 		eq(t, "WB-F 进展不变", len(k.progress(wbF)), n)
 		eq(t, "WB-B 进展不变", len(k.progress(wbB)), nb)
 		rejected(t, k.events(wbF, "command.rejected"), "permission_denied", "WB-F 越权写进展")
 		rejected(t, k.events(wbB, "command.rejected"), "permission_denied", "WB-B observer 写进展")
 
-		k.apa(k.DEL, 0, "item", "progress", wbB, "--text", "本人说已订")
+		k.apa(k.DEL, 0, "item", "comment", wbB, "--text", "本人说已订")
 		eq(t, "WB-B 进展落账", len(k.progress(wbB)), nb+1)
 		eq(t, "Agent 写的进展记在 Agent 名下", k.lastEvent(wbB, "item.progress_added").Actor.Type, "agent")
 
@@ -312,7 +312,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 
 	k.step("ACT-WBN-12 全文搜索覆盖标题、摘要、正文与进展", func(t *testing.T) {
 		k.webOK("PATCH", "/items/"+wbC, `{"body":"护照续签"}`, 200)
-		k.webOK("POST", "/items/"+wbD+"/progress", `{"text":"等护照照片"}`, 201)
+		k.webOK("POST", "/items/"+wbD+"/comments", `{"text":"等护照照片"}`, 201)
 		vC, vD := k.version(wbC), k.version(wbD)
 		var cli, web, http struct {
 			Items []map[string]any `json:"items"`
@@ -345,7 +345,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		}
 		for _, sort := range []string{"deadline", "planned_for", "priority", "updated"} {
 			var cli, http, web list
-			jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--sort", sort).Stdout, &cli)
+			jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--sort", sort, "--full", "--limit", "200").Stdout, &cli)
 			jsonOf(t, k.APIRaw("GET", "/v1/items?sort="+sort, "", k.OBS).Body, &http)
 			jsonOf(t, k.webOK("GET", "/items?sort="+sort, "", 200), &web)
 			eq(t, "排序 "+sort+" CLI 与 HTTP", order(cli), order(http))
@@ -380,7 +380,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 			}
 		}
 		var f list
-		jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--planned-for", TMRW).Stdout, &f)
+		jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--planned-for", TMRW, "--full", "--limit", "200").Stdout, &f)
 		var got []string
 		for _, it := range f.Items {
 			eq(t, "筛选结果的 planned_for", it["planned_for"], TMRW)

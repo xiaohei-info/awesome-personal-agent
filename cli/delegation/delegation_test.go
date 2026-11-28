@@ -523,3 +523,62 @@ func TestReportRepeatedLinksRegisterVaultOutputs(t *testing.T) {
 		return nil
 	})
 }
+
+// apa executors set：只改给出的键，空值清除（回到声明自带的默认）；取值只能是声明列出的；权限按"Agent 与执行者配置"组判。
+func TestExecutorsSet(t *testing.T) {
+	w := newWorld(t)
+	w.cmd("executor.register", map[string]any{"harness": "px",
+		"overrides": map[string]any{
+			"model":    map[string]any{"label": map[string]string{"zh": "模型", "en": "Model"}, "args": []string{"--model", "{model}"}, "choices": []string{"m1", "m2"}, "role": "model"},
+			"thinking": map[string]any{"label": map[string]string{"zh": "思考", "en": "Thinking"}, "args": []string{"--effort", "{thinking}"}, "choices": []string{"low", "high"}, "role": "thinking"}},
+		"headless":  map[string]any{"command": []string{"true", "{prompt}"}, "session": map[string]any{"extract": "$.id"}, "access": map[string]any{"read": []string{}, "edit": []string{}}},
+		"executors": []map[string]any{{"id": "px.quick", "kind": "external-cli"}}})
+	var tok string
+	if err := w.st.Update(bg, func(tx *store.Tx) error {
+		_, s, err := w.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_cfg", Harness: "h", Audience: auth.AudienceInternal})
+		tok = s
+		if err != nil {
+			return err
+		}
+		_, err = policy.Update(tx, owner.Actor, "test card", func(p *policy.Policy) error {
+			p.AgentCards["agent_cfg"] = policy.DefaultCard().With(policy.GroupAgents)
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	overrides := func() map[string]string {
+		var l struct {
+			Executors []struct {
+				ID        string            `json:"id"`
+				Overrides map[string]string `json:"overrides"`
+			} `json:"executors"`
+		}
+		_ = json.Unmarshal([]byte(w.apa(tok, "", "executors").out), &l)
+		for _, e := range l.Executors {
+			if e.ID == "px.quick" {
+				return e.Overrides
+			}
+		}
+		return nil
+	}
+	if r := w.apa(w.token(auth.Delegate, ""), "", "executors", "set", "px.quick", "--model", "m1"); r.code != 23 {
+		t.Fatalf("a card without the agents group: %+v", r)
+	}
+	if r := w.apa(tok, "", "executors", "set", "px.quick", "--model", "m1", "--override", "thinking=high"); r.code != 0 {
+		t.Fatalf("set: %+v", r)
+	}
+	if r := w.apa(tok, "", "executors", "set", "px.quick", "--thinking", "low"); r.code != 0 || overrides()["model"] != "m1" || overrides()["thinking"] != "low" {
+		t.Fatalf("only the given key changes: %+v %v", r, overrides())
+	}
+	if r := w.apa(tok, "", "executors", "set", "px.quick", "--model", "free-text"); r.code != 2 || overrides()["model"] != "m1" {
+		t.Fatalf("a value outside the declared choices: %+v", r)
+	}
+	if r := w.apa(tok, "", "executors", "set", "px.quick", "--model", ""); r.code != 0 || overrides()["model"] != "" || overrides()["thinking"] != "low" {
+		t.Fatalf("an empty value clears the key: %+v %v", r, overrides())
+	}
+	if r := w.apa(tok, "", "executors", "set", "px.quick"); r.code != 2 {
+		t.Fatalf("nothing to set: %+v", r)
+	}
+}
