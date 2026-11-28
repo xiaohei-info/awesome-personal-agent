@@ -514,6 +514,12 @@ func Unattached(tx *store.Tx) ([]Dispatch, error) {
 	return queryDispatches(tx, "WHERE item = '' AND state = ? ORDER BY started_at DESC, id", DispatchRunning)
 }
 
+// InFlight 返回外部 harness 自己派出（没有运行 id）、已挂到事项上、仍在跟的记录，按开始时间升序。
+// 插件进程重启后的第一轮据此提示本会话该重新等待哪些（§6.17）。
+func InFlight(tx *store.Tx) ([]Dispatch, error) {
+	return queryDispatches(tx, "WHERE item != '' AND run = '' AND state = ? ORDER BY started_at, id", DispatchRunning)
+}
+
 // BySession 返回某会话句柄最近一次派出的记录（harness 为空不限）；回执按句柄查事项用它。
 func BySession(tx *store.Tx, harness, session string) (Dispatch, bool, error) {
 	ds, err := queryDispatches(tx, "WHERE session = ? AND (? = '' OR harness = ?) ORDER BY started_at DESC, id LIMIT 1", session, harness, harness)

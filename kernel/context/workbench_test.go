@@ -115,3 +115,33 @@ func TestUnattachedDispatchEveryTurnAndInjectBudget(t *testing.T) {
 		t.Fatalf("budget: %d runes\n%s", n, out[len(out)-200:])
 	}
 }
+
+// 插件进程重启后的第一轮（§6.17）：带 InFlight 时给本会话派出、子事项还没结束的外部派活，供 Agent 重新等待；
+// 不带不给，别的会话不给，子事项结束后不再给。
+func TestInFlightDispatchesAfterPluginRestart(t *testing.T) {
+	e := setup(t)
+	if err := executors.Register(e.x, executors.Options{Owner: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := delegation.Register(e.x, delegation.Options{Owner: "owner", OnError: func(command.Commit, error) {}}); err != nil {
+		t.Fatal(err)
+	}
+	parent := e.item(t, map[string]any{"title": "发布"})
+	child := e.id(t, agent, "delegate.create", map[string]any{"parent": parent, "assignee": "x.cli", "title": "写说明"})
+	e.do(t, agent, "delegate.dispatch", map[string]any{"id": child, "session": "agt_7"})
+	if r := e.build(t, Request{Session: "main"}); len(r.InFlight) != 0 {
+		t.Fatalf("only asked for after a restart: %+v", r.InFlight)
+	}
+	r := e.build(t, Request{Session: "main", InFlight: true})
+	if len(r.InFlight) != 1 || r.InFlight[0].Item != child || r.InFlight[0].Session != "agt_7" ||
+		!strings.Contains(r.Inject(), "在途未回执的委派 "+child) {
+		t.Fatalf("in flight: %+v\n%s", r.InFlight, r.Inject())
+	}
+	if r := e.build(t, Request{Session: "other", InFlight: true}); len(r.InFlight) != 0 {
+		t.Fatalf("another session's dispatch: %+v", r.InFlight)
+	}
+	e.do(t, owner, "delegate.report", map[string]any{"id": child, "outcome": "done", "summary": "写完了", "evidence": map[string]string{"link": "https://x.example/2"}})
+	if r := e.build(t, Request{Session: "main", InFlight: true}); len(r.InFlight) != 0 {
+		t.Fatalf("a reported dispatch is no longer in flight: %+v", r.InFlight)
+	}
+}

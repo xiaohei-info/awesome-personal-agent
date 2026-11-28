@@ -217,6 +217,39 @@ func unattached(tx *store.Tx, session string) ([]UnattachedDispatch, error) {
 	return out, nil
 }
 
+// InFlightDispatch 是本会话派出、已挂到事项上、还没有结果回执的派活（插件进程重启后的第一轮带上，§6.17）。
+type InFlightDispatch struct {
+	ID       string `json:"id"`
+	Item     string `json:"item"`
+	Executor string `json:"executor"`
+	Session  string `json:"session,omitempty"`
+	Minutes  int    `json:"age_min"` // 派出至今的分钟数
+}
+
+// inFlight 返回本会话派出、子事项还没结束的外部派活（APA 拉起的有运行与结果通知，不在此列）。
+func inFlight(tx *store.Tx, session string) ([]InFlightDispatch, error) {
+	ds, err := delegation.InFlight(tx)
+	if err != nil {
+		return nil, err
+	}
+	now := clock.Now()
+	var out []InFlightDispatch
+	for _, d := range ds {
+		if conversation(d.Origin) != conversation(session) {
+			continue
+		}
+		it, err := items.Get(tx, d.Item)
+		if isNotFound(err) || err == nil && closed(it) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, InFlightDispatch{ID: d.ID, Item: d.Item, Executor: d.Executor, Session: d.Session, Minutes: int(now.Sub(d.StartedAt).Minutes())})
+	}
+	return out, nil
+}
+
 // ---- 增量去重 ----
 
 // rowKey 是注入里一个事项行能看见的东西（标题、阶段、截止、状态标签）加最近一条进展：两者相同就是没有可见变化。

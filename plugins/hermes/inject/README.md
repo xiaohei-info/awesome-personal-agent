@@ -13,6 +13,8 @@ the plugin only passes the session through.
   (`post_compaction`) start a fresh kernel cursor (`<session>~<ns>`), so the full summary is injected again, plus
   `--instruction <version>` (the kernel adds the update notice if stale; override with `APA_INSTRUCTION_VERSION`)
   and `apa agents check`. Its output is not injected.
+- An older session this process sees for the first time (the gateway restarted) also gets `--in-flight`: that one turn
+  lists the session's attached dispatches that have no result yet, so the Agent can wait on them again (design §6.17).
 - Does not write harness memory.
 
 ## Live gate

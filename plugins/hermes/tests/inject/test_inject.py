@@ -148,3 +148,12 @@ def test_slow_kernel_is_abandoned_within_two_seconds(inj, tmp_path, monkeypatch)
 def test_no_session_id_injects_nothing(inj):
     assert inj.hook(is_first_turn=True) is None
     assert inj.calls() == []
+
+
+def test_first_turn_after_a_process_restart_asks_for_in_flight_dispatches_once(inj, monkeypatch):
+    """B1: a session this process has not seen (gateway restarted) lists its unreported dispatches once; a new session does not."""
+    inj.hook(session_id="old", is_first_turn=False)
+    inj.hook(session_id="old", is_first_turn=False)
+    inj.hook(session_id="new", is_first_turn=True)
+    ctx = [c for c in inj.calls() if "|context" in c]
+    assert "--in-flight" in ctx[0] and "--in-flight" not in ctx[1] and "--in-flight" not in ctx[2]

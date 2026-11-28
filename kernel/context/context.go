@@ -60,7 +60,9 @@ type Request struct {
 	// ItemScope 是 `--scope item`（§7.6）：不看游标，给事项条目和未确认的挂靠消息。Item 为空时按 Reader 确定事项。
 	ItemScope bool
 	Item      string
-	Reader    Reader
+	// InFlight 要本会话派出、还没回执的外部派活（插件进程重启后的第一轮，§6.17）；只在带 Session 时有效。
+	InFlight bool
+	Reader   Reader
 }
 
 // Reader 是读取者的身份，决定挂靠消息的白名单过滤和是否推进状态。
@@ -159,6 +161,8 @@ type Result struct {
 	Overview []OverviewGroup `json:"overview,omitempty"`
 	// Unattached 是本会话记下、还没挂到事项上的派活，每轮都给（§6.17）。
 	Unattached []UnattachedDispatch `json:"unattached_dispatches,omitempty"`
+	// InFlight 只在请求带 InFlight 时：本会话派出、还没回执的外部派活（§6.17）。
+	InFlight []InFlightDispatch `json:"in_flight_dispatches,omitempty"`
 }
 
 // Build 返回 req 的增量投影。带 Session 时在同一事务里把游标推进到本次读到的位置，
@@ -211,6 +215,11 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 	if req.Session != "" {
 		if res.Unattached, err = unattached(tx, req.Session); err != nil {
 			return res, err
+		}
+		if req.InFlight {
+			if res.InFlight, err = inFlight(tx, req.Session); err != nil {
+				return res, err
+			}
 		}
 	}
 	var tracked map[string]bool
@@ -633,7 +642,7 @@ func oneLine(s string) string {
 // 整份至多 InjectBudget 字：先放项目上下文、材料、投递、未挂的派活与跟进消息（投递与消息读取时已记送达，不截），
 // 余下的字数按概览分组与增量事项行截断，截掉的写明另有几条与查询命令。
 func (r Result) Inject() string {
-	if len(r.Items) == 0 && len(r.Overview) == 0 && len(r.Unattached) == 0 && len(r.Materials) == 0 && len(r.Deliveries) == 0 &&
+	if len(r.Items) == 0 && len(r.Overview) == 0 && len(r.Unattached) == 0 && len(r.InFlight) == 0 && len(r.Materials) == 0 && len(r.Deliveries) == 0 &&
 		len(r.Messages) == 0 && r.Project == nil && !r.Instruction.Stale {
 		return ""
 	}
@@ -715,6 +724,17 @@ func (r Result) Inject() string {
 			parent = u.About
 		}
 		line(&tail, "- 未挂事项的派活 ", u.ID, " | ", who, " | 挂上：apa dispatch attach ", u.ID, " --parent ", parent, " | 不跟踪：apa dispatch untrack ", u.ID)
+	}
+	for _, f := range r.InFlight {
+		who := oneLine(f.Executor)
+		if f.Session != "" {
+			who += "，会话 " + oneLine(f.Session)
+		}
+		age := strconv.Itoa(f.Minutes) + " 分钟"
+		if f.Minutes >= 120 {
+			age = strconv.Itoa(f.Minutes/60) + " 小时"
+		}
+		line(&tail, "- 在途未回执的委派 ", f.Item, " | ", who, " | 派出 ", age, " | 等待若随重启断了，重新等待它的结果；已不需要：apa dispatch untrack ", f.ID)
 	}
 	line(&tail, envelopeClose)
 	for _, m := range r.Messages { // 消息带自己的信封；事项 id 由内核生成，不是外部内容
