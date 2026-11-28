@@ -95,8 +95,8 @@ export function ItemsPage() {
 const PAGE_SIZE = 50;
 const DIMS = ["project", "kind", "phase", "priority", "planned", "origin", "tag"] as const;
 type Dim = (typeof DIMS)[number];
-// 检索时服务端能筛的维度（GET /search 的 project、phase、kind）。
-const SEARCH_DIMS: Dim[] = ["project", "phase", "kind"];
+// 检索时服务端能筛的维度（GET /search 的 project、phase、kind、tag）。
+const SEARCH_DIMS: Dim[] = ["project", "phase", "kind", "tag"];
 const NONE = "-";
 // 来源按 origin.source 归组；定时安排建的（instance:<实例>）合成一组。
 const originKey = (s?: string) => (!s ? NONE : s.startsWith("instance:") ? "instance:" : s);
@@ -271,7 +271,7 @@ function ItemList() {
       )}
       {error != null && <ErrorNote error={error} />}
       {view && items && <ViewTable view={view} items={all} />}
-      {!view && searching && <SearchResults query={{ q, project: f.project, phase: f.phase, kind: f.kind, after, before }} />}
+      {!view && searching && <SearchResults query={{ q, project: f.project === NONE ? "" : f.project, phase: f.phase, kind: f.kind, tag: f.tag, after, before }} />}
       {!items && error == null && !searching && <Skeleton label={t.loading} />}
       {!view && !searching && items && !shown.length && error == null && (filtered
         ? <EmptyState title={t.noMatch} action={<button type="button" onClick={() => setParams(sort ? { sort } : {}, { replace: true })}>{t.clearFilters}</button>} />

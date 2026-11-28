@@ -378,3 +378,20 @@ mark { padding: 0 1px; color: inherit; background: var(--warn-soft); border-radi
 
 /* 来源行的启用开关：一拨就存，旁边是保存状态 */
 label.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+/* 讨论里的 @：候选弹在输入框下面（主会话与执行者，叫不动的置灰写原因）；选中的是输入框上方的小标签；发言下面写 @ 了谁、各自怎样 */
+.composer-box { position: relative; }
+.mention-pop { left: 0; top: calc(100% + 4px); width: min(360px, 100%); margin: 0; list-style: none; }
+.mention-pop > li { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; padding: 4px 8px; border-radius: var(--r-md); cursor: pointer; }
+.mention-pop > li.sub { cursor: default; }
+.mention-pop > li[aria-selected="true"] { background: var(--selected); }
+.mention-pop > li[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.mention-pop > li .grow { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mention-pop > li small { flex: none; color: var(--ink-3); font-size: 12px; }
+.mention-picked { margin: 0; padding: 0; list-style: none; }
+.mention-states { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0 26px; padding: 0; list-style: none; }
+.mention-states a { text-decoration: none; color: inherit; }
+.mention-states [data-state="replied"], .mention-states [data-state="delivered"] { color: var(--ok); background: var(--ok-soft); }
+.mention-states [data-state="running"], .mention-states [data-state="sent"] { color: var(--warn); background: var(--warn-soft); }
+.mention-states :is([data-state="blocked"], [data-state="missing"], [data-state="not_delivered"]) { color: var(--seal); background: var(--seal-soft); }
+form.composer > .actions { display: flex; align-items: center; justify-self: stretch; }
+form.composer > .actions > .sub { margin-right: auto; }

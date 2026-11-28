@@ -8,13 +8,13 @@ import { Val } from "../../app/values";
 import type { Item } from "./ItemsPage";
 import { strings } from "./strings";
 
-// 事项页的检索（主文档 §7.1，GET /search?type=item）：搜索框有字时列表换成按相关度排的命中，筛选项目、阶段、类型、
+// 事项页的检索（主文档 §7.1，GET /search?type=item）：搜索框有字时列表换成按相关度排的命中，筛选项目、阶段、类型、标签、
 // 最近变更的时间段都交给服务端；一页 20 条，按 next_cursor 往后翻。每条命中逐级展开：先是标题与一段片段（命中的词标出），
 // 「展开」再读这件事，列出正文与进展里含命中词的段落，最后「打开」进详情。已放弃的默认不出，写明还有几件。
 
 export interface SearchHit { id: string; title: string; project?: string; project_name?: string; phase?: string; kind?: string; updated?: string; matched_in?: string[]; snippet?: string }
 interface Page { hits: SearchHit[]; total?: number; withheld?: { dropped?: number }; next_cursor?: string }
-export interface SearchQuery { q: string; project?: string; phase?: string; kind?: string; after?: string; before?: string }
+export interface SearchQuery { q: string; project?: string; phase?: string; kind?: string; tag?: string; after?: string; before?: string }
 
 const PAGE = 20;
 
@@ -32,7 +32,7 @@ export function SearchResults({ query }: { query: SearchQuery }) {
     let live = true;
     setError(null);
     const sp = new URLSearchParams({ q: query.q.trim(), type: "item", limit: String(PAGE) });
-    for (const k of ["project", "phase", "kind", "after", "before"] as const) if (query[k]) sp.set(k, query[k]!);
+    for (const k of ["project", "phase", "kind", "tag", "after", "before"] as const) if (query[k]) sp.set(k, query[k]!);
     if (query.phase === "dropped") sp.set("include_dropped", "true");
     if (cursor) sp.set("cursor", cursor);
     const timer = setTimeout(() => {
