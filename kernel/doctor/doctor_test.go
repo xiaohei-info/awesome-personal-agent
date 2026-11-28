@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -411,6 +412,23 @@ func TestProbeReportsRegionUnavailable(t *testing.T) {
 		}
 		if c.want == CodeRegionUnavailable && (!strings.Contains(j.Next, "gateway") || strings.Contains(j.Why, "protocol")) {
 			t.Fatalf("region text: %+v", j)
+		}
+	}
+}
+
+// 生成端点探测固定低档（写作项调高也不跟，免得超时）；写作项不指定时不发参数。
+func TestProbeGenerateAsksForLowThinking(t *testing.T) {
+	for write, want := range map[string]bool{"": true, "high": true, policy.ThinkingOff: false} {
+		var body string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			body = string(b)
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+		ProbeGenerate(bg, policy.GenerateEndpoint{URL: srv.URL + "/v1", Model: "m", Protocol: policy.ProtocolResponses}, policy.Thinking{Write: write}, Env{Model: &model.Client{}})
+		srv.Close()
+		if body == "" || strings.Contains(body, `"reasoning":{"effort":"low"}`) != want || strings.Contains(body, `"reasoning"`) != want {
+			t.Fatalf("write %q: %s", write, body)
 		}
 	}
 }

@@ -733,7 +733,7 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 	if cached != nil {
 		content, lv.Reused = cached, true
 	} else {
-		req := model.Request{System: p.question(), User: judgeUser(p.criteria(), p.input, mat), Schema: schema}
+		req := model.Request{System: p.question(), User: judgeUser(p.criteria(), p.input, mat), Schema: schema, Effort: pol.Thinking.ModelEffort(true)}
 		if p.meta.Timeout != "" {
 			req.Timeout, _ = time.ParseDuration(p.meta.Timeout) // 加载时已校验
 		}

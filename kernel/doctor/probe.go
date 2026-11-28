@@ -140,7 +140,9 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, th policy.Th
 	if !real {
 		req = model.Request{System: sampleSystem, User: sampleUser, Schema: json.RawMessage(sampleSchema), Timeout: probeTimeout}
 	}
-	req.Effort = th.ModelEffort(false) // 跟随设置里的写作档
+	if th.ModelEffort(false) != "" { // 只测通不通，固定低档才赶得上时限；写作项"不指定"说明端点不接受该参数
+		req.Effort = policy.DefaultJudgeThinking
+	}
 	d.Data["sample"] = map[bool]string{true: "draft", false: "builtin"}[real]
 	resp, err := e.Model.Complete(ctx, ep, req)
 	ms := e.now().Sub(start).Milliseconds()
