@@ -49,7 +49,7 @@ func registerBatchAgent(t *testing.T, e *env, sp policy.SourcePipeline) (*spyBat
 	e.must("executor.register", decl)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "batch settings", func(p *policy.Policy) error {
-			p.DefaultHarness = "stub-harness"
+			p.DefaultExecutor = "stub-harness"
 			p.SourcePipeline = sp
 			return nil
 		})
@@ -296,7 +296,7 @@ func TestBatchEnvIssueErrorBlocksLaunch(t *testing.T) {
 	e.must("executor.register", decl)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "batch settings", func(p *policy.Policy) error {
-			p.DefaultHarness = "stub-harness"
+			p.DefaultExecutor = "stub-harness"
 			p.SourcePipeline = policy.SourcePipeline{BatchSize: 1}
 			return nil
 		})
@@ -385,20 +385,16 @@ func TestBatchBlockedWritesOneHealthAlert(t *testing.T) {
 	}
 }
 
-// 未指定处理 Agent：用默认 Agent 和它权限卡上的工具档位，不借主 Agent 更高的权限。
+// 未指定处理的执行者：用日常执行者和它所属声明权限卡上的工具档位，不借主执行者更高的权限。
 func TestBatchWithoutAgentUsesDefaultAgentNotMain(t *testing.T) {
 	e := setupUnifiedJudgeEnv(t, nil, nil, "", "")
 	registerBatchAgent(t, e, policy.SourcePipeline{BatchSize: 1})
-	res := e.must("agent.configure", map[string]any{"harness": "stub-harness", "name": "daily", "enabled": true})
-	var card struct{ ID string }
-	if err := json.Unmarshal(res, &card); err != nil || card.ID == "" {
-		t.Fatalf("card: %s %v", res, err)
-	}
+	e.must("executor.register", executors.Declaration{Harness: "stub-main", Headless: &executors.Headless{Command: []string{"/bin/echo", "{prompt}"},
+		Session: executors.Session{Extract: "--session-id"}, Access: map[string][]string{"read": {}, "edit": {}, "full": {}}}})
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "roles", func(p *policy.Policy) error {
-			main := "legacy:stub-harness"
-			p.DefaultAgentID, p.MainAgentID = &card.ID, &main
-			p.AgentCards = map[string]policy.Card{main: {Tool: "full"}, card.ID: {Tool: "edit"}}
+			p.DefaultExecutor, p.MainExecutor = "stub-harness", "stub-main"
+			p.AgentCards = map[string]policy.Card{"stub-main": {Tool: "full"}, "stub-harness": {Tool: "edit"}}
 			return nil
 		})
 		return err
@@ -409,7 +405,7 @@ func TestBatchWithoutAgentUsesDefaultAgentNotMain(t *testing.T) {
 	if err := e.svc.TickQueue(bg); err != nil {
 		t.Fatal(err)
 	}
-	if r := latestBatchRun(t, e).Run; r.AgentID != card.ID || r.Access != "edit" {
-		t.Fatalf("agent=%s access=%s", r.AgentID, r.Access)
+	if r := latestBatchRun(t, e).Run; r.AgentID != "stub-harness" || r.Executor != "stub-harness" || r.Access != "edit" {
+		t.Fatalf("agent=%s executor=%s access=%s", r.AgentID, r.Executor, r.Access)
 	}
 }

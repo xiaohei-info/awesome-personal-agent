@@ -769,13 +769,13 @@ echo '{"cursor":"c1"}'
 	if code, body := s.do("GET", "/packs", ""); code != 200 || !strings.Contains(body, "inbound-triage") {
 		t.Fatalf("builtin packs not loaded: %d %s", code, body)
 	}
-	// 实例到期 → instance.fired → 规则执行建 routine 事项 → 任务型。没有设默认 harness，所以没拉起（§8.7）。
+	// 实例到期 → instance.fired → 规则执行建 routine 事项 → 任务型。分工里没选日常执行者，所以没拉起（§8.7）。
 	// 2026-11-20 改写：原断言 routine 事项转 needs_input、问题含"默认 harness"；没拉起是事件不是问题：
 	// 这一份转 dropped，诊断页 other_alerts 的通知带 task_refused 与同样的原因。
 	for {
 		code, body := s.do("GET", "/items?kind=routine", "")
 		hc, health := s.do("GET", "/health", "")
-		if code == 200 && strings.Contains(body, `"phase":"dropped"`) && hc == 200 && strings.Contains(health, `"code":"task_refused"`) && strings.Contains(health, "默认 harness") {
+		if code == 200 && strings.Contains(body, `"phase":"dropped"`) && hc == 200 && strings.Contains(health, `"code":"task_refused"`) && strings.Contains(health, "还没选日常执行者") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -1143,7 +1143,7 @@ func (k *kernel) usableAgent(t *testing.T) {
 		"command": []string{"true"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string][]string{"read": {}, "edit": {}}}})
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
 		_, err := policy.Update(tx, hostOwner.Actor, "t", func(p *policy.Policy) error {
-			p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+			p.AgentCards["hx"], p.DefaultExecutor, p.MainExecutor = policy.DefaultCard().WithTool(policy.PermEdit), "hx", "hx"
 			return nil
 		})
 		return err
@@ -1288,8 +1288,8 @@ curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TO
 	addr, stop := start(t, home)
 	s := webLogin(t, addr)
 	for _, c := range []struct{ method, path, body string }{
-		{"PUT", "/settings/policy", `{"default_harness":"acme"}`},
-		{"PUT", "/settings/agents/legacy:acme/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"edit"}`},
+		{"PUT", "/settings/policy", `{"default_executor":"acme","main_executor":"acme"}`},
+		{"PUT", "/settings/agents/acme/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"edit"}`},
 		{"PATCH", "/rules/" + strings.ReplaceAll(labelledRule, "/", "%2F") + "/mode", `{"mode":"auto"}`},
 	} {
 		if code, b := s.do(c.method, c.path, c.body); code >= 300 {

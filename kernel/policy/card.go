@@ -73,13 +73,23 @@ func (c Card) Allows(g string, now time.Time) bool {
 	return ok && (gr.Until == nil || now.Before(*gr.Until))
 }
 
-// Card 返回 agent 的权限卡；没设过的 Agent 与没有归属的调用者取 DefaultCard。
+// Card 返回 agent（声明）的权限卡；没设过的 Agent 与没有归属的调用者取 DefaultCard。
 func (p Policy) Card(agent string) Card {
+	agent = AgentKey(agent)
 	if c, ok := p.AgentCards[agent]; ok && agent != "" {
+		return c
+	}
+	if c, ok := p.AgentCards[legacyPrefix+agent]; ok && agent != "" { // 执行者统一切换前的旧键
 		return c
 	}
 	return DefaultCard()
 }
+
+const legacyPrefix = "legacy:"
+
+// AgentKey 把历史记录里的 Agent id 认成声明：执行者统一切换前的兼容卡 legacy:<程序> 就是声明 <程序>（§16.5）；
+// 运行快照、审计依据与规矩改动的"按 Agent 撤回"读旧 id 时都经它。
+func AgentKey(id string) string { return strings.TrimPrefix(id, legacyPrefix) }
 
 // Limits 是三项明示的全局上限（§14.5、§14.9）；0 表示没设过，取运行配置的初值。
 type Limits struct {

@@ -8,7 +8,7 @@
 // 本层只做 HTTP 到命令请求的搬运：
 //   - 路径里的 id 注入回执请求体（体里不许再写 id）；
 //   - Idempotency-Key 头 → 幂等键；If-Match 头 → 期望版本；
-//   - GET /executors 的 ?project= → executor.list 的 project。
+//   - GET /executors 的 ?project=、?runner=、?rule=、?schedule=、?item=、?delegated= → executor.list 的同名参数。
 //
 // /messages/{id}/handback 不在本分组（cli-followmsg）。
 package delegation
@@ -55,10 +55,17 @@ func Routes(x *command.Executor) core.RouteGroup {
 type handlers struct{ x *command.Executor }
 
 func (h *handlers) executors(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	in := json.RawMessage(`{}`)
-	if proj := r.URL.Query().Get("project"); proj != "" {
-		in, _ = json.Marshal(map[string]string{"project": proj})
+	// ?project= 标出是否允许；?runner=（加 rule、schedule、item、delegated）给出选择预览与逐个能否用于这种运行（§13.6）。
+	q, args := r.URL.Query(), map[string]any{}
+	for _, k := range []string{"project", "runner", "rule", "schedule", "item"} {
+		if v := q.Get(k); v != "" {
+			args[k] = v
+		}
 	}
+	if q.Get("delegated") == "true" {
+		args["delegated"] = true
+	}
+	in, _ := json.Marshal(args)
 	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "executor.list", Input: in})
 	if err != nil {
 		return err

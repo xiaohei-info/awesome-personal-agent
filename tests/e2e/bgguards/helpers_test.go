@@ -134,7 +134,7 @@ func setup(t *testing.T) *fx {
 	e.IssueCredentials()
 	e.CreateProjects()
 	f.declareHarness()
-	f.webOK("PUT", "/settings/policy", `{"default_harness":"`+harness+`"}`, 200)
+	f.webOK("PUT", "/settings/policy", `{"default_executor":"`+harness+`","main_executor":"`+harness+`"}`, 200)
 	return f
 }
 

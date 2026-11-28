@@ -8,7 +8,7 @@ func TestCallerAgentLegacyFallback(t *testing.T) {
 		want string
 	}{
 		{Caller{CredentialAgentID: "agent_1", CredentialHarness: "hermes"}, "agent_1"},
-		{Caller{CredentialHarness: "hermes"}, "legacy:hermes"},
+		{Caller{CredentialHarness: "hermes"}, "hermes"},
 		{Caller{}, ""},
 	} {
 		if got := c.in.Agent(); got != c.want {

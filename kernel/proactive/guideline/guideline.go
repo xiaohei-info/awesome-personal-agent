@@ -19,6 +19,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -46,9 +47,9 @@ type Options struct {
 	Drafter Drafter
 	// Host 是本机主机名：仓库有 Host 等于它的检出才算"本机有检出"。
 	Host string
-	// Harness 是本机起草用的无头运行声明名，空则用 Web 设置的默认 harness（与任务型同一规则，§13.6）。
+	// 本机起草的执行者按任务型同一口径选（规则固定的执行者，否则日常执行者，§13.6）。
 	// Executor 是无本机检出时受托起草的执行者 id（运行配置 guideline_draft_executor，§16.2），空则起草事项转 needs_input。
-	Harness, Executor string
+	Executor string
 }
 
 func invalid(why string) error {
@@ -209,7 +210,7 @@ func brief(m missing) string {
 func (o Options) local(ctx context.Context, c rules.Call, pack, tmpl string, m missing) (string, error) {
 	body, _ := json.Marshal(map[string]any{"project": m.project.ID, "repos": m.project.Repos, "checkout": m.checkout})
 	out, err := o.Drafter.Launch(ctx, task.Task{Pack: pack, Template: tmpl, Title: title(m.project), Project: m.project.ID,
-		Harness: o.Harness, Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule},
+		Selection: executors.Selection{Rule: c.Rule}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule},
 		Materials: []task.Material{{Name: "guideline-check", Body: string(body)}}})
 	return out.Item, err
 }

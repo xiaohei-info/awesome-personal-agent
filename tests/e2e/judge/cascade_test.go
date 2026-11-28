@@ -305,8 +305,8 @@ func TestFlowAgentCascade(t *testing.T) {
 
 	f.step(t, "ACT-CAS-10 harness 不可用时账本照常", func(t *testing.T) {
 		f.reset()
-		f.webOK("PUT", "/settings/policy", `{"default_harness":""}`, 200)
-		defer f.webOK("PUT", "/settings/policy", `{"default_harness":"`+harnessName+`"}`, 200)
+		f.webOK("PUT", "/settings/policy", `{"default_executor":"","main_executor":""}`, 200)
+		defer f.webOK("PUT", "/settings/policy", `{"default_executor":"`+harnessName+`","main_executor":"`+harnessName+`"}`, 200)
 		f.ModelStub.When("ACCRELAYGEN", reply(`{"insufficient_info":true}`))
 		id := relay("cas10")
 		_ = id

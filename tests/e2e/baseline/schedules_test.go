@@ -13,7 +13,7 @@ import (
 // 建的简报、复盘事项；重新启用后同样拨一周则出现，证明前一半不是空过（没有默认宿主时内核本来就跳过简报）。
 func TestDefaultSchedulesPaused(t *testing.T) {
 	e := Setup(t)
-	e.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub"}`, 200)
+	e.webOK("PUT", "/v1/settings/policy", `{"default_executor":"acc-stub","main_executor":"acc-stub"}`, 200)
 	week := func() { e.TCAdvance(8 * 24 * 60 * 60) }
 	// 简报与复盘建的事项 kind 都是 brief，标题以类别名开头。
 	briefs := func() string {

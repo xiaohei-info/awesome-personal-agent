@@ -74,12 +74,12 @@ func TestFlowRoutine(t *testing.T) {
 
 	k.step("ACT-RTN-01 准备默认 harness 与替身", func(t *testing.T) {
 		h = k.declareHarness("acc-stub-rtn", "routine")
-		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub-rtn"}`, 200)
-		k.webOK("PUT", "/v1/settings/agents/legacy:acc-stub-rtn/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"read"}`, 200)
+		k.webOK("PUT", "/v1/settings/policy", `{"default_executor":"acc-stub-rtn","main_executor":"acc-stub-rtn"}`, 200)
+		k.webOK("PUT", "/v1/settings/agents/acc-stub-rtn/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"read"}`, 200)
 		if p := packList(t, e); p["routine"].Name == "" {
 			t.Fatalf("pack list 应含内置 routine 包: %v", p)
 		}
-		if pol := k.webOK("GET", "/v1/settings/policy", "", 200) + k.webOK("GET", "/v1/settings/access-limits", "", 200); !contains(strings.ReplaceAll(pol, " ", ""), `"default_harness":"acc-stub-rtn"`, `"legacy:acc-stub-rtn":{"groups"`) {
+		if pol := k.webOK("GET", "/v1/settings/policy", "", 200) + k.webOK("GET", "/v1/settings/access-limits", "", 200); !contains(strings.ReplaceAll(pol, " ", ""), `"default_executor":"acc-stub-rtn"`, `"legacy:acc-stub-rtn":{"groups"`) {
 			t.Errorf("Web 设置应显示默认 harness 为 acc-stub-rtn、上限 read: %s", pol)
 		}
 		k.markModelBaseline()
@@ -113,7 +113,7 @@ func TestFlowRoutine(t *testing.T) {
 	})
 
 	k.step("ACT-RTN-03 create_item 模式不需要宿主", func(t *testing.T) {
-		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":""}`, 200)
+		k.webOK("PUT", "/v1/settings/policy", `{"default_executor":"","main_executor":""}`, 200)
 		before := routineItems()
 		tick(2)
 		if n := len(routineItems()) - len(before); n != 2 {
@@ -122,7 +122,7 @@ func TestFlowRoutine(t *testing.T) {
 		if hl := k.apa(e.OBS, 0, "health").Stdout; strings.Contains(strings.ToLower(hl), "harness") {
 			t.Errorf("健康视图不应因缺 harness 产生告警: %s", hl)
 		}
-		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub-rtn"}`, 200)
+		k.webOK("PUT", "/v1/settings/policy", `{"default_executor":"acc-stub-rtn","main_executor":"acc-stub-rtn"}`, 200)
 	})
 
 	k.step("ACT-RTN-04 同一周期只生成一份，停机后只补最近一次", func(t *testing.T) {

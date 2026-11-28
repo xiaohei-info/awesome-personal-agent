@@ -368,6 +368,9 @@ type ImportInfo struct {
 
 // Item 是一切事务的统一表示（§6.3）。
 type Item struct {
+	// PreferredExecutor 是本人或 Agent 给这件事指定的执行者（事项 > 安排 > 规则 > 分工，§13.6）。
+	PreferredExecutor string `json:"preferred_executor,omitempty"`
+	// PreferredAgentID 是旧的指定 Agent 卡：已取消（2026-11-28），只读，执行者统一切换时换成 PreferredExecutor 后清空（§16.5）。
 	PreferredAgentID string `json:"preferred_agent_id,omitempty"`
 	ID               string `json:"id"`
 	Phase            Phase  `json:"phase"`

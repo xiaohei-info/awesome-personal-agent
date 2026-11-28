@@ -82,9 +82,12 @@ type Options struct {
 	APIURL string
 	// WebBase 是本人打开 Web 的地址（与渠道链接同源）；简报资料据此给条目 web_url，空时不给链接。
 	WebBase string
-	// Host 是 APA 主机名，用来判断项目在本机有没有检出；空时取 os.Hostname()，取不到按没有本机检出拒绝。
+	// Host 是 APA 主机名，用来判断项目在本机有没有检出、执行者在不在本机；空时取 os.Hostname()，取不到按没有本机检出拒绝。
 	Host string
-	Now  func() time.Time
+	// ContextDir 是外呼调用器写运行上下文文件的目录（proc.Options.ContextDir）：声明以 {run_context} 把路径交给
+	// 不继承环境变量的执行者（§7.7）。空表示 {run_context} 展开为空。
+	ContextDir string
+	Now        func() time.Time
 	// OnError 接收 Settle 里无法交给调用方的错误（落账失败等）；可为空。
 	OnError func(runID string, err error)
 }
@@ -139,8 +142,6 @@ type Task struct {
 	// Target 是已建好的目标事项（执行者须已是内核身份，见 CallAgent）；为空时由 Launch 新建。
 	// 给出时 Title、Project、Parent 不再使用；这个事项有过运行就不再拉起（同一触发只拉起一次）。
 	Target string
-	// Harness 只来自规则与 Web 设置，不来自事件内容（§14.10）；为空时用 Web 设置的默认 harness。
-	Harness string
 	// Instruction 是实例里本人写的任务说明；非空时写成运行目录里的 instruction.txt，经 {instruction_path} 交给运行者。
 	// 它是本人的要求，不是外部资料，不进提示词正文。
 	Instruction string
@@ -191,9 +192,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	if strings.TrimSpace(t.Instruction) == "" { // 实例没写内容要求时用模板的默认要求，随发行更新（C.7）
 		t.Instruction = pr.Meta.DefaultInstruction
 	}
-	var access string // 工具档位取所属 Agent 权限卡上的值（§14.5），选出 Agent 后才知道
-	var hl executors.Headless
-	var selected executors.Selected
+	var target executors.Target // 选出的执行者；工具档位取它所属声明权限卡上的值（§14.5）
 	var forwarded, ran bool
 	var pol policy.Policy
 	var project *domain.Project
@@ -201,13 +200,15 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if _, pol, err = policy.Current(tx); err != nil {
 			return err
 		}
-		t.Selection.Harness = t.Harness
+		t.Selection.Runner = executors.RunnerTask
 		if t.Target != "" {
 			it, err := items.Get(tx, t.Target)
 			if err != nil {
 				return err
 			}
-			t.Selection.Item = it.PreferredAgentID
+			if it.PreferredExecutor != "" {
+				t.Selection.Item = it.PreferredExecutor
+			}
 			t.Title, t.Project = it.Title, it.Project
 			if ran, err = proc.HasRun(tx, t.Target); err != nil || ran {
 				return err
@@ -220,35 +221,28 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 			}
 			project = &p
 		}
-		selected, err = executors.Resolve(tx, pol, t.Selection)
-		t.Harness = selected.Card.Harness
-		if selected.Record.Declaration.Headless != nil {
-			hl = *selected.Record.Declaration.Headless
-		}
+		id, source := executors.Pick(pol, t.Selection)
+		target, err = executors.Resolve(tx, pol, executors.Want{Executor: id, Source: source, Runner: executors.RunnerTask, Host: s.o.Host})
 		return err
 	})
 	if err != nil || ran {
 		return Outcome{Item: t.Target}, err
 	}
 	forwarded = true
-	if allowlist.RunsFiltered(pol, selected.Snapshot.AgentID) {
+	if allowlist.RunsFiltered(pol, target.Key) {
 		for _, m := range t.Messages {
 			forwarded = forwarded && authz.ForwardAllowed(pol, m.Source, m.Sender, m.Verified)
 		}
 	}
 
 	out := Outcome{Item: t.Target}
-	access = selected.Snapshot.PermissionCap
-	cwd := pr.Meta.Cwd
-	if cwd == "" {
-		cwd = selected.Card.Values["cwd"]
-	}
-	workDir, noCheckout := projects.WorkDir(cwd, project, s.o.Host)
+	access := target.Access
+	workDir, noCheckout := projects.WorkDir(pr.Meta.Cwd, project, s.o.Host)
 	switch {
 	case packs.UsesPlaceholder(pr.Body, "instruction_path") && t.Instruction == "":
 		out.Reason = "实例没有任务说明（instruction），模板要求经 instruction_path 交给运行者"
-	case selected.AccessReason(access) != "":
-		out.Reason = selected.AccessReason(access)
+	case target.Reason != "":
+		out.Reason = target.Reason
 	case !forwarded:
 		out.Reason = "输入含未进转发白名单的挂靠消息，不交给任务型"
 	case noCheckout != "":
@@ -283,17 +277,11 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	if workDir != "" {
 		dir = workDir
 	}
-	sessionID := ""
-	argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
-	argv = append(argv, selected.Args...)
-	argv = append(argv, hl.Output...)
-	argv = append(argv, hl.Access[access]...)
-	if len(hl.Session.Assign) > 0 {
-		sessionID = runID
-		argv = append(argv, expand(hl.Session.Assign, "{session_id}", sessionID)...)
+	built, err := target.Build(pol, executors.Spec{RunID: runID, RunDir: runDir, Prompt: prompt, ContextDir: s.o.ContextDir})
+	if err != nil {
+		return out, err
 	}
-
-	run := domain.Run{AgentSnapshot: &selected.Snapshot, Runner: "task", Launch: "headless", ID: runID, Category: domain.RunTask, Target: itemID, Harness: t.Harness, SessionID: sessionID,
+	run := domain.Run{AgentSnapshot: &built.Snapshot, Runner: "task", Launch: "headless", ID: runID, Category: domain.RunTask, Target: itemID, Harness: target.Program(), SessionID: built.SessionID,
 		Access: access, TimeoutSec: int(pol.BackgroundRunTimeout() / time.Second)} // 任务型与 wake 同一来源：策略 background_run_timeout_sec（§13.6）
 	err = s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		it, err := items.Get(tx, itemID)
@@ -307,7 +295,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if err := executors.CheckRun(tx, run); err != nil {
 			return err
 		}
-		if _, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{OptionEnv: selected.Env, Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now()); err != nil {
+		if _, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: built.Command, Dir: dir, RunDir: runDir, Cancel: built.Cancel, Await: built.Await}}, s.o.Now()); err != nil {
 			return err
 		}
 		body, err := json.Marshal(run)

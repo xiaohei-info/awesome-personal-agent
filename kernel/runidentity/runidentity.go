@@ -24,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -81,13 +82,14 @@ func agentRun(tx *store.Tx, runID string) (proc.Record, error) {
 	return rec, nil
 }
 
-// AgentOf 是运行凭据的权限所随的 Agent：运行记录上的快照 Agent，兼容卡下的运行（legacy:<宿主>，InstanceID 为空）同样取它，
-// 与拉起时的工具档位、挂靠消息判定取的是同一个快照（§14.3）；task、background、source_batch 一个口径。没有快照的旧运行为空，按默认卡。
+// AgentOf 是运行凭据的权限所随的 Agent：运行记录快照上执行者所属的声明（权限卡的键），与拉起时的工具档位、挂靠消息判定
+// 取的是同一个快照（§14.3）；task、background、source_batch 一个口径。执行者统一切换前的兼容卡 legacy:<程序> 按 <程序> 认，
+// 没有快照的旧运行为空，按默认卡。
 func AgentOf(r domain.Run) string {
 	if r.AgentSnapshot == nil {
 		return ""
 	}
-	return r.AgentID
+	return policy.AgentKey(r.AgentID)
 }
 
 // Issue 在 tx 内为运行签发凭据并返回明文（唯一一次可见）。运行必须是未结束的 task、background 或 source_batch 运行；目标不必是事项。

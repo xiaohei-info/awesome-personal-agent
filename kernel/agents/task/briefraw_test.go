@@ -70,7 +70,7 @@ type rawEntry struct {
 func runBrief(e *env) (runDir string, m map[string]string) {
 	e.t.Helper()
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	id := e.openItemWithOrigin("instance:ins_1")
 	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", id)); err != nil {
 		e.t.Fatal(err)

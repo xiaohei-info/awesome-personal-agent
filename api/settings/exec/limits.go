@@ -77,7 +77,7 @@ func LimitsRoutes(st *store.Store, fb Fallback) core.RouteGroup {
 			if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook { // 外部凭据只做声明的用途，不读设置与拒绝明细
 				return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read settings", "use an owner or agent credential")
 			}
-			agent := r.PathValue("agent")
+			agent := policy.AgentKey(r.PathValue("agent"))
 			if agent == "me" {
 				agent = p.Caller.Agent()
 			}
@@ -111,11 +111,11 @@ func limits(tx *store.Tx, agent string, fb Fallback, now time.Time) (Limits, err
 		return out, err
 	}
 	for _, c := range creds {
-		owner := c.AgentID
-		if owner == "" && c.Harness != "" {
-			owner = "legacy:" + c.Harness
+		owner := c.AgentID // 绑到隔离另写的声明的钥匙；没有绑定按所属程序（§14.5）
+		if owner == "" {
+			owner = c.Harness
 		}
-		if owner != agent || !c.RevokedAt.IsZero() || agent == "" {
+		if owner != policy.AgentKey(agent) || !c.RevokedAt.IsZero() || agent == "" {
 			continue
 		}
 		id := c.ID

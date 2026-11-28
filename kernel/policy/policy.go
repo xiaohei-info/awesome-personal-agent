@@ -114,6 +114,9 @@ const DefaultDailyCap = 20
 // SourcePipeline 是来源处理线的设置（§9.3，设置 › 来源处理）。零值即默认：
 // 攒够 10 条或最早一条等了 30 分钟触发一批、一批最多 20 条、紧急立即处理默认关、失败最多重试 2 次、每日不限批数、两份提示词留空用内置默认。
 type SourcePipeline struct {
+	// Executor 是跑批处理的执行者（执行者 id）；为空时取分工里的日常执行者（default_executor）。
+	Executor string `json:"executor,omitempty"`
+	// Agent 是旧的处理 Agent（Agent 卡 id）：已取消（2026-11-28），只读，只在执行者统一切换时换算成 Executor 后清空（§16.5）。
 	Agent           string `json:"agent,omitempty"`
 	BatchSize       int    `json:"batch_size,omitempty"`
 	WaitMinutes     int    `json:"wait_minutes,omitempty"`
@@ -199,10 +202,11 @@ func ParseClock(s string) (int, error) {
 	return t.Hour()*60 + t.Minute(), nil
 }
 
-// MainSessionLaunch 是以 Agent 本人身份做事时怎么拉起（§13.6）：按 Agent（harness）与按规则（规则键）各一份，
+// MainSessionLaunch 是以 Agent 本人身份做事时怎么拉起（§13.6）：按 Agent（声明）与按规则（规则键）各一份，
 // 值是 headless（单独开一个后台会话）或 wake（在和本人的对话里接着做）；没有的键表示没选，按下一级取。只在 Web 改。
 // 旧版本策略文档没有这个段，读作两份空表。
 type MainSessionLaunch struct {
+	// ByAgent 是旧的按 Agent 卡一份：已取消（2026-11-28），只读，执行者统一切换时并入 ByHarness（卡已成为同 id 的声明）后清空。
 	ByAgent   map[string]string `json:"by_agent,omitempty"`
 	ByHarness map[string]string `json:"by_harness"`
 	ByRule    map[string]string `json:"by_rule"`
@@ -342,7 +346,8 @@ type Policy struct {
 	// 旧版本文档里的 web_only、material_write、screening_timeout_ms 段已随旧权限模型取消，解码时忽略（§14.3）；
 	// agent_tier 与 permission_cap 两段随权限卡取消，只在切换时按原文换算（§16.5）。
 	Disturb Disturb `json:"disturb"`
-	// AgentCards 是各 Agent 的权限卡（§14.5），键是 Agent 实例 id 或兼容卡 legacy:<程序>。只有本人能改。
+	// AgentCards 是各 Agent 的权限卡（§14.5），键是声明（harness；隔离另写的声明是原 Agent 卡 id）。只有本人能改。
+	// 执行者统一切换前的旧键 legacy:<程序> 由切换改成 <程序>，读取时也按 AgentKey 认。
 	AgentCards map[string]Card `json:"agent_cards"`
 	// Limits 是同时运行数与连锁层数（§14.9）；旧文档没有此键，读作全部取运行配置的初值。
 	Limits           Limits              `json:"limits"`
@@ -351,8 +356,14 @@ type Policy struct {
 	ForwardAllowlist map[string][]string `json:"forward_allowlist"`
 	ChannelAnswerers map[string][]string `json:"channel_answerers"`
 	Channels         map[string]Channel  `json:"channels"`
-	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
-	DefaultHarness    string            `json:"default_harness"`
+	// DefaultExecutor 与 MainExecutor 是分工（§13.6）：没指定执行者的后台运行用日常执行者，以本人身份做事（main_session）用主执行者；
+	// RuleExecutor 是某条规则固定用的执行者（规则键 → 执行者 id）。都是执行者 id，空表示没选。
+	DefaultExecutor string            `json:"default_executor,omitempty"`
+	MainExecutor    string            `json:"main_executor,omitempty"`
+	RuleExecutor    map[string]string `json:"rule_executor,omitempty"`
+	// DefaultHarness、DefaultAgentID、MainAgentID、RuleAgent 是按 Agent 卡选人的旧字段：已取消（2026-11-28），只读，
+	// 只在执行者统一切换时换算成上面三项后清空（§16.5）；v0.2.0 之后第一个版本去掉读兼容。
+	DefaultHarness    string            `json:"default_harness,omitempty"`
 	DefaultAgentID    *string           `json:"default_agent_id,omitempty"`
 	MainAgentID       *string           `json:"main_agent_id,omitempty"`
 	RuleAgent         map[string]string `json:"rule_agent,omitempty"`
@@ -661,6 +672,13 @@ func normalize(p Policy) (Policy, error) {
 		}
 	}
 
+	p.DefaultExecutor, p.MainExecutor = strings.TrimSpace(p.DefaultExecutor), strings.TrimSpace(p.MainExecutor)
+	for k, v := range p.RuleExecutor {
+		if k == "" || strings.TrimSpace(v) == "" {
+			return p, invalid("rule_executor %q needs a rule key and an executor id", k)
+		}
+	}
+
 	if err := normalizeEndpoints(&p); err != nil {
 		return p, err
 	}
@@ -685,6 +703,7 @@ func normalize(p Policy) (Policy, error) {
 
 func normalizeSourcePipeline(sp *SourcePipeline) error {
 	sp.Agent = strings.TrimSpace(sp.Agent)
+	sp.Executor = strings.TrimSpace(sp.Executor)
 	if sp.BatchSize < 0 || sp.BatchSize > MaxPipelineBatch {
 		return invalid("source_pipeline batch_size %d: use 1 to %d", sp.BatchSize, MaxPipelineBatch)
 	}

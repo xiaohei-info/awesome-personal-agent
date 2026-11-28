@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -218,7 +219,11 @@ func resolve(tx *store.Tx, pol policy.Policy, r row, prio domain.Priority) (laye
 		if err != nil {
 			return l, err
 		}
-		if r.from == fromAgent && r.fromAgent != mainAgent(pol) { // 发起的不是主 Agent：不唤醒主会话
+		main, err := executors.MainAgent(tx, pol)
+		if err != nil {
+			return l, err
+		}
+		if r.from == fromAgent && policy.AgentKey(r.fromAgent) != main { // 发起的不是主执行者所属的 Agent：不唤醒主会话
 			blocked = "not_main"
 		}
 		switch {
@@ -234,17 +239,6 @@ func resolve(tx *store.Tx, pol policy.Policy, r row, prio domain.Priority) (laye
 		l.agent = ""
 	}
 	return l, nil
-}
-
-// mainAgent 是主 Agent 的卡 id，与 executors.Resolve 对主会话的取法相同（旧设置迁移来的为 legacy:<harness>）。
-func mainAgent(pol policy.Policy) string {
-	if pol.MainAgentID != nil {
-		return *pol.MainAgentID
-	}
-	if pol.DefaultHarness != "" {
-		return "legacy:" + pol.DefaultHarness
-	}
-	return ""
 }
 
 // emit 按 r 所在行把 d（基础 id，路由待定）写成一层或两层投递；两层都不推时按 floor 留 Web 未读或什么都不出。

@@ -146,9 +146,10 @@ func str(a map[string]any, k string) string {
 
 // spec 是一次拉起的全部参数：来自规则动作、提示词模板和 Web 设置，没有任何一项来自事件内容。
 // spec 是规则动作的参数。工具档位不在这里：一律取所属 Agent 权限卡上的值（§14.5），规则与模板里的 access 已取消。
+// executor 是规则动作里写明的执行者；没写时按 事项 > 安排 > 规则 > 分工 选（executors.Pick）。
 type spec struct {
-	runner, cwd, harness, executor string
-	prompt                         packs.Prompt
+	runner, cwd, executor string
+	prompt                packs.Prompt
 }
 
 func (s *Service) parse(c rules.Call) (spec, error) {
@@ -162,8 +163,7 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 	if !ok {
 		return spec{}, invalid("prompt " + pack + "/" + tmpl + " does not exist")
 	}
-	sp := spec{runner: str(c.Action, "runner"), cwd: str(c.Action, "cwd"),
-		harness: str(c.Action, "harness"), executor: str(c.Action, "executor"), prompt: pr}
+	sp := spec{runner: str(c.Action, "runner"), cwd: str(c.Action, "cwd"), executor: str(c.Action, "executor"), prompt: pr}
 	switch {
 	case sp.runner == "task" && pr.Meta.Agent != "task":
 		return sp, invalid("runner task needs a prompt with agent: task, got " + pack + "/" + tmpl)
@@ -171,8 +171,6 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 		return sp, invalid("runner main_session needs a prompt with run_as: main_session, got " + pack + "/" + tmpl)
 	case sp.runner != "task" && sp.runner != "main_session":
 		return sp, invalid("start_background_run runner must be task or main_session")
-	case sp.runner == "task" && sp.executor == "":
-		return sp, invalid("runner task needs an executor")
 	}
 	if sp.cwd == "" {
 		sp.cwd = pr.Meta.Cwd
@@ -182,7 +180,7 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 
 // facts 是拉起前一次性读出的账本事实。
 type facts struct {
-	selected executors.Selected
+	target   executors.Target // 选中的执行者及其声明（Reason 非空表示拉不起）
 	pv       int
 	pol      policy.Policy
 	mode     string
@@ -190,9 +188,7 @@ type facts struct {
 	busy     bool
 	project  *domain.Project
 	executor domain.ExecutorRef // runner=task 的执行者在名录里的登记（名单按它判定）
-	rec      executors.Record
-	declared bool
-	depth    int // 本次拉起的链路深度：触发事件的深度加一（规则拉起新运行，§14.9）
+	depth    int                // 本次拉起的链路深度：触发事件的深度加一（规则拉起新运行，§14.9）
 }
 
 func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err error) {
@@ -223,26 +219,26 @@ func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err
 			}
 			f.project = &p
 		}
-		if f.executor, err = executors.Ref(tx, sp.executor); err != nil {
-			return err
-		}
-		sel := executors.Selection{Item: f.item.PreferredAgentID, Rule: c.Rule, Harness: sp.harness, Runner: sp.runner}
+		sel := executors.Selection{Item: f.item.PreferredExecutor, Rule: c.Rule, Runner: sp.runner}
 		if c.Instance != nil {
 			var params struct {
-				AgentID string `json:"agent_id"`
+				Executor string `json:"executor"`
 			}
 			if err := json.Unmarshal(c.Instance.Params, &params); err != nil {
 				return err
 			}
-			sel.Schedule = params.AgentID
+			sel.Schedule = params.Executor
 		}
-		f.selected, err = executors.Resolve(tx, f.pol, sel)
-		if err != nil {
+		id, source := sp.executor, executors.SourceExplicit
+		if id == "" {
+			id, source = executors.Pick(f.pol, sel)
+		}
+		if f.executor, err = executors.Ref(tx, id); err != nil {
 			return err
 		}
-		f.rec = f.selected.Record
-		f.declared = f.rec.Declaration.Headless != nil
-		return nil
+		// 规则的运行用规则自己的提示词模板、会发运行凭据，所以执行者要在 APA 主机上（跨机只经委派即开工，§13.6）。
+		f.target, err = executors.Resolve(tx, f.pol, executors.Want{Executor: id, Source: source, Runner: sp.runner, Host: s.o.Host})
+		return err
 	})
 	return f, err
 }
@@ -294,7 +290,7 @@ func (s *Service) Ready(ctx context.Context, c rules.Call) (string, error) {
 	if f.busy {
 		return "该事项已有在途运行", nil
 	}
-	return f.selected.AccessReason(f.selected.Snapshot.PermissionCap), nil
+	return f.target.Reason, nil
 }
 
 func (s *Service) start(ctx context.Context, c rules.Call) error {
@@ -316,57 +312,40 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if limit := f.pol.Limits.Chain(s.o.MaxChainDepth); f.depth > limit { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
 		return chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, f.item.ID, f.depth, limit)
 	}
-	harness := f.selected.Card.Harness
-	headless, ms := executors.Headless{}, executors.MainSession{}
-	if f.declared {
-		headless = *f.rec.Declaration.Headless
-		if m := f.rec.Declaration.MainSession; m != nil {
-			ms = *m
-		}
-	}
-	if sp.cwd == "" {
-		sp.cwd = f.selected.Card.Values["cwd"]
+	t := f.target
+	var ms executors.MainSession
+	if m := t.Record.Declaration.MainSession; m != nil {
+		ms = *m
 	}
 	workDir, noCheckout := projects.WorkDir(sp.cwd, f.project, s.o.Host)
 	var how launchChoice
 	if sp.runner == "main_session" {
-		launchPolicy := f.pol
-		if value := f.pol.MainSessionLaunch.ByAgent[f.selected.Card.ID]; value != "" || f.selected.Card.Rev > 0 {
-			launchPolicy.MainSessionLaunch.ByHarness = map[string]string{harness: value}
-			if ms.CanWake() {
-				ms.Wake = true
-			}
-			ms.Launch = ""
-		}
-		how = launchOf(launchPolicy, c.Rule, harness, &ms)
+		how = launchOf(f.pol, c.Rule, t.Key, &ms)
 	}
 	wakes := how.launch == policy.LaunchWake
 	var reason string
 	switch {
 	case f.mode != rules.ModeAuto && !c.Requested: // 本人“现在开工”不看规则模式，其余复核照旧
 		reason = "规则已不是 auto"
-	case f.selected.AccessReason(f.selected.Snapshot.PermissionCap) != "":
-		reason = f.selected.AccessReason(f.selected.Snapshot.PermissionCap)
-	case f.selected.Card.Rev > 0 && (wakes || how.fallback):
-		reason = "这张卡尚未绑定已有对话"
+	case t.Reason != "":
+		reason = t.Reason
 	case wakes && s.o.Wake == nil:
-		reason = "选了在对话里接着做（唤醒 " + harness + "），但内核没有接入唤醒"
+		reason = "选了在对话里接着做（唤醒 " + t.Name() + "），但内核没有接入唤醒"
 	case sp.runner == "task" && (f.project != nil && !f.project.ExecutorAllowed(f.executor, s.o.Owner)):
-		reason = "执行者 " + sp.executor + " 不在项目允许的执行者名单内"
+		reason = "执行者 " + t.Entry.ID + " 不在项目允许的执行者名单内"
 	case noCheckout != "":
 		reason = noCheckout
 	}
 	if reason != "" {
 		return s.refuse(ctx, c, f, reason)
 	}
-
 	target := f.item.ID
 	if sp.runner == "task" { // 内核先把子事项委派给执行者，运行目标是它（§13.6）
-		if target, err = s.createChild(c, f.item, sp.executor); err != nil {
+		if target, err = s.createChild(c, f.item, t.Entry.ID); err != nil {
 			return err
 		}
 	}
-	return s.launch(ctx, c, f, sp, harness, headless, ms, how, target, workDir)
+	return s.launch(ctx, c, f, sp, how, target, workDir)
 }
 
 // 拉起方式来自哪一级（§13.6），写进 background.launched 的载荷供处理经过与 `apa why` 展示。
@@ -401,7 +380,7 @@ func launchOf(pol policy.Policy, rule, harness string, ms *executors.MainSession
 }
 
 // createChild 经 delegate.create 建委派子事项（与 `apa delegate` 同一路径：项目名单校验、父事项转 waiting），
-// 运行者因此能按委派回执写回它。
+// 运行者因此能按委派回执写回它。运行用规则的提示词模板，拉起与委派即开工同一套拼装（executors.Target.Build）。
 func (s *Service) createChild(c rules.Call, parent domain.Item, executor string) (string, error) {
 	res, err := c.Do("delegate.create", map[string]any{"parent": parent.ID, "assignee": executor,
 		"reason": "rule " + c.Rule + ": background task runner"})
@@ -443,14 +422,24 @@ func renderPrompt(body, item, run, project string) string {
 	return strings.NewReplacer(pairs...).Replace(body)
 }
 
-func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, how launchChoice, target, workDir string) error {
+// launch 拉起运行（目标 target：main_session 是事项本身，task 是委派子事项）：唤醒时写外部运行交唤醒模块，
+// 否则按执行者的声明拼命令（executors.Target.Build，与所有后台运行同一套）。
+func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, how launchChoice, target, workDir string) error {
+	t := f.target
 	runID, err := newRunID()
 	if err != nil {
 		return err
 	}
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
-	run := domain.Run{AgentSnapshot: &f.selected.Snapshot, ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
-		Harness: harness, Access: f.selected.Snapshot.PermissionCap, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(f.pol.BackgroundRunTimeout() / time.Second)}
+	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
+		Harness: t.Program(), Access: t.Access, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(f.pol.BackgroundRunTimeout() / time.Second)}
+	runDir := filepath.Join(s.o.RunsDir, runID)
+	prompt := renderPrompt(sp.prompt.Body, target, runID, f.item.Project)
+	built, err := t.Build(f.pol, executors.Spec{RunID: runID, RunDir: runDir, Prompt: prompt, ContextDir: s.o.ContextDir})
+	if err != nil {
+		return err
+	}
+	run.AgentSnapshot = &built.Snapshot
 	if how.launch == policy.LaunchWake { // 进程在真实主会话所在处：不写运行目录与命令，凭据由网关插件换取（§13.6）
 		run.Launch = runidentity.LaunchWake
 		return s.enqueue(ctx, c, f, how, proc.Request{Run: run, External: true}, func(tx *store.Tx) error {
@@ -458,11 +447,9 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 			return err
 		})
 	}
-	runDir := filepath.Join(s.o.RunsDir, runID)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return err
 	}
-	prompt := renderPrompt(sp.prompt.Body, target, runID, f.item.Project)
 	if err := os.WriteFile(filepath.Join(runDir, "prompt.md"), []byte(prompt), 0o600); err != nil {
 		return err
 	}
@@ -470,18 +457,8 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 	if workDir != "" {
 		dir = workDir
 	}
-	argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
-	argv = append(argv, f.selected.Args...)
-	argv = append(argv, hl.Output...)
-	if sp.runner == "main_session" {
-		argv = append(argv, ms.Args...)
-	}
-	argv = append(argv, hl.Access[run.Access]...)
-	if len(hl.Session.Assign) > 0 {
-		run.SessionID = runID
-		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)
-	}
-	return s.enqueue(ctx, c, f, how, proc.Request{Run: run, Spec: proc.Spec{OptionEnv: f.selected.Env, Command: argv, Dir: dir, RunDir: runDir}}, nil)
+	run.SessionID = built.SessionID
+	return s.enqueue(ctx, c, f, how, proc.Request{Run: run, Spec: proc.Spec{Command: built.Command, Dir: dir, RunDir: runDir, Cancel: built.Cancel, Await: built.Await}}, nil)
 }
 
 // enqueue 在一个事务里写 Run、运行关联与 launched 审计记录（与 also 一起提交），再交调度器。
@@ -573,7 +550,7 @@ func (s *Service) Env(r domain.Run) map[string]string {
 		if d, ok, err := delegation.ByRun(tx, r.ID); err != nil {
 			return err
 		} else if ok {
-			if e, found, err := executors.Get(tx, d.Executor); err != nil || (found && s.Remote(e)) {
+			if e, found, err := executors.Get(tx, d.Executor); err != nil || (found && executors.Remote(e, s.o.Host)) {
 				return err
 			}
 		}
@@ -656,7 +633,7 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 			resulted = resulted || mine && (r.Outcome == delegation.OutcomeDone || r.Outcome == delegation.OutcomeBlocked)
 		}
 		if err == nil {
-			hl, _, err = executors.ActiveHeadless(tx, run.Harness)
+			hl, _, err = executors.RunHeadless(tx, run)
 		}
 		return err
 	}

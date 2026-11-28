@@ -48,8 +48,8 @@ func (k *kit) runCredential() (tok, runID, item string) {
 		k.t.Fatalf("apa declare acc-hang: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	k.webOK("POST", "/settings/declarations/acc-hang/1/confirm", "", 200)
-	k.webOK("PUT", "/settings/policy", `{"default_harness":"acc-hang"}`, 200)
-	k.webOK("PUT", "/settings/agents/legacy:acc-hang/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"edit"}`, 200)
+	k.webOK("PUT", "/settings/policy", `{"default_executor":"acc-hang","main_executor":"acc-hang"}`, 200)
+	k.webOK("PUT", "/settings/agents/acc-hang/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"edit"}`, 200)
 	k.webOK("PATCH", "/rules/background-run%2Fevent_rules%2Fhandle-labelled/mode", `{"mode":"auto"}`, 200)
 	item = k.idOf(k.apa(k.OBS, 0, "propose", "--kind", "task", "--title", "prop-run 后台运行", "--project", k.Projects["acc-open"], "--tags", "agent-ok"))
 	k.webOK("POST", "/items/"+item+"/accept", `{}`, 200)

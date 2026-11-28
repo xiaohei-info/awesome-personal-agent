@@ -186,8 +186,7 @@ func TestTemplateFailedFollowsTaskPush(t *testing.T) {
 			return err
 		}
 		_, err := policy.Update(tx, owner.Actor, "main", func(p *policy.Policy) error {
-			main := "legacy:hx"
-			p.MainAgentID, p.Disturb.Routes["decision"] = &main, "channel:chan"
+			p.MainExecutor, p.Disturb.Routes["decision"] = "hx", "channel:chan"
 			return nil
 		})
 		return err

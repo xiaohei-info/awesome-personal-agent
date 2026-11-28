@@ -25,11 +25,5 @@
     "exit_codes": {"ok": [0], "session_missing": [1, 2]},
     "exit_output": {"session_missing": ["No session found matching", "Resume retains gateway session policy"]}
   },
-  "instance_options": {
-    "fields": {
-      "model": {"label": {"zh": "模型", "en": "Model"}, "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._:/@+-]*", "display_as": "model"}
-    },
-    "args_if_set": {"model": ["--model", "{model}"]}
-  },
   "main_session": {}
 }

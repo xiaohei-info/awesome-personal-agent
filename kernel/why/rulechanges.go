@@ -87,7 +87,7 @@ func RuleChanges(tx *store.Tx, agent string, before int64, limit int) ([]RuleCha
 			continue
 		}
 		seen[ev.Seq] = true
-		if agent != "" && (ev.Basis == nil || ev.Basis.Agent != agent) {
+		if agent != "" && (ev.Basis == nil || policy.AgentKey(ev.Basis.Agent) != policy.AgentKey(agent)) { // 旧记录里的 legacy:<程序> 就是声明 <程序>
 			continue
 		}
 		var rc RuleChange
@@ -153,7 +153,7 @@ func ReverseOf(tx *store.Tx, seq int64) (RuleChange, *Reversal, error) {
 func base(ev domain.Event, command string) RuleChange {
 	rc := RuleChange{Seq: ev.Seq, At: ev.At, Actor: ev.Actor, Command: command, Object: ev.Object}
 	if ev.Basis != nil {
-		rc.Agent = ev.Basis.Agent
+		rc.Agent = policy.AgentKey(ev.Basis.Agent)
 	}
 	return rc
 }

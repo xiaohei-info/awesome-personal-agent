@@ -45,7 +45,7 @@ type AgentOptions struct {
 //     没有可用结果时转 needs_input 问本人怎么收尾（§8.7）；调用失败返回错误，规则建的事项由规则引擎转 dropped。
 //   - judge：交给 Judge。
 //
-// 能力包取规则键的包名；harness 用 Web 设置的默认 harness（§13.6）。
+// 能力包取规则键的包名；执行者按 事项 > 安排 > 规则 > 分工 选（§13.6）。
 func (s *Service) CallAgent(o AgentOptions) rules.Handler {
 	return func(ctx context.Context, c rules.Call) error {
 		pack, _, _ := strings.Cut(c.Rule, "/")
@@ -82,7 +82,7 @@ const modeCreateItem = "create_item"
 
 // instParams 是实例参数里内核认的三个：mode、instruction（本人写的任务说明）、access（权限档位）。其余参数只作资料。
 type instParams struct {
-	AgentID     string `json:"agent_id"`
+	Executor    string `json:"executor"`
 	Mode        string `json:"mode"`
 	Instruction string `json:"instruction"`
 }
@@ -249,8 +249,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		}
 	}
 	ip := instanceParams(c)
-	harness, _ := c.Action["harness"].(string)
-	t := Task{Selection: executors.Selection{Rule: c.Rule, Schedule: ip.AgentID}, Harness: harness, Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
+	t := Task{Selection: executors.Selection{Rule: c.Rule, Schedule: ip.Executor}, Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
 		Digest: digest, Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:
@@ -261,7 +260,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		}
 		t.Target = c.Item.ID
 	case c.Item != nil:
-		t.Selection.Item = c.Item.PreferredAgentID
+		t.Selection.Item = c.Item.PreferredExecutor
 		t.Title, t.Project, t.From = c.Item.Title, c.Item.Project, c.Item.ID
 	}
 	_, err = s.Launch(ctx, t) // 没拉起时返回带类别码的错误，规则引擎记告警、收掉规则建的事项

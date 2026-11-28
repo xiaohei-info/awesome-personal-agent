@@ -227,7 +227,7 @@ func TestRunCredentialFollowsSnapshotAgentCard(t *testing.T) {
 	e := setup(t)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "card", func(p *policy.Policy) error {
-			p.AgentCards["legacy:hx"] = policy.DefaultCard().With(policy.GroupDecide)
+			p.AgentCards["hx"] = policy.DefaultCard().With(policy.GroupDecide)
 			return nil
 		})
 		return err

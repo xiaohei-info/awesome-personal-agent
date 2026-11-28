@@ -20,98 +20,101 @@ import (
 
 var bg = context.Background()
 
-func TestSameHostCardsResolveIndependently(t *testing.T) {
+// 选人只选执行者：事项 > 安排 > 规则 > 分工（主会话取主执行者）；所有运行同一套拼装（Build）。
+func TestPickResolveAndBuildOneChain(t *testing.T) {
 	e := setup(t)
-	declaration := decl("host")
-	declaration.MainSession = &MainSession{Args: []string{"--main"}}
-	declaration.InstanceOptions = &InstanceOptions{
-		Fields: map[string]OptionField{"variant": {Type: "enum", Label: Label{"模型", "Model"}, Choices: []string{"small", "large"}, DisplayAs: "model"}},
-		Args:   map[string][]string{"variant": {"--model", "{variant}"}}, Env: map[string]map[string]string{"variant": {"HOST_MODEL": "{variant}"}},
-	}
-	e.must(t, owner, "executor.register", declaration)
-	create := func(model string) Card {
-		var card Card
-		result := e.must(t, owner, "agent.configure", Card{Name: model, Harness: "host", Enabled: true, Values: map[string]string{"variant": model}})
-		if err := json.Unmarshal(result.Value, &card); err != nil {
-			t.Fatal(err)
-		}
-		return card
-	}
-	daily, main := create("small"), create("large")
+	d := decl("host", Executor{ID: "host.a", Kind: KindExternalCLI, Handle: json.RawMessage(`{"profile":"p1"}`)},
+		Executor{ID: "host.far", Kind: KindRemoteAgent, Host: "elsewhere"})
+	d.MainSession = &MainSession{Args: []string{"--main"}}
+	d.ExecutorArgs = map[string][]string{"profile": {"--profile", "{profile}"}}
+	d.Overrides = map[string]Override{"model": {Label: Label{"模型", "Model"}, Args: []string{"--model", "{model}"}, Choices: []string{"m1", "m2"}, Role: RoleModel},
+		"think": {Label: Label{"思考", "Thinking"}, Args: []string{"--t", "{think}"}, Choices: []string{"hi"}, Role: RoleThinking}}
+	d.Headless.NoPersona, d.Headless.Effort = []string{"--bare"}, []string{"--effort", "{effort}"}
+	d.Headless.Command = append(d.Headless.Command, "--ctx", "{run_context}")
+	e.must(t, owner, "executor.register", d)
+	e.must(t, owner, "executor.override", map[string]any{"id": "host.a", "values": map[string]string{"model": "m1"}})
+
 	pol := policy.Default()
-	pol.DefaultHarness = "host"
-	pol.DefaultAgentID, pol.MainAgentID = &daily.ID, &main.ID
-	pol.RuleAgent = map[string]string{"handoff": daily.ID}
+	pol.DefaultExecutor, pol.MainExecutor = "host.a", "host.far"
+	pol.RuleExecutor = map[string]string{"r": "host.far"}
+	pol.AgentCards = map[string]policy.Card{"host": {Tool: "edit"}}
+	for _, c := range []struct {
+		sel        Selection
+		id, source string
+	}{
+		{Selection{}, "host.a", SourceDefault}, {Selection{Runner: RunnerMainSession}, "host.far", SourceMain},
+		{Selection{Rule: "r"}, "host.far", SourceRule}, {Selection{Rule: "r", Schedule: "x"}, "x", SourceSchedule},
+		{Selection{Schedule: "x", Item: "y"}, "y", SourceItem},
+	} {
+		if id, source := Pick(pol, c.sel); id != c.id || source != c.source {
+			t.Fatalf("%+v: got %s %s", c.sel, id, source)
+		}
+	}
 	if err := e.st.View(bg, func(tx *store.Tx) error {
-		for _, test := range []struct {
-			sel        Selection
-			id, source string
-		}{
-			{Selection{}, daily.ID, "default"}, {Selection{Runner: "main_session"}, main.ID, "main"},
-			{Selection{Rule: "handoff", Runner: "main_session"}, daily.ID, "rule"}, {Selection{Rule: "handoff", Schedule: main.ID}, main.ID, "schedule"},
-			{Selection{Schedule: main.ID, Item: daily.ID}, daily.ID, "item"}, {Selection{Harness: "host"}, "legacy:host", "rule"},
-		} {
-			selected, err := Resolve(tx, pol, test.sel)
+		resolve := func(w Want) Target {
+			w.Host = "apa-host"
+			got, err := Resolve(tx, pol, w)
 			if err != nil {
-				return err
+				t.Fatal(err)
 			}
-			if selected.Reason != "" || selected.Snapshot.AgentID != test.id || selected.Snapshot.SelectionSource != test.source {
-				t.Fatalf("%+v: %+v", test, selected)
+			return got
+		}
+		// 不在本机的执行者只能经委派派活，其余运行给出原因，不悄悄剔除。
+		if r := resolve(Want{Executor: "host.far", Runner: RunnerTask}).Reason; r == "" {
+			t.Fatal("remote executor must not run a non-delegated task")
+		}
+		if r := resolve(Want{Executor: "host.far", Runner: RunnerTask, Delegated: true}).Reason; r != "" {
+			t.Fatal(r)
+		}
+		if r := resolve(Want{Executor: "nobody", Runner: RunnerTask}).Reason; r == "" {
+			t.Fatal("unknown executor must not resolve")
+		}
+		tg := resolve(Want{Executor: "host.a", Source: SourceDefault, Runner: RunnerMainSession})
+		if tg.Reason != "" || tg.Key != "host" || tg.Access != "edit" || tg.Program() != "host" {
+			t.Fatalf("%+v", tg)
+		}
+		build := func(pol policy.Policy, s Spec) Built {
+			b, err := tg.Build(pol, s)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if selected.Card.Rev > 0 && (selected.AccessReason("edit") == "" || len(selected.Args) != 2 || selected.Args[1] != selected.Snapshot.ConfiguredModel || selected.Env["HOST_MODEL"] != selected.Card.Name) {
-				t.Fatalf("wrong options or inherited privileges: %+v", selected)
-			}
+			return b
+		}
+		b := build(pol, Spec{RunID: "run_1", RunDir: "/runs/run_1", Prompt: "P", ContextDir: "/ctx"})
+		want := []string{"acme", "run", "P", "--dir", "/runs/run_1", "--ctx", "/ctx/run_1", "--profile", "p1", "--model", "m1", "--bare", "--effort", "medium", "--main", "--rw"}
+		if !slices.Equal(b.Command, want) || b.Snapshot.ConfiguredModel != "m1" || b.Snapshot.Executor != "host.a" || b.Snapshot.AgentID != "host" {
+			t.Fatalf("command %v snapshot %+v", b.Command, b.Snapshot)
+		}
+		// 单次覆盖先于执行者默认；执行者有生效的思考档覆盖时不再追加设置里的思考强度；本人开了人格就不加 no_persona。
+		pol.BackgroundPersona = true
+		b = build(pol, Spec{RunID: "run_2", Once: map[string]string{"model": "m2", "think": "hi"}})
+		if !slices.Contains(b.Command, "m2") || slices.Contains(b.Command, "--effort") || slices.Contains(b.Command, "--bare") || b.Snapshot.ConfiguredThinking != "hi" {
+			t.Fatalf("overrides: %v", b.Command)
+		}
+		if _, err := tg.Build(pol, Spec{Once: map[string]string{"model": "m9"}}); err == nil {
+			t.Fatal("a value outside choices must be refused")
+		}
+		// 续接接着原会话，并沿用原来的运行上下文文件。
+		b = build(pol, Spec{RunID: "run_3", ContextDir: "/ctx", ContextName: "run_1", Resume: "s1"})
+		if !b.Resumed || b.SessionID != "s1" || !slices.Contains(b.Command, "/ctx/run_1") || !slices.Contains(b.Command, "s1") {
+			t.Fatalf("resume: %+v", b)
+		}
+		pol.AgentCards = nil // 默认卡只读，声明有这一档
+		if r := resolve(Want{Executor: "host.a", Runner: RunnerTask}); r.Reason != "" || r.Access != "read" {
+			t.Fatalf("%+v", r)
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// 默认不带人格和记忆：拉起参数追加声明的 headless.no_persona；本人开了就不追加。
-	declaration.Headless.NoPersona = []string{"--bare"}
-	e.must(t, owner, "executor.register", declaration)
-	if err := e.st.View(bg, func(tx *store.Tx) error {
-		for persona, want := range map[bool]bool{false: true, true: false} {
-			pol.BackgroundPersona = persona
-			selected, err := Resolve(tx, pol, Selection{})
-			if err != nil {
-				return err
-			}
-			if slices.Contains(selected.Args, "--bare") != want {
-				t.Fatalf("persona=%v args=%v", persona, selected.Args)
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// 思考强度：声明的 {effort} 换成设置里"后台 Agent 运行"一项，没设取默认 medium。
-	declaration.Headless.Effort = []string{"--think", "{effort}"}
-	e.must(t, owner, "executor.register", declaration)
-	if err := e.st.View(bg, func(tx *store.Tx) error {
-		for set, want := range map[string]string{"": "medium", "high": "high", "off": ""} {
-			pol.Thinking.Background = set
-			selected, err := Resolve(tx, pol, Selection{})
-			if err != nil {
-				return err
-			}
-			if i := slices.Index(selected.Args, "--think"); (want == "") != (i < 0) || (i >= 0 && selected.Args[i+1] != want) {
-				t.Fatalf("thinking=%q args=%v", set, selected.Args)
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	daily.Enabled = false
-	e.must(t, owner, "agent.configure", daily)
-	if err := e.st.View(bg, func(tx *store.Tx) error {
-		selected, err := Resolve(tx, pol, Selection{Item: daily.ID, Schedule: main.ID})
-		if selected.Reason == "" || selected.Snapshot.AgentID != daily.ID {
-			t.Fatalf("disabled explicit selection: %+v", selected)
-		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
+}
+
+// 能拉起的声明没列执行者时，确认后有一个与声明同名的执行者，选得到它。
+func TestDeclarationWithoutExecutorsGetsOne(t *testing.T) {
+	e := setup(t)
+	e.must(t, owner, "executor.register", decl("solo"))
+	if es := e.list(t); len(es) != 1 || es[0].ID != "solo" || es[0].Harness != "solo" {
+		t.Fatalf("%+v", es)
 	}
 }
 

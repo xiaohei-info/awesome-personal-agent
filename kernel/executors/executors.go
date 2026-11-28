@@ -385,7 +385,12 @@ type Cancel struct {
 
 // Declaration 是 `apa declare` 提交或主机配置文件登记的整份声明。
 type Declaration struct {
+	// InstanceOptions 是已取消（2026-11-28）的 Agent 卡字段说明：只读兼容，旧插件仍可提交，内核不再用它拼参数；
+	// 模型等按执行者换的值写成 overrides（附录 A.2）。v0.2.0 之后第一个版本不再接受。
 	InstanceOptions *InstanceOptions `json:"instance_options,omitempty"`
+	// Base 非空表示这是同一程序隔离另写的一份声明（自己一张权限卡，§14.5）：值是所属程序，运行记录的 harness 记它，
+	// 该程序的钥匙按 agent_id 绑到这份声明。只由执行者统一切换写（§16.5），提交的声明不能带。
+	Base string `json:"base,omitempty"`
 	// ExecutorArgs 是执行者级参数：键是执行者句柄里的字段，值是 [标志, "{键}"]，句柄里有这个字段才追加（附录 A.2）。
 	// 同一份声明因此能承载多个执行者，共用一张权限卡。
 	ExecutorArgs map[string][]string `json:"executor_args,omitempty"`
@@ -398,6 +403,14 @@ type Declaration struct {
 	MainSession *MainSession        `json:"main_session,omitempty"`
 	Executors   []Executor          `json:"executors,omitempty"`
 	Selfcheck   *Selfcheck          `json:"selfcheck,omitempty"`
+}
+
+// DisplayName 是声明给人看的名字：声明的中文名，没有时为 harness。
+func (d Declaration) DisplayName() string {
+	if d.Name != nil {
+		return d.Name.Zh
+	}
+	return d.Harness
 }
 
 // Selfcheck 是插件的自检命令（A.1、A.2）：只作数据保存，由 `apa doctor` 在 APA 主机上执行，内核不执行。
@@ -442,6 +455,12 @@ ALTER TABLE executors_entry ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
 	// 账本结构版本 14（附录 A.2）：本人给执行者定的可覆盖参数默认值。只增列，已有条目为空（不传参，行为不变）。
 	Version: 4, Ledger: 14, Name: "ledger-v14-executor-overrides",
 	SQL: `ALTER TABLE executors_entry ADD COLUMN overrides TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 18（§16.5，17 归讨论里的 @）："谁来干活"统一为执行者：选人只选执行者，按声明列执行者的查询走这个索引。
+	// executors_agent（旧 Agent 卡）保留只读，不再写；数据的换算由启动时的一次性切换做（cli/serve 的 switchExecutors），
+	// 结构版本因此加一，旧程序打不开切换过的账本（回退要用升级前的备份）。
+	Version: 5, Ledger: 18, Name: "ledger-v18-executor-unify",
+	SQL: `CREATE INDEX executors_entry_harness ON executors_entry(harness);`,
 }}}
 
 func invalid(format string, a ...any) error {
@@ -477,6 +496,9 @@ func ParseDeclaration(data []byte) (Declaration, error) {
 	}
 	if o := d.InstanceOptions; o != nil && len(o.Fields)+len(o.Args)+len(o.Env)+len(o.Cwd) == 0 {
 		d.InstanceOptions = nil
+	}
+	if d.Base != "" {
+		return Declaration{}, invalid("base is written only by APA's executor switch; declare the program itself")
 	}
 	return d, d.validate()
 }
@@ -809,6 +831,23 @@ func ActiveHeadless(tx *store.Tx, harness string) (h Headless, ok bool, err erro
 	return *rec.Declaration.Headless, true, nil
 }
 
+// Active 返回 harness 当前生效的声明；没有时 ok 为假。
+func Active(tx *store.Tx, harness string) (Record, bool, error) {
+	return record(tx, harness, 0, StateActive)
+}
+
+// RunHeadless 返回运行所属声明的无头运行声明：快照记了声明时按它（隔离另写的声明与程序名不同），否则按运行的 harness。
+func RunHeadless(tx *store.Tx, run domain.Run) (Headless, bool, error) {
+	key := run.Harness
+	if run.AgentSnapshot != nil && run.AgentID != "" {
+		key = strings.TrimPrefix(run.AgentID, "legacy:")
+	}
+	if key == "" {
+		return Headless{}, false, nil
+	}
+	return ActiveHeadless(tx, key)
+}
+
 // record 取一份声明；rev 为 0 表示不限版本，state 为空表示不限状态。
 func record(tx *store.Tx, harness string, rev int64, state string) (rec Record, ok bool, err error) {
 	err = query(tx, func(r *store.Rows) (err error) {
@@ -871,23 +910,25 @@ func putEntry(tx *store.Tx, e Executor, harness string) error {
 }
 
 // activate 让 d 生效：声明里的执行者并入名录（新增或更新），不删除该 harness 已登记的其他条目（§6.17）。
-// 调用方先做冲突检查。
+// 能拉起的声明至少要有一个执行者才选得到（选人只选执行者，§13.6）：声明没列执行者、名录里也还没有它的执行者时，
+// 建一个与声明同名的执行者（这份声明本身那一种启动方式）。调用方先做冲突检查。
 func activate(tx *store.Tx, d Declaration) error {
-	cards, err := storedCards(tx, d.Harness)
-	if err != nil {
-		return err
-	}
-	for _, card := range cards {
-		if card.Enabled {
-			if err := d.InstanceOptions.check(card.Values); err != nil {
-				return conflict("%s: %v", card.Name, err)
-			}
-		}
-	}
 	for _, e := range d.Executors {
 		if err := putEntry(tx, e, d.Harness); err != nil {
 			return err
 		}
 	}
-	return nil
+	if d.Headless == nil || len(d.Executors) > 0 {
+		return nil
+	}
+	es, err := List(tx)
+	if err != nil {
+		return err
+	}
+	for _, e := range es {
+		if e.Harness == d.Harness || e.ID == d.Harness {
+			return nil
+		}
+	}
+	return putEntry(tx, Executor{ID: d.Harness, Kind: KindExternalCLI, Label: d.DisplayName()}, d.Harness)
 }

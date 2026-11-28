@@ -109,7 +109,6 @@ func setup(t *testing.T) *env {
 		t.Fatalf("load: %v %+v", err, rej)
 	}
 	onErr := func(_ string, err error) { e.errs <- err }
-	e.must(owner, "executor.put", map[string]any{"id": "work-host.cli", "kind": "external-cli"})
 	var bgs *background.Service
 	e.disp = proc.New(st, config.Config{MaxSubprocesses: 4, MaxShortSubprocesses: 1}, proc.Options{
 		Env: func(r domain.Run) map[string]string { return bgs.Env(r) },
@@ -169,9 +168,10 @@ func (e *env) harness(resume, gone bool) {
 		h["exit_codes"] = map[string][]int{SessionMissing: {7}}
 		h["exit_output"] = map[string][]string{SessionMissing: {"no such session"}}
 	}
-	e.must(owner, "executor.register", map[string]any{"harness": "hx", "headless": h})
+	e.must(owner, "executor.register", map[string]any{"harness": "hx", "headless": h, "executors": []map[string]any{
+		{"id": "hx", "kind": "external-cli"}, {"id": "work-host.cli", "kind": "external-cli"}, {"id": "other.cli", "kind": "external-cli"}}})
 	e.setPolicy(func(p *policy.Policy) {
-		p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+		p.AgentCards["hx"], p.DefaultExecutor, p.MainExecutor = policy.DefaultCard().WithTool(policy.PermEdit), "hx", "hx"
 	})
 }
 
@@ -373,9 +373,9 @@ func resumeContextCase(t *testing.T, all bool) {
 	id := e.asked("agent-ok", nil)
 	e.setPolicy(func(p *policy.Policy) {
 		p.ForwardAllowlist = map[string][]string{"mail": {"alice"}}
-		c := p.AgentCards["legacy:hx"]
+		c := p.AgentCards["hx"]
 		c.RunsAllMessages = all
-		p.AgentCards["legacy:hx"] = c
+		p.AgentCards["hx"] = c
 	})
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		for _, m := range []struct{ id, sender string }{{"m1", "alice"}, {"m2", "bob"}} {
@@ -554,7 +554,7 @@ func TestResumeUsesTheCardToolNow(t *testing.T) {
 	e.harness(true, false)
 	e.auto("main")
 	id := e.asked("agent-ok", nil)
-	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermRead) })
+	e.setPolicy(func(p *policy.Policy) { p.AgentCards["hx"] = policy.DefaultCard().WithTool(policy.PermRead) })
 	if out, err := e.svc.Resume(bg, id); err != nil || out != Resumed {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
@@ -661,7 +661,7 @@ func TestNewRequiresDependencies(t *testing.T) {
 	}
 }
 
-// 自由文本回答原样带进新会话；harness 声明被本人撤走（没有已确认的无头声明）时拒绝。
+// 自由文本回答原样带进新会话；续接锁定原运行的执行者，它被本人移出名录时拒绝（改分工不影响续接）。
 func TestFreeTextAnswerAndMissingDeclaration(t *testing.T) {
 	e := setup(t)
 	e.harness(true, false)
@@ -674,14 +674,15 @@ func TestFreeTextAnswerAndMissingDeclaration(t *testing.T) {
 	e.release(r.ID)
 	e.waitResult()
 	e.must(owner, "decision.answer", map[string]any{"id": root, "text": "用备用账户"})
-	e.setPolicy(func(p *policy.Policy) { p.DefaultHarness = "gone-harness" })
+	e.setPolicy(func(p *policy.Policy) { p.DefaultExecutor, p.MainExecutor = "gone-harness", "gone-harness" })
+	e.must(owner, "executor.remove", map[string]any{"id": "hx"})
 	if out, err := e.svc.Resume(bg, root); err != nil || out != Refused {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
 	// 2026-11-20 改写：原断言事项转 needs_input、问题含 "gone-harness"，再回答那张拒绝卡（choice rerun）后复核为 Skipped；
 	// 续接被拒不再挂问题：改为事项不变、告警原因含 "gone-harness"，同一回答再复核为 Skipped（同一回答已处理，不重复拉起）。
-	e.refusedNotice(root, "gone-harness")
-	e.setPolicy(func(p *policy.Policy) { p.DefaultHarness = "" })
+	e.refusedNotice(root, "hx 不在执行者名录里")
+	e.setPolicy(func(p *policy.Policy) { p.DefaultExecutor, p.MainExecutor = "", "" })
 	if out, err := e.svc.Resume(bg, root); err != nil || out != Skipped {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}

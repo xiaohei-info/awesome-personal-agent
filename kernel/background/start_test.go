@@ -14,6 +14,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -110,7 +111,7 @@ func TestDelegateStartRunsTheExecutorFromItsDeclaration(t *testing.T) {
 	res = e.waitResult()
 	argv = e.argvOf(res.Run.ID)
 	if argv[slices.Index(argv, "--model")+1] != "m2" || argv[slices.Index(argv, "--profile")+1] != "deep" || !slices.Contains(argv, "--ctx=") ||
-		argv[slices.Index(argv, "--schema")+1] != filepath.Join(e.runs, res.Run.ID, reportSchemaFile) || !strings.Contains(strings.Join(argv, "\n"), "SPEC-TEXT") {
+		argv[slices.Index(argv, "--schema")+1] != filepath.Join(e.runs, res.Run.ID, executors.ReportSchemaFile) || !strings.Contains(strings.Join(argv, "\n"), "SPEC-TEXT") {
 		t.Fatalf("remote executor argv: %q", argv)
 	}
 }

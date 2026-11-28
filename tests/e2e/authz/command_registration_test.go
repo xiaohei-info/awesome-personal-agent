@@ -123,7 +123,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 		if p := k.webOK("GET", "/v1/settings/declarations", "", 200); !strings.Contains(p, "acc-pending") {
 			t.Fatalf("Web 设置页应显示待确认: %s", p)
 		}
-		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-pending"}`, 200)
+		k.webOK("PUT", "/v1/settings/policy", `{"default_executor":"acc-pending","main_executor":"acc-pending"}`, 200)
 		k.webOK("PATCH", "/v1/rules/"+url.PathEscape(runRule)+"/mode", `{"mode":"auto"}`, 200)
 
 		k.triggerRun()
@@ -145,7 +145,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 	})
 
 	k.step("ACT-CMD-03 运行凭据提交的声明只进待确认", func(t *testing.T) {
-		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub"}`, 200) // 无头运行替身，已确认
+		k.webOK("PUT", "/v1/settings/policy", `{"default_executor":"acc-stub","main_executor":"acc-stub"}`, 200) // 无头运行替身，已确认
 		k.triggerRun()
 		var token string
 		k.waitFor("后台运行写出它收到的环境变量", 20*time.Second, func() bool {

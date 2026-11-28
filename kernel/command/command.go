@@ -57,9 +57,9 @@ type Caller struct {
 	Kind  auth.Kind // 仅凭据入口有值
 	// Credential 是凭据 id，仅凭据入口有值（Actor.Principal 在绑定执行者时是执行者 id）。
 	Credential string
-	// CredentialAgentID 是凭据上内核记录的所属 Agent，仅凭据入口有值；权限卡按它取（§14.5）。
+	// CredentialAgentID 是凭据绑定的另一份声明（同一程序隔离另写的那份，§14.5），仅凭据入口有值；空表示就是所属程序的声明。
 	CredentialAgentID string
-	// CredentialHarness 是凭据所属程序；没有 Agent 归属的旧设置迁移来的凭据，权限卡按兼容卡 legacy:<程序> 取（不改投递路由）。
+	// CredentialHarness 是凭据所属程序；没有绑定另一份声明的凭据按它取权限卡（不改投递路由）。
 	CredentialHarness string
 	// RunDepth 只有运行凭据有值：运行记录的链路深度，本运行发出的命令据它继承（§14.9）。
 	RunDepth int
@@ -77,13 +77,14 @@ type Caller struct {
 // Web 本人、运行凭据与内核自己的入口没有 Kind，一律按内部。
 func (c Caller) External() bool { return c.Kind != "" && !c.Internal }
 
-// Agent 是调用者所属的 Agent：运行凭据取运行记录，其余取凭据归属；没有归属为空（默认卡）。
+// Agent 是调用者所属的 Agent（声明，权限卡的键）：运行凭据取运行记录，其余取凭据绑定的声明，没有绑定取凭据所属程序；
+// 都没有为空（默认卡）。执行者统一切换前的兼容卡 legacy:<程序> 按 <程序> 认（§16.5）。
 func (c Caller) Agent() string {
 	if c.Level == authz.LevelRun {
-		return c.RunAgentID
+		return policy.AgentKey(c.RunAgentID)
 	}
-	if c.CredentialAgentID == "" && c.CredentialHarness != "" {
-		return "legacy:" + c.CredentialHarness
+	if c.CredentialAgentID == "" {
+		return c.CredentialHarness
 	}
 	return c.CredentialAgentID
 }

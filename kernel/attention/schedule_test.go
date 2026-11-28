@@ -23,7 +23,7 @@ func local(day string, hm string) time.Time {
 	return t
 }
 
-// mainSession 登记一个声明支持唤醒的 harness 并选它为主 Agent：主会话的唤醒路由是 wake（旧设置迁移来的卡没有 Agent id）。
+// mainSession 登记一个声明支持唤醒的 harness 并选它为主 Agent：主会话的唤醒路由是 wake（声明不是隔离另写的，钥匙不绑声明）。
 func (e *env) mainSession() {
 	e.t.Helper()
 	if err := executors.Register(e.x, executors.Options{Owner: "owner"}); err != nil {
@@ -31,7 +31,7 @@ func (e *env) mainSession() {
 	}
 	e.do(owner, "executor.register", map[string]any{"harness": "hx", "main_session": map[string]any{"wake": true},
 		"headless": map[string]any{"command": []string{"true"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string]any{"edit": []string{}}}})
-	e.policy(func(p *policy.Policy) { main := "legacy:hx"; p.MainAgentID = &main })
+	e.policy(func(p *policy.Policy) { p.MainExecutor = "hx" })
 }
 
 // proactive 改主动提醒设置（从默认值或已存的值起改）。

@@ -52,7 +52,7 @@ event_rules:
   - {id: main, mode: observe, when: {event: item.phase_changed, to_phase: open, tag_any: [agent-ok]},
      do: [{action: start_background_run, runner: main_session, prompt: handle, access: edit, cwd: run_dir}]}
   - {id: named, mode: observe, when: {event: item.phase_changed, to_phase: open, tag_any: [named]},
-     do: [{action: start_background_run, runner: main_session, prompt: handle, access: read, harness: hy}]}
+     do: [{action: start_background_run, runner: main_session, prompt: handle, access: read, executor: hy}]}
   - {id: readonly, mode: observe, when: {event: item.phase_changed, to_phase: open, tag_any: [readonly]},
      do: [{action: start_background_run, runner: main_session, prompt: handle, access: read}]}
   - {id: dup-a, mode: observe, when: {event: item.phase_changed, to_phase: open, tag_any: [dup]},
@@ -187,7 +187,6 @@ func setup(t *testing.T, maxDepth int) *env {
 		t.Fatal(err)
 	}
 	e.svc = svc
-	e.must(owner, "executor.put", map[string]any{"id": "work-host.cli", "kind": "external-cli"})
 	eng, err := rules.New(rules.Options{Store: st, Exec: e.x, Packs: ld, Owner: "owner", Now: func() time.Time { return t0 },
 		Handlers: map[string]rules.Handler{Action: svc.Handler()}, OnError: func(err error) { t.Errorf("rules: %v", err) }})
 	if err != nil {
@@ -213,7 +212,8 @@ func (e *env) must(id command.Identity, cmd string, in any) command.Result {
 	return r
 }
 
-// harness 登记一个由本人确认的无头运行声明，运行 scripts[script]，只声明 tiers 里的档位。
+// harness 登记一个由本人确认的无头运行声明，运行 scripts[script]，只声明 tiers 里的档位。声明下的执行者是与它同名的一个；
+// hx 另带 runner=task 规则用的 work-host.cli 与 other-host.cli。
 func (e *env) harness(name, script string, tiers ...string) {
 	e.t.Helper()
 	path := filepath.Join(e.dir, name+".sh")
@@ -224,7 +224,11 @@ func (e *env) harness(name, script string, tiers ...string) {
 	for _, tier := range tiers {
 		access[tier] = []string{}
 	}
-	e.must(owner, "executor.register", map[string]any{"harness": name, "headless": map[string]any{
+	execs := []map[string]any{{"id": name, "kind": "external-cli"}}
+	if name == "hx" {
+		execs = append(execs, map[string]any{"id": "work-host.cli", "kind": "external-cli"}, map[string]any{"id": "other-host.cli", "kind": "external-cli"})
+	}
+	e.must(owner, "executor.register", map[string]any{"harness": name, "executors": execs, "headless": map[string]any{
 		"command": []string{"sh", path, "{prompt}", "{run_dir}"}, "session": map[string]any{"extract": "$.session_id"}, "access": access}})
 }
 
@@ -355,11 +359,11 @@ func askIDs(it domain.Item) []string {
 	return ids
 }
 
-// configure 是大多数用例的起点：hx 声明三档，上限 edit，默认 harness hx。
+// configure 是大多数用例的起点：hx 声明三档，上限 edit，日常与主执行者都是 hx。
 func (e *env) configure(script string) {
 	e.harness("hx", script, "read", "edit", "full")
 	e.setPolicy(func(p *policy.Policy) {
-		p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+		p.AgentCards["hx"], p.DefaultExecutor, p.MainExecutor = policy.DefaultCard().WithTool(policy.PermEdit), "hx", "hx"
 	})
 }
 
@@ -455,8 +459,8 @@ func TestEventContentCannotOverrideRunParameters(t *testing.T) {
 	}
 }
 
-// ACT-BGM-09：规则声明 harness 时用它，没声明时用 Web 默认 harness。
-func TestRuleHarnessOverridesDefault(t *testing.T) {
+// ACT-BGM-09：规则写明执行者时用它，没写时用分工里的执行者。
+func TestRuleExecutorOverridesDefault(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("silent")
 	e.harness("hy", "silent", "read")
@@ -497,9 +501,9 @@ func (e *env) refused(id, want string) {
 	e.t.Fatalf("no background_refused alert on %s naming %q: %+v", id, want, e.ofType(domain.EvHealthAlert))
 }
 
-// 规则没有 harness、Web 也没有默认 harness：不拉起，并说明原因。
-// 2026-11-20 改写：原断言事项转 needs_input、问题含 "harness"；改为事项不变，告警原因含 "harness"。
-func TestNoHarnessGoesToNeedsInput(t *testing.T) {
+// 规则没写执行者、分工里也没选：不拉起，并说明原因。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含 "harness"；改为事项不变，告警原因说明没选执行者。
+func TestNoExecutorIsRefused(t *testing.T) {
 	e := setup(t, 0)
 	e.auto("readonly")
 	id := e.newItem("a", []string{"readonly"}, nil)
@@ -507,7 +511,7 @@ func TestNoHarnessGoesToNeedsInput(t *testing.T) {
 	if len(e.runList()) != 0 {
 		t.Fatalf("runs=%d", len(e.runList()))
 	}
-	e.refused(id, "harness")
+	e.refused(id, "还没选")
 }
 
 // ACT-BGM-08：运行结束时事项仍是 open：转 needs_input，选项为我来处理、放弃；不自动再次拉起。
@@ -595,9 +599,9 @@ func TestInFlightRunSkipsSecondTrigger(t *testing.T) {
 func TestPermissionTierGuards(t *testing.T) {
 	e := setup(t, 0)
 	e.harness("hx", "silent", "read", "edit")
-	e.setPolicy(func(p *policy.Policy) { p.DefaultHarness = "hx" })
+	e.setPolicy(func(p *policy.Policy) { p.DefaultExecutor, p.MainExecutor = "hx", "hx" })
 	e.auto("full")
-	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermFull) })
+	e.setPolicy(func(p *policy.Policy) { p.AgentCards["hx"] = policy.DefaultCard().WithTool(policy.PermFull) })
 	undeclared := e.newItem("b", []string{"full"}, nil)
 	e.open(undeclared)
 	e.refused(undeclared, "档位")
@@ -895,7 +899,7 @@ func TestProjectCheckoutCwd(t *testing.T) {
 func TestWakeDeclarationLaunchesWakeRun(t *testing.T) {
 	e := setup(t, 0)
 	e.setPolicy(func(p *policy.Policy) {
-		p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+		p.AgentCards["hx"], p.DefaultExecutor, p.MainExecutor = policy.DefaultCard().WithTool(policy.PermEdit), "hx", "hx"
 	})
 	path := filepath.Join(e.dir, "hx.sh")
 	_ = os.WriteFile(path, []byte("touch \"$2/ran\"\n"), 0o700)
@@ -975,7 +979,7 @@ func TestMainSessionLaunchChoice(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := setup(t, 0)
 			e.setPolicy(func(p *policy.Policy) {
-				p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+				p.AgentCards["hx"], p.DefaultExecutor, p.MainExecutor = policy.DefaultCard().WithTool(policy.PermEdit), "hx", "hx"
 				if c.byHarness != "" {
 					p.MainSessionLaunch.ByHarness["hx"] = c.byHarness
 				}
@@ -1129,7 +1133,7 @@ func TestOwnerStartNow(t *testing.T) {
 	e.waitResult()
 
 	e.harness("hx", "silent", "read", "edit") // 声明撤走 full，而权限卡要 full：现在开工照样复核，不拉起
-	e.setPolicy(func(p *policy.Policy) { p.AgentCards["legacy:hx"] = policy.DefaultCard().WithTool(policy.PermFull) })
+	e.setPolicy(func(p *policy.Policy) { p.AgentCards["hx"] = policy.DefaultCard().WithTool(policy.PermFull) })
 	over := e.newItem("over", []string{"agent-ok"}, nil)
 	e.open(over)
 	e.must(owner, "item.start", map[string]any{"id": over})
@@ -1176,8 +1180,8 @@ func TestUnifiedDefaultTimeout4HoursIgnoresTemplateTimeout(t *testing.T) {
 	// 3. main_session wake（推送主会话）
 	e.wakeHarness("hwake")
 	e.setPolicy(func(pol *policy.Policy) {
-		pol.DefaultHarness = "hwake"
-		pol.AgentCards["legacy:hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
+		pol.DefaultExecutor, pol.MainExecutor = "hwake", "hwake"
+		pol.AgentCards["hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
 	})
 	w1 := e.newItem("wake-runner", []string{"agent-ok"}, nil)
 	e.open(w1)
@@ -1215,8 +1219,8 @@ func TestTimeoutPolicyChangeAppliesImmediatelyToNewRunsNotInFlight(t *testing.T)
 	e := setup(t, 0)
 	e.wakeHarness("hwake")
 	e.setPolicy(func(pol *policy.Policy) {
-		pol.DefaultHarness = "hwake"
-		pol.AgentCards["legacy:hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
+		pol.DefaultExecutor, pol.MainExecutor = "hwake", "hwake"
+		pol.AgentCards["hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
 	})
 	e.auto("main")
 
@@ -1279,8 +1283,8 @@ func TestTimeoutSettlePreservesWrittenProgressAndReports(t *testing.T) {
 		e := setup(t, 0)
 		e.wakeHarness("hwake")
 		e.setPolicy(func(pol *policy.Policy) {
-			pol.DefaultHarness = "hwake"
-			pol.AgentCards["legacy:hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
+			pol.DefaultExecutor, pol.MainExecutor = "hwake", "hwake"
+			pol.AgentCards["hwake"] = policy.DefaultCard().WithTool(policy.PermEdit)
 			pol.BackgroundRunTimeoutSec = 1800
 		})
 		e.auto("main")

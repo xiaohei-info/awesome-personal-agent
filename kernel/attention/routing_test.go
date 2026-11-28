@@ -432,7 +432,7 @@ func TestDelegationResultGoesToWhoStartedIt(t *testing.T) {
 		})
 		return l
 	}
-	if l := r(fromAgent, "legacy:hx"); l.agent != delivery.RouteWake || l.user != "" {
+	if l := r(fromAgent, "hx"); l.agent != delivery.RouteWake || l.user != "" {
 		t.Errorf("main agent started it: %+v", l)
 	}
 	if l := r(fromAgent, "agt_other"); l.agent != delivery.RouteInject || l.user != "" {

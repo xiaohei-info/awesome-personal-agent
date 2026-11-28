@@ -1,10 +1,6 @@
 package executors
 
-import (
-	"maps"
-	"regexp"
-	"slices"
-)
+import "regexp"
 
 type OptionField struct {
 	Label     Label    `json:"label"`
@@ -81,46 +77,4 @@ func (o *InstanceOptions) validate() error {
 		}
 	}
 	return nil
-}
-
-func (o *InstanceOptions) check(values map[string]string) error {
-	for key, value := range values {
-		if o != nil && key == "cwd" && slices.Contains(o.Cwd, value) {
-			continue
-		}
-		if o == nil || !optionValue.MatchString(value) {
-			return invalid("invalid option %s", key)
-		}
-		field := o.Fields[key]
-		if field.Type == "enum" && slices.Contains(field.Choices, value) {
-			continue
-		}
-		if field.Type == "string" && regexp.MustCompile("^(?:"+field.Pattern+")$").MatchString(value) {
-			continue
-		}
-		return invalid("value outside declared range for %s", key)
-	}
-	return nil
-}
-
-func (o *InstanceOptions) expand(values map[string]string) (args []string, env map[string]string, model string) {
-	if o == nil {
-		return
-	}
-	for _, key := range slices.Sorted(maps.Keys(values)) {
-		value := values[key]
-		if argv := o.Args[key]; len(argv) > 0 {
-			args = append(args, argv[0], value)
-		}
-		for name := range o.Env[key] {
-			if env == nil {
-				env = map[string]string{}
-			}
-			env[name] = value
-		}
-		if o.Fields[key].DisplayAs == "model" {
-			model = value
-		}
-	}
-	return
 }

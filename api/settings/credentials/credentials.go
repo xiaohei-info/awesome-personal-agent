@@ -114,12 +114,13 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 			Apply: func(c *command.Ctx) (any, error) {
 				in, _, _ := parse(c.Input)
 				if in.AgentID != "" {
-					card, err := executors.StoredCard(c.Tx, in.AgentID)
+					// 钥匙只能绑到同一程序隔离另写的声明（§14.5）。
+					rec, ok, err := executors.Active(c.Tx, in.AgentID)
 					if err != nil {
 						return nil, err
 					}
-					if !card.Enabled || card.Harness != in.Harness {
-						return nil, invalid("select an enabled Agent of this harness")
+					if !ok || rec.Declaration.Base != in.Harness {
+						return nil, invalid("agent_id must be a separate declaration of this harness")
 					}
 				}
 				cred, secret, err := a.Issue(c.Tx, auth.Spec{Kind: in.Kind, Label: in.Label, Executor: in.Executor, Scope: in.Scope, Harness: in.Harness, AgentID: in.AgentID,

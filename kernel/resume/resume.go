@@ -102,6 +102,8 @@ type Options struct {
 	MaxChainDepth int
 	// OnError 接收 Settle 里无法交给调用方的错误；可为空。
 	OnError func(runID string, err error)
+	// Host 是 APA 主机名（判执行者在不在本机），ContextDir 是运行上下文文件的目录（{run_context}，§7.7）。
+	Host, ContextDir string
 }
 
 // Service 是续接入口，可并发使用。
@@ -124,6 +126,9 @@ func New(o Options) (*Service, error) {
 	if o.MaxChainDepth <= 0 {
 		o.MaxChainDepth = command.DefaultMaxChainDepth
 	}
+	if o.Host == "" {
+		o.Host, _ = os.Hostname()
+	}
 	return &Service{o: o}, nil
 }
 
@@ -131,7 +136,7 @@ var system = domain.Actor{Type: domain.ActorSystem, Principal: "kernel:resume", 
 
 // facts 是续接前一次性读出的账本事实。
 type facts struct {
-	selected executors.Selected
+	target   executors.Target // 原运行的执行者（续接锁定它）
 	it       domain.Item
 	base     proc.Record
 	link     background.Link
@@ -140,8 +145,6 @@ type facts struct {
 	mode     string
 	project  *domain.Project
 	executor domain.ExecutorRef // 事项 assignee 在名录里的登记（runner=task 的名单按它判定）
-	rec      executors.Record
-	declared bool
 	session  string
 	msgs     []allowlist.Attached
 	depth    int  // 事项当前的链路深度（最近一条事件）：续接经提问而来，沿用不加（§14.9）
@@ -152,34 +155,6 @@ type facts struct {
 func waiting(it domain.Item) bool {
 	a := it.Ask
 	return a != nil && a.Resolution != nil && a.ResumeNote != "" && !it.Phase.Terminal() && it.Phase != domain.PhaseNeedsInput
-}
-
-// harnessOf 是规则当前声明的 harness（按当前策略复核，规则可能已改过）；规则没写则用 Web 默认。
-func (s *Service) harnessOf(rule string, pol policy.Policy) string {
-	parts := strings.SplitN(rule, "/", 3)
-	if len(parts) == 3 {
-		if pk, ok := s.o.Packs.Get(parts[0]); ok {
-			var acts []packs.Action
-			for _, r := range pk.EventRules {
-				if parts[1] == "event_rules" && r.ID == parts[2] {
-					acts = r.Do
-				}
-			}
-			for _, r := range pk.ClockRules {
-				if parts[1] == "clock_rules" && r.ID == parts[2] {
-					acts = r.Do
-				}
-			}
-			for _, a := range acts {
-				if a["action"] == background.Action {
-					if h, _ := a["harness"].(string); h != "" {
-						return h
-					}
-				}
-			}
-		}
-	}
-	return pol.DefaultHarness
 }
 
 func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err error) {
@@ -247,28 +222,21 @@ func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err er
 			return f, err
 		}
 	}
-	sel := executors.Selection{Harness: s.harnessOf(f.base.Run.Basis.RuleID, f.pol), Runner: f.base.Run.Runner}
-	var reason string
+	// 续接锁定原运行的执行者；执行者统一切换前入队的运行快照里没有执行者，按它的声明找（§16.5）。
+	var id string
 	if original := f.base.Run.AgentSnapshot; original != nil {
-		sel.Item = original.AgentID
-		if original.ConfigRev == 0 && f.pol.DefaultAgentID == nil && (original.SelectionSource == "default" || original.SelectionSource == "main") && sel.Harness != f.base.Run.Harness {
-			reason = "原兼容 Agent 与当前默认 harness 不一致：" + sel.Harness
+		if id = original.Executor; id == "" {
+			if id, err = executors.ForDeclaration(tx, original.AgentID); err != nil {
+				return f, err
+			}
 		}
-	} else if f.base.Run.Harness != "" {
-		sel.Harness = f.base.Run.Harness
 	}
-	f.selected, err = executors.Resolve(tx, f.pol, sel)
-	if reason != "" {
-		f.selected.Reason = reason
-	}
-	if err != nil {
+	if f.target, err = executors.Resolve(tx, f.pol, executors.Want{Executor: id, Source: executors.SourceResume, Runner: f.base.Run.Runner, Host: s.o.Host}); err != nil {
 		return f, err
 	}
-	f.rec = f.selected.Record
-	f.declared = f.rec.Declaration.Headless != nil
 	// 挂靠消息按运行身份过滤：只有白名单内的发送者进入新会话的上下文。
 	for _, id := range slices.Compact([]string{itemID, f.link.Item}) {
-		ms, err := allowlist.Messages(tx, id, authz.LevelRun, f.selected.Snapshot.AgentID)
+		ms, err := allowlist.Messages(tx, id, authz.LevelRun, f.target.Key)
 		if err != nil {
 			return f, err
 		}
@@ -351,35 +319,26 @@ func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome
 		return Skipped, s.audit(tx, f, domain.EvHealthAlert, "chain depth exceeded",
 			map[string]any{"chain_depth": f.depth, "threshold": limit})
 	}
-	harness := f.selected.Card.Harness
-	var hl executors.Headless
-	if f.declared {
-		hl = *f.rec.Declaration.Headless
-	}
-	tier, runner := f.selected.Snapshot.PermissionCap, f.base.Run.Runner // 续接是新进程：工具档位取权限卡现在的值（§14.5）
+	t, runner := f.target, f.base.Run.Runner // 续接是新进程：工具档位取权限卡现在的值（§14.5）
 	var reason string
 	switch {
 	case f.mode != rules.ModeAuto:
 		reason = "规则已不是 auto"
-	case f.selected.Reason != "":
-		reason = f.selected.Reason
-	case f.base.Run.AgentSnapshot != nil && (f.selected.Card.Rev != f.base.Run.ConfigRev || f.rec.Rev != f.base.Run.DeclarationRev):
-		reason = "原 Agent 的配置或声明已变更，请重新开会话"
-	case harness == "":
-		reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
-	case !f.declared:
-		reason = "没有已确认的无头运行声明：" + harness
+	case f.base.Run.AgentSnapshot == nil:
+		reason = "原运行没有记下执行者，请重新开会话"
+	case t.Reason != "":
+		reason = t.Reason
+	case t.Record.Rev != f.base.Run.DeclarationRev:
+		reason = "原执行者的声明已变更，请重新开会话"
 	case f.base.Run.Launch == policy.LaunchWake: // 续接只接无头运行；唤醒回合的会话在真实主会话里（§13.6）
-		reason = "原运行是在对话里接着做的（唤醒 " + harness + "），不是无头运行"
-	case f.selected.AccessReason(tier) != "":
-		reason = f.selected.AccessReason(tier)
+		reason = "原运行是在对话里接着做的（唤醒 " + t.Name() + "），不是无头运行"
 	case runner == "task" && f.project != nil && !f.project.ExecutorAllowed(f.executor, s.o.Owner):
 		reason = "执行者 " + f.it.Assignee + " 不在项目允许的执行者名单内"
 	}
 	if reason != "" {
 		return Refused, s.refuse(tx, f, reason)
 	}
-	return s.launch(tx, f, harness, hl, sessionLost)
+	return s.launch(tx, f, sessionLost)
 }
 
 // refusedSince 报告这件事在本人这次回答之后有没有续接拒绝记录。
@@ -426,7 +385,7 @@ func materials(f facts, runDir string) (prompt, file string) {
 	prompt = head + body + "完整上下文见 " + filepath.Join(runDir, "context.md") + "。\n"
 	var b strings.Builder
 	heading := "\n## 挂靠消息\n"
-	if allowlist.RunsFiltered(f.pol, f.selected.Snapshot.AgentID) {
+	if allowlist.RunsFiltered(f.pol, f.target.Key) {
 		heading = "\n## 挂靠消息（仅白名单内的发送者）\n"
 	}
 	b.WriteString(head + body + heading)
@@ -439,8 +398,9 @@ func materials(f facts, runDir string) (prompt, file string) {
 	return prompt, b.String()
 }
 
-func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Headless, sessionLost bool) (Outcome, error) {
-	base := f.base
+func (s *Service) launch(tx *store.Tx, f facts, sessionLost bool) (Outcome, error) {
+	base, t := f.base, f.target
+	harness := t.Program()
 	runID, err := newRunID()
 	if err != nil {
 		return Skipped, err
@@ -460,28 +420,25 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 	if base.Spec.Dir != "" && base.Spec.Dir != filepath.Join(s.o.RunsDir, base.Run.ID) { // 原运行在项目检出目录：续接回到同一目录
 		dir = base.Spec.Dir
 	}
-	argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
-	argv = append(argv, f.selected.Args...)
-	argv = append(argv, hl.Output...)
-	if ms := f.rec.Declaration.MainSession; base.Run.Runner == "main_session" && ms != nil {
-		argv = append(argv, ms.Args...)
+	spec := executors.Spec{RunID: runID, RunDir: runDir, Prompt: prompt, ContextDir: s.o.ContextDir}
+	if !sessionLost && f.session != "" && base.Run.Harness == harness {
+		spec.Resume, spec.ContextName = f.session, base.ContextName()
 	}
-	argv = append(argv, hl.Access[f.selected.Snapshot.PermissionCap]...)
-	mode, sid, contextName := string(Fresh), "", ""
-	if !sessionLost && len(hl.Resume) > 0 && f.session != "" && base.Run.Harness == harness {
-		mode, sid, contextName = string(Resumed), f.session, base.ContextName()
-		argv = append(argv, expand(hl.Resume, "{session_id}", sid)...)
-	} else if len(hl.Session.Assign) > 0 {
-		sid = runID
-		argv = append(argv, expand(hl.Session.Assign, "{session_id}", sid)...)
+	built, err := t.Build(f.pol, spec)
+	if err != nil {
+		return Skipped, err
+	}
+	mode, sid, contextName := string(Fresh), built.SessionID, ""
+	if built.Resumed {
+		mode, contextName = string(Resumed), spec.ContextName
 	}
 	timeout := int(f.pol.BackgroundRunTimeout() / time.Second)
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: base.Run.Basis.RuleID}
-	snapshot := f.selected.Snapshot
-	snapshot.SelectionSource = "resume"
+	snapshot := built.Snapshot
 	run := domain.Run{AgentSnapshot: &snapshot, ID: runID, Category: domain.RunBackground, Runner: base.Run.Runner, Launch: "headless", Target: f.it.ID,
-		Harness: harness, SessionID: sid, Access: f.selected.Snapshot.PermissionCap, Basis: basis, ChainDepth: f.depth, TimeoutSec: timeout}
-	if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{OptionEnv: f.selected.Env, Command: argv, Dir: dir, RunDir: runDir, ContextName: contextName}}, s.o.Now()); err != nil {
+		Harness: harness, SessionID: sid, Access: t.Access, Basis: basis, ChainDepth: f.depth, TimeoutSec: timeout}
+	if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: built.Command, Dir: dir, RunDir: runDir, ContextName: contextName,
+		Cancel: built.Cancel, Await: built.Await}}, s.o.Now()); err != nil {
 		return Skipped, err
 	}
 	if _, err := tx.Exec(`INSERT INTO resume_run (run_id, item, base_run, answer_at, mode, session_id) VALUES (?,?,?,?,?,?)`,

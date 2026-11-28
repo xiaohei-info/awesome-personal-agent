@@ -210,7 +210,7 @@ var (
 		"create_item":          {"kind", "assignee", "parent"},
 		"create_timer":         {"after", "at", "schedule"},
 		"call_agent":           {"prompt"},
-		"start_background_run": {"runner", "prompt", "access", "cwd", "harness", "executor"},
+		"start_background_run": {"runner", "prompt", "access", "cwd", "executor"}, // harness 已取消（2026-11-28）：执行者决定声明
 	}
 )
 

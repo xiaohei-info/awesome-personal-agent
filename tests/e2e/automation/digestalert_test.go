@@ -336,7 +336,7 @@ func TestFlowDigestAlert(t *testing.T) {
 	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
 	k.step("ACT-DGA-14 准备简报实例与计划日期数据", func(t *testing.T) {
 		briefHarness = k.declareHarness("acc-stub-brief", "brief")
-		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub-brief"}`, 200)
+		k.webOK("PUT", "/v1/settings/policy", `{"default_executor":"acc-stub-brief","main_executor":"acc-stub-brief"}`, 200)
 		plan := func(title string, extra ...string) {
 			args := append([]string{"item", "add", "--kind", "task", "--title", title, "--summary", title, "--phase", "open", "--assignee", "work-host.cli",
 				"--project", e.Projects["acc-home"]}, extra...)

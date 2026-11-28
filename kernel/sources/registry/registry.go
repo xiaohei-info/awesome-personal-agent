@@ -744,18 +744,22 @@ func planHandling(tx *store.Tx, in json.RawMessage) (domain.Source, string, erro
 // ReasonCreateItemNeedsDecide 是选"直接立项"被拒的类别码：处理来源的 Agent 的权限卡没开"替我拍板"。
 const ReasonCreateItemNeedsDecide = "create_item_needs_decide"
 
-// CreateItemAllowed 报告"直接立项"现在能不能选：处理来源的 Agent（设置里指定的，没指定是默认 Agent，与来源批处理同一口径）
-// 的权限卡开了"替我拍板"。返回那个 Agent 的 id。
+// CreateItemAllowed 报告"直接立项"现在能不能选：处理来源的执行者（设置里指定的，没指定是日常执行者，与来源批处理同一口径）
+// 所属声明的权限卡开了"替我拍板"。返回那份声明（权限卡的键）。
 func CreateItemAllowed(tx *store.Tx, now time.Time) (agent string, ok bool, err error) {
 	_, pol, err := policy.Current(tx)
 	if err != nil {
 		return "", false, err
 	}
-	sel, err := executors.Resolve(tx, pol, executors.Selection{Item: pol.SourcePipeline.Agent})
-	if err != nil {
-		return "", false, err
+	id, _ := executors.Pipeline(pol)
+	if id == "" {
+		return "", false, nil
 	}
-	agent = sel.Snapshot.AgentID
+	if e, ok, err := executors.Get(tx, id); err != nil || !ok {
+		return "", false, err
+	} else {
+		agent = e.Harness // 权限卡挂在执行者所属的声明上（§14.5）
+	}
 	return agent, agent != "" && pol.Card(agent).Allows(policy.GroupDecide, now), nil
 }
 
