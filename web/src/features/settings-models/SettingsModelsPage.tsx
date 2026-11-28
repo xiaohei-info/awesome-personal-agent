@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Skeleton } from "../../app/ui";
+import { SaveState, Skeleton, type Save } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, lang, useLang, useT } from "../../app/i18n";
@@ -213,33 +213,30 @@ function PauseSwitch({ paused, save }: { paused: boolean; save: (on: boolean) =>
   );
 }
 
-function SaveLine({ busy, status, onSave, label }: { busy: boolean; status: { ok: boolean; text: string } | null; onSave: () => void; label: string }) {
+// 模型端点是例外：地址、密钥、模型名要一起对才能用，填到一半存进去会让端点坏掉（半把密钥会盖掉存着的那把），所以整块保存；
+// 反馈与别处一样是保存状态（界面设计 §6.1）。
+function SaveLine({ state, onSave, label }: { state: Save; onSave: () => void; label: string }) {
   const t = useT(strings);
   return (
-    <>
-      <div className="row">
-        <button type="button" className="primary" disabled={busy} onClick={onSave} aria-label={label}>{t.save}</button>
-      </div>
-      {status && <p role={status.ok ? "status" : "alert"}>{status.text}</p>}
-    </>
+    <div className="row">
+      <button type="button" className="primary" disabled={state === "saving"} onClick={onSave} aria-label={label}>{t.save}</button>
+      <SaveState state={state} />
+    </div>
   );
 }
 
 function useSaver(run: () => Promise<number>) {
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [state, setState] = useState<Save>("idle");
   const go = async () => {
-    setBusy(true);
-    setStatus(null);
+    setState("saving");
     try {
-      setStatus({ ok: true, text: strings[lang()].saved(await run()) });
+      await run();
+      setState("saved");
     } catch (e) {
-      setStatus({ ok: false, text: msg(e) });
-    } finally {
-      setBusy(false);
+      setState({ failed: e });
     }
   };
-  return { busy, status, save: () => void go() };
+  return { state, save: () => void go() };
 }
 
 function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; doc: Endpoint | null; paused: boolean; unsetExternal: number | null; save: (e: object | null) => Promise<number> }) {
@@ -468,7 +465,7 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
           {probe && <ProbeView r={probe} />}
         </>
       )}
-      <SaveLine busy={saver.busy} status={saver.status} onSave={saver.save} label={t.saveCard(title)} />
+      <SaveLine state={saver.state} onSave={saver.save} label={t.saveCard(title)} />
     </section>
   );
 }

@@ -126,7 +126,7 @@ function PermissionCard({ e, card, version, onSaved }: { e: Entry; card: Permiss
   };
   const everyday = PERMISSION_GROUP.filter((g) => !GRAVE_GROUP.includes(g));
   return (
-    <Card title={t.title} hint={t.lede} saveLabel={t.save} onSave={submit} dirty={dirty} id="permissions">
+    <Card title={t.title} hint={t.lede} onSave={submit} dirty={dirty} id="permissions">
       {everyday.map(row)}
       {draft.groups.decide && (
         <fieldset className="checks">

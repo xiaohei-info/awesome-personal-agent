@@ -168,9 +168,8 @@ describe("设置 › 提醒渠道：用自己的程序接入", () => {
     expect(screen.getByRole("region", { name: "old" })).toBeInTheDocument(); // 已吊销、只在段里的渠道不丢
     await userEvent.type(c.getByRole("textbox", { name: "谁能在这里替我回答" }), "4242{Enter}");
     await userEvent.click(c.getByLabelText("只能发文字"));
-    await userEvent.click(c.getByRole("button", { name: "保存slack" }));
-    await c.findByRole("status");
-    expect(s.calls.at(-1)).toEqual({ method: "PUT", url: "/v1/settings/channels/slack/answerers", body: { answerers: ["4242"] } });
+    // 卡片即改即存：勾选当场存，回答人与只能发文字一起写
+    await waitFor(() => expect(s.calls.at(-1)).toEqual({ method: "PUT", url: "/v1/settings/channels/slack/answerers", body: { answerers: ["4242"] } }));
     expect(s.puts.at(-1)!.body).toEqual({ channels: { old: { text_only: true }, slack: { text_only: true } } });
     expect(s.doc.channel_answerers.old).toEqual(["1"]);
   });

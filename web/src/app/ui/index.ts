@@ -11,3 +11,5 @@ export { ConfirmInline, ConfirmDialog } from "./Confirm";
 export { SaveState, Skeleton, EmptyState, Clamp, type Save } from "./feedback";
 export { collapse } from "./motion";
 export { ErrorBoundary } from "./ErrorBoundary";
+export { Highlight, terms } from "./Highlight";
+export { useAutoSave } from "./autosave";

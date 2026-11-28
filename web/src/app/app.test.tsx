@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -29,6 +29,11 @@ function fakeServer() {
       if (csrf !== "tok-1") return json(403, { code: "permission_denied", why: "CSRF token is missing or wrong", next: "x" });
       sessionValid = false;
       return json(200, { ok: true });
+    }
+    // 统一检索：⌘K 的事项段只认 q 里带「登录」的那一件。
+    if (url.startsWith("/v1/search?")) {
+      const q = new URL(url, "http://x").searchParams.get("q") ?? "";
+      return json(200, { hits: q.includes("登录") ? [{ type: "item", id: "itm_9", title: "修登录超时", project_name: "工作", phase: "open" }] : [], total: 0 });
     }
     return json(200, { projects: [] });
   }) as unknown as typeof fetch;
@@ -159,10 +164,28 @@ describe("登录与导航框架", () => {
 
     await userEvent.click(jump);
     await userEvent.type(screen.getByRole("combobox", { name: "跳转到页面" }), "事项");
-    expect(within(screen.getByRole("dialog")).getAllByRole("option")).toHaveLength(1);
+    // 一个页面，加最后一项「在事项里搜全部」
+    expect(within(screen.getByRole("dialog")).getAllByRole("option").map((o) => o.textContent)).toEqual(["事项", "在事项里搜“事项”的全部结果"]);
     await userEvent.keyboard("{Enter}");
     expect(await screen.findByRole("heading", { name: "事项 页面" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("⌘K 的事项段：停手后检索事项，命中的词标出来，回车打开那件事；最后一项落到事项页的检索", async () => {
+    const srv = fakeServer();
+    mount(srv.impl);
+    await signIn("correct-horse");
+    await screen.findByRole("heading", { name: "决策待办 页面" });
+    await userEvent.keyboard("{Control>}k{/Control}");
+    await userEvent.type(screen.getByRole("combobox", { name: "跳转到页面" }), "登录");
+    const dialog = screen.getByRole("dialog");
+    await waitFor(() => expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual(["修登录超时工作 · 进行中", "在事项里搜“登录”的全部结果"]));
+    const hit = within(dialog).getAllByRole("option")[0];
+    expect(hit.querySelector("mark")).toHaveTextContent("登录");
+    expect(srv.calls.filter((c) => c.path.startsWith("/v1/search?")).map((c) => c.path)).toEqual(["/v1/search?q=%E7%99%BB%E5%BD%95&type=item&limit=8"]);
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByRole("heading", { name: "事项 页面" })).toBeInTheDocument();
   });
 
   it("没有注册页面时给出空状态而不是白屏", async () => {

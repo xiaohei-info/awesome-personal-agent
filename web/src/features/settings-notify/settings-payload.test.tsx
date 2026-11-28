@@ -1,5 +1,5 @@
 import { withSession } from "../../app/test-session";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -64,9 +64,10 @@ describe("改版前后 PUT 载荷逐字段一致", () => {
     );
     const c = within(await screen.findByRole("region", { name: card }));
     if (edit) await edit(c);
-    await userEvent.click(c.getByRole("button", { name: `保存${card}` }));
-    await c.findByText("已保存"); // 矩阵卡里嵌着到点提醒的预览（role=status），按保存结果的文字找
-    expect(s.puts).toHaveLength(1);
+    // 即改即存：下拉一改就存，文字离开输入框时存
+    act(() => (document.activeElement as HTMLElement | null)?.blur?.());
+    await waitFor(() => expect(s.puts).toHaveLength(1));
+    await c.findByText("已保存");
     expect(s.puts[0].path).toBe(path);
     expect(s.puts[0].body).toEqual(body);
     expect(s.puts[0].csrf).toBe("tok-1");

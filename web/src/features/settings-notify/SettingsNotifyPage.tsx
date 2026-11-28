@@ -193,13 +193,14 @@ function Mutes({ doc, put }: { doc: Doc; put: Put }) {
   type Row = [scope: string, id: string, until: string];
   const [mutes, setMutes, dirty] = useDraft(doc.disturb.mutes, () => mutesOf(doc).filter((m) => m.scope !== "all").map((m): Row => [m.scope, m.id, toLocalInput(m.until)]));
   const setMute = (i: number, j: number, v: string) => setMutes(mutes.map((r, n) => (n === i ? (r.map((x, m) => (m === j ? v : j === 0 && m === 1 ? "" : x)) as Row) : r)));
-  const submit = () =>
-    put({
-      mutes: [
-        ...mutes.filter(([, id]) => id.trim()).map(([scope, id, until]) => ({ scope, id: id.trim(), ...(until ? { until: new Date(until).toISOString() } : {}) })),
-        ...mutesOf(doc).filter((m) => m.scope === "all"),
-      ],
-    });
+  // 即改即存：刚加的一行还没选对象时，要发的名单与已存的一样，就不发请求。
+  const submit = () => {
+    const next = [
+      ...mutes.filter(([, id]) => id.trim()).map(([scope, id, until]) => ({ scope, id: id.trim(), ...(until ? { until: new Date(until).toISOString() } : {}) })),
+      ...mutesOf(doc).filter((m) => m.scope === "all"),
+    ];
+    return JSON.stringify(next) === JSON.stringify(mutesOf(doc)) ? Promise.resolve(0) : put({ mutes: next });
+  };
   return (
     <Card title={t.mutes} hint={t.mutesHint} onSave={submit} dirty={dirty}>
       {mutes.length === 0 && <p className="sub">{t.noMutes}</p>}
@@ -210,7 +211,7 @@ function Mutes({ doc, put }: { doc: Doc; put: Put }) {
             <MuteTarget scope={scope} id={id} label={t.muteTarget(i + 1)} placeholder={t.itemId} onChange={(v) => setMute(i, 1, v)} />
           </span>
           <input type="datetime-local" aria-label={t.muteUntil(i + 1)} title={t.forever} value={until} onChange={(e) => setMute(i, 2, e.target.value)} />
-          <button type="button" aria-label={t.resume(i + 1)} onClick={() => setMutes(mutes.filter((_, n) => n !== i))}>✕</button>
+          <button type="button" data-save aria-label={t.resume(i + 1)} onClick={() => setMutes(mutes.filter((_, n) => n !== i))}>✕</button>
         </div>
       ))}
       <div>

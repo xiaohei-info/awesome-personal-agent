@@ -43,6 +43,15 @@ function ledger() {
       const phase = sp.get("phase"), q = sp.get("q");
       return json(200, { items: items.filter((i) => (!phase || i.phase === phase) && (!q || i.title.includes(q))) });
     }
+    // 统一检索（GET /search?type=item）：标题含 q 的事项，按 project、phase 筛，一页一条、带 next_cursor 以便测翻页。
+    if (url.startsWith("/v1/search?")) {
+      const sp = new URL(url, "http://x").searchParams;
+      const q = sp.get("q") ?? "", phase = sp.get("phase");
+      const all = items.filter((i) => i.title.includes(q) && (!phase || i.phase === phase));
+      const at = Number(sp.get("cursor") || 0);
+      return json(200, { hits: all.slice(at, at + 1).map((i) => ({ type: "item", id: i.id, title: i.title, phase: i.phase, kind: i.kind, project_name: "工作", matched_in: ["title", "body"], snippet: "片段里也有 " + q })),
+        total: all.length, ...(at + 1 < all.length ? { next_cursor: String(at + 1) } : {}), withheld: { dropped: 1 } });
+    }
     if (/^\/v1\/items\/[^/]+\/messages$/.test(url)) return json(200, { messages: [] });
     const tr = traceRoute(url, events);
     if (tr) return tr;
@@ -50,7 +59,7 @@ function ledger() {
     if (!m) return err(404, "not_found", "no such route");
     const it = items.find((i) => i.id === m[1]);
     if (!it) return err(404, "not_found", "item not found");
-    if (method === "GET") return json(200, { item: it, relations: rels.filter((r) => r.from === it.id || r.to === it.id) });
+    if (method === "GET") return json(200, { item: it, relations: rels.filter((r) => r.from === it.id || r.to === it.id), progress: it.id === "item_a" ? [{ id: "p1", text: "讨论里提到 item 的进展", actor: "owner", at: "2030-01-02T00:00:00Z" }] : [] });
     if (h["If-Match"] && Number(h["If-Match"]) !== it.version) return err(409, "conflict", "item version changed");
     if (m[2] === "relations") {
       rels.push({ type: body.type, from: it.id, to: body.to });
@@ -333,15 +342,33 @@ describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
     expect(screen.getByText("第 1–50 条，共 57 条")).toBeInTheDocument();
   });
 
-  it("搜索框、排序与计划日期筛选都走服务端参数", async () => {
+  it("排序与计划日期筛选走服务端参数", async () => {
     const l = ledger();
     mount(l.impl);
     await screen.findByRole("link", { name: "item-b" });
-    await userEvent.type(screen.getByLabelText("搜索"), "item-a");
-    await waitFor(() => expect(screen.queryByRole("link", { name: "item-b" })).not.toBeInTheDocument());
-    expect(screen.getByRole("link", { name: "item-a" })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("排序"), "planned_for");
     await userEvent.type(screen.getByLabelText("计划日期"), "2026-05-01");
-    await waitFor(() => expect(l.calls.some((c) => c.path === "/v1/items?q=item-a&sort=planned_for&planned_for=2026-05-01")).toBe(true));
+    await waitFor(() => expect(l.calls.some((c) => c.path === "/v1/items?sort=planned_for&planned_for=2026-05-01")).toBe(true));
+  });
+
+  it("搜索框有字时走统一检索：命中的词标出，阶段与变更时间交给服务端，一页往后翻，展开列出含命中词的段落", async () => {
+    const l = ledger();
+    mount(l.impl);
+    await screen.findByRole("link", { name: "item-b" });
+    await userEvent.type(screen.getByLabelText("搜索"), "item");
+    const results = await screen.findByRole("list", { name: "检索结果" });
+    expect(screen.getByText(/共 2 件/)).toHaveTextContent("另有 1 件已放弃");
+    // 标出命中词的 <mark> 在 jsdom 里会让无障碍名多出空格，按地址找链接。
+    const first = results.querySelector('a[href="/items/item_a"]')!;
+    expect(first).toHaveTextContent("item-a");
+    expect(first.querySelector("mark")).toHaveTextContent("item");
+    await userEvent.click(within(results).getByRole("button", { name: "展开" }));
+    expect(await within(results).findByText(/命中在：标题、正文/)).toBeInTheDocument();
+    expect(await within(results).findByText(/讨论里提到/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await waitFor(() => expect(screen.getByRole("list", { name: "检索结果" }).querySelector('a[href="/items/item_b"]')).toHaveTextContent("item-b"));
+    await userEvent.type(screen.getByLabelText("变更起"), "2030-01-01");
+    await waitFor(() => expect(l.calls.some((c) => c.path === "/v1/search?q=item&type=item&limit=20&after=2030-01-01")).toBe(true));
+    expect(l.calls.some((c) => c.path.startsWith("/v1/items?q="))).toBe(false);
   });
 });

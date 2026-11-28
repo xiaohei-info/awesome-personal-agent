@@ -288,11 +288,14 @@ describe("导入条目只显示到日（flow-web-import ACT-WIM-04）", () => {
 
   it("precision 为 day 的进展只显示日期，精确时刻的显示时刻，按 at 先后排列", async () => {
     mount(backend({ items: [{ id: "item_i", phase: "done", version: 2, kind: "task", title: "T-0001" }], progress: { item_i: progress } }).impl, "/items/item_i");
-    const rows = within(await screen.findByRole("list", { name: "进展" })).getAllByRole("listitem");
-    expect(rows.map((r) => r.textContent?.slice(0, 3))).toEqual(["约定一", "约定二", "精确一", "约定三", "精确二"]);
-    for (const i of [0, 1, 3]) expect(rows[i].textContent).not.toMatch(/\d{1,2}:\d{2}/);
-    for (const i of [2, 4]) expect(rows[i].textContent).toMatch(/\d{1,2}:\d{2}/);
-    expect(rows[0].textContent).toContain(new Date(noon("2030-02-01")).toLocaleDateString("zh-CN"));
+    // 讨论流里的每条发言：正文与时间分开读（作者名在前）。
+    const rows = within(await screen.findByRole("list", { name: "讨论" })).getAllByRole("listitem");
+    const text = (r: HTMLElement) => r.querySelector(".comment-text")!.textContent!;
+    const time = (r: HTMLElement) => r.querySelector("time")!.textContent!;
+    expect(rows.map((r) => text(r).slice(0, 3))).toEqual(["约定一", "约定二", "精确一", "约定三", "精确二"]);
+    for (const i of [0, 1, 3]) expect(time(rows[i])).not.toMatch(/\d{1,2}:\d{2}/);
+    for (const i of [2, 4]) expect(time(rows[i])).toMatch(/\d{1,2}:\d{2}/);
+    expect(time(rows[0])).toContain(new Date(noon("2030-02-01")).toLocaleDateString("zh-CN"));
   });
 
   it("经过里 precision 为 day 的阶段变更只显示日期，其余显示时刻，且按 at 排列", async () => {

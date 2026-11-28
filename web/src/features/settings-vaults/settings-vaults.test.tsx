@@ -1,5 +1,5 @@
 import { withSession } from "../../app/test-session";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -36,7 +36,11 @@ function mount(fetchImpl: typeof fetch) {
 }
 const CARD = "我的笔记库";
 const card = async () => within(await screen.findByRole("region", { name: CARD }));
-const save = async () => userEvent.click((await card()).getByRole("button", { name: `保存${CARD}` }));
+// 卡片即改即存（界面设计 §6.1）：删行、换打开方式当场存，文字离开输入框时存。save 让焦点离开输入框，再等这一轮存完。
+const save = async () => {
+  act(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+};
 
 beforeEach(() => sessionStorage.clear());
 
@@ -45,7 +49,7 @@ describe("设置 › 笔记库", () => {
     mount(server([]).impl);
     expect(await screen.findByText("把库里的文档挂到事项上，点链接回笔记应用读原文。")).toBeVisible();
   });
-  it("ACT-WVM-01: 每库一行可增删改；保存前先看到用示例路径渲染的打开地址；PUT 整体替换", async () => {
+  it("ACT-WVM-01: 每库一行可增删改，即改即存；先看到用示例路径渲染的打开地址；PUT 整体替换", async () => {
     const s = server([{ name: "notes", open_url: "app://open?v={vault}&f={path}" }, { name: "old", open_url: "https://x.example/{path}" }]);
     mount(s.impl);
     const c = await card();
@@ -59,10 +63,9 @@ describe("设置 › 笔记库", () => {
     await userEvent.click(c.getByRole("button", { name: "删除库 2" }));
     await userEvent.click(c.getByRole("button", { name: "＋ 添加笔记库" }));
     await userEvent.type(c.getByLabelText("库2 名称"), " a b ");
-    expect(s.puts).toHaveLength(0); // 保存前没有写任何东西
     await save();
-    await c.findByRole("status");
-    expect(s.puts).toEqual([{ vaults: [{ name: "notes", open_url: "https://wiki.example/{vault}/{path}" }, { name: "a b", open_url: OBSIDIAN }] }]);
+    await waitFor(() => expect(s.puts.at(-1)).toEqual({ vaults: [{ name: "notes", open_url: "https://wiki.example/{vault}/{path}" }, { name: "a b", open_url: OBSIDIAN }] }));
+    expect(await c.findByText("已保存")).toBeInTheDocument();
   });
 
   it("新建默认用 Obsidian：只填库名，地址自动生成；可改成只登记名字", async () => {
@@ -76,9 +79,8 @@ describe("设置 › 笔记库", () => {
     expect(c.getByLabelText("库2 示例地址")).toHaveTextContent("obsidian://open?vault=%E5%B7%A5%E4%BD%9C%20%E7%AC%94%E8%AE%B0&file=folder%2Fexample%20note.md");
     await userEvent.selectOptions(c.getByLabelText("库1 打开方式"), "none");
     expect(c.queryByLabelText("库1 示例地址")).toBeNull();
-    await save();
-    await c.findByRole("status");
-    expect(s.puts).toEqual([{ vaults: [{ name: "same", open_url: "" }, { name: "工作 笔记", open_url: OBSIDIAN }] }]);
+    // 换打开方式当场存，连同刚填的新库一起整体替换
+    await waitFor(() => expect(s.puts).toEqual([{ vaults: [{ name: "same", open_url: "" }, { name: "工作 笔记", open_url: OBSIDIAN }] }]));
   });
 
   it("预览与服务端同一编码规则（open-url-cases.json，内核测试跑同一份）", () => {
@@ -91,20 +93,19 @@ describe("设置 › 笔记库", () => {
     const c = await card();
     await userEvent.click(c.getByRole("button", { name: "删除库 1" }));
     expect(c.getByText("还没有登记笔记库")).toBeInTheDocument();
-    await save();
-    await c.findByRole("status");
-    expect(s.puts).toEqual([{ vaults: [] }]);
+    await waitFor(() => expect(s.puts).toEqual([{ vaults: [] }])); // 删行当场存
   });
 
   it("本地拒绝空名与重名：不发请求，原因显示在卡片里", async () => {
     const s = server([{ name: "a", open_url: "app://a" }, { name: "a", open_url: "app://b" }]);
     mount(s.impl);
     const c = await card();
-    await save();
-    expect(await c.findByRole("alert")).toHaveTextContent("库名「a」重复");
     await userEvent.clear(c.getByLabelText("库1 名称"));
     await save();
-    expect(await c.findByRole("alert")).toHaveTextContent("第 1 行的库名不能为空");
+    expect(await c.findByText(/没保存：第 1 行的库名不能为空/)).toBeInTheDocument();
+    await userEvent.type(c.getByLabelText("库1 名称"), "a");
+    await save();
+    expect(await c.findByText(/没保存：库名「a」重复/)).toBeInTheDocument();
     expect(s.puts).toHaveLength(0);
   });
 
@@ -116,7 +117,7 @@ describe("设置 › 笔记库", () => {
     await userEvent.type(c.getByLabelText("库1 名称"), "bad");
     await userEvent.type(c.getByLabelText("库1 自定义地址"), "javascript:alert(1)");
     await save();
-    expect(await c.findByRole("alert")).toHaveTextContent("open_url protocol is not allowed");
+    expect(await c.findByText(/没保存：.*open_url protocol is not allowed/)).toBeInTheDocument();
     expect(c.getByLabelText("库1 自定义地址")).toHaveValue("javascript:alert(1)");
   });
 

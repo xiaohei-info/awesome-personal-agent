@@ -109,7 +109,7 @@ describe("设置 › 模型", () => {
       await userEvent.clear(f);
       if (bad) await userEvent.type(f, bad);
       await save("写作模型");
-      await g.findByText("资料上限填 2000 到 500000 之间的整数（token）");
+      await g.findByText("没保存：资料上限填 2000 到 500000 之间的整数（token）");
       expect(s.puts, bad).toHaveLength(0);
       if (bad) expect(f).toHaveValue(Number(bad));
     }
@@ -309,7 +309,7 @@ describe("设置 › 模型", () => {
     expect(j.getByLabelText("超时（秒）")).toHaveValue(10);
     await userEvent.type(j.getByLabelText(/地址/), "http://cls.stub/judge");
     await save("打分模型");
-    expect(await j.findByRole("alert")).toHaveTextContent("配置这个端点时必选");
+    expect(await j.findByText(/没保存：.*配置这个端点时必选/)).toBeInTheDocument();
     expect(s.puts).toHaveLength(0);
     await userEvent.click(j.getByRole("radio", { name: /本机/ }));
     await save("打分模型");
@@ -331,7 +331,7 @@ describe("设置 › 模型", () => {
     await userEvent.type(url, "not a url");
     await userEvent.type(g.getByLabelText("API 密钥"), "k");
     await save("写作模型");
-    expect(await g.findByRole("alert")).toHaveTextContent("bad endpoint url");
+    expect(await g.findByText(/没保存：.*bad endpoint url/)).toBeInTheDocument();
     expect(url).toHaveValue("not a url");
 
   });

@@ -212,16 +212,20 @@ describe("来源列表：类型、周期、状态与读取统计", () => {
     expect(screen.getByRole("button", { name: "接入第一个来源" })).toBeInTheDocument();
   });
 
-  it("启停：PATCH enabled 带 CSRF，界面以服务端回读为准", async () => {
+  it("启停：开关一拨就 PATCH enabled，带 CSRF，界面以服务端回读为准", async () => {
     const b = backend({ sources: [{ ...rss }] });
     mount(b.impl);
-    await userEvent.click(within((await row("新闻订阅")).getByRole("group", { name: "操作 新闻订阅" })).getByRole("button", { name: "停用" }));
+    // 启用是一个开关，即改即存
+    const sw = within((await row("新闻订阅")).getByRole("group", { name: "操作 新闻订阅" })).getByRole("switch", { name: "启用 新闻订阅" });
+    expect(sw).toBeChecked();
+    await userEvent.click(sw);
+    await waitFor(() => expect(b.calls.some((c) => c.method === "PATCH")).toBe(true));
     const patch = b.calls.find((c) => c.method === "PATCH")!;
     expect(patch.path).toBe("/v1/sources/src_rss");
     expect(patch.body).toEqual({ enabled: false });
     expect(patch.csrf).toBe("tok-1");
     expect(await (await row("新闻订阅")).findByText("已停用")).toBeInTheDocument();
-    await userEvent.click((await row("新闻订阅")).getByRole("button", { name: "启用" }));
+    await userEvent.click((await row("新闻订阅")).getByRole("switch", { name: "启用 新闻订阅" }));
     await waitFor(async () => expect((await row("新闻订阅")).queryByText("已停用")).not.toBeInTheDocument());
   });
 });
@@ -242,7 +246,7 @@ describe("接收密钥与入站记录重放", () => {
     await userEvent.click(await screen.findByRole("button", { name: "创建或更换密钥" }));
     expect(await screen.findByTestId("webhook-secret")).toHaveTextContent("apa_whk_SECRET123");
     expect(screen.getByText("/ingest/src_hook")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("已创建 · 只显示这一次");
+    expect(screen.getByText(/已创建 · 只显示这一次/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "复制" })).toHaveLength(2);
     expect(b.calls.find((c) => c.path === "/v1/sources/src_hook/webhook")!.csrf).toBe("tok-1");
     await userEvent.click(screen.getByRole("button", { name: "创建或更换密钥" }));
@@ -438,7 +442,7 @@ describe("只口头提醒（§9.3）", () => {
     const b = backend({ sources: [], projects: [{ id: "prj_a", name: "家务" }], captures: [{ id: "capture:prj_a", name: "", type: "capture", enabled: true, handling_mode: "normal" }] });
     mount(b.impl);
     const li = await row("对话捕获 · 家务");
-    expect(li.queryByRole("button", { name: "停用" })).not.toBeInTheDocument();
+    expect(li.queryByRole("switch")).not.toBeInTheDocument();
     await userEvent.click(li.getByRole("button", { name: "详情" }));
     await userEvent.click(within(await li.findByRole("group", { name: "处理方式" })).getByRole("button", { name: "只口头提醒" }));
     await waitFor(() => expect(b.calls.find((c) => c.method === "PATCH")).toMatchObject({ path: "/v1/sources/capture%3Aprj_a", body: { handling_mode: "remind_only" } }));

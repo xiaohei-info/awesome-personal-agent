@@ -59,7 +59,8 @@ describe("今天页（flow-web-workbench）", () => {
 
   // 对齐工作台「今日焦点」的行上按钮：排时间、交给助手（APA 里是交给 Agent）、完成，另加记进展。
   // 写入后重读那一件（GET /items/{id}），再静默重取 /today 按新分组就地重排；替身的 /today 按当前状态算（未结束、计划不晚于 TODAY）。
-  const TODAY = new Date().toISOString().slice(0, 10);
+  // 本机日期（页面没取到主机时钟时按浏览器本地的今天算）；用 UTC 的日期在本地午夜到 8 点之间会差一天。
+  const TODAY = new Date().toLocaleDateString("sv-SE");
   function live(list: ReturnType<typeof mk>[], groups: { overdue?: string[]; high?: string[] } = {}) {
     const items = new Map(list.map((i) => [i.id, { ...i } as Record<string, any>]));
     const progress: Record<string, { id: string; text: string; at: string }[]> = {};

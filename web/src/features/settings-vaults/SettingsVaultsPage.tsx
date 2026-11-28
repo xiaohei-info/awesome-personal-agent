@@ -83,7 +83,7 @@ function VaultsCard({ doc, save }: { doc: Doc; save: (v: Vault[]) => Promise<num
                 <option value="none">{t.nameOnly}</option>
                 {mode === "custom" && <option value="custom">{t.custom}</option>}
               </select>
-              <button type="button" aria-label={t.del(i + 1)} onClick={() => setRows(rows.filter((_, n) => n !== i))}>✕</button>
+              <button type="button" data-save aria-label={t.del(i + 1)} onClick={() => setRows(rows.filter((_, n) => n !== i))}>✕</button>
             </div>
             <details open={mode === "custom"}>
               <summary>{t.advanced}</summary>

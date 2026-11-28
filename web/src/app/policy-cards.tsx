@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { SaveState, Skeleton, useAutoSave } from "./ui";
 import { useSession } from "./session";
 import { PageHead } from "./page";
 import { errorText as msg, lang, useT } from "./i18n";
@@ -52,7 +53,7 @@ export function PolicyPage({ title, lede, error, ready, onRetry, children }: {
         <button onClick={onRetry}>{t.retry}</button>
       </main>
     );
-  if (!ready) return <main><p role="status">{t.loading}</p></main>;
+  if (!ready) return <main><Skeleton shape="card" label={t.loading} /></main>;
   return (
     <main>
       <PageHead lede={lede}>{title}</PageHead>
@@ -62,37 +63,21 @@ export function PolicyPage({ title, lede, error, ready, onRetry, children }: {
 }
 
 /**
- * 一张可单独保存的卡片（界面设计 §6.1「整块保存」）：标题即说明，至多一条短提示；保存成功就地写「已保存」，出错写原因。
- * 给了 dirty 时：没有改动按钮不可点，有改动时标题旁标「未保存」，离开页面前先问一句（useLeaveGuard）。
+ * 一张设置卡片（界面设计 §6.1「即改即存」）：标题即说明，至多一条短提示；没有保存按钮，改了就存，标题旁是保存状态
+ * （保存中 → 已保存，失败常驻写原因，草稿保留，下次改动再试）。勾选、单选、下拉、分段按钮与标签的增删当场存；
+ * 文字输入停手 800ms 或离开输入框时存。给了 dirty 时只在有改动时存，有改动没存上时离开页面先问一句（useLeaveGuard）。
+ * 卡片里另有自己动作的按钮（如吊销钥匙）不触发保存；要随点随存的按钮标 data-save。
  */
-export function Card({ title, hint, onSave, dirty, id, saveLabel, children }: {
-  title: string; hint?: string; onSave: () => Promise<number>; dirty?: boolean; id?: string; saveLabel?: string; children: ReactNode;
+export function Card({ title, hint, onSave, dirty, id, children }: {
+  title: string; hint?: string; onSave: () => Promise<unknown>; dirty?: boolean; id?: string; children: ReactNode;
 }) {
-  const t = useT(shared);
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const auto = useAutoSave(onSave, dirty);
   useDirty(!!dirty);
-  async function save() {
-    setBusy(true);
-    setStatus(null);
-    try {
-      await onSave();
-      setStatus({ ok: true, text: t.saved() });
-    } catch (e) {
-      setStatus({ ok: false, text: msg(e) });
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
-    <section aria-label={title} className="panel stack" id={id}>
-      <h2>{title}{dirty && <span className="unsaved">{t.unsaved}</span>}</h2>
+    <section aria-label={title} className="panel stack" id={id} {...auto.on}>
+      <h2>{title}<SaveState state={auto.state} /></h2>
       {children}
       {hint && <p className="sub">{hint}</p>}
-      <div>
-        <button type="button" className="primary" disabled={busy || dirty === false} onClick={() => void save()} aria-label={t.saveCard(title)}>{saveLabel ?? t.save}</button>
-        {status && <span role={status.ok ? "status" : "alert"} className={"saved-note" + (status.ok ? "" : " bad")}>{status.text}</span>}
-      </div>
     </section>
   );
 }
