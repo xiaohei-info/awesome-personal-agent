@@ -37,7 +37,9 @@ export function thread(said: Said[], entries: TraceEntry[]): (Comment | TraceEnt
     if (parent && parent !== c) parent.kids.push(c);
     else top.push(c);
   }
-  return top.sort((a, b) => Date.parse(isComment(a) ? a.p.at : a.at) - Date.parse(isComment(b) ? b.p.at : b.at));
+  // 同一时刻的发言排在它引出的派活行之前（@ 一条发言与它建出的子事项同一时刻落账）。
+  const at = (x: Comment | TraceEntry) => Date.parse(isComment(x) ? x.p.at : x.at);
+  return top.sort((a, b) => at(a) - at(b) || Number(!isComment(a)) - Number(!isComment(b)));
 }
 const isComment = (x: Comment | TraceEntry): x is Comment => "kids" in x;
 const OWNER = "owner";
@@ -96,7 +98,12 @@ export function Discussion({ item, said, rev, onPosted }: { item: Item; said: Sa
 function useAuthor() {
   const t = useT(strings);
   const credential = useNames("credential");
-  return (actor?: string) => (actor === OWNER ? t.you : actor ? credential(actor) : t.agentFallback);
+  // 凭据还没归到哪个 Agent 时名单里只有它的 id：写「Agent」，不露 id（悬停在头像行上有全 id）。
+  return (actor?: string) => {
+    if (actor === OWNER) return t.you;
+    const n = actor ? credential(actor) : "";
+    return n && n !== actor ? n : t.agentFallback;
+  };
 }
 
 function Author({ actor }: { actor?: string }) {
@@ -104,7 +111,7 @@ function Author({ actor }: { actor?: string }) {
   const name = useAuthor()(actor);
   const owner = actor === OWNER;
   return (
-    <span className="author">
+    <span className="author" title={owner ? undefined : actor}>
       <span className="avatar" data-kind={owner ? "owner" : "agent"} aria-hidden="true">{[...name][0] ?? "?"}</span>
       <b>{name}</b>
       {!owner && <span className="badge plain">{t.agentTag}</span>}
