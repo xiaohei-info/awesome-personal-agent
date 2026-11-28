@@ -485,6 +485,12 @@ func (q *Queue) Backlog(tx *store.Tx) ([]domain.Delivery, error) {
 	return q.list(tx, "WHERE state IN ('pending','claimed') AND route != ? ORDER BY created_at, rowid", RouteInject)
 }
 
+// Withdraw 撤回一条还没送出的投递：没被领取的（pending），或退回 Web 而本人还没读的；已领取、已送达的不动。
+func (q *Queue) Withdraw(tx *store.Tx, id string) (int64, error) {
+	return tx.Exec(`UPDATE delivery_delivery SET state = 'superseded', lease_until = 0
+		WHERE id = ? AND (state = 'pending' OR state = 'fallback_web' AND read_at = 0)`, id)
+}
+
 // SupersedeID 作废一条还没被领取的投递（pending，含退避等待中的），返回条数；已领取、已送达或已终结的不动。
 // 不属于单个事项的合并投递在成员变化时由触达调用。
 func (q *Queue) SupersedeID(tx *store.Tx, id string) (int64, error) {

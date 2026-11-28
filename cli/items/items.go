@@ -1,5 +1,5 @@
 // Package items 是 apa 的事项命令组（附录 B.1「事项」「上下文」）：
-// item show/list/add/update/transition/relate、propose、inbox。
+// item show/list/add/update/comment/thread/transition/relate、propose、inbox。
 //
 // 这里只做参数到 HTTP 请求的搬运：校验、授权、版本、幂等、到期时钟全部由内核判定，
 // 内核的错误体与退出码原样透出；不直接访问存储。
@@ -35,7 +35,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> [--part body|progress|messages --offset --full] | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --limit --cursor --full] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> [--part body|progress|messages --offset --full] | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --limit --cursor --full] | add | update <id> | comment <id> --text <t> [--reply-to <comment id>] [--on <YYYY-MM-DD>] | thread <id> [--before <n> --limit <n> --full] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 const (
 	todayUsage = "usage: apa today [--full]"
@@ -45,13 +45,14 @@ const (
 // 各写子命令的完整用法：参数错误时放进 next，-h / --help 时整段输出。
 const (
 	updateUsage     = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --daily-at <HH:MM, empty clears; a planned date clears it> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
-	progressUsage   = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>]"
+	commentUsage    = "usage: apa item comment <id> --text <text> [--reply-to <comment id on the same item, from apa item thread>] [--on <YYYY-MM-DD, not later than today>]"
+	threadUsage     = "usage: apa item thread <id> [--before <before from the previous page>] [--limit <1-100, default 20>] [--full]; newest last, the page stays within the read budget; without --full each entry omits its raw events (steps)"
 	transitionUsage = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <note or result evidence> --version <n>]"
 	relateUsage     = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove]"
 )
 
 // itemHelp 是 `apa item … --help` 的输出：总览加各写子命令的全部参数。
-var itemHelp = strings.Join([]string{itemUsage, addUsage("item add"), updateUsage, progressUsage, transitionUsage, relateUsage}, "\n")
+var itemHelp = strings.Join([]string{itemUsage, addUsage("item add"), updateUsage, commentUsage, threadUsage, transitionUsage, relateUsage}, "\n")
 
 func addUsage(name string) string {
 	u := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --planned-slot <HH:MM - HH:MM> --daily-at <HH:MM, no date> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
@@ -75,8 +76,10 @@ func item(c *client.Ctx, args []string) error {
 		return add(c, args, "item add")
 	case "update":
 		return write(c, args, "update", "PATCH", "")
-	case "progress":
-		return write(c, args, "progress", "POST", "/progress")
+	case "comment":
+		return write(c, args, "comment", "POST", "/comments")
+	case "thread":
+		return thread(c, args)
 	case "transition":
 		return write(c, args, "transition", "POST", "/transition")
 	case "relate":
@@ -219,9 +222,9 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	case "update":
 		fields = itemFields[1:]
 		hint = updateUsage
-	case "progress":
-		fields = []string{"text", "on"}
-		hint = progressUsage
+	case "comment":
+		fields = []string{"text", "on", "reply-to"}
+		hint = commentUsage
 	case "transition":
 		fields = []string{"to", "reason", "waiting-on"}
 		hint = transitionUsage
@@ -238,7 +241,7 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	if err != nil {
 		return err
 	}
-	if sub == "progress" && body["text"] == nil {
+	if sub == "comment" && body["text"] == nil {
 		return usage("--text is required", hint)
 	}
 	if sub == "transition" {
@@ -385,6 +388,29 @@ func show(c *client.Ctx, args []string) error {
 		next = append(next, self+" --part messages")
 	}
 	out["next"] = append(next, "apa why "+id)[:min(3, len(next)+1)]
+	return c.Print(out)
+}
+
+// thread：GET /items/{id}/thread，讨论流的一页；页大小与字数上限由内核守住。
+func thread(c *client.Ctx, args []string) error {
+	f, bools := newForm("item thread", []string{"before", "limit"}, nil, []string{"full"})
+	id, err := f.parse(args, true, threadUsage)
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	for n, v := range f.vals {
+		if *v != "" {
+			q.Set(n, *v)
+		}
+	}
+	if *bools["full"] {
+		q.Set("full", "1")
+	}
+	var out map[string]any
+	if err := c.Do(bg, "GET", "/items/"+url.PathEscape(id)+"/thread?"+q.Encode(), nil, &out); err != nil {
+		return err
+	}
 	return c.Print(out)
 }
 

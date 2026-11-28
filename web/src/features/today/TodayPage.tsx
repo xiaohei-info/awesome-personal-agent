@@ -322,7 +322,7 @@ function Stale({ items, act }: { items: Item[]; act: (fn: () => Promise<unknown>
       const failed: string[] = [];
       for (const it of items.filter((i) => picked.has(i.id))) {
         try {
-          if (choice === "continue") await api.post(itemPath(it) + "/progress", { text: t.continueText });
+          if (choice === "continue") await api.post(itemPath(it) + "/comments", { text: t.continueText });
           else if (choice === "reschedule") await api.patch(itemPath(it), { planned_for: date }, ifMatch(it));
           else await api.post(itemPath(it) + "/transition", { to: "dropped", reason: t.dropReason }, ifMatch(it));
         } catch (e) { failed.push(t.failed(it.title, msg(e))); }

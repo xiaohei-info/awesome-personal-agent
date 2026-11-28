@@ -18,7 +18,7 @@ per-process memory of what the session delegated: which item a dispatch belongs 
   while the dispatch is still unattached. Other terminal commands are not reports; `apa ...` itself is never captured.
 
 `completed` / exit 0 reports `done` with the result as summary and the evidence found in it (`--pr`, `--commit`, `--branch`, `--link`);
-with none found it reports `progress` instead. Anything else reports `blocked` with the error.
+with none found the summary itself is the result (still `done`). Anything else reports `blocked` with the error.
 The same target and outcome is reported once per process; the kernel also gets an idempotency key. The kernel writes each report
 on a delegated item as progress on its parent too.
 

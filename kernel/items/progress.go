@@ -34,20 +34,41 @@ func Today(now time.Time) string { return now.In(time.Local).Format(dateLayout) 
 // ---- 进展 ----
 
 type progressIn struct {
-	ID   string  `json:"id"`
-	Text string  `json:"text"`
-	On   *string `json:"on"`
+	ID      string  `json:"id"`
+	Text    string  `json:"text"`
+	On      *string `json:"on"`
+	ReplyTo string  `json:"reply_to"`
 }
 
 func insertProgress(tx *store.Tx, item string, p domain.Progress) error {
-	_, err := tx.Exec(`INSERT INTO item_progress (id, item, text, on_date, actor, at, precision) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, item, p.Text, p.On, p.Actor, p.At.UnixNano(), p.Precision)
+	_, err := tx.Exec(`INSERT INTO item_progress (id, item, text, on_date, actor, at, precision, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, item, p.Text, p.On, p.Actor, p.At.UnixNano(), p.Precision, p.ReplyTo)
 	return err
+}
+
+// CheckReplyTo 要求 reply 是事项 item 上已有的一条进展（讨论区的回复只挂在同一事项内，§6.3）；空串表示不是回复。
+func CheckReplyTo(tx *store.Tx, item, reply string) error {
+	if reply == "" {
+		return nil
+	}
+	r, err := tx.Query(`SELECT 1 FROM item_progress WHERE id = ? AND item = ?`, reply, item)
+	if err != nil {
+		return err
+	}
+	found := r.Next()
+	r.Close()
+	if err := r.Err(); err != nil {
+		return err
+	}
+	if !found {
+		return domain.NewError(domain.CodeInvalidRequest, "reply_to "+reply+" is not a comment on item "+item, "read the thread with apa item thread "+item+" and reply to one of its comments")
+	}
+	return nil
 }
 
 // Progress 按记录先后返回事项的进展；没有时返回 nil。
 func Progress(tx *store.Tx, item string) ([]domain.Progress, error) {
-	r, err := tx.Query(`SELECT id, text, on_date, actor, at, precision FROM item_progress WHERE item = ? ORDER BY at, id`, item)
+	r, err := tx.Query(`SELECT id, text, on_date, actor, at, precision, reply_to FROM item_progress WHERE item = ? ORDER BY at, id`, item)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +77,7 @@ func Progress(tx *store.Tx, item string) ([]domain.Progress, error) {
 	for r.Next() {
 		var p domain.Progress
 		var at int64
-		if err := r.Scan(&p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision); err != nil {
+		if err := r.Scan(&p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision, &p.ReplyTo); err != nil {
 			return nil, err
 		}
 		p.At = time.Unix(0, at).UTC()
@@ -76,7 +97,7 @@ func ProgressIn(tx *store.Tx, from, to string) (map[string][]domain.Progress, er
 	if err != nil {
 		return nil, err
 	}
-	r, err := tx.Query(`SELECT item, id, text, on_date, actor, at, precision FROM item_progress
+	r, err := tx.Query(`SELECT item, id, text, on_date, actor, at, precision, reply_to FROM item_progress
 		WHERE (on_date <> '' AND on_date BETWEEN ? AND ?) OR (on_date = '' AND at >= ? AND at < ?) ORDER BY at, id`,
 		from, to, f.UnixNano(), t.AddDate(0, 0, 1).UnixNano())
 	if err != nil {
@@ -88,7 +109,7 @@ func ProgressIn(tx *store.Tx, from, to string) (map[string][]domain.Progress, er
 		var item string
 		var p domain.Progress
 		var at int64
-		if err := r.Scan(&item, &p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision); err != nil {
+		if err := r.Scan(&item, &p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision, &p.ReplyTo); err != nil {
 			return nil, err
 		}
 		p.At = time.Unix(0, at).UTC()
@@ -117,15 +138,17 @@ func (s *svc) progress() command.Spec {
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) []authz.Action {
 			return editActions(boundOr(tx, c, o), false, false)
 		},
-		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
 			if blank(v.Text) {
 				return invalid("text is required")
 			}
 			if v.On != nil {
-				return checkDate("on", *v.On)
+				if err := checkDate("on", *v.On); err != nil {
+					return err
+				}
 			}
-			return nil
+			return CheckReplyTo(tx, v.ID, v.ReplyTo)
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
@@ -141,7 +164,7 @@ func (s *svc) progress() command.Spec {
 				return nil, err
 			}
 			// id 随条数递增：同一时刻追加的几条仍按写入先后排序。
-			p := domain.Progress{ID: fmt.Sprintf("%s.p%06d", cur.ID, len(prev)+1), Text: v.Text, Actor: c.Caller.Actor.Principal, At: c.Now().UTC()}
+			p := domain.Progress{ID: fmt.Sprintf("%s.p%06d", cur.ID, len(prev)+1), Text: v.Text, ReplyTo: v.ReplyTo, Actor: c.Caller.Actor.Principal, At: c.Now().UTC()}
 			if v.On != nil {
 				p.On = *v.On
 			}

@@ -246,6 +246,11 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	if err != nil {
 		return err
 	}
+	if it.Kind == domain.KindDelegation && it.Phase.Terminal() {
+		if err := a.withdrawStuck(tx, id); err != nil {
+			return err
+		}
+	}
 	ask := it.Ask
 	if ask != nil && ask.Resolution != nil && answeredByPerson(ask.Resolution) {
 		// 本人直接回答的那条投递记 acknowledged，而不是被随后的作废盖成 superseded

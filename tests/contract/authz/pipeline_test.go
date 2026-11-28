@@ -117,8 +117,8 @@ func TestDelegateEditsAnyItemOnTierOne(t *testing.T) {
 	}
 }
 
-// 回执：委派子事项的回执是一档，任何 delegate 钥匙都能报；报 done 无结果证据对任何 kind 都是 2 且事项不变。
-// 结果证据（pr、commit、link）与本人原话无关，照旧必填。
+// 回执：委派子事项的回执是一档，任何 delegate 钥匙都能报；委派子事项报 done 以摘要为完成依据（2026-11-28），
+// 其他事项报 done 无结果证据是 2 且事项不变。
 func TestDelegateReceiptsAndDoneEvidence(t *testing.T) {
 	e := setup(t)
 	e.issue("DEL2", auth.Spec{Kind: auth.Delegate})
@@ -135,12 +135,8 @@ func TestDelegateReceiptsAndDoneEvidence(t *testing.T) {
 	if rec := report("DEL2", "progress", ""); rec.Code != 200 {
 		t.Fatalf("another delegate's progress: %d %s", rec.Code, rec.Body)
 	}
-	wantReject(t, report("DEL", "done", ""), domain.ExitUsage)
-	if p := e.get(child.ID).Phase; p != domain.PhaseOpen {
-		t.Fatalf("done without result evidence moved the child to %s", p)
-	}
-	if rec := report("DEL", "done", `,"evidence":{"pr":"https://x/pr/1"}`); rec.Code != 200 {
-		t.Fatalf("done with result: %d %s", rec.Code, rec.Body)
+	if rec := report("DEL", "done", ""); rec.Code != 200 || e.get(child.ID).Phase != domain.PhaseDone {
+		t.Fatalf("done on its summary: %d %s", rec.Code, rec.Body)
 	}
 	for _, en := range e.events(domain.EvDelegationReported) {
 		if en.Event.Actor.OnBehalfOf != "" {

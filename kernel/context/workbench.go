@@ -30,7 +30,7 @@ import (
 const (
 	// OverviewGroupRows 是工作台概览每组的行数上限。
 	OverviewGroupRows = 5
-	// InjectBudget 是一次注入的字数上限（按字符计）：内核自己守住，不靠宿主截断。
+	// InjectBudget 是一次注入的字数上限（按字符计）：内核自己守住，不靠宿主截断。讨论区的一页读取（apa item thread）用同一个上限。
 	InjectBudget = 4000
 	// trackingLimit 是"本会话在跟"最多查多少个事项。
 	trackingLimit = 50

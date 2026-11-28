@@ -89,7 +89,7 @@ func TestFlowRunTiers(t *testing.T) {
 		id := k.webItem(map[string]any{"kind": "task", "title": "T1-工作台", "project": k.Projects["acc-home"], "planned_for": TODAY})
 		eq(t, "planned_for", k.planned(id), TODAY)
 		byOwner(t, "新建", k.lastEvent(id, "item.created"))
-		k.webOK("POST", "/items/"+id+"/progress", `{"text":"第一档写进展"}`, 201)
+		k.webOK("POST", "/items/"+id+"/comments", `{"text":"第一档写进展"}`, 201)
 		byOwner(t, "进展", k.lastEvent(id, "item.progress_added"))
 		if !has(k.today().ids("planned"), id) {
 			t.Errorf("今天清单缺该事项: %v", k.today().ids("planned"))

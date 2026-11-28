@@ -41,16 +41,8 @@ func (a *Attention) delegationResult(tx *store.Tx, pol policy.Policy, e domain.E
 	if json.Unmarshal(e.Payload, &p) != nil || p.Report.Outcome != delegation.OutcomeDone && p.Report.Outcome != delegation.OutcomeBlocked {
 		return nil
 	}
-	ds, err := delegation.Dispatches(tx, e.Object)
-	if err != nil {
+	if started, err := delegation.Started(tx, e.Object); err != nil || !started {
 		return err
-	}
-	started := false
-	for _, d := range ds {
-		started = started || d.Run != ""
-	}
-	if !started {
-		return nil
 	}
 	from, _, err := originOf(tx, e.Object)
 	if err != nil || from == "" {
@@ -77,6 +69,29 @@ func (a *Attention) delegationResult(tx *store.Tx, pol policy.Policy, e domain.E
 	}
 	return a.offer(tx, pol, held{id: id, item: it.ID, class: domain.DeliveryReminder, priority: it.Priority, version: 1,
 		content: domain.DeliveryContent{Title: title, Summary: summary, WebURL: a.o.WebURL(it.ID)}})
+}
+
+// withdrawStuck：子事项已结束时，还没送出的"卡住了"通知不再送（结局已定，§7.4）；"完成"通知照送。
+// 已领取或已送达的不动，退回 Web 而还没读的一并撤回。
+func (a *Attention) withdrawStuck(tx *store.Tx, child string) error {
+	reps, err := delegation.Reports(tx, child)
+	if err != nil {
+		return err
+	}
+	for _, r := range reps {
+		if r.Outcome != delegation.OutcomeBlocked {
+			continue
+		}
+		for _, id := range []string{DelegationResultID(child, r.Seq), DelegationResultID(child, r.Seq) + AgentSuffix} {
+			if _, err := tx.Exec(`DELETE FROM attention_held WHERE id = ?`, id); err != nil {
+				return err
+			}
+			if _, err := a.o.Queue.Withdraw(tx, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // originOf 认出委派子事项的发起方：建它的那条 delegation.created 的操作者。后台运行发起的返回空（不推）。

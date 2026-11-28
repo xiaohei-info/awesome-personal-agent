@@ -1,5 +1,6 @@
 // Package items 是事项分组的 HTTP 路由（附录 B.2，设计 §7.1、§14.3）：
-// GET/POST /items、GET/PATCH /items/{id}、POST /items/{id}/transition|relations|progress|revert|start、GET /today。
+// GET/POST /items、GET/PATCH /items/{id}、POST /items/{id}/transition|relations|comments|revert|start、GET /today。
+// 讨论流 GET /items/{id}/thread 在 api/why（与处理经过同一份合成）。
 //
 // 路由里没有业务规则：写入全部映射到内核命令（item.create/update/transition/relate/revert/start），
 // 授权（含"只有 Web 登录才能撤销"）、校验、内核字段防写、乐观版本与幂等都由命令管线判定。
@@ -58,7 +59,7 @@ func Routes(x *command.Executor, st *store.Store, staleAfter ...func() time.Dura
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/relations", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "DELETE", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
-		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/progress", Handler: h.write("item.progress", "id", http.StatusCreated, h.withProgress)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/comments", Handler: h.write("item.progress", "id", http.StatusCreated, h.withComment)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/attach", Handler: h.write(inbound.CmdAttach, "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/proposals/batch", Handler: h.batch})
 		r.Handle(core.Route{Method: "GET", Path: "/today", Handler: h.today})
@@ -424,12 +425,12 @@ func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.
 	}
 }
 
-// withProgress 在 progress 写入的响应里附上刚追加的那条进展（附录 B.2）。
-func (h *handlers) withProgress(r *http.Request, id string, out map[string]any) error {
+// withComment 在发言的响应里附上刚追加的那条（附录 B.2）。
+func (h *handlers) withComment(r *http.Request, id string, out map[string]any) error {
 	return h.st.View(r.Context(), func(tx *store.Tx) error {
 		ps, err := kitems.Progress(tx, id)
 		if err == nil && len(ps) > 0 {
-			out["progress"] = ps[len(ps)-1]
+			out["comment"] = ps[len(ps)-1]
 		}
 		return err
 	})

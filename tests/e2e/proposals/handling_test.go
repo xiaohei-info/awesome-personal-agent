@@ -584,7 +584,7 @@ func TestFlowProposalHandling(t *testing.T) {
 	})
 
 	k.step("ACT-PRH-18 事件订阅能取到新的稳定事件", func(t *testing.T) {
-		k.apa(k.DEL, 0, "item", "progress", t3, "--text", "prh 已发回意见")
+		k.apa(k.DEL, 0, "item", "comment", t3, "--text", "prh 已发回意见")
 		types := map[string]bool{}
 		for _, e := range k.feedLines(k.OBS, "events", "--cursor", c0) {
 			types[e.Type] = true

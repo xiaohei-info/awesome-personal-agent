@@ -210,6 +210,13 @@ func GetDispatch(tx *store.Tx, id string) (Dispatch, error) {
 	return ds[0], nil
 }
 
+// Started 报告子事项是否由 APA 拉起过（有委派记录带运行 id）。这类委派的结局只经委派结果通知告诉发起方（§7.4 delegation_result 行）：
+// 运行没交回结果时内核代记一条"卡住"回执；后台运行"没交回"的问题与运行失败的推送对它不产出。三处产出点都只按这一处判定。
+func Started(tx *store.Tx, child string) (bool, error) {
+	ds, err := queryDispatches(tx, "WHERE item = ? AND run != '' LIMIT 1", child)
+	return len(ds) > 0, err
+}
+
 // Dispatches 返回事项上的委派记录，按开始时间倒序。
 func Dispatches(tx *store.Tx, item string) ([]Dispatch, error) {
 	return queryDispatches(tx, "WHERE item = ? ORDER BY started_at DESC, id", item)

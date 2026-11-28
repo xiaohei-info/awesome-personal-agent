@@ -9,8 +9,8 @@ attaches it). A result comes back two ways: delegate_task's own result and subag
 record. `apa` itself is never captured. Everything runs detached and prints nothing, so the model never sees it; any
 failure is swallowed and never reaches Hermes.
 
-`done` needs result evidence (PR, commit, branch or link) taken from the executor's output; without any it is
-reported as `progress`. The exit code of `apa report` is watched off the hook thread: every failure goes to a
+`done` carries result evidence (PR, commit, branch or link) taken from the executor's output when there is any;
+without it the summary is the result (the kernel accepts it on a delegated item). The exit code of `apa report` is watched off the hook thread: every failure goes to a
 plugin-local log (command, item id, exit code, reason; no credentials, no conversation text). Exit 7 (kernel
 unreachable) keeps the request and its idempotency key and re-sends it at later hooks until the kernel answers
 (success, or a refusal which is only logged); it is given up after MAX_RESENDS tries. Once sent successfully it is never sent again.
@@ -190,8 +190,6 @@ def _report(target, outcome, summary, session_id, before=(), by_session=False):
     _sent.add((target, outcome))
     summary = (summary or "").strip()[-SUMMARY_MAX:]
     ev = _evidence(summary) if outcome == "done" else {}
-    if outcome == "done" and not ev:
-        outcome = "progress"  # the kernel refuses done without result evidence
     key = "hermes-receipt-" + hashlib.sha1(f"{target}|{outcome}|{summary}".encode()).hexdigest()[:16]
     where = ["--session", target] if by_session else [target]
     args = [os.environ.get("APA_BIN", "apa"), "report", *where, "--outcome", outcome, "--idempotency-key", key]

@@ -438,7 +438,7 @@ func TestFlowInboundRules(t *testing.T) {
 printf '%%s\n' "$BODY" >> %q
 case "$BODY" in
 *接缝并入*) "$APA" source propose "$EV" --into %s >/dev/null ;;
-*接缝挂靠*) "$APA" source attach "$EV" --to %s >/dev/null; "$APA" item progress %s --text "接缝进展" >/dev/null ;;
+*接缝挂靠*) "$APA" source attach "$EV" --to %s >/dev/null; "$APA" item comment %s --text "接缝进展" >/dev/null ;;
 *) "$APA" source ignore "$EV" >/dev/null ;;
 esac`, seen, target, open.ID, open.ID))
 		defer e.BatchAgent("")

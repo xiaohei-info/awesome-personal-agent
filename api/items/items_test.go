@@ -548,13 +548,13 @@ func TestProgressOverHTTP(t *testing.T) {
 	w := e.create(e.web, `{"kind":"task","title":"f","phase":"open","assignee":"wrk1"}`)
 	yday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	tmrw := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
-	rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"联系了供应商","on":"`+yday+`"}`, wrk)
+	rec := e.do("POST", "/v1/items/"+w.ID+"/comments", `{"text":"联系了供应商","on":"`+yday+`"}`, wrk)
 	var created struct {
-		Progress domain.Progress `json:"progress"`
+		Comment domain.Progress `json:"comment"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	if rec.Code != 201 || created.Progress.Text != "联系了供应商" || created.Progress.On != yday {
-		t.Fatalf("progress must return 201 with the entry: %d %s", rec.Code, rec.Body)
+	if rec.Code != 201 || created.Comment.Text != "联系了供应商" || created.Comment.On != yday {
+		t.Fatalf("comment must return 201 with the entry: %d %s", rec.Code, rec.Body)
 	}
 	var g struct {
 		Item     domain.Item
@@ -565,10 +565,10 @@ func TestProgressOverHTTP(t *testing.T) {
 	if g.Item.Phase != domain.PhaseOpen || len(g.Progress) != 1 || g.Progress[0].Text != "联系了供应商" || g.Progress[0].On != yday || g.Progress[0].Actor != "wrk1" || g.Progress[0].At.IsZero() {
 		t.Fatalf("progress[] = %+v (%s)", g.Progress, rec.Body)
 	}
-	if rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"未来","on":"`+tmrw+`"}`, wrk); rec.Code != 400 {
+	if rec := e.do("POST", "/v1/items/"+w.ID+"/comments", `{"text":"未来","on":"`+tmrw+`"}`, wrk); rec.Code != 400 {
 		t.Fatalf("future on = %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"x"}`, wrk2); rec.Code != 403 {
+	if rec := e.do("POST", "/v1/items/"+w.ID+"/comments", `{"text":"x"}`, wrk2); rec.Code != 403 {
 		t.Fatalf("another worker = %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do("GET", "/v1/items/"+w.ID, "", e.web); strings.Count(rec.Body.String(), `"text"`) != 1 {
@@ -630,7 +630,7 @@ func TestListSearchSortFilterOverHTTP(t *testing.T) {
 	d := e.create(e.web, `{"kind":"task","title":"D","phase":"open","planned_for":"2026-05-01","priority":"urgent"}`)
 	n := e.create(e.web, `{"kind":"task","title":"护照照片","phase":"open"}`)
 	e.create(e.web, `{"kind":"task","title":"other","phase":"open","planned_for":"2026-05-02"}`)
-	if rec := e.do("POST", "/v1/items/"+d.ID+"/progress", `{"text":"等护照照片"}`, e.web); rec.Code != 201 {
+	if rec := e.do("POST", "/v1/items/"+d.ID+"/comments", `{"text":"等护照照片"}`, e.web); rec.Code != 201 {
 		t.Fatalf("progress = %d %s", rec.Code, rec.Body)
 	}
 	list := func(query string) []string {
@@ -783,7 +783,7 @@ func TestProgressRangeOverHTTP(t *testing.T) {
 		{b.ID, `{"text":"完成前的进展"}`},
 		{c.ID, `{"text":"只有上周的","on":"` + lastWeek + `"}`},
 	} {
-		if rec := e.do("POST", "/v1/items/"+w.id+"/progress", w.body, e.web); rec.Code != 201 {
+		if rec := e.do("POST", "/v1/items/"+w.id+"/comments", w.body, e.web); rec.Code != 201 {
 			t.Fatalf("progress = %d %s", rec.Code, rec.Body)
 		}
 	}

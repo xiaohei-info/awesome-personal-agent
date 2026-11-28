@@ -1,6 +1,6 @@
 // Package why 是回放与审计分组的 HTTP 路由（附录 B.2，设计 §15.1、§15.3）：
 // GET /why/{id}（事项或运行回放）、GET /audit/events（按操作者、对象、类型筛选的 Event 查询），
-// 以及处理经过 GET /source-events/{id}/trace 与 GET /items/{id}/trace。
+// 处理经过 GET /source-events/{id}/trace 与 GET /items/{id}/trace，以及事项的讨论流 GET /items/{id}/thread。
 //
 // 路由里没有业务规则：读取、授权与按凭据级别的内容裁剪都在 kernel/why；
 // 本层只做认证后的参数搬运，以及把"哪些事项有未返回的 web_only 初筛"从账本取给内核。
@@ -19,6 +19,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
@@ -38,6 +39,7 @@ func Routes(st *store.Store) core.RouteGroup {
 		r.Handle(core.Route{Method: "GET", Path: "/audit/events", Handler: h.audit})
 		r.Handle(core.Route{Method: "GET", Path: "/source-events/{id}/trace", Handler: h.messageTrace})
 		r.Handle(core.Route{Method: "GET", Path: "/items/{id}/trace", Handler: h.itemTrace})
+		r.Handle(core.Route{Method: "GET", Path: "/items/{id}/thread", Handler: h.itemThread})
 	}
 }
 
@@ -232,6 +234,50 @@ func (h *handlers) itemTrace(w http.ResponseWriter, r *http.Request, p *core.Pri
 			t.Origins = slices.DeleteFunc(t.Origins, func(o kwhy.Trace) bool { return inbound.IsCaptureSource(o.Message.Source) })
 		}
 		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, t)
+}
+
+// itemThread 是事项的讨论流一页（?before=&limit=&full=1）：读取口径同 itemTrace，整页不超过注入的字数上限。
+func (h *handlers) itemThread(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if err := traceable(p); err != nil {
+		return err
+	}
+	q := r.URL.Query()
+	pg := kwhy.Page{Budget: kcontext.InjectBudget, Full: q.Get("full") == "1" || q.Get("full") == "true"}
+	if v := q.Get("before"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return domain.NewError(domain.CodeInvalidRequest, "before must be the before value from the previous page", "drop it to read from the newest")
+		}
+		pg.Before = n
+	}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return domain.NewError(domain.CodeInvalidRequest, "limit must be a positive integer", "drop it for the default page size")
+		}
+		pg.Limit = n
+	}
+	id := r.PathValue("id")
+	var t kwhy.Thread
+	err := h.st.View(r.Context(), func(tx *store.Tx) error {
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		if _, err := kitems.Get(tx, id); err != nil {
+			return err
+		}
+		level, err := replayLevel(tx, p, id, false)
+		if err != nil {
+			return err
+		}
+		t, err = kwhy.ItemThread(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: level, ID: id}, pg)
+		return err
 	})
 	if err != nil {
 		return err

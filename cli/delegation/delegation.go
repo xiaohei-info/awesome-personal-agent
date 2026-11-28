@@ -50,9 +50,16 @@ func idem(key string) map[string]string {
 	return map[string]string{"Idempotency-Key": key}
 }
 
-const executorsUsage = "usage: apa executors [--project <id>]"
+const (
+	executorsUsage = "usage: apa executors [--project <id>] | set <executor> [--model <m>] [--thinking <t>] [--override <key=value>]..."
+	setUsage       = "usage: apa executors set <executor> [--model <m>] [--thinking <t>] [--override <key=value>]...; " +
+		"changes only the keys given, an empty value clears one (the declaration's own default applies); values must be ones apa executors lists under overridable"
+)
 
 func executors(c *client.Ctx, args []string) error {
+	if len(args) > 0 && args[0] == "set" {
+		return setExecutor(c, args[1:])
+	}
 	fs := flags("executors")
 	project := fs.String("project", "", "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
@@ -65,6 +72,52 @@ func executors(c *client.Ctx, args []string) error {
 	return send(c, nil, "GET", path, nil)
 }
 
+// setExecutor 改执行者的可覆盖参数默认值（PUT /executors/{id}/overrides 整份替换）：先读现值，只改命令行给出的键。
+// 取值是否在声明列出的范围内由内核判定。
+func setExecutor(c *client.Ctx, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return usage("an executor id is required first", setUsage)
+	}
+	id, args := args[0], args[1:]
+	fs := flags("executors set")
+	fs.String("model", "", "")
+	fs.String("thinking", "", "")
+	set := pairFlag{}
+	fs.Var(set, "override", "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return usage("invalid arguments for executors set", setUsage)
+	}
+	fs.Visit(func(f *flag.Flag) { // --model 与 --thinking 是同名键的简写；出现过才算，空值也算（清除）
+		if f.Name == "model" || f.Name == "thinking" {
+			set[f.Name] = f.Value.String()
+		}
+	})
+	if len(set) == 0 {
+		return usage("nothing to set", setUsage)
+	}
+	var list struct {
+		Executors []struct {
+			ID        string            `json:"id"`
+			Overrides map[string]string `json:"overrides"`
+		} `json:"executors"`
+	}
+	if err := c.Do(context.Background(), "GET", "/executors", nil, &list); err != nil {
+		return err
+	}
+	values := map[string]string{}
+	for _, e := range list.Executors {
+		if e.ID == id {
+			for k, v := range e.Overrides {
+				values[k] = v
+			}
+		}
+	}
+	for k, v := range set {
+		values[k] = v
+	}
+	return send(c, nil, "PUT", "/executors/"+url.PathEscape(id)+"/overrides", map[string]any{"values": values})
+}
+
 const delegateUsage = "usage: apa delegate --parent <id> --assignee <executor> [--executor <json file|->] [--title --summary --body --priority --project --reason --idempotency-key] " +
 	"[--start [--model <m>] [--thinking <t>] [--override <key=value>]...]   (--start: APA starts the executor itself; values must be ones apa executors lists)"
 
@@ -74,7 +127,7 @@ func (p pairFlag) String() string { return "" }
 func (p pairFlag) Set(v string) error {
 	k, val, ok := strings.Cut(v, "=")
 	if !ok || k == "" {
-		return usage("--override takes key=value", delegateUsage)
+		return usage("--override takes key=value", "e.g. --override model=m1")
 	}
 	p[k] = val
 	return nil
@@ -131,7 +184,8 @@ type linkFlag []string
 func (l *linkFlag) String() string     { return strings.Join(*l, ",") }
 func (l *linkFlag) Set(v string) error { *l = append(*l, v); return nil }
 
-const reportUsage = "usage: apa report (<id> | --session <dispatch session handle>) --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link]... [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]"
+const reportUsage = "usage: apa report (<id> | --session <dispatch session handle>) --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link --file <report file>]... [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]; " +
+	"done on a delegated item needs no PR: the summary (required) is the result, evidence is attached when there is one"
 
 func report(c *client.Ctx, args []string) error {
 	id := ""
@@ -143,7 +197,7 @@ func report(c *client.Ctx, args []string) error {
 	outcome, summary := fs.String("outcome", "", ""), fs.String("summary", "", "")
 	cursor, reason, version, key := fs.String("ack-cursor", "", ""), fs.String("reason", "", ""), fs.String("version", "", ""), fs.String("idempotency-key", "", "")
 	ev := map[string]*string{}
-	for _, n := range []string{"pr", "commit", "branch"} {
+	for _, n := range []string{"pr", "commit", "branch", "file"} {
 		ev[n] = fs.String(n, "", "")
 	}
 	var links linkFlag // --link 可重复：库内链接在报 done 时由内核登记为产出（主文档 §7.5）

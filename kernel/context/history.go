@@ -99,7 +99,8 @@ func sequenceItems(tx *store.Tx, it domain.Item) (map[string]string, error) {
 	return via, nil
 }
 
-// History 返回 it 所在序列最近的委派记录（至多 historyMax 条）。harness 是本次调用方报告的 harness。
+// History 返回 it 所在序列最近的委派记录（至多 historyMax 条）：挂在 it 本身的在前（"上次怎么派的"取第一条），
+// 其余按开始时间倒序——同一父事项下几乎同时派出的兄弟子事项不能顶替它自己的记录。harness 是本次调用方报告的 harness。
 func History(tx *store.Tx, it domain.Item, harness string) ([]HistoryEntry, error) {
 	via, err := sequenceItems(tx, it)
 	if err != nil {
@@ -150,6 +151,9 @@ func History(tx *store.Tx, it domain.Item, harness string) ([]HistoryEntry, erro
 		out = append(out, h)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if a, b := out[i].Via == "item", out[j].Via == "item"; a != b {
+			return a
+		}
 		if !out[i].StartedAt.Equal(out[j].StartedAt) {
 			return out[i].StartedAt.After(out[j].StartedAt)
 		}

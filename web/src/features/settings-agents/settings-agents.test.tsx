@@ -206,7 +206,7 @@ describe("设置 › Agent", () => {
     expect(others.getByText("各项目允许的执行者：3 个项目设了名单")).toBeInTheDocument();
     expect(others.getByText("8 层，超过后停下并告诉它")).toBeInTheDocument();
     expect(others.getByText("只看信任发件人的")).toBeInTheDocument();
-    expect(others.getByText("报「完成」必须带结果证据")).toBeInTheDocument();
+    expect(others.getByText("报「完成」要有依据：交给别人做的事写明结果即可，其他事项要带 PR、提交或链接")).toBeInTheDocument();
     expect(others.getByText(/最近 7 天被拦下 1 次/)).toBeInTheDocument();
     const rec = within(c.getByRole("region", { name: "它做过什么" }));
     expect(rec.getByRole("link", { name: /Agent 改动/ })).toHaveAttribute("href", "/agent-changes?agent=agent_1");

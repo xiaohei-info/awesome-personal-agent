@@ -98,7 +98,7 @@ func TestRunsAndSummary(t *testing.T) {
 }
 
 // 通用用量契约（附录 A.2）：任意 harness 只凭声明回报。假 harness 从 stdout 事件回报，输入不含缓存、自带模型名；
-// 声明经内核的解析器；没声明用量的另一个 harness 记为未回报，即使它写了同样的输出。
+// 声明经内核的解析器；没声明用量的另一个 harness 记为未提供（不是未回报、不计 0），即使它写了同样的输出。
 func TestDeclaredUsageContractAnyHarness(t *testing.T) {
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{executors.Module, Module} {
@@ -148,7 +148,7 @@ func TestDeclaredUsageContractAnyHarness(t *testing.T) {
 	}
 	want := []Row{
 		{Key{PartAgent, "task", "fake-stream", "m-x"}, Counts{Requests: 1, Reported: 1, InputTokens: 45, OutputTokens: 4, CacheReadTokens: 30, CacheWriteTokens: 5}},
-		{Key{PartAgent, "task", "fake-silent", "configured"}, Counts{Requests: 1}},
+		{Key{PartAgent, "task", "fake-silent", "configured"}, Counts{Requests: 1, Undeclared: 1}},
 	}
 	if !slices.Equal(got.Rows, want) {
 		t.Fatalf("rows = %+v", got.Rows)

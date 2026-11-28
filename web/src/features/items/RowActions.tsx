@@ -185,7 +185,7 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
       {open === "progress" && (
         <div className="row-panel" role="group" aria-label={t.rowProgressFor(item.title)}>
           <ProgressForm autoFocus label={t.rowSave} onSubmit={async (b) => {
-            const ok = await write(() => api.post(path + "/progress", b), "progress");
+            const ok = await write(() => api.post(path + "/comments", b), "progress");
             if (ok) setOpen(null);
             return ok;
           }} />
