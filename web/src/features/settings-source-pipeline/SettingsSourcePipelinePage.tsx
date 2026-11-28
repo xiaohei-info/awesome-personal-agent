@@ -3,7 +3,7 @@ import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { PACK_BAND } from "../../app/ids";
 import { Card, PolicyPage, reject, useDraft } from "../../app/policy-cards";
-import { AgentPick } from "../settings-agents/AgentPick";
+import { ExecutorPick } from "../executors/ExecutorPick";
 import { Reminder, ReminderScope } from "../settings-notify/Reminder";
 import { withBand, type Band } from "../judgment/JudgmentPage";
 import { SourceRules } from "./SourceRules";
@@ -12,7 +12,7 @@ import { strings } from "./strings";
 // 设置 › 来源处理（§9.3）：读写 GET/PUT /settings/source-pipeline，结果提醒复用 Reminder(source_result)，
 // 两道题拿不准的范围复用 GET/PUT /settings/judgment 里 triage-screen、triage-urgent 的全局不确定带。校验以服务端为准。
 export interface SourcePipeline {
-  agent?: string;
+  executor?: string;
   batch_size?: number;
   wait_minutes?: number;
   urgent_immediate?: boolean;
@@ -67,7 +67,7 @@ export function SettingsSourcePipelinePage() {
     <PolicyPage title={t.title} lede={t.lede} error={error} ready={!!sp} onRetry={() => void load()}>
       {sp && (
         <>
-          <AgentCard sp={sp} save={save} />
+          <ExecutorCard sp={sp} save={save} />
           <ScheduleCard sp={sp} save={save} />
           <ReminderScope>
             <Reminder row="source_result" />
@@ -102,12 +102,12 @@ export function SettingsSourcePipelinePage() {
   );
 }
 
-function AgentCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) {
+function ExecutorCard({ sp, save }: { sp: SourcePipeline; save: SavePipeline }) {
   const t = useT(strings);
-  const [agent, setAgent, dirty] = useDraft(sp.agent ?? "", () => sp.agent ?? "");
+  const [executor, setExecutor, dirty] = useDraft(sp.executor ?? "", () => sp.executor ?? "");
   return (
-    <Card title={t.agentTitle} hint={t.agentHint} dirty={dirty} onSave={() => save({ agent })}>
-      <AgentPick value={agent} onChange={setAgent} label={t.agentLabel} />
+    <Card title={t.agentTitle} hint={t.agentHint} dirty={dirty} onSave={() => save({ executor })}>
+      <ExecutorPick runner="source_batch" value={executor} onChange={setExecutor} label={t.agentLabel} />
     </Card>
   );
 }

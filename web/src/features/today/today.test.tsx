@@ -81,7 +81,7 @@ describe("今天页（flow-web-workbench）", () => {
         return json(200, { items: ids.map((id) => items.get(id)), progress });
       }
       if (url === "/v1/rules") return json(200, { rules: [{ key: "background-run/event_rules/handle-labelled", mode: "auto" }] });
-      if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: { agent_id: "legacy:hx", agent_name: "主 Agent" }, reason: "" });
+      if (url.startsWith("/v1/executors?")) return json(200, { executors: [{ id: "hx", kind: "external-cli", harness: "hx", label: "主执行者" }], selected: { executor: "hx", source: "main" } });
       if (url.startsWith("/v1/runs?target=")) return json(200, { runs: [] });
       const m = /^\/v1\/items\/([^/]+)(\/transition|\/comments|\/start)?$/.exec(url);
       const it = m && items.get(m[1]);

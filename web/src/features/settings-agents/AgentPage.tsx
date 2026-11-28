@@ -1,20 +1,19 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { EmptyState } from "../../app/ui";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
-import { useRaw } from "../../app/raw";
 import { Val } from "../../app/values";
-import { Basics } from "./AgentEditor";
 import { Permission } from "./Permission";
 import { PolicyPage, useDraft, usePolicyDocs, type Doc, type Save } from "../../app/policy-cards";
-import { AGENT_KINDS, entries, hasKey, LEGACY, useData, type Credential, type Declaration, type Entry } from "./data";
+import { AGENT_KINDS, entries, hasKey, keyOwner, useData, type Credential, type Declaration, type Entry } from "./data";
 import { useEntryName } from "./SettingsAgentsPage";
 import { strings } from "./strings";
 import { AudienceChoice, ScopeEditor, ScopeSummary, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 
-// 设置 › Agent › 某个 Agent（界面设计 §3.2、§4、§6.3；设计 §14.3）：这个 Agent 的全部属性只在这里改。
-// ①接入清单（没完成时置顶，每步就地做完）②基本信息 ③钥匙（能碰哪些事）④权限卡与限制清单 ⑤在哪里做 ⑥被谁使用（只读）⑦它做过什么 ⑧高级。
+// 设置 › Agent › 某个 Agent（界面设计 §3.2、§4、§6.3；设计 §14.3）：一个 Agent 是一份声明，这里只管接入与权限。
+// ①接入清单（没完成时置顶，每步就地做完）②钥匙（能碰哪些事）③权限卡与限制清单 ④在哪里做 ⑤它做过什么 ⑥高级。
+// 谁来干活、执行者的默认参数在执行者页；这里一行链过去。
 // 钥匙（/settings/tokens）只定范围，权限卡定能做哪些组，两者互不影响；判定都在服务端。
 // 每档给 Agent 的工具只取声明里的 headless.tools / tool_notes（附录 A.2），不解析命令行参数。
 
@@ -25,8 +24,9 @@ export function AgentPage() {
   const { data, error, setError, load } = useData();
   const nameOf = useEntryName();
   const pol = docs?.policy;
-  const e = data ? entries(data).find((x) => x.id === id) : undefined;
-  const reloadAll = async () => { await load(); await loadPol(); };
+  const all = data ? entries(data) : [];
+  const e = all.find((x) => x.id === id);
+  const base = e?.base ? all.find((x) => x.id === e.base) : undefined;
   if (data && pol && !e)
     return (
       <main>
@@ -42,8 +42,10 @@ export function AgentPage() {
       {e && pol && (
         <div className="stack">
           <Connect e={e} name={name} reload={load} onError={setError} />
-          <RolesLine e={e} pol={pol} />
-          {e.instance ? <Basics key={e.card!.rev} card={e.card!} host={e.live?.declaration} onSaved={reloadAll} /> : <LegacyBasics e={e} />}
+          <p className="sub">
+            {e.base && <>{t.isolated(base ? nameOf(base) : e.base)} </>}
+            <Link to="/executors">{t.itsExecutors}</Link>
+          </p>
           <section aria-label={t.keys} className="panel stack" id="keys">
             <h2>{t.keys}</h2>
             <p className="sub">{t.keysScope}</p>
@@ -51,14 +53,13 @@ export function AgentPage() {
           </section>
           <Permission e={e} version={Number(pol.version)} onSaved={loadPol} />
           {e.live && <Launch e={e} name={name} pol={pol} save={save} />}
-          <UsedBy e={e} pol={pol} />
           <Records e={e} />
           <details className="panel">
             <summary>{t.advanced}</summary>
             {(e.live ?? e.pending) && (
               <details>
                 <summary>{t.fullDecl}</summary>
-                <pre data-testid={"declaration-" + e.harness}>{JSON.stringify((e.pending ?? e.live)!.declaration, null, 2)}</pre>
+                <pre data-testid={"declaration-" + e.id}>{JSON.stringify((e.pending ?? e.live)!.declaration, null, 2)}</pre>
               </details>
             )}
           </details>
@@ -102,11 +103,10 @@ function Connect({ e, name, reload, onError }: { e: Entry; name: string; reload:
     await reload();
   };
   const issue = () => act(async () => {
-    const body: Record<string, string> = { kind: "delegate", harness: e.harness, audience: audience! };
-    if (e.instance) body.agent_id = e.card!.id;
+    const body: Record<string, string> = { kind: "delegate", ...keyOwner(e), audience: audience! };
     setSecret((await api.post<{ secret: string }>("/settings/tokens", body)).secret);
   });
-  const decide = (verb: "confirm" | "reject") => act(() => api.post(`/settings/declarations/${encodeURIComponent(e.harness)}/${e.pending!.rev}/${verb}`));
+  const decide = (verb: "confirm" | "reject") => act(() => api.post(`/settings/declarations/${encodeURIComponent(e.id)}/${e.pending!.rev}/${verb}`));
   return (
     <section aria-label={t.connect} id="connect" className="panel stack">
       <h2>{t.connect} <span className="sub">{left ? t.connectLeft(left) : t.connectDone}</span></h2>
@@ -146,30 +146,6 @@ function Connect({ e, name, reload, onError }: { e: Entry; name: string; reload:
   );
 }
 
-/** 分工只在列表页改；这里一行说它现在是不是日常或主 Agent，并给去改的链接。 */
-function RolesLine({ e, pol }: { e: Entry; pol: Doc }) {
-  const t = useT(strings);
-  const role = (k: string) => (pol[k] ?? (pol.default_harness ? LEGACY + pol.default_harness : "")) === e.id;
-  const says = [role("default_agent_id") && t.isDailyNow, role("main_agent_id") && t.isMainNow].filter(Boolean).join(t.listSep);
-  return (
-    <p className="sub">
-      {says || null} <Link to="/settings/agents#roles">{says ? t.changeRoles : t.setRoles}</Link>
-    </p>
-  );
-}
-
-/** 旧设置迁移来的 Agent：名字取自程序，不能改名；要另起一份配置就复制成新的 Agent。 */
-function LegacyBasics({ e }: { e: Entry }) {
-  const t = useT(strings);
-  const raw = useRaw();
-  return (
-    <section aria-label={t.basics} className="panel stack">
-      <h2>{t.basics}</h2>
-      <p className="sub">{t.legacyBasics}{raw && <code className="raw-id">{e.harness}</code>}</p>
-    </section>
-  );
-}
-
 /** 声明能不能在对话里接着做：新字段 wake，或旧声明 launch: wake（§13.6）。 */
 export const canWake = (d?: Declaration) => !!(d?.main_session?.wake || d?.main_session?.launch === "wake");
 
@@ -181,24 +157,23 @@ function WakeChange({ from, to }: { from?: Declaration; to: Declaration }) {
   return <p>{canWake(to) ? t.changeWakeOn : t.changeWakeOff(to.main_session?.wake_missing?.[0]?.[lang] ?? "")}</p>;
 }
 
-// 在哪里做（以 Agent 本人身份做事时）：单选、可随时改回、不扩大权限，所以即改即存（§6.1）。
-// 写 main_session_launch.by_agent[id] 或 by_harness[程序]，按规则的覆盖原样带回（PUT 按段替换）；换选择不用重新确认声明。
+// 在哪里做（以你的身份做事时）：单选、可随时改回、不扩大权限，所以即改即存（§6.1）。
+// 写 main_session_launch.by_harness[声明]，按规则的覆盖原样带回（PUT 按段替换）；换选择不用重新确认声明。
 function Launch({ e, name, pol, save }: { e: Entry; name: string; pol: Doc; save: Save }) {
   const t = useT(strings);
   const lang = useLang();
   const live = e.live!.declaration;
   const missing = live.main_session?.wake_missing ?? [];
-  const scope = e.instance ? "by_agent" : "by_harness";
-  const cur = (pol.main_session_launch ?? {}) as { by_agent?: Record<string, string>; by_harness?: Record<string, string>; by_rule?: Record<string, string> };
-  const saved = cur[scope]?.[e.key] ?? (!e.instance && live.main_session?.launch === "wake" ? "wake" : "headless");
+  const cur = (pol.main_session_launch ?? {}) as { by_harness?: Record<string, string>; by_rule?: Record<string, string> };
+  const saved = cur.by_harness?.[e.id] ?? (live.main_session?.launch === "wake" ? "wake" : "headless");
   const [how, setHow] = useDraft(pol.main_session_launch, () => saved);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
-  const wake = !e.instance && canWake(live);
+  const wake = canWake(live);
   const pick = async (v: string) => {
     setHow(v);
     setNote(null);
     try {
-      await save("policy", { main_session_launch: { ...cur, [scope]: { ...(cur[scope] ?? {}), [e.key]: v }, by_rule: cur.by_rule ?? {} } });
+      await save("policy", { main_session_launch: { by_harness: { ...(cur.by_harness ?? {}), [e.id]: v }, by_rule: cur.by_rule ?? {} } });
       setNote({ ok: true, text: t.saved() });
     } catch (err) {
       setHow(saved); // 失败时控件回到原值，旁边写原因
@@ -244,34 +219,6 @@ function Records({ e }: { e: Entry }) {
   );
 }
 
-/** 被谁使用（只读）：哪些规则、定时安排、事项单独指定了它；改要去那条规则、那个安排、那件事自己的页面。 */
-function UsedBy({ e, pol }: { e: Entry; pol: Doc }) {
-  const t = useT(strings);
-  const { api } = useSession();
-  const [counts, setCounts] = useState<{ schedules: number; items: number } | null>(null);
-  const rules = Object.values((pol.rule_agent ?? {}) as Record<string, string>).filter((x) => x === e.id).length;
-  useEffect(() => {
-    let live = true;
-    Promise.all([
-      api.get<{ instances: { params: { agent_id?: string } }[] }>("/instances").then((r) => r.instances.filter((i) => i.params.agent_id === e.id).length, () => 0),
-      // shortcut: 前端从事项列表里筛（接口没有按指定的 Agent 筛选），个人规模够用；事项很多时要服务端筛选
-      api.get<{ items: { preferred_agent_id?: string; phase: string }[] }>("/items").then((r) => r.items.filter((i) => i.preferred_agent_id === e.id && !["done", "dropped"].includes(i.phase)).length, () => 0),
-    ]).then(([schedules, items]) => live && setCounts({ schedules, items }));
-    return () => { live = false; };
-  }, [api, e.id]);
-  const lines = [
-    rules > 0 && <li key="r"><Link to="/settings/agents#auto-action">{t.usedRules(rules)}</Link></li>,
-    !!counts?.schedules && <li key="s"><Link to="/briefs/schedule">{t.usedSchedules(counts.schedules)}</Link></li>,
-    !!counts?.items && <li key="i"><Link to="/items">{t.usedItems(counts.items)}</Link></li>,
-  ].filter(Boolean);
-  return (
-    <section aria-label={t.usedBy} className="panel stack">
-      <h2>{t.usedBy}</h2>
-      {lines.length ? <ul className="plain">{lines}</ul> : counts && <p className="sub">{t.usedNone}</p>}
-    </section>
-  );
-}
-
 function Keys({ e, reload, onError }: { e: Entry; reload: () => Promise<void>; onError: (m: string | null) => void }) {
   const t = useT(strings);
   const { api } = useSession();
@@ -284,9 +231,8 @@ function Keys({ e, reload, onError }: { e: Entry; reload: () => Promise<void>; o
   const issue = async () => {
     onError(null);
     try {
-      const body: Record<string, unknown> = { kind, harness: e.harness, audience };
+      const body: Record<string, unknown> = { kind, ...keyOwner(e), audience };
       if (audience === "external") body.source_scopes = scopes;
-      if (e.instance) body.agent_id = e.card!.id;
       if (note.trim()) body.label = note.trim();
       setSecret((await api.post<{ secret: string }>("/settings/tokens", body)).secret);
       setNote("");

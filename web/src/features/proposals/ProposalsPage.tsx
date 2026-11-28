@@ -15,6 +15,7 @@ import { Val } from "../../app/values";
 import { HANDOFF_TAG } from "../../app/ids";
 import { Prereqs } from "../../app/Prereqs";
 import { handoffPrereqs, useHandoff } from "../items/HandOff";
+import { executorName } from "../executors/ExecutorPick";
 import { strings as itemStrings } from "../items/strings";
 import { acceptPlan, fallback, groupBy, objectName, type Group, type Origin } from "./groups";
 import { deadlineText, deadlineValue, hostParts, useHostClock } from "../items/schedule";
@@ -668,7 +669,8 @@ export function ProposalsPage() {
       if (action === "handoff") {
         if (ready) await api.patch(path, { tags: [...(item?.tags ?? []).filter((x) => x !== HANDOFF_TAG), HANDOFF_TAG], reason: it.handoff }, item?.version ? { "If-Match": String(item.version) } : undefined);
         await api.post(path + "/accept", {});
-        const who = handoff.preview?.selected?.agent_name;
+        const sel = handoff.preview?.executors.find((e) => e.id === handoff.preview?.selected?.executor);
+        const who = sel && executorName(sel);
         setReceipts((r) => [...r, { id, title, to: "/items/" + encodeURIComponent(id) + "#agent", text: ready ? t.handedTo(who || t.agent) : t.acceptedNotHanded, missing: !ready }]);
       } else if (action === "unmerge") {
         await api.post(path + "/unmerge", {});

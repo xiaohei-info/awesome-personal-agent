@@ -42,7 +42,7 @@ describe("用当前数据（v28）渲染每个编辑页", () => {
       if (url === "/v1/settings/notify/overview") return new Response(JSON.stringify(overview), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/v1/settings/source-pipeline") return new Response(JSON.stringify({ version: 28, source_pipeline: {} }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/v1/settings/judgment") return new Response(JSON.stringify({ version: 28, bands: [], shadow: [], spot_check: { per_brief: 5 } }), { status: 200, headers: { "Content-Type": "application/json" } });
-      if (url.startsWith("/v1/agents")) return new Response(JSON.stringify({ agents: [], selected: {}, reason: "" }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url.startsWith("/v1/executors")) return new Response(JSON.stringify({ executors: [], selected: { executor: "", source: "default" } }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/v1/items?kind=brief") return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/v1/packs") return new Response(JSON.stringify({ packs: [{ name: "brief", instance_params: {} }, { name: "review", instance_params: {} }] }), { status: 200, headers: { "Content-Type": "application/json" } });
       return s.impl(url, init);

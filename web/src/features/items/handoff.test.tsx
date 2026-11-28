@@ -19,7 +19,7 @@ function server(o: { mode?: string; declared?: boolean; items?: any[]; runs?: an
     const h = (init.headers ?? {}) as Record<string, string>;
     if (url === "/v1/rules") return json(200, { rules: o.mode ? [{ key: RULE, pack: "background-run", group: "event_rules", id: "handle-labelled", mode: o.mode, hash: "h" }] : [] });
     if (url.startsWith("/v1/runs?")) return json(200, { runs: o.runs ?? [] });
-    if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: o.declared ? { agent_id: "legacy:hx" } : {}, reason: o.declared ? "" : "还没选主 Agent" });
+    if (url.startsWith("/v1/executors?")) return json(200, { executors: [{ id: "hx", kind: "external-cli", harness: "hx", agent: "HX" }], selected: o.declared ? { executor: "hx", source: "main" } : { executor: "", source: "main", reason: "还没选主执行者" } });
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items });
     if (/\/messages$/.test(url)) return json(200, { messages: [] });
@@ -81,7 +81,7 @@ describe("事项 › 交给 Agent", () => {
   it.each([
     ["规则关着", { mode: "off", declared: true }, "「我交给 Agent 的事自动开始」关着", "去打开", RULE_AT],
     ["试运行", { mode: "observe", declared: true }, "「我交给 Agent 的事自动开始」在试运行，只记录", "去打开", RULE_AT],
-    ["还没有能在后台运行的 Agent", { mode: "auto", declared: false }, "还没选主 Agent", "去选", "/settings/agents#roles"],
+    ["还没选主执行者", { mode: "auto", declared: false }, "还没选主执行者", "去选", "/executors#roles"],
   ])("开着但前提没满足（%s）：前提清单一行状态加一个按钮，落到对应位置（界面设计 §3.2）", async (_n, o, text, button, href) => {
     const s = server({ ...o, items: [{ id: "i1", version: 1, kind: "task", phase: "proposed", title: "修复登录", tags: ["agent-ok"] }] });
     mount(s);

@@ -127,7 +127,7 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
       {open === "agent" && item.kind === "task" && (
         <div ref={agentPanelRef} tabIndex={-1} className="row-panel" aria-label={t.rowAgentFor(item.title)} role="group">
           <AgentBlock key={"h" + item.version} item={item} onSave={(tags) => void tagWrite(tags)}
-            onAgent={(aid) => void write(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} />
+            onAgent={(aid) => void write(() => api.patch(path, { preferred_executor: aid, reason: t.handoff }, ifMatch))} />
         </div>
       )}
     </>

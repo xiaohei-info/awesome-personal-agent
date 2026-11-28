@@ -1,10 +1,11 @@
 import type { Dict } from "../../app/i18n";
 import { common } from "../../app/strings";
 
-// Agent 动态 › 执行者：谁在替你干活（§6.17）。执行者由 Agent 在委派时登记，这里只看、只移除。
+// 自动化 › 执行者：谁替你干活（§6.17）。顶部是分工（日常执行者、主执行者），下面每个执行者一张卡。
 const zh = {
   ...common.zh,
   title: "执行者",
+  lede: "谁替你干活：分工，以及每个执行者手上的事。",
   empty: "还没有人替你干活",
   inHand: "手上的事",
   noneInHand: "手上没有事",
@@ -15,11 +16,24 @@ const zh = {
   notListed: "未登记",
   startable: "可由 APA 直接派活",
   asDeclared: "沿用自带的默认",
+  remote: (host: string) => `不在本机（在 ${host} 上）`,
+  ofAgent: (name: string) => `属于 ${name}`,
+  isDaily: "日常",
+  isMain: "主",
+  roles: "分工",
+  dailyRole: "日常执行者",
+  dailyHint: "写简报、跑例行任务、处理来源这类固定的活",
+  mainRole: "主执行者",
+  mainHint: "以你的身份做事：你交给它的事，由它像平时对话那样处理",
+  roleNone: "还没选",
+  roleNoneHint: "还没选，要它做的事会停下来告诉你",
+  unusable: " · 现在用不了",
 };
 
 const en: typeof zh = {
   ...common.en,
   title: "Executors",
+  lede: "Who works for you: roles, and what each executor has in hand.",
   empty: "Nobody is working for you yet",
   inHand: "In hand",
   noneInHand: "Nothing in hand",
@@ -30,6 +44,53 @@ const en: typeof zh = {
   notListed: "Not registered",
   startable: "APA can start it",
   asDeclared: "Its own default",
+  remote: (host) => `Not on this machine (on ${host})`,
+  ofAgent: (name) => `Part of ${name}`,
+  isDaily: "Daily",
+  isMain: "Main",
+  roles: "Roles",
+  dailyRole: "Daily executor",
+  dailyHint: "Routine work such as briefs, scheduled tasks and handling sources",
+  mainRole: "Main executor",
+  mainHint: "Works as you: things you hand over, handled like your usual chats",
+  roleNone: "Not chosen",
+  roleNoneHint: "Not chosen; work meant for it stops and tells you",
+  unusable: " · Can't be used now",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };
+
+// 「用哪个执行者」选择器（ExecutorPick.tsx，全站共用）。
+const pickZh = {
+  label: "用哪个执行者",
+  forItem: "这件事用哪个执行者",
+  follow: (src: string, name: string) => `${src}（现在是 ${name}）`,
+  followNone: (src: string) => `${src}（还没选）`,
+  followDefault: "跟随日常执行者",
+  followMain: "跟随主执行者",
+  followRule: "跟随规则",
+  handledBy: (name: string) => `由 ${name} 处理`,
+  none: "还没选执行者",
+  change: "改",
+  see: "去看这个执行者",
+  onHost: (host: string) => ` · 在 ${host} 上`,
+  unusable: " · 现在用不了",
+  unusableNow: "它现在用不了，到执行者页看看",
+};
+const pickEn: typeof pickZh = {
+  label: "Which executor",
+  forItem: "Which executor for this item",
+  follow: (src, name) => `${src} (now ${name})`,
+  followNone: (src) => `${src} (none chosen)`,
+  followDefault: "Follow the daily executor",
+  followMain: "Follow the main executor",
+  followRule: "Follow the rule",
+  handledBy: (name) => `Handled by ${name}`,
+  none: "No executor chosen",
+  change: "Change",
+  see: "Open this executor",
+  onHost: (host) => ` · on ${host}`,
+  unusable: " · can't be used now",
+  unusableNow: "It can't be used now; see the executors page",
+};
+export const pick: Dict<typeof pickZh> = { zh: pickZh, en: pickEn };

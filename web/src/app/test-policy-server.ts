@@ -1,12 +1,12 @@
 // Test double for the settings pages that edit the policy document (not shipped: only imported by tests).
 // It answers like api/settings/policy: three routes read and replace whole sections, keys are masked,
-// GET /agents lists the Agent cards with their permission card,
+// GET /executors lists executors with a selection preview (when asked with runner),
 // and a non-Web session gets 403 web_only (error bodies follow appendix B.3).
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
 
 export const SECTIONS: Record<string, string[]> = {
-  "/v1/settings/policy": ["disturb", "background_run_timeout_sec", "background_persona", "thinking", "channels", "default_harness", "main_session_launch", "rule_agent"],
+  "/v1/settings/policy": ["disturb", "background_run_timeout_sec", "background_persona", "thinking", "channels", "default_executor", "main_executor", "rule_executor", "main_session_launch"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
   "/v1/settings/access-limits": ["agent_cards"],
 };
@@ -18,7 +18,9 @@ export function initialDoc(): Record<string, any> {
     background_persona: false,
     thinking: { judge: "low", write: "medium", background: "medium" },
     channels: {},
-    default_harness: "",
+    default_executor: "",
+    main_executor: "",
+    rule_executor: {},
     main_session_launch: { by_harness: {}, by_rule: {} },
     forward_allowlist: { telegram: ["alice"] },
     channel_answerers: {},
@@ -122,9 +124,10 @@ export function v28Overview() {
   };
 }
 
-export function policyServer(opts: { preview?: Record<string, unknown>; instances?: Record<string, unknown>[]; webOnlyDenied?: boolean; agents?: Record<string, unknown>[]; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[]; v28?: boolean; rules?: { key: string; mode: string }[] } = {}) {
+export function policyServer(opts: { preview?: Record<string, unknown>; instances?: Record<string, unknown>[]; webOnlyDenied?: boolean; cards?: Record<string, unknown>; executors?: Record<string, unknown>[]; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[]; v28?: boolean; rules?: { key: string; mode: string }[] } = {}) {
   let version = 1;
   const doc = initialDoc();
+  if (opts.cards) doc.agent_cards = opts.cards;
   if (opts.v28) {
     version = 28;
     doc.disturb = structuredClone(V28.disturb);
@@ -160,7 +163,11 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
     }
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
-    if (url === "/v1/agents") return opts.webOnlyDenied ? err(403, "web_only", "settings can only be used by the owner in the Web UI") : json(200, { agents: opts.agents ?? [], selected: {}, reason: "" });
+    if (url === "/v1/executors" || url.startsWith("/v1/executors?")) {
+      const runner = new URL(url, "http://x").searchParams.get("runner");
+      const pick = runner === "main_session" ? doc.main_executor : doc.default_executor;
+      return json(200, { executors: opts.executors ?? [], ...(runner ? { selected: { executor: pick, source: runner === "main_session" ? "main" : "default" } } : {}) });
+    }
     const keys = SECTIONS[url];
     if (!keys) return err(404, "not_found", "no such route");
     if (opts.webOnlyDenied) return err(403, "web_only", "settings can only be used by the owner in the Web UI");

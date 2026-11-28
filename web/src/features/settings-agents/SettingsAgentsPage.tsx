@@ -1,25 +1,26 @@
 import { useEffect, useState } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { PageReminder } from "../settings-notify/Reminder";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
 import { EntityPick } from "../../app/names";
 import { useLabel } from "../../app/values";
-import { AddAgent } from "./AgentEditor";
 import { AgentPage, KeyList, KindChoice, Secret } from "./AgentPage";
+import { Onboard } from "./OnboardForm";
 import { AutoAct } from "./AutoAct";
-import { PermissionOverview } from "./PermissionOverview";
 import { AudienceChoice, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 import { RunTimeoutCard } from "./RunTimeout";
 import { BackgroundPersonaCard } from "./BackgroundPersona";
 import { ThinkingCard } from "./Thinking";
-import { PolicyPage, usePolicyDocs, type Doc, type Save } from "../../app/policy-cards";
-import { entries, hasKey, LEGACY, ready, useData, type Data, type Entry, type Rec } from "./data";
+import { PolicyPage, usePolicyDocs } from "../../app/policy-cards";
+import { entries, hasKey, ready, useData, type Data, type Entry, type Rec } from "./data";
+import { cardOf, PermissionOverview } from "./PermissionOverview";
+import type { PermissionCardDoc } from "./Permission";
 import { strings } from "./strings";
 
-// 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表上：分工（日常 Agent、主 Agent）、Agent 一行一个（名字、分工标记、一句状态加按钮）、权限总览、替我动手、
-// 所有 Agent 共用的后台运行时限、折叠的「很少用到」。一个 Agent 的全部属性只在它自己的页面（/settings/agents/<id>）改。
-// 判定都在服务端；本页只搬运选择并以服务端状态为准。
+// 设置 › Agent（界面设计 §4、§6.3）：只管接入与权限。列表上：Agent 一行一个（名字、一句状态加按钮）、接入新的程序、权限总览、替我动手、
+// 所有 Agent 共用的后台运行时限、人格、思考强度、折叠的「很少用到」。一个 Agent 的接入、钥匙、权限卡、在哪里做只在它自己的页面
+// （/settings/agents/<声明>）改；谁来干活（分工、各处用哪个执行者）在执行者页与各对象自己的页面。判定都在服务端。
 
 export { agentsOf } from "./data";
 
@@ -27,25 +28,36 @@ export function SettingsAgentsPage() {
   return (
     <Routes>
       <Route index element={<AgentList />} />
-      <Route path=":id" element={<AgentPage />} />
+      <Route path=":id" element={<AgentRoute />} />
     </Routes>
   );
+}
+
+const OLD = "legacy:";
+
+/** 执行者统一之前的地址 /settings/agents/legacy:<程序> 落到 /settings/agents/<程序>。 */
+function AgentRoute() {
+  const { id = "" } = useParams();
+  const { hash } = useLocation();
+  if (id.startsWith(OLD)) return <Navigate replace to={"/settings/agents/" + encodeURIComponent(id.slice(OLD.length)) + hash} />;
+  return <AgentPage />;
 }
 
 export function useEntryName(): (e: Entry) => string {
   const lang = useLang();
   const t = useT(strings);
-  return (e) => (e.instance ? e.card!.name : e.card?.name || (e.live ?? e.pending)?.declaration.name?.[lang] || e.harness || t.agent);
+  return (e) => (e.live ?? e.pending)?.declaration.name?.[lang] || e.id || t.agent;
 }
 
 function AgentList() {
   const t = useT(strings);
   const { docs, error: polError, load: loadPol, save } = usePolicyDocs(["policy", "access-limits"] as const);
   const { data, error, setError, load } = useData();
-  const [adding, setAdding] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const pol = docs?.policy;
+  const cards = docs?.["access-limits"]?.agent_cards;
   const list = data ? entries(data) : [];
+  const nameOf = useEntryName();
 
   return (
     <PolicyPage title={t.title} lede={t.lede} error={polError} ready={!!pol} onRetry={() => { void loadPol(); void load(); }}>
@@ -54,15 +66,14 @@ function AgentList() {
         <>
           {data && (
             <>
-              <Roles pol={pol} save={save} list={list} />
               <section aria-label={t.list} className="panel">
                 <h2>{t.list}</h2>
                 {list.length === 0 && <p className="sub">{t.emptyCards}</p>}
-                <ul className="rows">{list.map((e) => <Row key={e.id} e={e} pol={pol} />)}</ul>
-                {!adding && <p><button type="button" onClick={() => setAdding(true)}>{t.add}</button></p>}
+                <ul className="rows">{list.map((e) => <Row key={e.id} e={e} list={list} cards={cards} />)}</ul>
+                <p className="sub">{t.whoWorks} <Link to="/executors">{t.whoWorksLink}</Link></p>
               </section>
-              {adding && <AddAgent hosts={data.live.map((r) => r.declaration)} taken={list.map((e) => e.harness)} reload={load} onCancel={() => setAdding(false)} />}
-              <PermissionOverview agents={data.cards} />
+              <Onboard taken={list.map((e) => e.id)} reload={load} />
+              <PermissionOverview agents={list.map((e) => ({ id: e.id, name: nameOf(e), card: cardOf(cards, e.id) }))} />
             </>
           )}
           <AutoAct pol={pol} save={save} />
@@ -79,60 +90,20 @@ function AgentList() {
   );
 }
 
-/** 分工：日常 Agent、主 Agent，选了就存（§6.1 即改即存），旁边短暂写「已保存」。本人第一次保存前，预选旧的默认并标明。 */
-function Roles({ pol, save, list }: { pol: Doc; save: Save; list: Entry[] }) {
-  const t = useT(strings);
-  const nameOf = useEntryName();
-  const legacy = pol.default_agent_id == null && pol.main_agent_id == null && !!pol.default_harness;
-  const roles = { default_agent_id: pol.default_agent_id ?? (pol.default_harness ? LEGACY + pol.default_harness : ""), main_agent_id: pol.main_agent_id ?? (pol.default_harness ? LEGACY + pol.default_harness : "") };
-  const [note, setNote] = useState<{ role: string; ok: boolean; text: string } | null>(null);
-  const pick = async (role: "default_agent_id" | "main_agent_id", id: string) => {
-    setNote(null);
-    try {
-      await save("policy", { ...roles, [role]: id, version: pol.version });
-      setNote({ role, ok: true, text: t.saved() });
-    } catch (e) {
-      setNote({ role, ok: false, text: msg(e) });
-    }
-  };
-  return (
-    <section aria-label={t.roles} className="panel stack" id="roles">
-      <h2>{t.roles}</h2>
-      {(["default_agent_id", "main_agent_id"] as const).map((role) => (
-        <div key={role} className="act-row">
-          <div>
-            <label>{role === "default_agent_id" ? t.dailyRole : t.mainRole}
-              <select value={roles[role]} onChange={(e) => void pick(role, e.target.value)}>
-                <option value="">{t.roleNone}</option>
-                {list.map((e) => <option key={e.id} value={e.id} disabled={e.card ? !e.card.enabled : false}>{nameOf(e)}</option>)}
-              </select>
-            </label>
-            <span className="sub">{!roles[role] ? t.roleNoneHint : legacy ? t.roleLegacy : role === "default_agent_id" ? t.dailyHint : t.mainHint}</span>
-          </div>
-          {note?.role === role && <span role={note.ok ? "status" : "alert"} className={"saved-note" + (note.ok ? "" : " bad")}>{note.text}</span>}
-        </div>
-      ))}
-    </section>
-  );
-}
-
-/** 列表里的一行：名字、分工标记、一句状态。可用写「可用」；还差一步时写差哪一步并给「去接入」。 */
-function Row({ e, pol }: { e: Entry; pol: Doc }) {
+/** 列表里的一行：名字、一句状态。可用写「可用」；还差一步时写差哪一步并给「去接入」。隔离另写的声明说明它与哪个程序同一程序。 */
+function Row({ e, list, cards }: { e: Entry; list: Entry[]; cards?: Record<string, PermissionCardDoc> }) {
   const t = useT(strings);
   const nameOf = useEntryName();
   const label = useLabel();
-  const roleId = (k: string) => pol[k] ?? (pol.default_harness ? LEGACY + pol.default_harness : "");
+  const base = e.base ? list.find((x) => x.id === e.base) : undefined;
   const to = "/settings/agents/" + encodeURIComponent(e.id);
   const step = !hasKey(e) ? t.stepKey : !e.live ? (e.pending ? t.stepLaunch : t.stepNoRequest) : "";
   return (
     <li className="act-row" aria-label={nameOf(e)}>
       <div>
-        <span>
-          <Link to={to}>{nameOf(e)}</Link>{" "}
-          {roleId("default_agent_id") === e.id && <span className="badge plain">{t.isDaily}</span>}{" "}
-          {roleId("main_agent_id") === e.id && <span className="badge plain">{t.isMain}</span>}
-        </span>
-        <span className="sub">{e.card && !e.card.enabled ? t.stateOff : ready(e) ? t.stateReady : t.stateMissing(step)}{e.card?.permission?.groups.decide ? " · " + label("permissionGroup", "decide") : ""}</span>
+        <span><Link to={to}>{nameOf(e)}</Link></span>
+        <span className="sub">{ready(e) ? t.stateReady : t.stateMissing(step)}{cardOf(cards, e.id).groups.decide ? " · " + label("permissionGroup", "decide") : ""}</span>
+        {e.base && <span className="sub">{t.isolated(base ? nameOf(base) : e.base)}</span>}
       </div>
       {ready(e) ? <Link className="btn" to={to}>{t.open}</Link> : <Link className="btn" to={to + "#connect"}>{t.goConnect}</Link>}
     </li>
@@ -166,7 +137,7 @@ function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; 
     }
     await reload();
   };
-  const harnesses = list.map((e) => e.harness);
+  const harnesses = list.map((e) => e.id);
   const orphan = data.tokens.filter((c) => !c.harness && !(c.seen_harness && harnesses.includes(c.seen_harness)));
   return (
     <details className="panel">

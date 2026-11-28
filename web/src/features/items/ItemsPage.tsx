@@ -31,7 +31,7 @@ import { Clamp, Disclosure, EmptyState, ErrorBoundary, LIST_KEYS, PeekPanel, Ske
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
 export interface Item {
-  preferred_agent_id?: string;
+  preferred_executor?: string;
   id: string;
   phase: string;
   version: number;
@@ -409,7 +409,7 @@ export function ItemDetail({ embedded }: { embedded?: string } = {}) {
           {item.phase !== "proposed" && <PhaseActions key={"p" + item.version} item={item} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />}
           {item.kind === "task" && (
             <ErrorBoundary resetKey={item.version}>
-              <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
+              <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_executor: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
             </ErrorBoundary>
           )}
 
