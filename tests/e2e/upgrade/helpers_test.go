@@ -290,10 +290,10 @@ func openRW(t *testing.T, home string) *sql.DB {
 	return db
 }
 
-// tableCounts 与夹具清单同一口径：全部表（不含 sqlite_ 内部表与全文索引影子表）的行数。
+// tableCounts 与夹具清单同一口径：全部表（不含 sqlite_ 内部表与检索索引：检索索引是派生数据，随时重建）的行数。
 func tableCounts(t *testing.T, db *sql.DB) map[string]int {
 	t.Helper()
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'material_search_%' ORDER BY name`)
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'material\_search%' ESCAPE '\' AND name NOT LIKE 'search\_%' ESCAPE '\' ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
 	}

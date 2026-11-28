@@ -265,7 +265,7 @@ func TestFlowAgentsMD(t *testing.T) {
 		vd := decode[verdict](t, f.in(co, f.OBS, 11, "agents", "check").Stdout)
 		eq(t, "状态", vd.State, "drift")
 		drift = vd.Item
-		it := f.apa(f.OBS, 0, "item", "show", drift).Stdout
+		it := f.apa(f.OBS, 0, "item", "show", drift, "--full").Stdout
 		contains(t, "漂移事项（needs_input 附 diff）", it, "needs_input", "手改：禁止直接推 main", "merge", "override", "ignore")
 		f.in(co, f.OBS, 6, "agents", "sync")
 		eq(t, "sync 不丢手改内容", readFile(t, filepath.Join(co, "AGENTS.md")), edited)
@@ -359,7 +359,7 @@ func TestFlowAgentsMD(t *testing.T) {
 			}
 		}()
 		f.waitFor("来源一个周期后产生漂移事项", 30*time.Second, func() bool { return len(f.driftItems(gh)) > 0 })
-		it := f.apa(f.OBS, 0, "item", "show", f.driftItems(gh)[0]).Stdout
+		it := f.apa(f.OBS, 0, "item", "show", f.driftItems(gh)[0], "--full").Stdout
 		contains(t, "漂移事项", it, "needs_input", "AGENTS.md")
 	})
 }

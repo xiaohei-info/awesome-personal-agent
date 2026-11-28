@@ -136,7 +136,9 @@ func take(t *testing.T, s *store.Store) snapshot {
 	snap := snapshot{rows: map[string]int64{}, payload: map[int64]string{}}
 	err := s.View(context.Background(), func(tx *store.Tx) error {
 		var tables []string
-		r, err := tx.Query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'store_%'")
+		// 检索索引是派生数据，升级时可整张换掉（§16.5），不计入行数比较。
+		r, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'store_%'
+			AND name NOT LIKE 'material\_search%' ESCAPE '\' AND name NOT LIKE 'search\_%' ESCAPE '\'`)
 		if err != nil {
 			return err
 		}

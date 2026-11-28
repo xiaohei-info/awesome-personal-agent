@@ -29,7 +29,9 @@
 | `apa today [--full]` | 今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1）；事项默认精简（同 `apa item list`） | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建；可带 `--deadline`、`--origin`、`--ext`（规则同 `apa item add`） | observer | |
-| `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 默认输出精简事项（不含 `body`、`spec`、`ext`、`proposal`，响应不含 `origins`、`groups`），要全文读单条用 `show`，要整表全量带 `--full`（主文档 §17.2）；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--from <日期> --to <日期>`（按日期范围读，同 HTTP 的 `from`、`to`）、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 5 |
+| `apa search <查询> [--type item\|material\|project\|source]... [--project] [--phase] [--kind] [--tag]... [--item] [--after] [--before] [--include-dropped] [--limit 1–50] [--cursor]` | 统一检索（主文档 §7.1）：跨项目按相关度排，中英文都可、整句可用、引号是短语；一页默认 10 条，输出不超过一次读取的字数上限，带 `total`、`withheld`、`next_cursor` 与至多三条 `next`；不带 `--project` 时当前目录所在项目的命中加权 | observer | 2 |
+| `apa item show <id> [--part body\|progress\|messages] [--offset <n>] [--full]` | 读一条事项：默认正文前 2000 字、最近 5 条进展与挂靠消息（消息不带 `detail` 与 `content`；按转发白名单过滤）、关系与关联键，`parts` 写明各部分有多少、给了多少，`next` 给分段读取与 `apa why`；`--part body --offset <n>` 从第 n 个字起读正文，`--part progress\|messages --offset <n>` 跳过最近的 n 条往前读，都不超过一次读取的字数上限；`--full` 给全部（主文档 §17.2） | observer | 2、5 |
+| `apa item list [筛选] [--limit 1–200] [--cursor] [--full]` | 列事项：默认一页 30 条，每行只有 id、标题、阶段、类型、项目、优先级、标签、执行者、状态说明、截止与计划、`version`、`chain_depth`、建立与最近变更时间，摘要截到 60 字（响应不含 `origins`、`groups`），输出不超过一次读取的字数上限，带 `total`、`next_cursor` 与 `next`；`--full` 给完整的行（仍分页）。筛选：`--phase`、`--kind`、`--project`、`--assignee`、`--tag`、`--q <全文>`（走统一检索，按相关度排）、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--from <日期> --to <日期>`（按日期范围读，同 HTTP 的 `from`、`to`）、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 2 |
 | `apa item add/update/transition/relate` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` 与 `--planned-slot "HH:MM - HH:MM"`（`update` 传空串清除；有时段必须有计划日期，否则退出码 2）；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐；`add`、`transition` 可带 `--evidence <说明或结果证据>`，进请求体的 `evidence`（委派子事项进入 `done` 必须带），只作记录，不参与权限判定。 | worker（自己的事项）；delegate（任意事项）。一档；以非 `proposed` 阶段新建、使事项离开 `proposed` 或 `needs_input` 为二档（见下文三档表） | 2、4、6、20、23 |
 | `apa item comment <id> --text [--reply-to <发言 id>] [--on <日期>]` | 在事项的讨论区发言（追加一条进展，内核命令 `item.progress`），不改阶段；`--reply-to` 回复同一事项里已有的一条发言，不在这个事项里为退出码 2；`--on` 不能晚于今天（主文档 §6.3） | worker（自己的事项）；delegate（任意事项） | 2、4 |
 | `apa item thread <id> [--before <游标>] [--limit <条数>] [--full]` | 读事项的讨论流（同 `GET /items/{id}/thread`）：最新的在后，缺省 20 条、至多 100 条，整页不超过读取上限；更早的用上一页的 `before` 读；不带 `--full` 时每行不带原始记录 | observer | 2、5 |
@@ -50,7 +52,7 @@
 | `apa report (<id> \| --session <句柄>) --outcome --summary [--pr --commit --branch --link --file] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`--summary` 必填。委派子事项报 `done` 时摘要就是结果，有 `--pr`、`--commit`、`--branch`、`--link` 或 `--file`（报告文件路径）就一并作为证据；其他事项报 `done` 必须带其中至少一项，否则退出码 2（主文档 §6.14 第 3 条）。`--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5）。`--session` 代替 id：按调用方 harness 记下的会话句柄找到委派记录所在的子事项，记录还没挂事项为 6。委派子事项上的回执同时成为父事项的一条进展 | 绑定该 assignee 的 worker、该运行的运行凭据、delegate | 2、4、5、6 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
-| `apa project list/show` | 读项目，含 repos 与允许的执行者 | observer | |
+| `apa project list/show` | 读项目，含 repos 与允许的执行者，带项目卡片（各阶段条数、最近活动；`show` 另带最近五条事项与材料条数）与 `next` | observer | |
 | `apa project create/update` | 建项目、改基本信息（整理事项）；改对话捕获开关属"改日常规则与提醒"。`allowed_executors` 与远程地址属"Agent 与执行者配置"、外发范围属"数据去向"，各有自己的入口（`apa settings`、`apa project repos`），建项目时带 `allowed_executors` 为 2 | delegate | 2、23 |
 | `apa project repos add/remove` | 增改本机检出（整理事项）；远程地址属"Agent 与执行者配置"，这一组没开为 23 | worker | 4、23 |
 | **材料与规范** | | | |
@@ -58,7 +60,6 @@
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
 | `apa material list` | 列出材料，可按项目、kind、标签筛选 | observer | |
 | `apa material show <id> [--rev]` | 读当前或指定修订；托管型只回位置 | observer | 5 |
-| `apa material search <查询>` | 检索，只回 id、标题、片段 | observer | |
 | `apa blob put/get` | 附件 | worker / observer | |
 | `apa agents list` | 查看 Agent 卡、默认选择与可用原因 | observer | — |
 | `apa agents check` | 比对工作区 AGENTS.md | observer | 10、11 |
@@ -166,7 +167,8 @@
 
 | 分组 | 方法与路径 | 说明 | 凭据 |
 |---|---|---|---|
-| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围） | 按 §14.3；导出 ext 密钥可 `GET` |
+| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文，走统一检索：只留命中的事项，不带 `sort` 时按相关度排）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围）、`limit`（正整数）与 `cursor`（分页，见下） | 按 §14.3；导出 ext 密钥可 `GET` |
+| 检索 | `GET /search` | 统一检索（主文档 §7.1），参数与响应见下 | observer；导出 ext 密钥可用；webhook 与其他 ext 密钥 403 |
 | | `GET /today` | 今天的清单，六组：`planned`、`due`、`pending`、`stale`、`overdue`（截止的本机日早于今天、未结束，按截止先后）、`high_priority`（紧急或高、未结束，紧急在前）；一件事可在几组里同时出现 | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
 | | 已有路由 GET /items 的新增查询参数 | `progress_from`、`progress_to`：只列进展日落在范围内的事项，响应另带 `progress`（主文档 §7.1） | observer |
@@ -204,7 +206,6 @@
 | | `PATCH /materials/{id}` | 改链接型材料的标题、kind 与标签 `{"title"?, "kind"?, "tags"?, "reason"?}`，经 `material.update`；位置不可改，非链接型返回 409（3a） | Web 登录；Agent 按权限卡 |
 | | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订（二档；规范类为 3a） | Web 登录、delegate |
 | | `GET /revisions/pending` | 全站等本人确认的 proposed 修订，先提交的在前：`{"pending": [{"revision", "material", "baseline_changed"}]}`；只读 | 同材料读取 |
-| | `GET /materials/search` | 检索 | observer |
 | | `PUT/GET /blobs/{hash}` | 附件 | worker 写，observer 读 |
 | | 已有路由 POST /materials 的新增请求体 | 带 `link` 键时登记链接型材料：`{"link", "title", "project", "kind"?, "tags"?}`，经 `material.link`；已有同项目同位置的返回 200 与那一条，新建返回 201。`GET /materials` 与 `GET /materials/{id}` 的每条材料加只读字段 `form`（`hosted`、`owned`、`link`），链接型另带 `link` 与 `open_url`（库已登记打开方式时） | worker 写，observer 读 |
 | | `GET /note-vaults` | 已登记的笔记库：`{"vaults": [{"name", "open_url"}]}` | observer |
@@ -308,6 +309,20 @@
 
 事项字段 `daily_at`（**新增（2026-11-23）**）：`POST /items` 与 `PATCH /items/{id}` 可写（CLI 为 `apa item add/update --daily-at <HH:MM>`，空串清除），值为 `HH:MM`（本机时区，00:00–23:59，两位补零），`PATCH` 传 `null` 或空串清除；`GET` 在已设置时返回。表示每天这个钟点提醒一次，只在开启了到点提醒时产生提醒（主文档 §7.4）。与 `planned_for` 互斥：同一请求或事项上两者同时有值返回 400 `invalid_request`；写入计划日期而没写 `daily_at` 时内核在同一条命令里清掉它。事项事件的快照里随之带上这个字段。
 
+`GET /search?q=<查询>`：参数 `type`（`item`、`material`、`project`、`source`，可重复或逗号分隔；缺省为前三种，来源事件只在显式给出时检索）、`project`（过滤）、`here`（调用方当前所在的项目，只加权不过滤）、`phase`、`kind`、`tag`（可重复，全部命中）、`item`（与该事项有关系边的材料）、`after`、`before`（最近变更时间的下界与上界，RFC 3339 或 `YYYY-MM-DD`）、`include_dropped`（`true` 时已放弃的事项也出）、`limit`（1–50，缺省 10）、`cursor`（上一页的 `next_cursor`）。不带 `q` 时只按筛选列出，最近变更的在前。响应：
+
+```json
+{"hits": [{"type": "item", "id": "itm_…", "title": "…", "project": "prj_…", "project_name": "…", "phase": "open", "kind": "task",
+  "updated": "2026-11-27", "matched_in": ["title", "progress"], "coverage": "9/11", "snippet": "…至多 120 字…"}],
+ "total": 37, "withheld": {"dropped": 21}, "next_cursor": "10", "single_chars": false}
+```
+
+`matched_in` 取 `title`、`tags`、`summary`、`progress`、`body`；`coverage` 是查询词命中了几个；托管型材料另有 `path`、不带 `snippet`；项目命中不带 `project`。`total` 是这把钥匙看得到、且没被默认隐去的命中数，`withheld` 是默认隐去的（目前只有 `dropped`），`next_cursor` 缺省表示没有下一页，`single_chars` 表示二元组都没中、按单字检索。外部钥匙的命中在裁剪后的内容上复核（主文档 §14.14），`total` 与 `withheld` 只计复核后仍命中的。查询没有可检索的字符、`type`、`limit`、`after`、`before`、`include_dropped`、`cursor` 不合法时 400。每次首页检索计入健康视图的 `search` 统计，不存查询原文。
+
+`GET /items?limit=<n>[&cursor=<c>]`：只回一页，另带 `total`（筛选后的总数）与 `next_cursor`（缺省表示没有下一页）；`last_rejections`、`content_scopes` 只含这一页的事项。不带 `limit` 时回全部，与以前相同；HTTP 不设条数上限（升级前 `limit` 被忽略，带大数读全部的调用方照旧），命令行一页至多 200 条；只带 `cursor` 为 400。
+
+`GET /projects` 另带 `cards`（项目 id → `{"counts": {阶段: 条数}, "last_activity": "YYYY-MM-DD"}`），`GET /projects/{id}` 另带 `card`（同上，另有 `recent`：最近变更的五条事项 `{id, title, phase, updated}`，不含已放弃；`materials`：材料条数）。条数只数调用者读得到的事项（外部钥匙按档位，主文档 §14.14）。
+
 `GET /items?from=YYYY-MM-DD&to=YYYY-MM-DD`：按日期范围读，含首尾，`to` 不早于 `from`，跨度至多 62 天，两个参数须同时给，否则 400。收录 `planned_for` 落在范围内、或 `deadline` 所在的本机日落在范围内的事项，与其他筛选取交集；不按阶段过滤。带范围时响应另有 `today`（本机时区的今天）与 `utc_offset`（本机时区此刻的偏移，如 `+08:00`）。
 
 `GET /items?progress_from=YYYY-MM-DD&progress_to=YYYY-MM-DD`：按进展日读，含首尾，两个参数须同时给，`progress_to` 不早于 `progress_from`，跨度至多 62 天，否则 400。只收至少有一条进展的进展日落在范围内的事项（与其他筛选取交集，不按阶段过滤），响应另有 `progress`（事项 id → 落在范围内的进展条目，形状同 `GET /items/{id}` 的 `progress[]`，按记录先后）。进展日是条目的 `on`；没有 `on` 的取 `at` 所在的本机日。Web「已完成」页按它数一周的进展（界面设计 §9.13）。
@@ -365,7 +380,7 @@
 
 `GET /judgments` 返回 `{"judgments": [...], "next_after": "<记录 id>"}`，按判断时刻升序；`after` 是上一页最后一条的 id，有下一页时才返回 `next_after`，`limit` 缺省 100、上限 500，`after` 不是已知记录 id 或 `limit` 越界返回 400。运行凭据列表必须带 `subject`，且只读目标事项范围内的记录：`GET /judgments/{id}` 读范围外的记录返回 404（CLI 退出码 5），列表返回空；ext、webhook 凭据返回 403。记录过了保留期（`judgment_retention_days`，缺省 180 天）被清理后返回 404，引用它的命令 Event 与事项不受影响。`GET /judgments/{id}` 返回主文档 §6.16 的字段。`GET /judgments/stats` 返回 `{"rows": [{"use", "template", "source"?, "backend", "calls", "decided", "uncertain", "errors", "reused"}], "rates": [{"use", "template", "source"?, "escalation", "undecided", "acceptance", "false_drop", "reviewed"}], "histogram": [...]}`；`since` 缺省 30 天。
 
-`GET /health` 返回 `{"healthy": bool, "signals": [...]}`，信号恒为十四项且顺序固定（主文档 §15.2）：`source_failures`、`outcall`、`delivery_backlog`、`chain_trips`、`agentsmd_drift`、`pack_rejections`、`model_unavailable`、`unjudged_backlog`、`rule_fallbacks`、`receipt_failures`、`other_alerts`、`stalled_delegations`、`clock_lag`、`capture_failures`。前十一项的 id 与顺序同 v0.1，后三项是 v0.2.0 追加的，都是 `warning`，不影响 `healthy`。`capture_failures` 另给 `captures: [{class, count, last_at, project?}]`（最近 24 小时，按类别汇总，最近的在前），`detail` 是类别列表；不含对话内容与凭据。每项 `{id, ok, count, severity?, why?, next, detail?}`；`severity` 只在异常时给出，取 `error` 或 `warning`。`unjudged_backlog` 是 `warning`，不影响 `healthy`；它的 `detail` 为 `{"model_unavailable": n, "models_paused": n, "outbound_unset": n, "undecided": n, "restored": n, "expired": n, "rejudge_days": n, "sources": [{"source", "count"}]}`，`undecided` 只统计 v0.1 留下的事件，`expired` 只作参考、不计入 `count`；`rejudge_days` 是运行配置 `unjudged_rejudge_days` 的值，`0` 表示自动重判与到期都关闭（主文档 §9.3），Web 据它说明积压会不会自动判断。`outcall` 的 `detail` 另带 `failures`：`[{"run", "target", "category", "fault"}]`，是仍为目标最近一次的失败的任务型与后台运行（24 小时内），计入 `count`。`receipt_failures` 另带 `receipts`：`[{"object", "command", "exit", "code"?, "credential"}]`，`code` 是拒绝的原因码（升级前的告警从同一对象紧挨着的 `command.rejected` 补上），不带原因原文；`detail` 仍是对象 id 列表。`source_failures` 的 `detail` 每项为 `{"source", "enabled", "consecutive_failures", "kind"?, "needs_input_item"?}`，只列当前连续失败或已停用的来源，最近一次拉取成功即不再出现；`kind` 是最近一次失败的类别（`transient`、`auth_or_config`、`permanent`，同来源统计的 `last_failure_kind`），Web 据 `auth_or_config` 说"要重新登录"；`needs_input_item` 只在升级前留下的认证失败事项仍未结束时给出，当前版本不再建这类事项。`other_alerts` 另带 `notices`：`[{"object", "rule"?, "code"?, "params"?, "item"?, "dropped"?}]`，每条是一条仍算现状的告警，`code` 取动作没能完成的类别码（`task_refused`、`background_refused`、`resume_refused`、`model_unset`、`models_paused`、`outbound_blocked`、`chain_tripped`、`action_rejected`、`action_failed`，主文档 §8.7），`params` 只放内核生成的机制值（`detail`；`action_rejected` 另带拒绝原因码 `code`），`item` 是受影响的事项，`dropped` 为真表示规则建的那一份已转 `dropped`；升级前的告警没有 `code`；`detail` 仍是对象 id 列表。`model_unavailable` 的 `detail` 为 `{"judge": s, "generate": s, "endpoint": s, "paused": b, "screening": [事项 id], "judgements": [{"kind", "object", "endpoint"}]}`，`judgements` 是尚未恢复的模型调用失败，`endpoint` 取 `judge` 或 `generate`，表示这次失败归哪个端点（判断型模板在配了判断端点时归 `judge`，否则与生成型一样归 `generate`）；`judge`、`generate` 各取空、`not_configured`、`failing` 或 `paused`；`endpoint` 是 v0.1 的字段，保留，取两者中较差的一个。本人暂停了模型时 `paused` 为 true，`judge`、`generate` 都是 `paused`，`endpoint` 为空，信号正常（主文档 §8.7）。
+`GET /health` 返回 `{"healthy": bool, "signals": [...], "search": {"queries", "zero", "partial", "since"}}`（`search` 是统一检索的零命中统计，不是信号，不影响 `healthy`），信号恒为十四项且顺序固定（主文档 §15.2）：`source_failures`、`outcall`、`delivery_backlog`、`chain_trips`、`agentsmd_drift`、`pack_rejections`、`model_unavailable`、`unjudged_backlog`、`rule_fallbacks`、`receipt_failures`、`other_alerts`、`stalled_delegations`、`clock_lag`、`capture_failures`。前十一项的 id 与顺序同 v0.1，后三项是 v0.2.0 追加的，都是 `warning`，不影响 `healthy`。`capture_failures` 另给 `captures: [{class, count, last_at, project?}]`（最近 24 小时，按类别汇总，最近的在前），`detail` 是类别列表；不含对话内容与凭据。每项 `{id, ok, count, severity?, why?, next, detail?}`；`severity` 只在异常时给出，取 `error` 或 `warning`。`unjudged_backlog` 是 `warning`，不影响 `healthy`；它的 `detail` 为 `{"model_unavailable": n, "models_paused": n, "outbound_unset": n, "undecided": n, "restored": n, "expired": n, "rejudge_days": n, "sources": [{"source", "count"}]}`，`undecided` 只统计 v0.1 留下的事件，`expired` 只作参考、不计入 `count`；`rejudge_days` 是运行配置 `unjudged_rejudge_days` 的值，`0` 表示自动重判与到期都关闭（主文档 §9.3），Web 据它说明积压会不会自动判断。`outcall` 的 `detail` 另带 `failures`：`[{"run", "target", "category", "fault"}]`，是仍为目标最近一次的失败的任务型与后台运行（24 小时内），计入 `count`。`receipt_failures` 另带 `receipts`：`[{"object", "command", "exit", "code"?, "credential"}]`，`code` 是拒绝的原因码（升级前的告警从同一对象紧挨着的 `command.rejected` 补上），不带原因原文；`detail` 仍是对象 id 列表。`source_failures` 的 `detail` 每项为 `{"source", "enabled", "consecutive_failures", "kind"?, "needs_input_item"?}`，只列当前连续失败或已停用的来源，最近一次拉取成功即不再出现；`kind` 是最近一次失败的类别（`transient`、`auth_or_config`、`permanent`，同来源统计的 `last_failure_kind`），Web 据 `auth_or_config` 说"要重新登录"；`needs_input_item` 只在升级前留下的认证失败事项仍未结束时给出，当前版本不再建这类事项。`other_alerts` 另带 `notices`：`[{"object", "rule"?, "code"?, "params"?, "item"?, "dropped"?}]`，每条是一条仍算现状的告警，`code` 取动作没能完成的类别码（`task_refused`、`background_refused`、`resume_refused`、`model_unset`、`models_paused`、`outbound_blocked`、`chain_tripped`、`action_rejected`、`action_failed`，主文档 §8.7），`params` 只放内核生成的机制值（`detail`；`action_rejected` 另带拒绝原因码 `code`），`item` 是受影响的事项，`dropped` 为真表示规则建的那一份已转 `dropped`；升级前的告警没有 `code`；`detail` 仍是对象 id 列表。`model_unavailable` 的 `detail` 为 `{"judge": s, "generate": s, "endpoint": s, "paused": b, "screening": [事项 id], "judgements": [{"kind", "object", "endpoint"}]}`，`judgements` 是尚未恢复的模型调用失败，`endpoint` 取 `judge` 或 `generate`，表示这次失败归哪个端点（判断型模板在配了判断端点时归 `judge`，否则与生成型一样归 `generate`）；`judge`、`generate` 各取空、`not_configured`、`failing` 或 `paused`；`endpoint` 是 v0.1 的字段，保留，取两者中较差的一个。本人暂停了模型时 `paused` 为 true，`judge`、`generate` 都是 `paused`，`endpoint` 为空，信号正常（主文档 §8.7）。
 
 `GET /items/{id}/messages` 返回 `{"messages": [...]}`，按落盘顺序。每条字段：`id`、`source`、`sender`、`sender_verified`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`attach_state`、`forward_allowed`（是否进转发白名单）。只读，不推进 `attach_state`。运行身份和 `unattended` 事项的 worker、observer 只拿到 `forward_allowed` 为真的消息；Web 登录和 delegate 拿到全部。事项不存在返回 404。`apa item show` 把这个列表合进输出的 `messages`。
 
@@ -532,9 +547,11 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 {"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 14}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
-`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 14（版本 7 新增连接与凭据保管的三张表，版本 8 收齐工作台结构变更，版本 9 新增 Agent 实例表与钥匙的 `agent_id`，版本 10 新增 `projects.system_role` 与内置 Inbox 唯一索引，版本 11 至 14 见 B.6，均已按版号递增）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
+`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 15（版本 7 新增连接与凭据保管的三张表，版本 8 收齐工作台结构变更，版本 9 新增 Agent 实例表与钥匙的 `agent_id`，版本 10 新增 `projects.system_role` 与内置 Inbox 唯一索引，版本 11 至 14 见 B.6，均已按版号递增；版本 15 以统一检索索引取代材料索引）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
+
+账本结构版本 15（统一检索，2026-11-28，主文档 §7.1、§17.2、决定 99）：`search` 迁移 v3 丢弃 `material_search` 与 `material_search_state`，新建 `search_doc`、`search_index`（FTS5，分词器 `porter unicode61`）、`search_cursor`、`search_stat`；都是派生数据，升级后第一次检索时全量重建，不改业务数据、不回填、不追加事件。新增路由 `GET /search` 与命令 `apa search`；`GET /items` 增 `limit`、`cursor`（带上时响应另有 `total`、`next_cursor`）；`GET /projects` 增 `cards`、`GET /projects/{id}` 增 `card`；`GET /health` 增 `search`。**破坏性改动**：`GET /materials/search` 与 `apa material search` 删除，改用 `GET /search?type=material`、`apa search --type material`（命中的形状见 B.2：`hosted` 去掉，托管型以带 `path` 区分）；`GET /items?q=` 从"查询的每个词都要出现"改为"任一词命中、按相关度排"，结果会比以前多，不带 `sort` 时顺序是相关度；`apa item list` 默认一页 30 条、每行只留短字段，要完整的行带 `--full`，要更多条带 `--limit`（至多 200）或按 `next` 续页；`apa item show` 默认正文前 2000 字、最近 5 条进展与挂靠消息（消息不带 `detail`），要全部带 `--full`。HTTP 的 `GET /items`（不带 `limit`）与 `GET /items/{id}` 响应不变，Web 不受影响。**升级顺序**：内核与插件一起换（插件的 `apa_search` 工具改为调 `apa search`，旧插件调已删除的子命令会失败）。**回滚**：账本从 v14 升到 v15 不可原地降级，回滚须同时恢复旧二进制与升级前的账本快照；只丢升级后的写入，索引本身不需要备份。
 
 账本结构版本 14（协作工作台闭环与执行者托管委派，2026-11-28，主文档 §6.17、§7.5、§7.6、§9.3、§13.6）：只增列与索引，不回填、不改已有数据。`delegation` 迁移 3 给 `delegation_dispatch` 加 `run`、`origin`、`about`（`TEXT NOT NULL DEFAULT ''`）与索引 `delegation_dispatch_session(session)`；`executors` 迁移 4 给 `executors_entry` 加 `overrides TEXT NOT NULL DEFAULT ''`；`eventlog` 迁移 4 加表达式索引 `eventlog_event_session`（按 `actor` 里的会话，不是 JSON 的 `actor` 取空）。已有委派记录的三列为空，读作"harness 自己派出、已挂事项"；已有执行者没有默认覆盖值，拉起时不多传参数。
 
@@ -554,7 +571,7 @@ token 消耗小改（2026-11-27，主文档 §13.6、§17.2）：不改账本结
 - 判断模板新增 `inbound-triage/triage-urgent`（第二题，默认带 0.15–0.80，判断记录用途仍是 `inbound_urgent`）；`triage-screen` 去掉 `event_stats` 与第二题判据。覆盖了 `inbound-triage` 的同名包要自带 `triage-urgent`，否则急不急一题不问、一律按普通进队列。按模板名设过的 `triage-screen` 不确定带与影子模式只作用于第一题。`source_pipeline.judge_prompt` 只代替第一题的判据；原来写在里面的紧急判据不再生效。`source_pipeline` 新增 `owner_identity`（字符串，默认空，上限同两份提示词），两道题的判据后都附它；`judge_prompt` 整段原样作第一题判据，内核不拆段，原来写在里面的本人身份要移到 `owner_identity`，第二题判据与 stats 字样要删掉。
 - 来源规则 `where[]` 新增 `contains`、`prefix`；`GET /packs` 的每个包增 `source_rules`。
 
-委派完成依据与一次卡住只通知一次（2026-11-28，主文档 §6.14 第 3 条、§13.6、决定 99），结构变更并入结构版本 16：
+委派完成依据与一次卡住只通知一次（2026-11-28，主文档 §6.14 第 3 条、§13.6、决定 100），结构变更并入结构版本 16：
 - **回执**：委派子事项报 `done` 不再要求 PR、commit、分支或链接，摘要（必填）就是结果；证据新增 `file`（报告文件路径，`apa report --file`、回报结构 `file`）。其他事项报 `done` 照旧要结果证据。stdout 兜底与附带插件的回执捕获不再把没有证据的 `done` 降为 `progress`。`item.transition` 把委派转 `done` 仍要写明证据或说明。
 - **通知**：由 APA 拉起过的委派子事项，运行结束时这次运行期间没有"完成"或"卡住"回执、子事项仍在 `open`、`waiting` 的，内核代记一条"卡住"回执（操作者 system，`run` 为这次运行），不再转 `needs_input`（不再产出类别码 `background_incomplete` 的问题）、不再推 `run_failed`；发起方只收到一条 `delegation:<子事项>:<序号>` 通知。子事项进入终态时，还没送出的"卡住了"通知撤回（转 `superseded`）。
 - **委派历史**：`apa context --scope item` 的 `history[].dispatches` 与注入里的"上次"一行，挂在目标事项本身的记录排前，其余照旧按开始时间倒序。

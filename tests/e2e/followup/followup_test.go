@@ -178,7 +178,7 @@ func TestFlowFollowUp(t *testing.T) {
 			t.Fatalf("决策待办里没有 FU-4: %s", inbox)
 		}
 		for _, label := range []string{"继续等", "我来处理", "放弃"} {
-			if raw := f.apa(f.OBS, 0, "item", "show", fu4).Stdout; !strings.Contains(raw, label) {
+			if raw := f.apa(f.OBS, 0, "item", "show", fu4, "--full").Stdout; !strings.Contains(raw, label) {
 				t.Errorf("决策请求缺少选项 %q: %s", label, raw)
 			}
 		}

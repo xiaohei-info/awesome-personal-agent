@@ -79,7 +79,7 @@ func TestFlowDelegateRecover(t *testing.T) {
 		eq(t, "子事项 assignee", it["assignee"], "work-host.cli")
 		eq(t, "子事项 project", it["project"], work)
 		eq(t, "父事项阶段", f.phase(parent), "waiting")
-		contains(t, "父事项 waiting_on 指向执行者", f.apa(f.OBS, 0, "item", "show", parent).Stdout, "work-host.cli")
+		contains(t, "父事项 waiting_on 指向执行者", f.apa(f.OBS, 0, "item", "show", parent, "--full").Stdout, "work-host.cli")
 	})
 
 	t.Run("ACT-DLG-03 执行者拿到项目上下文，不含材料正文", func(t *testing.T) {

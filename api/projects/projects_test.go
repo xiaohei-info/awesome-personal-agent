@@ -9,12 +9,18 @@ import (
 	"testing"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -31,7 +37,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, kp.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, kp.Module, core.Module, clock.Module, kitems.Module, km.Module, registry.Module, runner.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -45,11 +51,14 @@ func setup(t *testing.T) *env {
 	if err := kp.Register(x); err != nil {
 		t.Fatal(err)
 	}
+	if err := kitems.Register(x, nil); err != nil {
+		t.Fatal(err)
+	}
 	au := auth.New(nil)
 	if err := st.Update(context.Background(), func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{Routes(st, x)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{Routes(st, x), apiitems.Routes(x, st)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,5 +409,32 @@ func TestExtAndWebhookCredentialsCannotReadProjects(t *testing.T) {
 		if r := e.do(e.token(kind), "GET", "/v1/projects/"+id, ""); r.Code != 200 {
 			t.Fatalf("%s must still read: %d", kind, r.Code)
 		}
+	}
+}
+
+// 项目卡片（§12.1）：列表带各阶段条数与最近活动日；单个项目另带最近变更（不含已放弃）与材料条数。
+func TestProjectCardsCountItems(t *testing.T) {
+	e := setup(t)
+	dlg, obs := e.token(auth.Delegate), e.token(auth.Observer)
+	id := e.create(dlg)
+	for _, ph := range []string{"open", "open", "done", "dropped"} {
+		if r := e.web("POST", "/v1/items", `{"kind":"task","title":"t-`+ph+`","phase":"`+ph+`","project":"`+id+`"}`); r.Code != 201 {
+			t.Fatalf("item: %d %s", r.Code, r.Body)
+		}
+	}
+	var l struct {
+		Cards map[string]Card `json:"cards"`
+	}
+	e.do(obs, "GET", "/v1/projects", "").into(&l)
+	if c := l.Cards[id]; c.Counts["open"] != 2 || c.Counts["done"] != 1 || c.Counts["dropped"] != 1 || c.LastActivity == "" || c.Recent != nil {
+		t.Fatalf("list card: %+v", c)
+	}
+	var one struct {
+		Name string
+		Card Card `json:"card"`
+	}
+	e.do(obs, "GET", "/v1/projects/"+id, "").into(&one)
+	if one.Name != "Work" || len(one.Card.Recent) != 3 || one.Card.Materials == nil || *one.Card.Materials != 0 {
+		t.Fatalf("show card: %+v", one)
 	}
 }

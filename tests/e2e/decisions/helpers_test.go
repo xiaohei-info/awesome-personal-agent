@@ -85,7 +85,7 @@ func (f *fx) item(id string) map[string]any {
 	var out struct {
 		Item map[string]any `json:"item"`
 	}
-	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id).Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id, "--full").Stdout), &out); err != nil {
 		f.t.Fatal(err)
 	}
 	return out.Item

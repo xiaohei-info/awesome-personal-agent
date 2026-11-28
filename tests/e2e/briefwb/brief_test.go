@@ -281,7 +281,7 @@ func (f *fx) proposedTitles() []string {
 	var out []string
 	for _, it := range decode[struct {
 		Items []item `json:"items"`
-	}](f.t, f.apa(f.OBS, 0, "item", "list", "--phase", "proposed").Stdout).Items {
+	}](f.t, f.apa(f.OBS, 0, "item", "list", "--phase", "proposed", "--full", "--limit", "200").Stdout).Items {
 		out = append(out, it.Title)
 	}
 	return out

@@ -22,6 +22,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	ksearch "github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -103,6 +104,8 @@ const (
 type Report struct {
 	Healthy bool     `json:"healthy"`
 	Signals []Signal `json:"signals"`
+	// Search 是检索的零命中统计（§7.1）：不是故障信号，不影响 healthy，供判断要不要加语义检索。
+	Search ksearch.Stats `json:"search"`
 }
 
 // Routes 返回健康路由分组，交给 core.Deps.Groups。ph 为空表示没有能力包加载器。
@@ -125,14 +128,22 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
 		return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read the ledger", "use an owner or agent credential")
 	}
-	var v khealth.View
+	var (
+		v  khealth.View
+		ss ksearch.Stats
+	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
-		v, err = khealth.Collect(tx, h.opts)
+		if v, err = khealth.Collect(tx, h.opts); err != nil {
+			return err
+		}
+		ss, err = ksearch.CurrentStats(tx)
 		return
 	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, build(v, h.rejudgeDays))
+	rep := build(v, h.rejudgeDays)
+	rep.Search = ss
+	return core.WriteJSON(w, http.StatusOK, rep)
 }
 
 func ids[T any](xs []T, id func(T) string) []string {

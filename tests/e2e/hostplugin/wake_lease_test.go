@@ -204,7 +204,7 @@ func (f *fx) phase(id string) string {
 			Phase string `json:"phase"`
 		} `json:"item"`
 	}
-	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id).Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id, "--full").Stdout), &out); err != nil {
 		f.t.Fatal(err)
 	}
 	return out.Item.Phase

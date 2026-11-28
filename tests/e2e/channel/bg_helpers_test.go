@@ -273,7 +273,7 @@ func (f *bg) item(id string) map[string]any {
 	var out struct {
 		Item map[string]any `json:"item"`
 	}
-	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id).Stdout), &out))
+	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id, "--full").Stdout), &out))
 	return out.Item
 }
 
@@ -352,7 +352,7 @@ func (f *bg) listAssignee(assignee string) []string {
 			ID string `json:"id"`
 		} `json:"items"`
 	}
-	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--assignee", assignee).Stdout), &out))
+	must(f.t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--assignee", assignee, "--full", "--limit", "200").Stdout), &out))
 	var ids []string
 	for _, i := range out.Items {
 		ids = append(ids, i.ID)

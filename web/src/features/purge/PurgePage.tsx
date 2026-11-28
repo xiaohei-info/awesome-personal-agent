@@ -35,11 +35,10 @@ export function PurgePage() {
     if (!q) return;
     setError(null);
     try {
-      const [items, mats] = await Promise.all([
-        api.get<{ items: { id: string; title: string }[] }>("/items?" + new URLSearchParams({ q })),
-        api.get<{ hits: { id: string; title: string }[] }>("/materials/search?" + new URLSearchParams({ q })),
-      ]);
-      setHits([...items.items.map((i): Hit => ({ id: i.id, title: i.title, kind: "item" })), ...mats.hits.map((m): Hit => ({ id: m.id, title: m.title, kind: "material" }))]);
+      // 统一检索：事项与材料一起排，已放弃的也要能找到（彻底删除常常是删已放弃的）。
+      const sp = new URLSearchParams({ q, type: "item,material", include_dropped: "true", limit: "50" });
+      const r = await api.get<{ hits: { id: string; title: string; type: string }[] }>("/search?" + sp);
+      setHits(r.hits.map((h): Hit => ({ id: h.id, title: h.title, kind: h.type === "material" ? "material" : "item" })));
     } catch (e) {
       setError(msg(e));
     }

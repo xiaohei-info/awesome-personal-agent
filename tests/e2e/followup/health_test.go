@@ -392,7 +392,7 @@ func TestFlowHealthWarnings(t *testing.T) {
 			// 明细以委派子事项或其父事项标出该委派
 			parent := decode[struct {
 				Relations []struct{ From, To string } `json:"relations"`
-			}](t, f.apa(f.OBS, 0, "item", "show", child).Stdout)
+			}](t, f.apa(f.OBS, 0, "item", "show", child, "--full").Stdout)
 			found := false
 			for _, r := range parent.Relations {
 				found = found || strings.Contains(string(s.Detail), r.From) || strings.Contains(string(s.Detail), r.To)

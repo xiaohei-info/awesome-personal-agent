@@ -8,7 +8,7 @@ agent: task
 - 本批提示词只列出事件的元信息（事件 id、来源、类型、时间、等级），不附原文；需要看原文时主动调用 `apa` 命令读取。
 
 ## 零、怎么调用
-下面按 `apa` 命令行写。没有终端时用同名的 APA 工具，参数一一对应：`apa source event` 即 `apa_source_event`，`apa item list/show/update/comment` 即 `apa_item_list`、`apa_item_show`、`apa_item_update`、`apa_item_comment`，`apa source propose/remind/ignore/attach` 即 `apa_source_propose`、`apa_source_remind`、`apa_source_ignore`、`apa_source_attach`；看项目用 `apa_project_list`、`apa_project_show`（代替 `apa context`）。
+下面按 `apa` 命令行写。没有终端时用同名的 APA 工具，参数一一对应：`apa source event` 即 `apa_source_event`，`apa search` 即 `apa_search`，`apa item list/show/update/comment` 即 `apa_item_list`、`apa_item_show`、`apa_item_update`、`apa_item_comment`，`apa source propose/remind/ignore/attach` 即 `apa_source_propose`、`apa_source_remind`、`apa_source_ignore`、`apa_source_attach`；看项目用 `apa_project_list`、`apa_project_show`（代替 `apa context`）。
 
 **参数速查**（照抄即可，不用再查 `--help`；没列出的参数不接受）：
 - `apa source event <事件 id> [--part body|messages]`
@@ -26,7 +26,8 @@ agent: task
    - 如果事件的状态已经不是 `pending`（例如上一次失败重跑前已被处理过），直接跳过，绝不重复建建议。
 2. 查账本里的现有事项与建议，避免重复立项或错并：
    - `apa context` 看全局项目与背景
-   - `apa item list --phase open` / `--phase waiting` / `--phase needs_input` / `--phase proposed`（可按 `--project`、`--q` 筛选）。列表是精简的（没有正文与建议详情），直接看输出即可；要细节再单看那一条
+   - `apa search "<事件里的关键词或一句话>"` 跨项目找同一件事的事项与建议，按相关度排；已放弃的默认不出（输出里写明有几条）
+   - `apa item list --phase open` / `--phase waiting` / `--phase needs_input` / `--phase proposed`（可按 `--project`、`--q` 筛选）。列表是精简的短行（没有正文与建议详情），每页 30 条，`total` 与 `next` 写明还剩多少，没列完时按 `next` 续页；要细节再单看那一条
    - `apa item show <事项 id>` 看具体事项的进展、关联键与来源
 
 ## 二、怎么落账（每条待处理事件必须有明确去向）

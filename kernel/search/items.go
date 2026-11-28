@@ -3,17 +3,14 @@ package search
 import (
 	"cmp"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// ItemQuery 是事项列表在阶段/类型/项目/执行者筛选之外的检索条件（附录 B.2 `GET /items`）：
-// 全文（标题、摘要、正文、进展）、标签、计划日期筛选与排序。各条件取交集。
+// ItemQuery 是事项列表在阶段/类型/项目/执行者筛选之外的条件（附录 B.2 `GET /items`）：
+// 标签、计划日期筛选与排序。各条件取交集。全文筛选（q）走统一索引（Rank），不在这里。
 type ItemQuery struct {
-	Text       string
 	Tag        string
 	PlannedFor string // YYYY-MM-DD
 	// From、To 是日期范围（含首尾，至多 MaxRangeDays 天）：计划日期或截止所在的本机日落在范围内的事项（§7.1）。
@@ -37,34 +34,10 @@ func CheckRange(fromName, toName, from, to string) error {
 	return nil
 }
 
-// ItemProgressText 返回每个事项全部进展文字（空格连接），供全文检索。
-func ItemProgressText(tx *store.Tx) (map[string]string, error) {
-	r, err := tx.Query("SELECT item, text FROM item_progress ORDER BY at, id")
-	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-	out := map[string]string{}
-	for r.Next() {
-		var id, text string
-		if err := r.Scan(&id, &text); err != nil {
-			return nil, err
-		}
-		out[id] += " " + text
-	}
-	return out, r.Err()
-}
-
-// FilterItems 按 q 筛选并排序 its（不改入参）。progress 是 ItemProgressText 的结果，缺项视为没有进展。
+// FilterItems 按 q 筛选并排序 its（不改入参）。
 // 排序：updated 新的在前；deadline、planned_for 早的在前；priority 高的在前；未设该字段的排末尾，同值按 id。
-// 不带 Sort 时保持入参顺序。全文沿用材料检索的切分：查询的每个词都要出现在标题、摘要、正文、进展的并集里。
-func FilterItems(its []domain.Item, progress map[string]string, q ItemQuery) ([]domain.Item, error) {
-	var terms []string
-	if strings.TrimSpace(q.Text) != "" {
-		if terms = tokens(q.Text, false); len(terms) == 0 {
-			return nil, domain.NewError(domain.CodeInvalidRequest, "query has no searchable text", "use letters, digits or CJK characters")
-		}
-	}
+// 不带 Sort 时保持入参顺序（带全文时入参已按相关度排好）。
+func FilterItems(its []domain.Item, q ItemQuery) ([]domain.Item, error) {
 	if q.PlannedFor != "" {
 		if _, err := time.Parse("2006-01-02", q.PlannedFor); err != nil {
 			return nil, domain.NewError(domain.CodeInvalidRequest, "planned_for must be YYYY-MM-DD", "e.g. planned_for=2026-05-01")
@@ -106,15 +79,6 @@ func FilterItems(its []domain.Item, progress map[string]string, q ItemQuery) ([]
 		}
 		if q.From != "" && !inRange(it, q.From, q.To) {
 			continue
-		}
-		if len(terms) > 0 {
-			have := map[string]bool{}
-			for _, t := range tokens(strings.Join([]string{it.Title, it.Summary, it.Body, progress[it.ID]}, "\n"), true) {
-				have[t] = true
-			}
-			if slices.ContainsFunc(terms, func(t string) bool { return !have[t] }) {
-				continue
-			}
 		}
 		out = append(out, it)
 	}

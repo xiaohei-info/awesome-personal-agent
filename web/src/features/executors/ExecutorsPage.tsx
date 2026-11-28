@@ -4,6 +4,7 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { Val } from "../../app/values";
+import { evidenceEntries, type Evidence } from "../../app/evidence";
 import { strings } from "./strings";
 
 // 形状对应 GET /v1/executors、GET /v1/items?kind=delegation、GET /v1/audit/events?type=delegation.reported、
@@ -16,7 +17,6 @@ interface Executor {
   startable?: boolean; overridable?: Record<string, Overridable>; overrides?: Record<string, string>;
 }
 interface Child { id: string; phase: string; title: string; assignee?: string }
-interface Evidence { commit?: string; pr?: string; branch?: string; link?: string }
 interface Step { seq: number; object: string; at: string; payload?: { report?: { outcome: string; summary: string; evidence: Evidence } } }
 interface Dispatch { id: string; item: string; executor: string; session?: string; state: string; resumable: boolean }
 
@@ -129,8 +129,8 @@ export function ExecutorsPage() {
               <p>
                 <Link to={"/items/" + last.object}>{last.payload.report.summary}</Link>{" "}
                 <span className="sub">{new Date(last.at).toLocaleString(locale())}</span>
-                {Object.entries(last.payload.report.evidence ?? {}).filter(([, v]) => v).map(([k, v]) => (
-                  <span key={k} className="sub"> · {v!.startsWith("http") ? <a href={v} target="_blank" rel="noreferrer">{k}</a> : v}</span>
+                {evidenceEntries(last.payload.report.evidence).map(([k, v], i) => (
+                  <span key={i} className="sub"> · {v.startsWith("http") ? <a href={v} target="_blank" rel="noreferrer">{k}</a> : v}</span>
                 ))}
               </p>
             ) : (

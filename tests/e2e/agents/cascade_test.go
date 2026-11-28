@@ -22,7 +22,7 @@ func (f *fx) proposals() map[string]string {
 	var out struct {
 		Items []struct{ ID, Title, Phase, Kind string } `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--phase", "proposed").Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--phase", "proposed", "--full", "--limit", "200").Stdout), &out); err != nil {
 		f.t.Fatal(err)
 	}
 	m := map[string]string{}
@@ -43,7 +43,7 @@ func (f *fx) itemTitles() map[string]string {
 	var out struct {
 		Items []struct{ ID, Title string } `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list").Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--full", "--limit", "200").Stdout), &out); err != nil {
 		f.t.Fatal(err)
 	}
 	m := map[string]string{}

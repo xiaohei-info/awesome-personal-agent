@@ -287,7 +287,7 @@ func (k *kit) itemIDs() []string {
 			ID string `json:"id"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "list").Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "list", "--full", "--limit", "200").Stdout), &out); err != nil {
 		k.t.Fatal(err)
 	}
 	var ids []string
@@ -329,7 +329,7 @@ type Item struct {
 
 func (k *kit) item(id string) Item {
 	k.t.Helper()
-	r := k.apa(k.OBS, 0, "item", "show", id)
+	r := k.apa(k.OBS, 0, "item", "show", id, "--full")
 	var out struct {
 		Item json.RawMessage `json:"item"`
 	}

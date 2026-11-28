@@ -34,13 +34,15 @@ func run(c *client.Ctx, args []string) error {
 		if len(rest) != 0 {
 			return usage("list takes no arguments")
 		}
-		return call(ctx, c, "GET", "/projects", nil)
+		return read(ctx, c, "/projects", []string{"apa project show <id>", "apa search <words>"})
 	case "show":
 		id, rest, err := splitID(rest)
 		if err != nil || len(rest) != 0 {
 			return usage("show takes exactly one project id")
 		}
-		return call(ctx, c, "GET", "/projects/"+url.PathEscape(id), nil)
+		// 逐级往下：这个项目的未结事项、在项目内检索、项目材料（§17.2）。
+		return read(ctx, c, "/projects/"+url.PathEscape(id), []string{"apa item list --project " + id + " --phase open",
+			"apa search <words> --project " + id, "apa material list --project " + id})
 	case "create":
 		body, err := fields(rest, true)
 		if err != nil {
@@ -61,6 +63,16 @@ func run(c *client.Ctx, args []string) error {
 		return repos(ctx, c, rest)
 	}
 	return usage("unknown project subcommand " + sub)
+}
+
+// read 是读命令：原样输出，另加"下一步"。
+func read(ctx context.Context, c *client.Ctx, path string, next []string) error {
+	var out map[string]any
+	if err := c.Do(ctx, "GET", path, nil, &out); err != nil {
+		return err
+	}
+	out["next"] = next
+	return c.Print(out)
 }
 
 func call(ctx context.Context, c *client.Ctx, method, path string, body map[string]any) error {

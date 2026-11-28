@@ -45,7 +45,7 @@ $APA report "$ITEM" --outcome done --summary 任务型完成 --link https://exam
 		if strings.Contains(f.apa(f.OBS, 0, "why", parent).Stdout, "delegation.reported") {
 			t.Errorf("回执不应写到触发事项 %s", parent)
 		}
-		if rel := f.apa(f.OBS, 0, "item", "show", child).Stdout; !strings.Contains(rel, `"from":"`+child+`","to":"`+parent+`","type":"parent"`) {
+		if rel := f.apa(f.OBS, 0, "item", "show", child, "--full").Stdout; !strings.Contains(rel, `"from":"`+child+`","to":"`+parent+`","type":"parent"`) {
 			t.Errorf("子事项应挂在触发事项 %s 下: %s", parent, rel)
 		}
 	})

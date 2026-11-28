@@ -345,7 +345,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		}
 		for _, sort := range []string{"deadline", "planned_for", "priority", "updated"} {
 			var cli, http, web list
-			jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--sort", sort).Stdout, &cli)
+			jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--sort", sort, "--full", "--limit", "200").Stdout, &cli)
 			jsonOf(t, k.APIRaw("GET", "/v1/items?sort="+sort, "", k.OBS).Body, &http)
 			jsonOf(t, k.webOK("GET", "/items?sort="+sort, "", 200), &web)
 			eq(t, "排序 "+sort+" CLI 与 HTTP", order(cli), order(http))
@@ -380,7 +380,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 			}
 		}
 		var f list
-		jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--planned-for", TMRW).Stdout, &f)
+		jsonOf(t, k.apa(k.OBS, 0, "item", "list", "--planned-for", TMRW, "--full", "--limit", "200").Stdout, &f)
 		var got []string
 		for _, it := range f.Items {
 			eq(t, "筛选结果的 planned_for", it["planned_for"], TMRW)

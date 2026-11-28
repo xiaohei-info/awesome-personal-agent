@@ -150,7 +150,7 @@ func (f *fx) itemIDs() map[string]bool {
 	f.t.Helper()
 	out := decode[struct {
 		Items []struct{ ID string } `json:"items"`
-	}](f.t, f.apa(f.OBS, 0, "item", "list").Stdout)
+	}](f.t, f.apa(f.OBS, 0, "item", "list", "--full", "--limit", "200").Stdout)
 	m := map[string]bool{}
 	for _, it := range out.Items {
 		m[it.ID] = true

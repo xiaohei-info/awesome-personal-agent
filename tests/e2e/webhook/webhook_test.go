@@ -260,14 +260,26 @@ type itemRow struct {
 
 func (f *fx) items(phase string) []itemRow {
 	f.t.Helper()
-	r := f.apa(f.OBS, 0, "item", "list", "--phase", phase)
-	var out struct {
-		Items []itemRow `json:"items"`
+	// 列表有界（一页至多 200 条），按 next_cursor 翻完。
+	var all []itemRow
+	for cursor := ""; ; {
+		args := []string{"item", "list", "--phase", phase, "--full", "--limit", "200"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		r := f.apa(f.OBS, 0, args...)
+		var out struct {
+			Items      []itemRow `json:"items"`
+			NextCursor string    `json:"next_cursor"`
+		}
+		if err := json.Unmarshal([]byte(r.Stdout), &out); err != nil {
+			f.t.Fatalf("apa item list 输出不是 JSON: %v\n%s", err, r.Stdout)
+		}
+		all = append(all, out.Items...)
+		if cursor = out.NextCursor; cursor == "" {
+			return all
+		}
 	}
-	if err := json.Unmarshal([]byte(r.Stdout), &out); err != nil {
-		f.t.Fatalf("apa item list 输出不是 JSON: %v\n%s", err, r.Stdout)
-	}
-	return out.Items
 }
 
 // ledgerEvents 直接读账本事件表（Event 的权威记录），返回某类型事件的 object 与 payload。
