@@ -33,8 +33,9 @@ export function DefaultProject({ source, onSaved }: { source: Source; onSaved: (
   );
 }
 
-/** 来源的处理方式（§9.3）：常规处理，或只口头提醒（不建建议）；选了就存。 */
-export function HandlingMode({ source, onSaved }: { source: Source; onSaved: () => void }) {
+/** 来源的处理方式（§9.3）：常规处理、只口头提醒（不建建议），或直接立项（建议直接成为事项）；选了就存。
+ *  直接立项只有处理来源的 Agent 的权限卡开了"替我拍板"才能选，否则置灰并说明原因。 */
+export function HandlingMode({ source, createItem, onSaved }: { source: Source; createItem: boolean; onSaved: () => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const [error, setError] = useState<unknown>(null);
@@ -51,9 +52,11 @@ export function HandlingMode({ source, onSaved }: { source: Source; onSaved: () 
     <>
       <div className="row">
         <span>{t.handling}</span>
-        <Seg label={t.handling} value={source.handling_mode ?? "normal"} onChange={(m) => void save(m)} options={[["normal", t.handlingNormal], ["remind_only", t.handlingRemind]]} />
+        <Seg label={t.handling} value={source.handling_mode ?? "normal"} onChange={(m) => void save(m)}
+          options={[["normal", t.handlingNormal], ["remind_only", t.handlingRemind], ["create_item", t.handlingCreate, !createItem && source.handling_mode !== "create_item"]]} />
       </div>
-      <p className="sub">{t.handlingHint}</p>
+      <p className="sub">{t.handlingHint} {t.handlingCreateHint}</p>
+      {!createItem && <p className="sub">{t.handlingCreateClosed} <Link to="/settings/agents">{t.handlingCreateWhere}</Link></p>}
       {error !== null && <ErrorNote error={error} />}
     </>
   );

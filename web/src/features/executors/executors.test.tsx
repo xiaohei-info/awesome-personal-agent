@@ -14,7 +14,10 @@ function server() {
   let execs = [
     { id: "hermes.paseo.mbp.quick", kind: "remote-agent", host: "mbp", harness: "hermes", label: "Paseo · quick @ mbp" },
     { id: "hermes.delegate_task.apa", kind: "native-subagent", host: "apa", harness: "hermes", label: "Hermes 子 agent @ apa" },
+    { id: "auto-runner", kind: "external-cli", harness: "paseo", label: "自动化", startable: true, overrides: {} as Record<string, string>,
+      overridable: { model: { label: { zh: "模型", en: "Model" }, choices: ["provider/model-a", "provider/model-b"] } } },
   ];
+  const puts: unknown[] = [];
   const items = [
     { id: "c1", phase: "open", title: "修登录超时", assignee: "hermes.paseo.mbp.quick" },
     { id: "c2", phase: "done", title: "写周报", assignee: "hermes.paseo.mbp.quick" },
@@ -34,6 +37,13 @@ function server() {
     if (url === "/v1/items?kind=delegation") return json(200, { items });
     if (url === "/v1/dispatches?resumable=true&limit=200") return json(200, { dispatches });
     if (url.startsWith("/v1/audit/events?type=delegation.reported&after=")) return json(200, { events });
+    const ov = url.match(/^\/v1\/executors\/(.+)\/overrides$/);
+    if (ov && method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      puts.push(body);
+      execs = execs.map((e) => (e.id === decodeURIComponent(ov[1]) ? { ...e, overrides: body.values } : e));
+      return json(200, {});
+    }
     const rm = url.match(/^\/v1\/executors\/(.+)$/);
     if (rm && method === "DELETE") {
       execs = execs.filter((e) => e.id !== decodeURIComponent(rm[1]));
@@ -41,7 +51,7 @@ function server() {
     }
     return json(404, { code: "not_found", why: "no such route", next: "" });
   }) as unknown as typeof fetch;
-  return { impl, calls };
+  return { impl, calls, puts };
 }
 
 function mount(fetchImpl: typeof fetch) {
@@ -68,6 +78,18 @@ describe("谁在替你干活（§6.17）", () => {
     const lawyer = screen.getByRole("article", { name: "lawyer" });
     expect(within(lawyer).getByText("问律师")).toBeInTheDocument();
     expect(within(lawyer).getByText(/未登记/)).toBeInTheDocument();
+  });
+
+  it("APA 能直接派活的执行者标出来，本人可给它定默认模型 → PUT /executors/{id}/overrides，只能选声明列出的值", async () => {
+    const s = server();
+    mount(s.impl);
+    const auto = await screen.findByRole("article", { name: "自动化" });
+    expect(within(auto).getByText("可由 APA 直接派活")).toBeInTheDocument();
+    const pick = within(auto).getByRole("combobox", { name: /模型/ });
+    expect(within(pick).getAllByRole("option").map((o) => o.textContent)).toEqual(["沿用自带的默认", "provider/model-a", "provider/model-b"]);
+    await userEvent.selectOptions(pick, "provider/model-a");
+    expect(s.puts).toEqual([{ values: { model: "provider/model-a" } }]);
+    expect(within(await screen.findByRole("article", { name: "自动化" })).getByRole("combobox", { name: /模型/ })).toHaveValue("provider/model-a");
   });
 
   it("手上没事的名录条目可以移除 → DELETE /executors/{id}", async () => {
