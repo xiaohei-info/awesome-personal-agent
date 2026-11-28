@@ -240,18 +240,16 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	return core.WriteJSON(w, http.StatusOK, out)
 }
 
-// MaxListLimit 是 GET /items 一页的上限。
-const MaxListLimit = 200
-
 type page struct{ limit, offset int }
 
 // pageOf 读 limit 与 cursor：都不带时不分页（Web 的列表页照旧读全部）。cursor 是上一页给的 next_cursor。
+// HTTP 不设条数上限：升级前 limit 被忽略，带大数读全部的调用方照旧拿到全部；有界输出由命令行守（至多 200，§17.2）。
 func pageOf(q url.Values) (page, error) {
 	var p page
 	if s := q.Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
-		if err != nil || n < 1 || n > MaxListLimit {
-			return p, domain.NewError(domain.CodeInvalidRequest, "limit must be 1 to 200", "fix limit and retry")
+		if err != nil || n < 1 {
+			return p, domain.NewError(domain.CodeInvalidRequest, "limit must be a positive integer", "fix limit and retry")
 		}
 		p.limit = n
 	}

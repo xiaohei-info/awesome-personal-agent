@@ -678,7 +678,7 @@ func TestListSearchSortFilterOverHTTP(t *testing.T) {
 	if got := list("tag=t1&phase=open"); len(got) != 1 || got[0] != c.ID { // v0.1 参数语义不变
 		t.Fatalf("tag+phase = %v", got)
 	}
-	for _, bad := range []string{"sort=nope", "planned_for=tomorrow", "q=!!", "limit=0", "limit=201", "cursor=3"} {
+	for _, bad := range []string{"sort=nope", "planned_for=tomorrow", "q=!!", "limit=0", "limit=x", "cursor=3"} {
 		if rec := e.do("GET", "/v1/items?"+bad, "", obs); rec.Code != 400 {
 			t.Fatalf("%s = %d %s", bad, rec.Code, rec.Body)
 		}

@@ -166,7 +166,7 @@
 
 | 分组 | 方法与路径 | 说明 | 凭据 |
 |---|---|---|---|
-| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文，走统一检索：只留命中的事项，不带 `sort` 时按相关度排）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围）、`limit`（1–200）与 `cursor`（分页，见下） | 按 §14.3；导出 ext 密钥可 `GET` |
+| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文，走统一检索：只留命中的事项，不带 `sort` 时按相关度排）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围）、`limit`（正整数）与 `cursor`（分页，见下） | 按 §14.3；导出 ext 密钥可 `GET` |
 | 检索 | `GET /search` | 统一检索（主文档 §7.1），参数与响应见下 | observer；导出 ext 密钥可用；webhook 与其他 ext 密钥 403 |
 | | `GET /today` | 今天的清单，六组：`planned`、`due`、`pending`、`stale`、`overdue`（截止的本机日早于今天、未结束，按截止先后）、`high_priority`（紧急或高、未结束，紧急在前）；一件事可在几组里同时出现 | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
@@ -317,7 +317,7 @@
 
 `matched_in` 取 `title`、`tags`、`summary`、`progress`、`body`；`coverage` 是查询词命中了几个；托管型材料另有 `path`、不带 `snippet`；项目命中不带 `project`。`total` 是这把钥匙看得到、且没被默认隐去的命中数，`withheld` 是默认隐去的（目前只有 `dropped`），`next_cursor` 缺省表示没有下一页，`single_chars` 表示二元组都没中、按单字检索。外部钥匙的命中在裁剪后的内容上复核（主文档 §14.14），`total` 与 `withheld` 只计复核后仍命中的。查询没有可检索的字符、`type`、`limit`、`after`、`before`、`include_dropped`、`cursor` 不合法时 400。每次首页检索计入健康视图的 `search` 统计，不存查询原文。
 
-`GET /items?limit=<n>[&cursor=<c>]`：只回一页，另带 `total`（筛选后的总数）与 `next_cursor`（缺省表示没有下一页）；`last_rejections`、`content_scopes` 只含这一页的事项。不带 `limit` 时回全部，与以前相同；只带 `cursor` 为 400。
+`GET /items?limit=<n>[&cursor=<c>]`：只回一页，另带 `total`（筛选后的总数）与 `next_cursor`（缺省表示没有下一页）；`last_rejections`、`content_scopes` 只含这一页的事项。不带 `limit` 时回全部，与以前相同；HTTP 不设条数上限（升级前 `limit` 被忽略，带大数读全部的调用方照旧），命令行一页至多 200 条；只带 `cursor` 为 400。
 
 `GET /projects` 另带 `cards`（项目 id → `{"counts": {阶段: 条数}, "last_activity": "YYYY-MM-DD"}`），`GET /projects/{id}` 另带 `card`（同上，另有 `recent`：最近变更的五条事项 `{id, title, phase, updated}`，不含已放弃；`materials`：材料条数）。条数只数调用者读得到的事项（外部钥匙按档位，主文档 §14.14）。
 
