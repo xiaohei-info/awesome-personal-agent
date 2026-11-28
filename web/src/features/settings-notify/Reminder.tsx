@@ -7,6 +7,7 @@ import { CHANNEL_PREFIX } from "../../app/vocab";
 import type { Delivery, Target } from "./matrix";
 import { apply, choiceOf, choicesFor, current, kindOf, push, switchOf, targetOf, type Choice, type State } from "./reminders";
 import { rstrings } from "./strings";
+import { Disclosure } from "../../app/ui";
 
 // 每类提醒唯一可编辑的位置（设计 v2 §3、§4）：一个单选、一句开关后果、一句按当前数据的预览，长解释收在"说明"里。
 // 一个页面里的单选共用一个 ReminderScope：同一份 disturb 文档，保存后用服务端规整过的结果替换，免得两处各拿旧文档互相覆盖。
@@ -329,13 +330,25 @@ export function InstanceReminders({ i }: { i: Instance }) {
 }
 
 /** 页面顶部（或底部）一行：自带数据范围的单个单选（来源、Agent、建议、状态页）。 */
+// 页面上的提醒设置低频，收成一行折叠（记住开合）；从设置页带锚点跳过来时展开。取不到设置时整块不显示。
 export function PageReminder({ row, children, onSaved }: { row: string; children?: ReactNode; onSaved?: () => void }) {
   return (
     <ReminderScope onSaved={onSaved}>
+      <PageReminderBody row={row}>{children}</PageReminderBody>
+    </ReminderScope>
+  );
+}
+
+function PageReminderBody({ row, children }: { row: string; children?: ReactNode }) {
+  const t = useT(rstrings);
+  const open = useLocation().hash === "#reminder-" + row;
+  if (!useScopeReady()) return null;
+  return (
+    <Disclosure className="page-reminder" summary={<span>{t.pageReminder(t.rows[row] ?? row)}</span>} persistKey={"reminder." + row} defaultOpen={open}>
       <section className="panel stack" aria-label={rstrings.zh.rows[row]}>
         <Reminder row={row}>{children}</Reminder>
       </section>
-    </ReminderScope>
+    </Disclosure>
   );
 }
 

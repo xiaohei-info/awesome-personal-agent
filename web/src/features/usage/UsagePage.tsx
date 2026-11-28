@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Skeleton } from "../../app/ui";
 import { PageHead } from "../../app/page";
 import { errorText, locale, useLang, useT } from "../../app/i18n";
 import { useRaw } from "../../app/raw";
@@ -65,7 +66,7 @@ export function UsagePage() {
           <button onClick={() => load(() => true)}>{t.retry}</button>
         </>
       ) : !data ? (
-        <p role="status">{t.loading}</p>
+        <Skeleton shape="chart" label={t.loading} />
       ) : (
         <>
           {data.since && <p className="sub">{t.since(new Date(data.since).toLocaleDateString(locale()))}</p>}

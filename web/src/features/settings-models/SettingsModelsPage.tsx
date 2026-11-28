@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, lang, useLang, useT } from "../../app/i18n";
@@ -148,7 +149,7 @@ export function SettingsModelsPage() {
         <button onClick={() => void load()}>{t.retry}</button>
       </main>
     );
-  if (!doc) return <main><p role="status">{t.loading}</p></main>;
+  if (!doc) return <main><Skeleton shape="card" label={t.loading} /></main>;
   const any = !!(doc.generate_endpoint || doc.judge_endpoint);
   const paused = any && !!doc.models_paused;
   return (

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { useSearchParams } from "react-router-dom";
 import { ErrorNote } from "../../app/errors";
 import { locale, useT } from "../../app/i18n";
@@ -143,9 +144,9 @@ export function RuleChangesPage() {
         </div>
       )}
       {list === null ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : list.length === 0 ? (
-        <p className="empty">{t.empty}</p>
+        <EmptyState title={t.empty} />
       ) : (
         <>
           {list.map((c) => <Row key={c.seq} c={c} who={who(c)} onRevert={revert} />)}

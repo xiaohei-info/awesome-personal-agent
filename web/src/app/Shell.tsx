@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BackBar, COUNTS_EVENT, SectionContext } from "./page";
+import { BackBar, COUNTS_EVENT } from "./page";
 import { AttentionProvider, useAttention } from "./attention";
 import { DIAG, MOBILE, SETTINGS, SETTINGS_HOME, buildNav, featureAt, settingsGroups, type Entry, type Feature, type NavModel } from "./registry";
 import { SettingsHome } from "./SettingsHome";
@@ -10,6 +10,7 @@ import { useSession } from "./session";
 import { toggleTheme } from "./theme";
 import type { Status } from "./status";
 import { useLeaveGuard } from "./leave";
+import { EmptyState, ErrorBoundary, ShortcutSheet, Toaster, typing } from "./ui";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
@@ -51,6 +52,7 @@ function ShellBody({ features: all }: { features: Feature[] }) {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [jumping, setJumping] = useState(false);
   const [more, setMore] = useState(false);
+  const [help, setHelp] = useState(false);
   const attention = useAttention();
   const status = attention?.status ?? null;
   useHashLanding(pathname, hash);
@@ -74,6 +76,9 @@ function ShellBody({ features: all }: { features: Feature[] }) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setJumping((o) => !o);
+      } else if (e.key === "?" && !e.metaKey && !e.ctrlKey && !typing(e.target)) {
+        e.preventDefault();
+        setHelp((o) => !o);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -97,7 +102,12 @@ function ShellBody({ features: all }: { features: Feature[] }) {
     </NavItem>
   );
   const bar = nav.entries.filter((e) => (MOBILE as string[]).includes(e.id));
-  const routes = <AppRoutes all={all} nav={nav} entryOf={entryOf} noPages={t.noPages} />;
+  // 路由级错误边界：页面渲染出错只换掉内容区，导航与工具条照常；换页（地址变了）自动重置。
+  const routes = (
+    <ErrorBoundary page resetKey={pathname}>
+      <AppRoutes all={all} nav={nav} entryOf={entryOf} noPages={t.noPages} />
+    </ErrorBoundary>
+  );
 
   return (
     <div className="shell">
@@ -158,7 +168,15 @@ function ShellBody({ features: all }: { features: Feature[] }) {
         {error && <p role="alert">{error}</p>}
       </nav>
       <section>
-        <div className="topbar">
+        {/* 紧凑工具条（Multica 的页头栏）：入口名 › 页签，右侧 ⌘K。 */}
+        <header className="toolbar">
+          {here && <span className="crumb">{here.title}</span>}
+          {here && here.features.length > 1 && !inSettings && (
+            <>
+              <span className="crumb-sep" aria-hidden="true">›</span>
+              <Tabs entry={here} current={current} counts={counts} />
+            </>
+          )}
           <button className="jump" aria-label={t.jumpLabel} onClick={() => setJumping(true)}>
             <span>{t.jump}</span>
             <span aria-hidden="true">
@@ -166,8 +184,7 @@ function ShellBody({ features: all }: { features: Feature[] }) {
               <kbd>K</kbd>
             </span>
           </button>
-        </div>
-        {here && here.features.length > 1 && !inSettings && <Tabs entry={here} current={current} counts={counts} />}
+        </header>
         <BackBar />
         {inSettings && narrow && !atHome && (
           <Link className="back" to={"/" + SETTINGS_HOME}>
@@ -184,6 +201,8 @@ function ShellBody({ features: all }: { features: Feature[] }) {
         )}
       </section>
       {jumping && <Palette nav={nav} onClose={() => setJumping(false)} />}
+      {help && <ShortcutSheet onClose={() => setHelp(false)} />}
+      <Toaster />
       {more && (
         <More
           nav={nav}
@@ -203,7 +222,7 @@ function AppRoutes({ all, nav, entryOf, noPages }: { all: Feature[]; nav: NavMod
         <Routes>
           {nav.settings && <Route path={SETTINGS_HOME + "/*"} element={<SettingsHome entry={nav.settings} />} />}
           {all.map((f) => (
-            <Route key={f.id} path={f.path + "/*"} element={<SectionContext.Provider value={entryOf.get(f.id)?.title}>{f.element}</SectionContext.Provider>} />
+            <Route key={f.id} path={f.path + "/*"} element={f.element} />
           ))}
           {all.flatMap((f) => (f.aliases ?? []).map((a) => <Route key={f.id + ":" + a} path={a + "/*"} element={<Alias to={f.path} />} />))}
           <Route
@@ -213,7 +232,7 @@ function AppRoutes({ all, nav, entryOf, noPages }: { all: Feature[]; nav: NavMod
                 <Navigate to={"/" + nav.entries[0].features[0].path} replace />
               ) : (
                 <main>
-                  <p className="empty">{noPages}</p>
+                  <EmptyState title={noPages} />
                 </main>
               )
             }

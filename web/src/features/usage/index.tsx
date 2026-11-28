@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { Skeleton } from "../../app/ui";
 import { useT } from "../../app/i18n";
 import type { Feature } from "../../app/registry";
 import { strings } from "./strings";
@@ -18,7 +19,7 @@ function LoadFailed() {
 
 function Loading() {
   const t = useT(strings);
-  return <main><p role="status">{t.loading}</p></main>;
+  return <main><Skeleton shape="chart" label={t.loading} /></main>;
 }
 
 export const feature: Feature = {

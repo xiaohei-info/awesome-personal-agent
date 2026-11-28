@@ -326,6 +326,7 @@ const rzh = {
   save: "保存",
   saved: "已保存",
   saving: "正在保存……",
+  pageReminder: (row: string) => `提醒方式：${row}`,
   goEdit: "去改",
 };
 
@@ -438,6 +439,7 @@ const ren: typeof rzh = {
   save: "Save",
   saved: "Saved",
   saving: "Saving…",
+  pageReminder: (row) => `Reminders: ${row}`,
   goEdit: "Change",
 };
 

@@ -21,11 +21,12 @@ import { QuestionCard, useAnswer, type DecisionItem } from "../decisions/Decisio
 import { TraceView } from "../trace/Trace";
 import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow } from "./ItemMaterials";
 import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
-import { RowActions } from "./RowActions";
+import { ItemRow, useCircleDone } from "./ItemRow";
 import { DeleteItem } from "./DeleteItem";
 import { ScheduleBlock, SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { deadlineText, deadlineValue, useHostClock } from "./schedule";
 import { ApiError } from "../../app/api";
+import { Clamp, Disclosure, EmptyState, ErrorBoundary, LIST_KEYS, PeekPanel, Skeleton, useListKeys, usePageKeys, usePeek } from "../../app/ui";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -151,6 +152,7 @@ function ItemList() {
   // 行上操作之后把这一件换成服务端的最新值，分组、排序与筛选当场按新值重算（都在前端，口径就是 arrange 与七维筛选）：
   // 完成的移到组尾，筛掉的就不再显示；不重读整个列表，页面不卸载，滚动位置不动。
   const replace = (it: Item) => setItems((l) => l && l.map((x) => (x.id === it.id ? it : x)));
+  const done = useCircleDone(t.listWhere, replace);
   // 默认不显示已放弃（删除就是转到已放弃）：没选阶段时先去掉；选了「已放弃」就是切出来看。阶段筛选的选项仍数全部，所以「已放弃」始终可选。
   const hide = (i: Item) => !f.phase && i.phase === "dropped";
   const hidden = all.filter((i) => hide(i) && keep(i, f)).length;
@@ -175,11 +177,31 @@ function ItemList() {
   const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const page = Math.min(pages, Math.max(1, Number(get("page")) || 1));
   const rows = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const peek = usePeek();
+  const navigate = useNavigate();
+  usePageKeys(LIST_KEYS);
+  const ids = rows.map((i) => i.id);
+  const cursor = useListKeys({
+    ids,
+    onOpen: (id) => navigate(encodeURIComponent(id), { state: { list: location.search } }),
+    onPeek: (id) => (peek.enabled ? (peek.id === id ? peek.close() : peek.open(id)) : navigate(encodeURIComponent(id), { state: { list: location.search } })),
+    onDone: (id) => { const it = rows.find((i) => i.id === id); if (it && it.kind !== "delegation" && !["proposed", "done", "dropped"].includes(it.phase)) void done(it); },
+    onMove: (id) => peek.id && peek.open(id),
+    onEscape: () => !!peek.id && (peek.close(), true),
+  });
+  // 行上靠右的次要字：不是进行中时写阶段（等你决定用醒目色），再是状态标签、标签、计划、截止。
+  const meta = (i: Item) => (
+    <>
+      {[i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" ")].filter(Boolean).map((x) => <span key={x}>{x}</span>)}
+      {i.planned_for && <span className="slot">{t.planAt(i.planned_for, i.planned_slot)}</span>}
+      {i.deadline && <span>{t.due(deadlineText(i.deadline, offset))}</span>}
+      {i.phase !== "open" && <span className={i.phase === "needs_input" ? "badge bad" : undefined}><Val k="phase" id={i.phase} /></span>}
+    </>
+  );
 
   return (
     <main>
       <PageHead>{t.title}</PageHead>
-      <p><Link to="new"><button type="button">{t.create}</button></Link></p>
       {views.length > 0 && (
         <nav className="chips" aria-label={t.quick}>
           <button type="button" aria-pressed={!view} onClick={() => set({ view: "" })}>{t.allTypes}</button>
@@ -216,6 +238,7 @@ function ItemList() {
           {t.plannedDate}
           <input type="date" value={plannedFor} onChange={(e) => set({ date: e.target.value })} />
         </label>
+        <Link className="btn primary filters-end" to="new">{t.create}</Link>
       </div>
       {filtered && (
         <p className="active-filters" aria-label={t.filtering}>
@@ -231,30 +254,33 @@ function ItemList() {
       )}
       {error != null && <ErrorNote error={error} />}
       {view && items && <ViewTable view={view} items={all} />}
-      {!view && items && !shown.length && error == null && <p className="empty">{t.noMatch}</p>}
+      {!items && error == null && <Skeleton label={t.loading} />}
+      {!view && items && !shown.length && error == null && (filtered
+        ? <EmptyState title={t.noMatch} action={<button type="button" onClick={() => setParams(sort ? { sort } : {}, { replace: true })}>{t.clearFilters}</button>} />
+        : <EmptyState title={t.noItems} note={t.noItemsNote} action={<Link className="btn" to="new">{t.create}</Link>} />)}
       {!view && hidden > 0 && <p className="sub">{t.hiddenDropped(hidden)}</p>}
-      {!view && (
+      {!view && items && (
         <div aria-label={t.list} role="group">
-          {pageGroups(rows).map(([pid, list]) => (
-            <section key={pid} aria-label={pid ? project(pid) : t.none.project}>
-              <h2>{t.groupCount(pid ? project(pid) : t.none.project, shown.filter((i) => (i.project ?? "") === pid).length)}</h2>
-              <ul className="rows">
-                {list.map((i) => (
-                  <li key={i.id} data-item={i.id} data-phase={i.phase}>
-                    <div className="act-row">
-                      <div>
-                        <Link to={i.id} state={{ list: location.search }}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
-                        <span className="sub">
-                          {[i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.planned_for && t.planAt(i.planned_for, i.planned_slot), i.deadline && t.due(deadlineText(i.deadline, offset))].filter(Boolean).join(" · ")}
-                        </span>
-                      </div>
-                      <RowActions item={i} where={t.listWhere} onChange={replace} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
+          {pageGroups(rows).map(([pid, list]) => {
+            const name = pid ? project(pid) : t.none.project;
+            return (
+              // 每个项目组各自一道错误边界：一组渲染出错只换掉这一组。
+              <ErrorBoundary key={pid}>
+                <section aria-label={name}>
+                  <Disclosure head defaultOpen persistKey={"items.group." + (pid || "-")}
+                    summary={<h2>{name} <span className="count-n">{shown.filter((i) => (i.project ?? "") === pid).length}</span></h2>}>
+                    <ul className="rows">
+                      {list.map((i) => (
+                        <ItemRow key={i.id} item={i} where={t.listWhere} to={encodeURIComponent(i.id)} state={{ list: location.search }} meta={meta(i)}
+                          cursor={cursor === i.id} peeked={peek.id === i.id} onPeek={peek.enabled ? () => peek.open(i.id) : undefined}
+                          onChange={replace} onDone={() => void done(i)} />
+                      ))}
+                    </ul>
+                  </Disclosure>
+                </section>
+              </ErrorBoundary>
+            );
+          })}
         </div>
       )}
       {!view && shown.length > PAGE_SIZE && (
@@ -263,6 +289,11 @@ function ItemList() {
           <span className="sub">{t.range((page - 1) * PAGE_SIZE + 1, (page - 1) * PAGE_SIZE + rows.length, shown.length)}</span>
           <button type="button" disabled={page >= pages} onClick={() => set({ page: String(page + 1) })}>{t.next}</button>
         </nav>
+      )}
+      {peek.id && (
+        <PeekPanel key="peek" id={peek.id} ids={ids} href={"/items/" + encodeURIComponent(peek.id)} title={all.find((i) => i.id === peek.id)?.title ?? ""} onOpen={peek.open} onClose={peek.close}>
+          <ItemDetail key={peek.id} embedded={peek.id} />
+        </PeekPanel>
       )}
     </main>
   );
@@ -285,10 +316,13 @@ const grouped = (r: Relation, from: string) => r.from === from && isMaterialId(r
 
 interface Detail { rejection?: Rejection; item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string; precision?: string }[]; materials: MaterialRel[] }
 
-function ItemDetail() {
+/** 事项详情。embedded：放在速览侧栏里（没有页面外框与返回链接，id 由速览给）。 */
+export function ItemDetail({ embedded }: { embedded?: string } = {}) {
   const t = useT(strings);
   const label = useLabel();
-  const { id = "" } = useParams();
+  const { id: routeId = "" } = useParams();
+  const id = embedded ?? routeId;
+  const Wrap = embedded ? "div" : "main";
   const { api } = useSession();
   const [d, setD] = useState<Detail | null>(null);
   const [loadErr, setLoadErr] = useState<unknown>(null);
@@ -337,8 +371,8 @@ function ItemDetail() {
     }
   };
 
-  if (loadErr != null) return <main><ErrorNote error={loadErr} /></main>;
-  if (!d) return <main><p role="status">{t.loading}</p></main>;
+  if (loadErr != null) return <Wrap><ErrorNote error={loadErr} /></Wrap>;
+  if (!d) return <Wrap><Skeleton shape="card" label={t.loading} /></Wrap>;
   const { item } = d;
   const path = "/items/" + encodeURIComponent(id);
   const ifMatch = { "If-Match": String(item.version) };
@@ -350,117 +384,139 @@ function ItemDetail() {
   };
   const ended = ["done", "dropped"].includes(item.phase);
 
-  // 自上而下（界面设计 §3.2）：①标题、状态一句与随阶段变化的主操作（等你决定时直接是问题卡）②Agent 处理 ③正文
-  // ④进展与经过 ⑤「更多操作」折叠：状态标签、截止、转阶段、关联、材料、关联键。
+  // 两栏（Multica 的事项详情）：左栏自上而下是标题、随阶段变化的主操作（等你决定时直接是问题卡）、Agent 处理、正文、讨论与经过、
+  // 「更多操作」折叠（状态标签、关联、材料、关联键）；右栏是属性（阶段、项目、优先级、计划、截止、标签）与排期、删除。
+  // 标题横跨两栏；速览侧栏与窄屏放不下两栏，属性叠在标题下面。
   return (
-    <main>
-      <p className="eyebrow"><Link to={back}>{t.back}</Link></p>
+    <Wrap className="item-detail">
+      {!embedded && <p className="backbar"><Link to={back}>{t.back}</Link></p>}
       <h1>{item.title}</h1>
-      <p className="lede">
-        {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.planned_for && t.planAt(item.planned_for, item.planned_slot), item.deadline && t.due(deadlineText(item.deadline, offset))].filter(Boolean).join(" · ")}
-      </p>
-      {item.kind !== "delegation" && projects.length > 0 && (
-        <label className="sub">
-          {t.projectField}{" "}
-          <EntityPick
-            kind="project"
-            label={t.projectField}
-            value={item.project ?? ""}
-            empty={item.project ? undefined : t.noProject}
-            onChange={(pid) => pid && pid !== item.project && void act(() => api.patch(path, { project: pid, reason: t.projectReason }, ifMatch))}
-          />
-        </label>
-      )}
-      {actErr != null && <ErrorNote error={actErr} reveal />}
-      {item.phase === "needs_input" && item.ask && !item.ask.resolution ? (
-        <QuestionCard item={item as DecisionItem} rejection={d.rejection} onAnswer={answer} inItem />
-      ) : (
-        <RejectionNote rejection={d.rejection} what="edit" item={item.id} />
-      )}
-      {!ended && <LastRunNote item={item.id} />}
-      {item.phase === "proposed" && (
-        <div className="actions">
-          <button type="button" className="primary" onClick={() => act(() => api.post(path + "/accept", {}))}>{t.accept}</button>
-          <button type="button" onClick={() => act(() => api.post(path + "/dismiss", {}))}>{t.dismiss}</button>
+      <div className="detail-cols">
+        <div className="detail-main">
+          {actErr != null && <ErrorNote error={actErr} reveal />}
+          {item.phase === "needs_input" && item.ask && !item.ask.resolution ? (
+            <QuestionCard item={item as DecisionItem} rejection={d.rejection} onAnswer={answer} inItem />
+          ) : (
+            <RejectionNote rejection={d.rejection} what="edit" item={item.id} />
+          )}
+          {!ended && <LastRunNote item={item.id} />}
+          {item.phase === "proposed" && (
+            <div className="actions">
+              <button type="button" className="primary" onClick={() => act(() => api.post(path + "/accept", {}))}>{t.accept}</button>
+              <button type="button" onClick={() => act(() => api.post(path + "/dismiss", {}))}>{t.dismiss}</button>
+            </div>
+          )}
+          {item.phase !== "proposed" && <PhaseActions key={"p" + item.version} item={item} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />}
+          {item.kind === "task" && (
+            <ErrorBoundary resetKey={item.version}>
+              <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
+            </ErrorBoundary>
+          )}
+
+          {/* 正文：编辑时用编辑框替换正文，不并排两份 */}
+          {editing ? (
+            <ContentForm
+              initial={{ title: item.title, body: item.body ?? "" }}
+              submitLabel={t.save}
+              onCancel={() => setEditing(false)}
+              onSubmit={(v) => act(() => api.patch(path, { title: v.title, body: v.body }, ifMatch))}
+            />
+          ) : (
+            <div className="item-body">
+              {item.body ? <Clamp><Markdown source={item.body} /></Clamp> : null}
+              {item.kind === "brief" && <BriefBody spec={item.spec} />}
+              <p><button type="button" onClick={() => setEditing(true)}>{t.edit}</button></p>
+            </div>
+          )}
+
+          <ErrorBoundary><AttachedMessages itemId={id} /></ErrorBoundary>
+
+          <section aria-label={t.progress}>
+            <h2>{t.progress}</h2>
+            <ul aria-label={t.progress} className="rows">
+              {d.progress.map((p) => (
+                <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), credential(p.actor), when(p.at, p.precision)].filter(Boolean).join(" · ")}</span></li>
+              ))}
+            </ul>
+            <ProgressForm onSubmit={(b) => act(() => api.post(path + "/comments", b))} />
+          </section>
+
+          <section aria-label={t.changes}>
+            <h2>{t.timeline}</h2>
+            <ErrorBoundary resetKey={item.version}><TraceView path={path + "/trace"} rev={item.version} /></ErrorBoundary>
+          </section>
+
+          <Disclosure summary={<h2>{t.moreActions}</h2>} aria-label={t.moreActions} persistKey="item.more">
+            <div className="facts">
+              <p>{t.label(item.status_label || t.notSet)}</p>
+              {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
+            </div>
+            {item.kind === "delegation" && <p><Link to={"/delegation#d-" + encodeURIComponent(item.id)}>{t.reassignLink}</Link></p>}
+            <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
+
+            <section aria-label={t.relationsLabel}>
+              <h2>{t.relations}</h2>
+              <ul aria-label={t.relations} className="rows">
+                {d.relations.filter((r) => !grouped(r, item.id)).map((r, n) => {
+                  const out = r.from === item.id;
+                  const other = out ? r.to : r.from;
+                  const type = label("relation", r.type);
+                  const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
+                  return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{isMaterialId(other) ? other : <ItemTitle id={other} />}</Link></li>;
+                })}
+              </ul>
+              <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
+            </section>
+
+            <ItemMaterials rels={d.materials} onRemove={(r) => act(() => api.post(path + "/relations", { to: r.to, type: r.type, remove: true }))} />
+
+            {/* 关联键是来源线程或对象的标识（§9.4），平时用不到，收在高级里。 */}
+            <Disclosure summary={<h3>{t.advancedKeys}</h3>} aria-label={t.sourcesLabel}>
+              <ul aria-label={t.keys} className="rows">
+                {d.keys.map((k, n) => <li key={n}>{k.key}</li>)}
+              </ul>
+              <KeyForm key={"k" + item.version} onSubmit={(key) => act(() => api.post(path + "/correlation-keys", { key }, ifMatch))} />
+            </Disclosure>
+          </Disclosure>
         </div>
-      )}
-      {item.phase !== "proposed" && <PhaseActions key={"p" + item.version} item={item} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />}
-      {item.phase !== "dropped" && (
-        <div className="actions" aria-label={t.delFor(item.title)} role="group">
-          <DeleteItem key={"x" + item.version} title={item.title} onConfirm={() => act(() => api.post(path + "/transition", { to: "dropped", reason: t.delReason(t.detailWhere) }, ifMatch))} />
-        </div>
-      )}
-      {item.kind === "task" && (
-        <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
-      )}
 
-      {item.kind !== "brief" && <ScheduleBlock item={item} path={path} onSaved={load} />}
-
-      {item.body ? <Markdown source={item.body} /> : null}
-      {item.kind === "brief" && <BriefBody spec={item.spec} />}
-      {editing ? (
-        <ContentForm
-          initial={{ title: item.title, body: item.body ?? "" }}
-          submitLabel={t.save}
-          onCancel={() => setEditing(false)}
-          onSubmit={(v) => act(() => api.patch(path, { title: v.title, body: v.body }, ifMatch))}
-        />
-      ) : (
-        <p><button type="button" onClick={() => setEditing(true)}>{t.edit}</button></p>
-      )}
-
-      <AttachedMessages itemId={id} />
-
-      <section aria-label={t.progress}>
-        <h2>{t.progress}</h2>
-        <ul aria-label={t.progress} className="rows">
-          {d.progress.map((p) => (
-            <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), credential(p.actor), when(p.at, p.precision)].filter(Boolean).join(" · ")}</span></li>
-          ))}
-        </ul>
-        <ProgressForm onSubmit={(b) => act(() => api.post(path + "/comments", b))} />
-      </section>
-
-      <section aria-label={t.changes}>
-        <h2>{t.timeline}</h2>
-        <TraceView path={path + "/trace"} rev={item.version} />
-      </section>
-
-      <details className="panel" aria-label={t.moreActions}>
-        <summary>{t.moreActions}</summary>
-        <div className="panel facts">
-          <p>{t.label(item.status_label || t.notSet)}</p>
-          {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
-        </div>
-        {item.kind === "delegation" && <p><Link to={"/delegation#d-" + encodeURIComponent(item.id)}>{t.reassignLink}</Link></p>}
-        <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
-
-        <section aria-label={t.relationsLabel}>
-          <h2>{t.relations}</h2>
-          <ul aria-label={t.relations} className="rows">
-            {d.relations.filter((r) => !grouped(r, item.id)).map((r, n) => {
-              const out = r.from === item.id;
-              const other = out ? r.to : r.from;
-              const type = label("relation", r.type);
-              const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
-              return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{isMaterialId(other) ? other : <ItemTitle id={other} />}</Link></li>;
-            })}
-          </ul>
-          <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
-        </section>
-
-        <ItemMaterials rels={d.materials} onRemove={(r) => act(() => api.post(path + "/relations", { to: r.to, type: r.type, remove: true }))} />
-
-        {/* 关联键是来源线程或对象的标识（§9.4），平时用不到，收在高级里。 */}
-        <details aria-label={t.sourcesLabel}>
-          <summary>{t.advancedKeys}</summary>
-          <ul aria-label={t.keys} className="rows">
-            {d.keys.map((k, n) => <li key={n}>{k.key}</li>)}
-          </ul>
-          <KeyForm key={"k" + item.version} onSubmit={(key) => act(() => api.post(path + "/correlation-keys", { key }, ifMatch))} />
-        </details>
-      </details>
-    </main>
+        {/* 右栏一道错误边界：属性或排期渲染出错只换掉右栏 */}
+        <ErrorBoundary resetKey={item.version}>
+        <aside className="detail-side" aria-label={t.props}>
+          <h2>{t.props}</h2>
+          <dl className="props">
+            <dt>{t.dims.phase}</dt>
+            <dd><span className={item.phase === "needs_input" ? "badge bad" : "badge plain"}><Val k="phase" id={item.phase} /></span></dd>
+            <dt>{t.projectField}</dt>
+            <dd>
+              {item.kind !== "delegation" && projects.length > 0 ? (
+                <EntityPick
+                  kind="project"
+                  label={t.projectField}
+                  value={item.project ?? ""}
+                  empty={item.project ? undefined : t.noProject}
+                  onChange={(pid) => pid && pid !== item.project && void act(() => api.patch(path, { project: pid, reason: t.projectReason }, ifMatch))}
+                />
+              ) : (item.project ? projectName(item.project) : t.noProject)}
+            </dd>
+            {item.priority && <><dt>{t.dims.priority}</dt><dd><Val k="priority" id={item.priority} /></dd></>}
+            <dt>{t.dims.planned}</dt>
+            <dd>{item.planned_for ? t.planAt(item.planned_for, item.planned_slot) : t.notSet}</dd>
+            <dt>{t.deadlineField}</dt>
+            <dd>{item.deadline ? deadlineText(item.deadline, offset) : t.notSet}</dd>
+            {item.status_label && <><dt>{t.statusLabel}</dt><dd>{item.status_label}</dd></>}
+            {item.tags?.length ? <><dt>{t.dims.tag}</dt><dd>{item.tags.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" ")}</dd></> : null}
+          </dl>
+          {item.kind !== "brief" && <ScheduleBlock item={item} path={path} onSaved={load} />}
+          {item.phase !== "dropped" && (
+            <div className="actions" aria-label={t.delFor(item.title)} role="group">
+              <DeleteItem key={"x" + item.version} title={item.title} onConfirm={() => act(() => api.post(path + "/transition", { to: "dropped", reason: t.delReason(t.detailWhere) }, ifMatch))} />
+            </div>
+          )}
+        </aside>
+        </ErrorBoundary>
+      </div>
+    </Wrap>
   );
 }
 
@@ -652,7 +708,7 @@ function NewItem() {
 
   return (
     <main>
-      <p className="eyebrow"><Link to="/items">{t.back}</Link></p>
+      <p className="backbar"><Link to="/items">{t.back}</Link></p>
       <PageHead>{t.newItem}</PageHead>
       {pre.any && <p className="badge plain" role="status">{t.prefilled}</p>}
       {pre.cutTitle && <p role="status">{t.cutTitle}</p>}

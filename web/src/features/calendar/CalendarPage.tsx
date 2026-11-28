@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ErrorNote } from "../../app/errors";
 import { useT } from "../../app/i18n";
@@ -140,10 +141,10 @@ export function CalendarPage() {
       {clock && clock.utc_offset !== browserOff && <p className="sub">{t.hostTime(clock.utc_offset)}</p>}
       {error != null && <ErrorNote error={error} />}
       {!byDay || !r ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : (
         <>
-          {total === 0 && <p className="empty">{t.empty}</p>}
+          {total === 0 && <EmptyState title={t.empty} />}
           {view === "day" && <DayView day={r.days[0]} byDay={byDay} grid={grid} ctx={ctx} />}
           {view === "week" && (narrow ? <WeekList days={r.days} byDay={byDay} ctx={ctx} /> : <WeekView days={r.days} byDay={byDay} grid={grid} ctx={ctx} />)}
           {view === "month" && <MonthView days={r.days} month={date.slice(0, 7)} byDay={byDay} ctx={ctx} />}

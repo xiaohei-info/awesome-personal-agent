@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
@@ -53,7 +54,7 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
     <section aria-label={t.title}>
       <h2>{t.title}</h2>
       {error != null && <ErrorNote error={error} />}
-      {!list && error == null && <p role="status">{t.loading}</p>}
+      {!list && error == null && <Skeleton label={t.loading} />}
       {list && !list.length && <p className="sub">{t.none}</p>}
       {list?.some((m) => m.attach_state === "pending") && <p className="sub">{t.openHint}</p>}
       {list && list.length > 0 && (

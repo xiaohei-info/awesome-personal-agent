@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
@@ -108,7 +109,7 @@ function SessionsSection({ reloadKey }: { reloadKey: number }) {
       <h2 id="heading-sessions">{t.sessions}</h2>
       {error && <div role="alert">{error}</div>}
       {list === null ? (
-        !error && <p role="status">{t.loading}</p>
+        !error && <Skeleton shape="card" label={t.loading} />
       ) : list.length === 0 ? (
         <p className="sub">{t.noSessions}</p>
       ) : (

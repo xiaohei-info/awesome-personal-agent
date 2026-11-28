@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Skeleton } from "../../app/ui";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { locale, useLang, useT } from "../../app/i18n";
@@ -290,7 +291,7 @@ export function TraceView({ path, rev }: { path: string; rev?: unknown }) {
     };
   }, [api, path, rev]);
   if (error != null) return <ErrorNote error={error} />;
-  if (!data) return <p role="status">{t.loading}</p>;
+  if (!data) return <Skeleton label={t.loading} />;
   return <TraceList data={data} />;
 }
 
@@ -306,11 +307,11 @@ export function MessageTracePage() {
     api.get<TraceData>(`/source-events/${encodeURIComponent(id)}/trace`).then(setData, setError);
   }, [api, id]);
   if (error != null) return <main><ErrorNote error={error} /></main>;
-  if (!data?.message) return <main><p role="status">{t.loading}</p></main>;
+  if (!data?.message) return <main><Skeleton shape="card" label={t.loading} /></main>;
   const m = data.message;
   return (
     <main>
-      <p className="eyebrow"><Link to="/sources">{source(m.source)}</Link></p>
+      <p className="backbar"><Link to="/sources">{source(m.source)}</Link></p>
       <h1>{m.link ? <a href={m.link} target="_blank" rel="noreferrer noopener">{m.subject || m.type}</a> : m.subject || m.type}</h1>
       <RawColumn id={m.id} />
       <h2>{t.title}</h2>

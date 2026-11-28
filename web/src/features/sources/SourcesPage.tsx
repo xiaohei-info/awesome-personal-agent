@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageReminder, SourceAlertRule } from "../settings-notify/Reminder";
 import { PageHead } from "../../app/page";
@@ -252,10 +253,9 @@ function SourcesHome() {
       {waiting > 0 && <p className="badge warn"><Link to={MODEL_SOURCES}>{t.unsetNotice(waiting)}</Link></p>}
       <section role="region" aria-label={t.list}>
         {sources === null ? (
-          error === null && <p role="status">{t.loading}</p>
+          error === null && <Skeleton label={t.loading} />
         ) : sources.length === 0 && captures.length === 0 ? (
-          <div className="empty">
-            <p>{t.none}</p>
+          <EmptyState title={t.none} action={
             <button
               className="primary"
               onClick={() => {
@@ -265,7 +265,7 @@ function SourcesHome() {
             >
               {t.addFirst}
             </button>
-          </div>
+          } />
         ) : (
           <ul className="rows">
             {sources.map((s) => (

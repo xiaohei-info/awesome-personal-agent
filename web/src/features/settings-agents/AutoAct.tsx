@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { locale, useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
@@ -155,8 +156,8 @@ export function AutoAct({ pol, save }: { pol: Doc; save: Save }) {
   return (
     <>
       {error != null && <ErrorNote error={error} />}
-      {!rules && error == null && <p role="status">{t.loading}</p>}
-      {rules && !groups.length && <p className="empty">{t.none}</p>}
+      {!rules && error == null && <Skeleton shape="card" label={t.loading} />}
+      {rules && !groups.length && <EmptyState title={t.none} />}
       {groups.map(({ g, list }) => (
         <section key={g} aria-label={t.groups[g]} className="panel" id={"auto-" + g}>
           <h2>{t.groups[g]}</h2>
