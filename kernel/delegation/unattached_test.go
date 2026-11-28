@@ -57,7 +57,7 @@ func TestUnattachedDispatchAttachAndReportByHandle(t *testing.T) {
 	e.must(t, e.as("DEL"), "delegate.report", map[string]any{"session": "agt_1", "outcome": "done", "summary": "README 已重写",
 		"evidence": map[string]string{"pr": "https://git.example/o/r/pull/3"}})
 	read()
-	if len(prog) != 1 || !strings.Contains(prog[0].Text, "README 已重写") || !strings.Contains(prog[0].Text, "pull/3") {
+	if len(prog) != 1 || prog[0].Text != "README：README 已重写" {
 		t.Fatalf("the report is also progress on the parent: %+v", prog)
 	}
 	var p domain.Item

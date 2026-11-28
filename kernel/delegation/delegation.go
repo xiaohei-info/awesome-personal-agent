@@ -499,7 +499,7 @@ func report() command.Spec {
 				return nil, err
 			}
 			if child.Kind == domain.KindDelegation {
-				if err := parentProgress(c, child, label, v.Evidence); err != nil {
+				if err := parentProgress(c, child, label); err != nil {
 					return nil, err
 				}
 			}
@@ -524,7 +524,7 @@ func report() command.Spec {
 
 // parentProgress 把委派子事项的回执同时写成父事项的一条进展（§7.5）：本人看事项看的是父事项，回报不能只留在子事项里。
 // 父事项已结束时不写。
-func parentProgress(c *command.Ctx, child domain.Item, label string, ev Evidence) error {
+func parentProgress(c *command.Ctx, child domain.Item, label string) error {
 	parent, ok, err := items.ParentOf(c.Tx, child.ID)
 	if err != nil || !ok {
 		return err
@@ -533,13 +533,8 @@ func parentProgress(c *command.Ctx, child domain.Item, label string, ev Evidence
 	if err != nil || p.Phase.Terminal() {
 		return err
 	}
-	text := child.Title + "：" + label
-	for _, e := range []string{ev.PR, ev.Commit, ev.Branch, ev.Link} {
-		if e = strings.TrimSpace(e); e != "" {
-			text += " " + e
-		}
-	}
-	w, err := items.AppendProgress(c.Tx, parent, text, c.Caller.Actor.Principal, c.Now())
+	// 证据留在子事项的回执上（事项页逐条可点），进展只写这一句：进展会进摘要等模型请求，不把外部链接带过去。
+	w, err := items.AppendProgress(c.Tx, parent, child.Title+"："+label, c.Caller.Actor.Principal, c.Now())
 	if err != nil {
 		return err
 	}
