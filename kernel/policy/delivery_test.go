@@ -40,6 +40,7 @@ func TestFactoryDeliveryIsTheDesignedFactoryColumn(t *testing.T) {
 		RowTaskFailed + "brief": mainElse(AgentNextChat), RowTaskFailed + "review": mainElse(AgentNextChat),
 		RowTaskFailed + "routine": nextChat, RowTaskFailed + TaskOther: nextChat,
 		RowHealth: off, RowSourceResult: mainElse(AgentNextChat),
+		RowDelegationResult: {Agent: AgentMain, User: UserDefault, Else: AgentNextChat},
 	})}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("factory =\n%+v\nwant\n%+v", got, want)
@@ -68,6 +69,7 @@ func TestDeriveOnlineShapeIsTheMigrationColumn(t *testing.T) {
 		RowTaskFailed + "brief": mainElse(UserDefault), RowTaskFailed + "review": mainElse(UserDefault),
 		RowTaskFailed + "routine": toDef, RowTaskFailed + TaskOther: toDef,
 		RowHealth: off, RowSourceResult: mainElse(AgentNextChat),
+		RowDelegationResult: {Agent: AgentMain, User: UserDefault, Else: AgentNextChat},
 	})}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("online =\n%+v\nwant\n%+v", got, want)

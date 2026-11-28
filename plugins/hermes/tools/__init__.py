@@ -186,22 +186,30 @@ def _delegate(args, session_id=None, **_):
         argv = ["delegate", "--assignee", args["assignee"]]
     else:
         return json.dumps({"ok": False, "error": "give mech (and its parameters) for an agent, or assignee for a person"})
-    r = cli.call(argv + _flags(args, *_DELEGATE_FLAGS), session_id, stdin=stdin)
-    child = r.get("stdout", {}).get("id") if r.get("ok") and isinstance(r.get("stdout"), dict) else None
-    if child:
-        dispatch.remember_delegated(session_id, child)
-    return json.dumps(r)
+    if args.get("start"):  # APA starts the executor itself (path A): only executors apa executors marks startable
+        argv.append("--start")
+        for k in ("model", "thinking"):  # start_model, start_thinking: "model" alone is the paseo model of a mech
+            if args.get("start_" + k):
+                argv += ["--" + k, str(args["start_" + k])]
+    return json.dumps(cli.call(argv + _flags(args, *_DELEGATE_FLAGS), session_id, stdin=stdin))
 
 
 def _dispatch(args, session_id=None, **_):
     """apa dispatch add|update for ways of delegating the plugin does not capture by itself."""
-    if args.get("action") == "update":
-        if not args.get("dispatch"):
-            return json.dumps({"ok": False, "error": "dispatch is required to update"})
+    action = args.get("action") or "add"
+    if action in ("update", "attach", "untrack") and not args.get("dispatch"):
+        return json.dumps({"ok": False, "error": f"dispatch is required to {action}"})
+    if action == "update":
         argv = ["dispatch", "update", args["dispatch"], *_flags(args, "state")]
         if isinstance(args.get("resumable"), bool):
             argv += ["--resumable", "true" if args["resumable"] else "false"]
         return json.dumps(cli.call(argv, session_id))
+    if action == "attach":
+        if not args.get("parent"):
+            return json.dumps({"ok": False, "error": "parent is required to attach"})
+        return json.dumps(cli.call(["dispatch", "attach", args["dispatch"], *_flags(args, "parent", "title", "reason")], session_id))
+    if action == "untrack":
+        return json.dumps(cli.call(["dispatch", "untrack", args["dispatch"]], session_id))
     if not args.get("item"):
         return json.dumps({"ok": False, "error": "item is required"})
     stdin = None
@@ -213,11 +221,7 @@ def _dispatch(args, session_id=None, **_):
             return json.dumps({"ok": False, "error": str(e)})
         argv += ["--handle", "-"]
         stdin = json.dumps(args["handle"])
-    r = cli.call(argv, session_id, stdin=stdin)
-    out = r.get("stdout") if isinstance(r.get("stdout"), dict) else {}
-    if r.get("ok") and out.get("id"):
-        dispatch.remember_dispatch(session_id, args["item"], args.get("session"), out["id"])
-    return json.dumps(r)
+    return json.dumps(cli.call(argv, session_id, stdin=stdin))
 
 
 def _history(args, session_id=None, **_):
@@ -227,12 +231,8 @@ def _history(args, session_id=None, **_):
     r = cli.call(["context", "--scope", "item", "--item", args["item"]], session_id)
     out = r.get("stdout") if isinstance(r.get("stdout"), dict) else None
     for h in (out or {}).get("history") or []:
-        dispatch.remember_delegated(session_id, h.get("item"))  # picking it up in this session: capture what follows
-        for d in sorted(h.get("dispatches") or [], key=lambda d: d.get("started_at", "")):
+        for d in h.get("dispatches") or []:
             d["hermes"] = dispatch.resume_hint(d)
-            if d.get("harness") == dispatch.HARNESS:  # oldest first, so the latest wins for continues
-                dispatch.remember_delegated(session_id, d.get("item"))
-                dispatch.remember_dispatch(session_id, d.get("item"), d.get("session"), d.get("id"))
     return json.dumps(r)
 
 
@@ -285,20 +285,27 @@ def register(ctx):
             "id": _s("Proposal id"), "do": {"type": "string", "enum": list(_BATCH_DO)}, "to": _s("attach: the existing item id"),
             "reason": _s("Reason")}, "required": ["id", "do"]}},
         "source": _s("recommended only: narrow to a source"), "project": _s("recommended only: narrow to a project id")}, []))
-    desc = ("Create a child item and put the parent in waiting (apa delegate). Run it BEFORE handing work to anyone, then delegate "
-            "with your own tools and put the child item id in the task. For an agent give mech (delegate_task, or paseo with host and "
-            "profile, or provider and model); the plugin names the executor. For a person give assignee. Exit 21 = not allowed in this project.")
+    desc = ("Create a child item and put the parent in waiting (apa delegate). For an executor APA can start itself (apa executors "
+            "marks it startable) give assignee and start=true: APA runs it and the report lands on the item; model and thinking "
+            "(start_model, start_thinking) override the executor's default with a value apa executors lists. Otherwise run it BEFORE handing work over, then "
+            "delegate with your own tools and put the child item id in the task: give mech (delegate_task, or paseo with host and "
+            "profile, or provider and model) and the plugin names the executor. For a person give assignee. Exit 21 = not allowed in this project.")
     ctx.register_tool(name="apa_delegate", toolset=TOOLSET, handler=_delegate, description=desc, schema=_schema("apa_delegate", desc, {
         "parent": _s("Parent item id"), "mech": {"type": "string", "enum": list(dispatch.MECHS), "description": "How you will delegate"},
         "host": _s("paseo: the --host you will pass (machine or daemon); empty for this machine"),
         "profile": _s("paseo: agent profile"), "provider": _s("paseo: provider, when not using a profile"), "model": _s("paseo: model"),
-        "assignee": _s("A person's id, when giving the work to a person instead of an agent"),
+        "assignee": _s("An executor apa executors lists (with start), or a person's id"),
+        "start": {"type": "boolean", "description": "APA starts the executor (only executors apa executors marks startable)"},
+        "start_model": _s("start: model override, one of the values apa executors lists"),
+        "start_thinking": _s("start: thinking override, one of the values apa executors lists"),
         "title": _s("Child title"), "summary": _s("Summary"), "body": _s("Body"), "priority": _s("Priority"),
         "project": _s("Project id"), "reason": _REASON, "idempotency_key": _s("Idempotency key")}, ["parent"]))
-    desc = ("Record a dispatch the plugin could not capture by itself (apa dispatch add), or mark one ended or lost (update). "
-            "Dispatches through delegate_task and paseo commands that name the child item are recorded automatically.")
+    desc = ("Record a dispatch the plugin could not capture by itself (apa dispatch add), mark one ended or lost (update), attach "
+            "one recorded without an item to its parent item (attach), or mark it not worth tracking (untrack). Dispatches through "
+            "delegate_task and paseo commands are recorded automatically: on the child item they name, otherwise unattached.")
     ctx.register_tool(name="apa_dispatch", toolset=TOOLSET, handler=_dispatch, description=desc, schema=_schema("apa_dispatch", desc, {
-        "action": {"type": "string", "enum": ["add", "update"], "description": "add (default) or update"},
+        "action": {"type": "string", "enum": ["add", "update", "attach", "untrack"], "description": "add (default), update, attach or untrack"},
+        "parent": _s("attach: the parent item"), "title": _s("attach: child title"), "reason": _REASON,
         "item": _s("Child item id (add)"), "session": _s("Session or agent id (add)"),
         "resumable": {"type": "boolean", "description": "Whether that session can be resumed later"},
         "cwd": _s("Working directory (add)"), "repo": _s("Repository (add)"), "continues": _s("Dispatch id this continues (add)"),

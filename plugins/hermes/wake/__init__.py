@@ -11,7 +11,8 @@ The credential is never put in the message, the environment of the gateway, or o
 Deliveries on the same route that carry no run (class decision, reminder, brief or health: the kernel's proactive reminders and
 scheduled-task outputs routed to the main session, design §7.4) are notices, not runs: the plugin injects their facts
 (title, summary, options and link as the kernel wrote them) and acks; no credential is exchanged. The main session then acts with its
-own tools as in chat. A notice whose ack was lost is not injected twice by this process (it only re-acks).
+own tools as in chat. A notice whose ack was lost is not injected twice by this process (it only re-acks); across a
+gateway restart the notice carries its delivery id for the Agent, and the relay rule says to relay one id once.
 
 Explicit opt-in: the loop starts only when readiness.py finds nothing missing (APA_WAKE_SESSION_KEY names the main
 session to wake, plugins.entries.apa-wake.allow_gateway_injection: true, APA_URL and APA_TOKEN). The same judgment is
@@ -108,6 +109,7 @@ def message(d):
 NOTICE_KIND = {"decision": "APA 提醒", "reminder": "APA 提醒", "brief": "APA 简报", "health": "APA 需要你看一下"}
 # The one place that says how the main session relays a notice. It must end with "不必回复 APA。" (apa-capture).
 RELAY = ("只把横线前的内容转给本人：保留顺序和标题，不加 ID、命令名和系统内部词；一条推送一条回复，不夹带别的后台进展；"
+         "同一投递 id 已经转述过的（如网关重启后又送来一次）不再转述；"
          "提醒里的事已经完成的，只说一句或不提；同一问题问过且没有变化，只说“仍在等你定”并带上选项；待决定必须带选项和推荐；"
          "随上下文带来的处理结果，只提要本人定或要本人知道的，放在回答本人问题之后。要看详情、改期、标完成，照常用 apa 命令"
          "（如 apa item show <事项 id>）。不必回复 APA。")
@@ -133,7 +135,7 @@ def notice(d):
     """A run-less delivery in two parts: the kernel's lines for the person, then what only the Agent needs."""
     c = d.get("content") or {}
     cls, title, summary = d.get("class"), (c.get("title") or "").strip(), (c.get("summary") or "").strip()
-    item, agent = d.get("item") or "", []
+    item, agent = d.get("item") or "", [f"投递 {d['id']}"] if d.get("id") else []  # survives restarts: one id is relayed once
     if item and ":" not in item:  # "attention:schedule" and the like are placeholders, not items
         agent.append(f"事项 {item}")
     if cls == "decision":

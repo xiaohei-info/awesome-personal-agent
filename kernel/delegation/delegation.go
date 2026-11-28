@@ -48,7 +48,7 @@ var Module = store.Module{Name: "delegation", Migrations: []store.Migration{{
 	ref TEXT PRIMARY KEY,
 	item TEXT NOT NULL
 ) WITHOUT ROWID;`,
-}, dispatchMigration}}
+}, dispatchMigration, dispatchRunMigration}}
 
 // Options 注入本模块读取但不拥有的东西。
 type Options struct {
@@ -147,10 +147,22 @@ type createIn struct {
 	Reason   string          `json:"reason"`
 	// Executor 随委派登记或更新名录条目（id 取 Assignee，harness 取调用方），可缺省。
 	Executor *executors.Enrollment `json:"executor,omitempty"`
+	// Start 为真时由 APA 按执行者的无头运行声明拉起这次委派（路径 A，§7.5、§13.6）；拉起与它的前置校验在
+	// kernel/background 的同事务回调里，不通过则整条命令不生效。Overrides 是这一次覆盖的可覆盖参数（只能取声明列出的值）。
+	Start     bool              `json:"start,omitempty"`
+	Overrides map[string]string `json:"overrides,omitempty"`
+}
+
+// StartInput 是 delegate.create 里交给拉起方的部分：kernel/background 从命令输入读它。
+type StartInput struct {
+	Start     bool              `json:"start"`
+	Overrides map[string]string `json:"overrides"`
 }
 
 type reportIn struct {
 	ID string `json:"id"`
+	// Session 是不带事项 id 的回执：按调用方 harness 记下的会话句柄找到委派记录所在的子事项（§6.17）。
+	Session string `json:"session,omitempty"`
 	Report
 	Reason string `json:"reason"`
 }
@@ -172,7 +184,7 @@ func Register(x *command.Executor, o Options) error {
 	if o.OnError == nil {
 		return invalid("delegation: Options.OnError is required")
 	}
-	for _, s := range []command.Spec{o.create(), report(), settle(), o.dispatch(), o.dispatchUpdate(), dispatchList()} {
+	for _, s := range []command.Spec{o.create(), o.attach(), report(), settle(), o.dispatch(), o.dispatchUpdate(), dispatchList()} {
 		if err := x.Register(s); err != nil {
 			return err
 		}
@@ -202,6 +214,12 @@ func (o Options) create() command.Spec {
 		var v createIn
 		if err := decode(in, &v); err != nil {
 			return v, err
+		}
+		if (v.Start || len(v.Overrides) > 0) && v.Assignee == o.Owner {
+			return v, invalid("start and overrides need an executor; work assigned to the owner is not started by APA")
+		}
+		if len(v.Overrides) > 0 && !v.Start {
+			return v, invalid("overrides only apply when APA starts the work (start)")
 		}
 		if v.Executor != nil && v.Assignee != o.Owner {
 			return v, v.Executor.Check(v.Assignee)
@@ -252,53 +270,123 @@ func (o Options) create() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
-			parent, err := items.Get(c.Tx, v.Parent)
+			return o.createChild(c, v)
+		}}
+}
+
+// createChild 建委派子事项并让父事项转 waiting（delegate.create 与把未挂的派活挂上共用）。
+func (o Options) createChild(c *command.Ctx, v createIn) (created, error) {
+	parent, err := items.Get(c.Tx, v.Parent)
+	if err != nil {
+		return created{}, err
+	}
+	if v.Executor != nil && v.Assignee != o.Owner {
+		if err := executors.Enroll(c, v.Assignee, *v.Executor); err != nil {
+			return created{}, err
+		}
+	}
+	title := v.Title
+	if blank(title) {
+		title = parent.Title
+	}
+	prio := v.Priority
+	if prio == "" {
+		prio = domain.PriorityNormal
+	}
+	child := domain.Item{Phase: domain.PhaseOpen, Kind: domain.KindDelegation, Title: title, Summary: v.Summary, Body: v.Body,
+		Priority: prio, Project: parent.Project, Assignee: v.Assignee,
+		// 后台运行建立的子事项带 unattended 并沿链路继承；本人显式重新委派开始新链路（§7.5）。
+		ItemKernelState: domain.ItemKernelState{ChainDepth: c.ChainDepth,
+			Unattended: c.Caller.Level == authz.LevelRun || (parent.Unattended && c.Caller.Level != authz.LevelWeb)}}
+	child, snap, err := items.Create(c.Tx, child, parent.ID, c.Now())
+	if err != nil {
+		return created{}, err
+	}
+	if _, err := command.Bump(c.Tx, child.ID); err != nil { // 新对象不是管线的授权对象，版本自己加
+		return created{}, err
+	}
+	reason := reasonOr(v.Reason, "delegated to "+v.Assignee)
+	if _, err := c.Emit(domain.Event{Type: domain.EvDelegationCreated, Object: child.ID, Reason: reason, Payload: snap}); err != nil {
+		return created{}, err
+	}
+	// 父事项（管线的授权对象，版本由管线加）转 waiting，等这个执行者。
+	before, _, psnap, err := items.Revise(c.Tx, parent.ID, "delegate.create", c.Now(), func(it *domain.Item) error {
+		it.Phase, it.WaitingOn = domain.PhaseWaiting, &domain.WaitingOn{Kind: domain.WaitingExecutor, Ref: v.Assignee}
+		return nil
+	})
+	if err != nil {
+		return created{}, err
+	}
+	typ := domain.EvItemUpdated
+	if before.Phase != domain.PhaseWaiting {
+		typ = domain.EvItemPhaseChanged
+	}
+	_, err = c.Emit(domain.Event{Type: typ, Object: parent.ID, Reason: "waiting on " + v.Assignee, Payload: psnap})
+	return created{ID: child.ID, Parent: parent.ID}, err
+}
+
+type attachIn struct {
+	ID       string          `json:"id"` // 未挂事项的委派记录
+	Parent   string          `json:"parent"`
+	Title    string          `json:"title"`
+	Summary  string          `json:"summary"`
+	Body     string          `json:"body"`
+	Priority domain.Priority `json:"priority"`
+	Reason   string          `json:"reason"`
+}
+
+// attach 是 delegate.attach：把还没挂到事项上的派活挂到父事项下——与 delegate.create 同一路径建委派子事项（项目名单、
+// 父事项转 waiting），再把这条委派记录挪到子事项上（§6.17）。
+func (o Options) attach() command.Spec {
+	parse := func(tx *store.Tx, in json.RawMessage) (attachIn, Dispatch, error) {
+		var v attachIn
+		if err := decode(in, &v); err != nil {
+			return v, Dispatch{}, err
+		}
+		if blank(v.ID) || blank(v.Parent) {
+			return v, Dispatch{}, invalid("id (the dispatch) and parent are required")
+		}
+		d, err := GetDispatch(tx, v.ID)
+		if err != nil {
+			return v, d, err
+		}
+		if d.Attached() || d.State != DispatchRunning {
+			return v, d, conflict("the dispatch is already attached or no longer tracked", "list the item's dispatches")
+		}
+		return v, d, nil
+	}
+	create := o.create()
+	asCreate := func(v attachIn, d Dispatch) json.RawMessage {
+		b, _ := json.Marshal(createIn{Parent: v.Parent, Assignee: d.Executor, Title: v.Title, Summary: v.Summary, Body: v.Body,
+			Priority: v.Priority, Reason: reasonOr(v.Reason, "attached dispatch "+d.ID)})
+		return b
+	}
+	return command.Spec{Name: "delegate.attach", Action: authz.ActionDelegate, Group: authz.GroupOrganize,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, d, err := parse(tx, in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			return create.Object(tx, asCreate(v, d))
+		},
+		Validate: create.Validate,
+		Apply: func(c *command.Ctx) (any, error) {
+			v, d, err := parse(c.Tx, c.Input)
 			if err != nil {
 				return nil, err
 			}
-			if v.Executor != nil && v.Assignee != o.Owner {
-				if err := executors.Enroll(c, v.Assignee, *v.Executor); err != nil {
-					return nil, err
-				}
-			}
-			title := v.Title
-			if blank(title) {
-				title = parent.Title
-			}
-			prio := v.Priority
-			if prio == "" {
-				prio = domain.PriorityNormal
-			}
-			child := domain.Item{Phase: domain.PhaseOpen, Kind: domain.KindDelegation, Title: title, Summary: v.Summary, Body: v.Body,
-				Priority: prio, Project: parent.Project, Assignee: v.Assignee,
-				// 后台运行建立的子事项带 unattended 并沿链路继承；本人显式重新委派开始新链路（§7.5）。
-				ItemKernelState: domain.ItemKernelState{ChainDepth: c.ChainDepth,
-					Unattended: c.Caller.Level == authz.LevelRun || (parent.Unattended && c.Caller.Level != authz.LevelWeb)}}
-			child, snap, err := items.Create(c.Tx, child, parent.ID, c.Now())
+			var cv createIn
+			_ = json.Unmarshal(asCreate(v, d), &cv)
+			out, err := o.createChild(c, cv)
 			if err != nil {
 				return nil, err
 			}
-			if _, err := command.Bump(c.Tx, child.ID); err != nil { // 新对象不是管线的授权对象，版本自己加
+			d.Item = out.ID
+			if err := putDispatch(c.Tx, d); err != nil {
 				return nil, err
 			}
-			reason := reasonOr(v.Reason, "delegated to "+v.Assignee)
-			if _, err := c.Emit(domain.Event{Type: domain.EvDelegationCreated, Object: child.ID, Reason: reason, Payload: snap}); err != nil {
-				return nil, err
-			}
-			// 父事项（管线的授权对象，版本由管线加）转 waiting，等这个执行者。
-			before, _, psnap, err := items.Revise(c.Tx, parent.ID, "delegate.create", c.Now(), func(it *domain.Item) error {
-				it.Phase, it.WaitingOn = domain.PhaseWaiting, &domain.WaitingOn{Kind: domain.WaitingExecutor, Ref: v.Assignee}
-				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
-			typ := domain.EvItemUpdated
-			if before.Phase != domain.PhaseWaiting {
-				typ = domain.EvItemPhaseChanged
-			}
-			_, err = c.Emit(domain.Event{Type: typ, Object: parent.ID, Reason: "waiting on " + v.Assignee, Payload: psnap})
-			return created{ID: child.ID, Parent: parent.ID}, err
+			_, err = c.Emit(domain.Event{Type: EvDispatchUpdated, Object: out.ID, Reason: "dispatch attached", Payload: dispatchPayload(d)})
+			return out, err
 		}}
 }
 
@@ -312,13 +400,33 @@ func reasonOr(r, def string) string {
 // ---- delegate.report ----
 
 func report() command.Spec {
-	parse := func(in json.RawMessage) (reportIn, error) {
+	// parse 读输入；按会话句柄回执时把找到的子事项填进 ID，三个阶段看到的是同一个对象。
+	parse := func(tx *store.Tx, in json.RawMessage) (reportIn, error) {
 		var v reportIn
-		return v, decode(in, &v)
+		if err := decode(in, &v); err != nil {
+			return v, err
+		}
+		if blank(v.ID) == blank(v.Session) {
+			return v, invalid("give the item id or the dispatch session handle, not both")
+		}
+		if v.ID != "" {
+			return v, nil
+		}
+		d, ok, err := BySession(tx, "", v.Session)
+		switch {
+		case err != nil:
+			return v, err
+		case !ok:
+			return v, domain.NewError(domain.CodeNotFound, "no dispatch was recorded with this session handle", "report on the item id, or record the dispatch first")
+		case !d.Attached():
+			return v, conflict("the dispatch "+d.ID+" is not attached to an item yet", "attach it with apa dispatch attach "+d.ID+" --parent <item>, then report")
+		}
+		v.ID = d.Item
+		return v, nil
 	}
 	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize, Receipt: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
-			v, err := parse(in)
+			v, err := parse(tx, in)
 			if err != nil {
 				return authz.Object{}, err
 			}
@@ -328,8 +436,25 @@ func report() command.Spec {
 			}
 			return authz.Object{ID: child.ID, Assignee: child.Assignee, Kind: string(child.Kind), Project: child.Project}, nil
 		},
+		// 按句柄回执只认调用方 harness 自己写的记录：句柄是那个 harness 的会话 id，别的 harness 不能借用。
+		Refine: func(tx *store.Tx, c command.Caller, _ *authz.Object, in json.RawMessage) error {
+			var v reportIn
+			if err := decode(in, &v); err != nil || v.Session == "" {
+				return err
+			}
+			if _, ok, err := BySession(tx, c.Actor.Harness, v.Session); err != nil || !ok {
+				if err == nil {
+					err = domain.NewError(domain.CodeNotFound, "no dispatch of your harness was recorded with this session handle", "report on the item id")
+				}
+				return err
+			}
+			return nil
+		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
-			v, _ := parse(in)
+			v, err := parse(tx, in)
+			if err != nil {
+				return err
+			}
 			child, err := reportable(tx, v.ID)
 			if err != nil {
 				return err
@@ -337,7 +462,7 @@ func report() command.Spec {
 			return checkReport(tx, child, v)
 		},
 		Apply: func(c *command.Ctx) (any, error) {
-			v, _ := parse(c.Input)
+			v, _ := parse(c.Tx, c.Input)
 			label := v.Summary
 			if v.Outcome == OutcomeBlocked {
 				label = "blocked: " + v.Summary
@@ -373,6 +498,11 @@ func report() command.Spec {
 				Evidence: string(ev), Payload: snap}); err != nil {
 				return nil, err
 			}
+			if child.Kind == domain.KindDelegation {
+				if err := parentProgress(c, child, label); err != nil {
+					return nil, err
+				}
+			}
 			if v.Outcome == OutcomeDone && child.Kind == domain.KindDelegation {
 				if err := registerVaultLinks(c, child, v.Evidence.Links); err != nil {
 					return nil, err
@@ -390,6 +520,29 @@ func report() command.Spec {
 			}
 			return map[string]string{"id": child.ID}, nil
 		}}
+}
+
+// parentProgress 把委派子事项的回执同时写成父事项的一条进展（§7.5）：本人看事项看的是父事项，回报不能只留在子事项里。
+// 父事项已结束时不写。
+func parentProgress(c *command.Ctx, child domain.Item, label string) error {
+	parent, ok, err := items.ParentOf(c.Tx, child.ID)
+	if err != nil || !ok {
+		return err
+	}
+	p, err := items.Get(c.Tx, parent)
+	if err != nil || p.Phase.Terminal() {
+		return err
+	}
+	// 证据留在子事项的回执上（事项页逐条可点），进展只写这一句：进展会进摘要等模型请求，不把外部链接带过去。
+	w, err := items.AppendProgress(c.Tx, parent, child.Title+"："+label, c.Caller.Actor.Principal, c.Now())
+	if err != nil {
+		return err
+	}
+	if _, err := command.Bump(c.Tx, parent); err != nil {
+		return err
+	}
+	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "reported by " + child.Assignee})
+	return err
 }
 
 // reportable 读出回执的目标事项：委派子事项，或任务型运行的目标事项（附录 C.13 的"写回事项"）。

@@ -280,6 +280,8 @@ type AgentSnapshot struct {
 	SelectionSource string `json:"selection_source"`
 	PermissionCap   string `json:"permission_cap"`
 	ConfiguredModel string `json:"configured_model,omitempty"`
+	// ConfiguredThinking 是这次运行按可覆盖参数生效的思考档（附录 A.2）；没有覆盖为空，由执行者自带的默认决定。
+	ConfiguredThinking string `json:"configured_thinking,omitempty"`
 }
 
 // ---- Source 登记、来源事件（§6.10） ----
@@ -308,7 +310,7 @@ type Source struct {
 	Outbound        Outbound   `json:"outbound"`
 	// ContentRetentionDays 是来源原文保留天数；nil 不清理（默认），只在 Web 设（§6.15）。
 	ContentRetentionDays *int `json:"content_retention_days,omitempty"`
-	// HandlingMode 是本人给来源设的处理方式（§9.3）：HandlingNormal 或 HandlingRemindOnly。
+	// HandlingMode 是本人给来源设的处理方式（§9.3）：HandlingNormal、HandlingRemindOnly 或 HandlingCreateItem。
 	HandlingMode string          `json:"handling_mode,omitempty"`
 	Config       json.RawMessage `json:"config,omitempty"`
 	Cursor       string          `json:"cursor,omitempty"`
@@ -336,6 +338,9 @@ func ValidOutboundScope(s string) bool {
 const (
 	HandlingNormal     = "normal"
 	HandlingRemindOnly = "remind_only" // 只口头提醒：进队列但不建建议
+	// HandlingCreateItem 是直接立项：处理它的 Agent 提出的建议直接成为进行中的事项，挂到已有事项时同时写一条进展。
+	// 只有处理来源的 Agent 的权限卡开了"替我拍板"才能选（§9.3、§14.5）。
+	HandlingCreateItem = "create_item"
 )
 
 type Disposition string

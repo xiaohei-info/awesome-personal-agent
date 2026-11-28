@@ -421,10 +421,14 @@ func (q *Queue) ConfirmAnswered(tx *store.Tx, item string) (bool, error) {
 	return len(ids) > 0, nil
 }
 
+// ResultPrefix 是委派结果通知的投递 id 前缀（§13.6）：一次回执一条，事项之后的变化不作废它（结果已经发生）。
+const ResultPrefix = "delegation:"
+
 // Supersede 作废该事项中版本小于 below 的未终结投递（含退回 Web 未读的：已变化的事项不再展示旧提醒；事项变化的命令在同一事务调用）。
+// 委派结果通知（ResultPrefix）不作废。
 func (q *Queue) Supersede(tx *store.Tx, item string, below int64) (int64, error) {
 	return tx.Exec(`UPDATE delivery_delivery SET state = 'superseded', lease_until = 0
-		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered', 'fallback_web')`, item, below)
+		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered', 'fallback_web') AND id NOT LIKE ?`, item, below, ResultPrefix+"%")
 }
 
 // Sweep 把可领已超过 UnclaimedAfter 仍无人领取的投递转 fallback_web，返回条数：

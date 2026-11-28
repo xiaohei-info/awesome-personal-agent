@@ -19,7 +19,7 @@ interface Rj { run_id: string; line: number; reason: string; raw: string; at: st
 interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; queue?: string; queue_level?: string; item?: string; unjudged_reason?: string }
 
 interface Models { judge?: boolean; generate?: boolean; paused?: boolean }
-function backend(o: { captures?: Src[]; projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number; rejudge_days?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
+function backend(o: { createItem?: boolean; captures?: Src[]; projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number; rejudge_days?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
   const sources = o.sources ?? [];
   const events = o.events ?? [];
   const ingests = o.ingests ?? [];
@@ -65,7 +65,7 @@ function backend(o: { captures?: Src[]; projects?: { id: string; name: string }[
       if (!cmd.endsWith("apple-pim-source")) return json(200, { name: null });
       return json(200, { name: u.searchParams.get("source_type") === "calendar" ? { zh: "Apple 日历", en: "Apple Calendar" } : { zh: "Apple 邮件", en: "Apple Mail" } });
     }
-    if (u.pathname === "/v1/sources" && method === "GET") return json(200, { sources, capture_sources: o.captures });
+    if (u.pathname === "/v1/sources" && method === "GET") return json(200, { sources, capture_sources: o.captures, create_item_allowed: o.createItem ?? false });
     if (u.pathname === "/v1/sources" && method === "POST") {
       if (o.webOnly) return err(403, "web_only", "custom commands can only be registered in the Web UI");
       if (body.outbound) return err(403, "web_only", "outbound is not part of the source registration");
@@ -442,6 +442,26 @@ describe("只口头提醒（§9.3）", () => {
     await userEvent.click(li.getByRole("button", { name: "详情" }));
     await userEvent.click(within(await li.findByRole("group", { name: "处理方式" })).getByRole("button", { name: "只口头提醒" }));
     await waitFor(() => expect(b.calls.find((c) => c.method === "PATCH")).toMatchObject({ path: "/v1/sources/capture%3Aprj_a", body: { handling_mode: "remind_only" } }));
+  });
+});
+
+describe("直接立项（§9.3）", () => {
+  it("处理消息的 Agent 没开「替我拍板」时置灰并说明；开了才能选，PATCH 只带 handling_mode", async () => {
+    const closed = backend({ sources: [], projects: [{ id: "prj_a", name: "家务" }], captures: [{ id: "capture:prj_a", name: "", type: "capture", enabled: true, handling_mode: "normal" }] });
+    const view = mount(closed.impl);
+    let li = await row("对话捕获 · 家务");
+    await userEvent.click(li.getByRole("button", { name: "详情" }));
+    expect(within(await li.findByRole("group", { name: "处理方式" })).getByRole("button", { name: "直接立项" })).toBeDisabled();
+    expect(li.getByText(/要开「替我拍板」才能直接立项/)).toBeInTheDocument();
+    view.unmount();
+
+    const open = backend({ createItem: true, sources: [], projects: [{ id: "prj_a", name: "家务" }], captures: [{ id: "capture:prj_a", name: "", type: "capture", enabled: true, handling_mode: "normal" }] });
+    mount(open.impl);
+    li = await row("对话捕获 · 家务");
+    await userEvent.click(li.getByRole("button", { name: "详情" }));
+    await userEvent.click(within(await li.findByRole("group", { name: "处理方式" })).getByRole("button", { name: "直接立项" }));
+    await waitFor(() => expect(open.calls.find((c) => c.method === "PATCH")).toMatchObject({ body: { handling_mode: "create_item" } }));
+    expect(li.queryByText(/要开「替我拍板」才能直接立项/)).not.toBeInTheDocument();
   });
 });
 

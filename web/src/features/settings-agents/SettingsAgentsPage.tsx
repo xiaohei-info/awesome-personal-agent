@@ -72,6 +72,7 @@ function AgentList() {
           <ThinkingCard doc={pol} save={save} />
           {data && <Other data={data} list={list} reload={load} onError={setError} secret={secret} onSecret={setSecret} />}
           <PageReminder row="run_failed" onSaved={() => void loadPol()} />
+          <PageReminder row="delegation_result" onSaved={() => void loadPol()} />
         </>
       )}
     </PolicyPage>

@@ -221,8 +221,19 @@ def test_delegate_with_mech_names_the_executor_from_the_way_of_delegating(tools,
     assert stdin_json(apa) == {"kind": "remote-agent", "host": "mbp", "label": "Paseo · team-quick @ mbp",
                                "handle": {"mech": "paseo", "host": "mbp", "target": "mbp", "profile": "team-quick"}}
     assert (apa / "log.harness").read_text().split() == ["hermes"]
-    from apa_tools import dispatch
-    assert "itm_c0ffee" in dispatch.delegated("s1")
+
+
+def test_delegate_start_lets_apa_run_a_registered_executor(tools, apa):
+    tools["apa_delegate"]({"parent": "a", "assignee": "team-quick", "start": True, "start_model": "m1", "start_thinking": "high"}, session_id="s")
+    [c] = calls(apa)
+    assert c["argv"][:3] == ["delegate", "--assignee", "team-quick"] and c["argv"][3:8] == ["--start", "--model", "m1", "--thinking", "high"]
+
+
+def test_dispatch_attach_and_untrack(tools, apa):
+    tools["apa_dispatch"]({"action": "attach", "dispatch": "dsp_1", "parent": "itm_p"}, session_id="s")
+    tools["apa_dispatch"]({"action": "untrack", "dispatch": "dsp_2"}, session_id="s")
+    assert [c["argv"] for c in calls(apa)] == [["dispatch", "attach", "dsp_1", "--parent", "itm_p"], ["dispatch", "untrack", "dsp_2"]]
+    assert json.loads(tools["apa_dispatch"]({"action": "attach", "dispatch": "dsp_1"}, session_id="s"))["ok"] is False
 
 
 def test_same_way_of_delegating_gets_the_same_executor_id(tools, apa):
@@ -262,8 +273,6 @@ def test_dispatch_add_checks_hermes_handle_shapes_before_writing(tools, apa, mon
     [c] = calls(apa)
     assert c["argv"] == ["dispatch", "add", "itm_1", "--session", "agt_1", "--resumable", "--handle", "-"]
     assert stdin_json(apa) == {"mech": "paseo", "host": "mbp", "agent_id": "agt_1"}
-    from apa_tools import dispatch
-    assert dispatch.last_dispatch("itm_1", "agt_1") == "dsp_1"
 
 
 def test_dispatch_update_marks_lost(tools, apa):
@@ -289,8 +298,6 @@ def test_item_history_gives_resume_hints_only_for_hermes_own_valid_handles(tools
     assert d2["hermes"]["or_new"] == 'paseo-profile-run --host mbp q "<task; name itm_b>"'
     assert d1["hermes"]["use"] == "reference only" and "claude-code" in d1["hermes"]["why"]
     assert d0["hermes"]["use"] == "reference only"
-    from apa_tools import dispatch
-    assert "itm_b" in dispatch.delegated("s9") and dispatch.last_dispatch("itm_b", "agt_1") == "dsp_2"
 
 
 # ---- 聊天里处置（附录 A.5）：三个代答工具 ----

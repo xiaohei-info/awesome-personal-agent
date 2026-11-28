@@ -33,7 +33,7 @@ import (
 
 // InstructionVersion 是常驻指令的当前版本；插件带着自己持有的版本来问，过期就提示更新。
 // 常驻指令（`apa guide`）的内容变化时递增。
-const InstructionVersion = 3
+const InstructionVersion = 4
 
 // Module 登记会话游标表。游标是事件序号，只属于本模块。
 var Module = store.Module{Name: "context", Migrations: []store.Migration{{
@@ -60,7 +60,9 @@ type Request struct {
 	// ItemScope 是 `--scope item`（§7.6）：不看游标，给事项条目和未确认的挂靠消息。Item 为空时按 Reader 确定事项。
 	ItemScope bool
 	Item      string
-	Reader    Reader
+	// InFlight 要本会话派出、还没回执的外部派活（插件进程重启后的第一轮，§6.17）；只在带 Session 时有效。
+	InFlight bool
+	Reader   Reader
 }
 
 // Reader 是读取者的身份，决定挂靠消息的白名单过滤和是否推进状态。
@@ -91,6 +93,8 @@ type Entry struct {
 	Running bool `json:"running,omitempty"`
 	// Last 是事项所在序列最近一次委派（§6.17），注入里多一行；完整记录与句柄用 --scope item 读。
 	Last *LastDispatch `json:"last_dispatch,omitempty"`
+	// Progress 只在增量里：游标之后新写的最近一条进展（含委派回报写给父事项的那条）。
+	Progress string `json:"progress,omitempty"`
 }
 
 // LastDispatch 是注入用的最近一次委派摘要，不带句柄。
@@ -153,6 +157,12 @@ type Result struct {
 	Messages    []ItemMessages  `json:"messages,omitempty"`
 	// History 只在 --scope item：每个目标事项所在序列最近的委派记录（§6.17）。
 	History []ItemHistory `json:"history,omitempty"`
+	// Overview 是不属于任何项目的会话从头读时的工作台概览（§7.6）；有它时 Items 为空。
+	Overview []OverviewGroup `json:"overview,omitempty"`
+	// Unattached 是本会话记下、还没挂到事项上的派活，每轮都给（§6.17）。
+	Unattached []UnattachedDispatch `json:"unattached_dispatches,omitempty"`
+	// InFlight 只在请求带 InFlight 时：本会话派出、还没回执的外部派活（§6.17）。
+	InFlight []InFlightDispatch `json:"in_flight_dispatches,omitempty"`
 }
 
 // Build 返回 req 的增量投影。带 Session 时在同一事务里把游标推进到本次读到的位置，
@@ -178,8 +188,10 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			inboxID = id
 		}
 	}
+	// 工作台视图：不属于任何项目的会话看全部项目（§7.6）。从头读给分组概览，之后只收事项级变化。
+	workbench := req.Session != "" && !req.All && project == ""
 	inScope := func(p string) bool {
-		return req.All || p == project || (project == "" && inboxID != "" && p == inboxID)
+		return req.All || workbench || p == project || (project == "" && inboxID != "" && p == inboxID)
 	}
 	// 游标按（会话, 作用域）保存：同一会话换作用域不会漏掉新作用域里更早的变更。
 	key := req.Session + "\x00" + project
@@ -195,11 +207,37 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		return res, err
 	}
 
-	changed, attached, projectChanged, mats, err := changes(tx, after, head, project)
+	changed, changed2, attached, projectChanged, mats, err := changes(tx, after, head, project)
 	if err != nil {
 		return res, err
 	}
 	res = Result{Cursor: head, Items: []Entry{}, Instruction: instruction(req)}
+	if req.Session != "" {
+		if res.Unattached, err = unattached(tx, req.Session); err != nil {
+			return res, err
+		}
+		if req.InFlight {
+			if res.InFlight, err = inFlight(tx, req.Session); err != nil {
+				return res, err
+			}
+		}
+	}
+	var tracked map[string]bool
+	if workbench && after == 0 {
+		if res.Overview, err = overview(tx, req, pol); err != nil {
+			return res, err
+		}
+		changed = nil // 概览就是现状，不再逐条列变化
+	} else if workbench {
+		ts, err := Tracking(tx, req.Session, 0)
+		if err != nil {
+			return res, err
+		}
+		tracked = map[string]bool{}
+		for _, it := range ts {
+			tracked[it.ID] = true
+		}
+	}
 
 	for _, id := range changed {
 		it, err := items.Get(tx, id)
@@ -220,16 +258,34 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 				continue
 			}
 		}
+		// 工作台增量只收事项级变化：只有普通字段改动的事项，除非本会话在跟，不带。
+		if tracked != nil && !tracked[id] && !changed2[id].itemLevel {
+			continue
+		}
+		forwarded := false
+		if req.Session != "" && attached[id] { // 不带会话时是只读事务，也不算增量
+			n := len(res.Messages)
+			if res.Messages, err = appendMessages(tx, res.Messages, req.Reader, it, pol); err != nil {
+				return res, err
+			}
+			forwarded = len(res.Messages) > n
+		}
+		// 渲染出来与游标那一刻相同、这次也没有真的转交消息：不是可见变化，不带。
+		if after > 0 && !forwarded {
+			if same, err := unchanged(tx, it, after); err != nil {
+				return res, err
+			} else if same {
+				continue
+			}
+		}
 		e, _, err := entry(tx, it, pol, req.Reader)
 		if err != nil {
 			return res, err
 		}
-		res.Items = append(res.Items, e)
-		if req.Session != "" && attached[id] { // 不带会话时是只读事务，也不算增量
-			if res.Messages, err = appendMessages(tx, res.Messages, req.Reader, it, pol); err != nil {
-				return res, err
-			}
+		if after > 0 && changed2[id].progress != "" {
+			e.Progress = changed2[id].progress
 		}
+		res.Items = append(res.Items, e)
 	}
 
 	if project != "" && !req.All && (after == 0 || projectChanged) {
@@ -259,7 +315,7 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			res.Materials = append(res.Materials, MaterialEntry{ID: m.ID, Title: m.Title, Kind: m.Kind, Path: m.Location, Summary: sum})
 		}
 	}
-	if res.Deliveries, err = injected(tx, req, project, inboxID, pol); err != nil {
+	if res.Deliveries, err = injected(tx, req, project, inboxID, workbench); err != nil {
 		return res, err
 	}
 
@@ -422,7 +478,7 @@ func conversation(session string) string {
 // injected 返回作用域内待注入的投递。带 Session 时每条只给该会话一次，并记 injected_to_session；
 // 不带 Session 给全部且不记录。投递的事项不在账本里（如合并摘要）时只在无项目作用域出现。
 // 带运行身份的读取（后台运行会话）既拿不到也不记录：投递是说给本人的，只进本人在场的会话（§11.6）。
-func injected(tx *store.Tx, req Request, project, inboxID string, pol policy.Policy) ([]DeliveryEntry, error) {
+func injected(tx *store.Tx, req Request, project, inboxID string, workbench bool) ([]DeliveryEntry, error) {
 	if req.Reader.Run != "" {
 		return nil, nil
 	}
@@ -440,7 +496,7 @@ func injected(tx *store.Tx, req Request, project, inboxID string, pol policy.Pol
 		it, err := items.Get(tx, d.Item)
 		switch {
 		case err == nil:
-			if !req.All && it.Project != project && !(project == "" && inboxID != "" && it.Project == inboxID) {
+			if !req.All && !workbench && it.Project != project && !(project == "" && inboxID != "" && it.Project == inboxID) {
 				continue
 			}
 			e.Action = action(it)
@@ -494,16 +550,23 @@ type matChange struct {
 	rev    string // 生效的修订；托管型刷新没有
 }
 
-// changes 读 (after, head] 的事件，返回按最近变更先后排序的去重事项 id、其中有新挂靠消息的事项、作用域项目是否有变更，
+// itemChange 是一个事项在增量区间里的变化：有没有事项级事件（普通字段改动之外的），以及最近一条新进展。
+type itemChange struct {
+	itemLevel bool
+	progress  string
+}
+
+// changes 读 (after, head] 的事件，返回按最近变更先后排序的去重事项 id、每个事项的变化、其中有新挂靠消息的事项、作用域项目是否有变更，
 // 以及有生效变更（material.revised）的材料，同样按最近变更先后排序。
-func changes(tx *store.Tx, after, head int64, project string) (ids []string, attached map[string]bool, projectChanged bool, mats []matChange, err error) {
+func changes(tx *store.Tx, after, head int64, project string) (ids []string, byItem map[string]itemChange, attached map[string]bool, projectChanged bool, mats []matChange, err error) {
 	last := map[string]int64{}
 	attached = map[string]bool{}
+	byItem = map[string]itemChange{}
 	byMat := map[string]matChange{}
 	for after < head {
 		es, err := eventlog.ReadLive(tx, after, 500)
 		if err != nil {
-			return nil, nil, false, nil, err
+			return nil, nil, nil, false, nil, err
 		}
 		if len(es) == 0 {
 			break
@@ -514,6 +577,17 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, att
 			case slices.Contains(itemEvents, t):
 				last[en.Event.Object] = en.Event.Seq
 				attached[en.Event.Object] = attached[en.Event.Object] || t == followmsg.EvAttached
+				ch := byItem[en.Event.Object]
+				ch.itemLevel = ch.itemLevel || t != domain.EvItemUpdated
+				if t == domain.EvItemProgressAdded {
+					var p struct {
+						Progress *domain.Progress `json:"progress"`
+					}
+					if json.Unmarshal(en.Event.Payload, &p) == nil && p.Progress != nil {
+						ch.progress = p.Progress.Text
+					}
+				}
+				byItem[en.Event.Object] = ch
 			case slices.Contains(projectEvents, t) && en.Event.Object == project:
 				projectChanged = true
 			case t == domain.EvMaterialRevised && !en.Tombstone:
@@ -535,7 +609,7 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, att
 		mats = append(mats, mc)
 	}
 	slices.SortFunc(mats, func(a, b matChange) int { return int(a.seq - b.seq) })
-	return ids, attached, projectChanged, mats, nil
+	return ids, byItem, attached, projectChanged, mats, nil
 }
 
 // action 给出建议动作：建议流用 accept / dismiss，待决用 decide（档位没放开时内核拒绝，Agent 把链接交给本人）。
@@ -565,67 +639,59 @@ func oneLine(s string) string {
 }
 
 // Inject 渲染注入文本；没有任何要说的（增量为空、指令未过期）返回空串，不注入。
+// 整份至多 InjectBudget 字：先放项目上下文、材料、投递、未挂的派活与跟进消息（投递与消息读取时已记送达，不截），
+// 余下的字数按概览分组与增量事项行截断，截掉的写明另有几条与查询命令。
 func (r Result) Inject() string {
-	if len(r.Items) == 0 && len(r.Materials) == 0 && len(r.Deliveries) == 0 && len(r.Messages) == 0 && r.Project == nil && !r.Instruction.Stale {
+	if len(r.Items) == 0 && len(r.Overview) == 0 && len(r.Unattached) == 0 && len(r.InFlight) == 0 && len(r.Materials) == 0 && len(r.Deliveries) == 0 &&
+		len(r.Messages) == 0 && r.Project == nil && !r.Instruction.Stale {
 		return ""
 	}
-	var b strings.Builder
-	line := func(format string, a ...string) {
-		b.WriteString(format)
+	var head, tail strings.Builder
+	line := func(b *strings.Builder, a ...string) {
 		for _, x := range a {
 			b.WriteString(x)
 		}
 		b.WriteByte('\n')
 	}
-	line(envelopeOpen)
-	line(truthStatement)
+	line(&head, envelopeOpen)
+	line(&head, truthStatement)
 	if r.Instruction.Stale {
-		line("常驻指令已过期，请更新 `apa` 插件的指令（当前版本 ", strconv.Itoa(r.Instruction.Current), "）。")
+		line(&head, "常驻指令已过期，请更新 `apa` 插件的指令（当前版本 ", strconv.Itoa(r.Instruction.Current), "）。")
 	}
 	if p := r.Project; p != nil {
-		line("项目：", oneLine(p.Name), "（", p.ID, "，", string(p.Status), "）")
+		line(&head, "项目：", oneLine(p.Name), "（", p.ID, "，", string(p.Status), "）")
 		if p.Intro != "" {
-			line("  简介：", oneLine(p.Intro))
+			line(&head, "  简介：", oneLine(p.Intro))
 		}
 		for _, repo := range p.Repos {
-			line("  repo：", oneLine(repo.Remote))
+			line(&head, "  repo：", oneLine(repo.Remote))
 			for _, c := range repo.Checkouts {
-				line("    检出：", oneLine(c.Host), ":", oneLine(c.Path))
+				line(&head, "    检出：", oneLine(c.Host), ":", oneLine(c.Path))
 			}
 		}
 		switch {
 		case p.AllowedExecutors == nil:
-			line("  允许的执行者：不限")
+			line(&head, "  允许的执行者：不限")
 		case len(p.AllowedExecutors) == 0:
-			line("  允许的执行者：仅本人")
+			line(&head, "  允许的执行者：仅本人")
 		default:
-			line("  允许的执行者：", oneLine(strings.Join(p.AllowedExecutors, ", ")))
+			line(&head, "  允许的执行者：", oneLine(strings.Join(p.AllowedExecutors, ", ")))
 		}
 	}
-	for _, e := range r.Items {
-		deadline := "无"
-		if e.Deadline != nil {
-			deadline = e.Deadline.UTC().Format(time.RFC3339)
-		}
-		line("- ", e.ID, " | ", oneLine(e.Title), " | 阶段 ", string(e.Phase), " | 截止 ", deadline, " | 建议：", e.Action)
-		if e.Running {
-			line("  ", runningNotice)
-		}
-		if d := e.Last; d != nil {
-			line("  ", lastDispatchLine(*d, e.ID))
-		}
+	if len(r.Overview) > 0 {
+		line(&head, "工作台概览（各组至多 ", strconv.Itoa(OverviewGroupRows), " 条）：")
 	}
 	for _, m := range r.Materials {
-		line("- 材料 ", m.ID, " | ", oneLine(m.Title), " | ", m.Kind, " | 变更：", oneLine(m.Summary))
+		line(&tail, "- 材料 ", m.ID, " | ", oneLine(m.Title), " | ", m.Kind, " | 变更：", oneLine(m.Summary))
 		if m.Path != "" {
-			line("  位置：", oneLine(m.Path))
+			line(&tail, "  位置：", oneLine(m.Path))
 		}
 	}
 	if len(r.Materials) > 0 {
-		line("  材料正文用 `apa material show <id>` 读取。")
+		line(&tail, "  材料正文用 `apa material show <id>` 读取。")
 	}
 	for _, d := range r.Deliveries {
-		line("- 提醒 ", d.ID, " | ", d.Class, " | ", oneLine(d.Title))
+		line(&tail, "- 提醒 ", d.ID, " | ", d.Class, " | ", oneLine(d.Title))
 		// 摘要保留换行（分节的结论压成一行读不了）：逐行压平、缩进，并换掉能提前结束信封的结束语。
 		var sum []string
 		for _, l := range strings.Split(d.Summary, "\n") {
@@ -634,26 +700,59 @@ func (r Result) Inject() string {
 			}
 		}
 		if len(sum) == 1 {
-			line("  摘要：", sum[0])
+			line(&tail, "  摘要：", sum[0])
 		} else if len(sum) > 1 {
-			line("  摘要：")
+			line(&tail, "  摘要：")
 			for _, l := range sum {
-				line("    ", l)
+				line(&tail, "    ", l)
 			}
 		}
 		for _, o := range d.Options {
-			line("  选项：", oneLine(o))
+			line(&tail, "  选项：", oneLine(o))
 		}
 		if d.Action != "" {
-			line("  建议：", d.Action)
+			line(&tail, "  建议：", d.Action)
 		}
 	}
-	line(envelopeClose)
-	for _, m := range r.Messages { // 消息带自己的信封；事项 id 由内核生成，不是外部内容
-		line("事项 ", m.Item, " 的跟进消息：")
-		b.WriteString(m.Inject())
+	for _, u := range r.Unattached {
+		who := oneLine(u.Executor)
+		if u.Session != "" {
+			who += "，会话 " + oneLine(u.Session)
+		}
+		parent := "<事项>"
+		if u.About != "" {
+			parent = u.About
+		}
+		line(&tail, "- 未挂事项的派活 ", u.ID, " | ", who, " | 挂上：apa dispatch attach ", u.ID, " --parent ", parent, " | 不跟踪：apa dispatch untrack ", u.ID)
 	}
-	return b.String()
+	for _, f := range r.InFlight {
+		who := oneLine(f.Executor)
+		if f.Session != "" {
+			who += "，会话 " + oneLine(f.Session)
+		}
+		age := strconv.Itoa(f.Minutes) + " 分钟"
+		if f.Minutes >= 120 {
+			age = strconv.Itoa(f.Minutes/60) + " 小时"
+		}
+		line(&tail, "- 在途未回执的委派 ", f.Item, " | ", who, " | 派出 ", age, " | 等待若随重启断了，重新等待它的结果；已不需要：apa dispatch untrack ", f.ID)
+	}
+	line(&tail, envelopeClose)
+	for _, m := range r.Messages { // 消息带自己的信封；事项 id 由内核生成，不是外部内容
+		line(&tail, "事项 ", m.Item, " 的跟进消息：")
+		tail.WriteString(m.Inject())
+	}
+	b := &budget{left: InjectBudget - runes(head.String()) - runes(tail.String())}
+	var body strings.Builder
+	body.WriteString(renderGroups(r.Overview, b))
+	for i, e := range r.Items {
+		l := itemLines(e)
+		if !b.take(l) {
+			body.WriteString(moreLine(len(r.Items)-i, "apa context --scope all"))
+			break
+		}
+		body.WriteString(l)
+	}
+	return head.String() + body.String() + tail.String()
 }
 
 // lastDispatchLine 是注入里"上次怎么派的"一行：不带句柄，别的 harness 写的标仅供参考。

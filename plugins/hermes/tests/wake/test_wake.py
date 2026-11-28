@@ -259,6 +259,7 @@ def test_notice_is_injected_as_facts_without_credential(wake, kernel):
     person, agent = text.split("\n———\n")
     assert person.splitlines()[:2] == [f"[APA 提醒] {NOTICE_TITLE}", NOTICE_LINE]
     assert "it1" not in person.replace(NOTICE_LINE, "") and agent.endswith("不必回复 APA。")
+    assert "投递 schedbatch:1" in agent and "schedbatch:1" not in person and "同一投递 id" in agent  # relayed once across restarts
     assert kernel.exchanges == 0 and "apa_wake_cli" not in text and "apa_run_" not in text
     assert kernel.reports == [("ack", "schedbatch:1", {"version": 1, "external_ref": "main-session"})]
 

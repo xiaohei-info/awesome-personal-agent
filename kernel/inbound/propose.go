@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"slices"
 	"strings"
@@ -139,6 +140,28 @@ func (s *Service) ProposeInto(ctx context.Context, id command.Identity, event, i
 	d := disposeIn{Event: event, Item: item, Rule: autoRule, WouldAccept: autoRule != "" && autoMode == rules.ModeObserve && !mf.Merge, Reason: reason, mergeFields: mf}
 	if _, err := s.do(ctx, id, autoRule, "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
 		return ev, err
+	}
+	// 直接立项（§9.3）：来源的处理方式由本人设为 create_item 时，新建的建议以处理它的调用者身份直接转进行中，
+	// 授权照常走权限卡（离开建议属"替我拍板"）。卡后来被收窄时转不过去，留下建议与拒绝记录，不静默。
+	if !mf.Merge {
+		var mode string
+		if err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+			cur, err := runner.Event(tx, event)
+			if err == nil {
+				mode, err = registry.HandlingMode(tx, cur.SourceID)
+			}
+			return err
+		}); err != nil {
+			return ev, err
+		}
+		if mode == domain.HandlingCreateItem {
+			_, err := s.do(ctx, id, "", "inbound:create_item:"+event, "item.transition",
+				map[string]any{"id": item, "to": domain.PhaseOpen, "reason": "source handling: create item directly"}, command.Chain{})
+			var de *domain.Error
+			if err != nil && !(errors.As(err, &de) && de.Code == domain.CodeTierClosed) {
+				return ev, err
+			}
+		}
 	}
 	if autoRule != "" && autoMode == rules.ModeAuto && !mf.Merge {
 		rule := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + autoRule, Via: domain.ViaRule, OnBehalfOf: s.o.Owner}, Level: authz.LevelDelegate}

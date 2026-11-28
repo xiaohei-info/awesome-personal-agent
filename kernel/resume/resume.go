@@ -460,7 +460,7 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 	if base.Spec.Dir != "" && base.Spec.Dir != filepath.Join(s.o.RunsDir, base.Run.ID) { // 原运行在项目检出目录：续接回到同一目录
 		dir = base.Spec.Dir
 	}
-	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
+	argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
 	argv = append(argv, f.selected.Args...)
 	argv = append(argv, hl.Output...)
 	if ms := f.rec.Declaration.MainSession; base.Run.Runner == "main_session" && ms != nil {

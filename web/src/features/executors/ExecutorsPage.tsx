@@ -7,8 +7,14 @@ import { Val } from "../../app/values";
 import { strings } from "./strings";
 
 // 形状对应 GET /v1/executors、GET /v1/items?kind=delegation、GET /v1/audit/events?type=delegation.reported、
-// GET /v1/dispatches?resumable=true、DELETE /v1/executors/{id}（只 Web）。分组与判定都只按服务端给的字段，不在前端推断。
-interface Executor { id: string; kind: string; host?: string; harness?: string; label?: string }
+// GET /v1/dispatches?resumable=true、DELETE /v1/executors/{id}、PUT /v1/executors/{id}/overrides（只 Web）。
+// 分组与判定都只按服务端给的字段，不在前端推断：能不能由 APA 直接派活（startable）、能换哪些参数与取值（overridable）都来自声明。
+interface Label { zh: string; en: string }
+interface Overridable { label: Label; choices: string[] }
+interface Executor {
+  id: string; kind: string; host?: string; harness?: string; label?: string;
+  startable?: boolean; overridable?: Record<string, Overridable>; overrides?: Record<string, string>;
+}
 interface Child { id: string; phase: string; title: string; assignee?: string }
 interface Evidence { commit?: string; pr?: string; branch?: string; link?: string }
 interface Step { seq: number; object: string; at: string; payload?: { report?: { outcome: string; summary: string; evidence: Evidence } } }
@@ -63,6 +69,15 @@ export function ExecutorsPage() {
     load();
   }, [load]);
 
+  const setDefault = async (e: Executor, key: string, value: string) => {
+    try {
+      await api.put("/executors/" + encodeURIComponent(e.id) + "/overrides", { values: { ...(e.overrides ?? {}), [key]: value } });
+      await load();
+    } catch (err) {
+      setError(msg(err));
+    }
+  };
+
   const remove = async (id: string) => {
     try {
       await api.del("/executors/" + encodeURIComponent(id));
@@ -88,7 +103,21 @@ export function ExecutorsPage() {
               {[e.host, e.harness].filter(Boolean).join(" · ")}
               {e.kind && <> · <Val k="executorKind" id={e.kind} /></>}
               {!listed && t.notListed}
+              {e.startable && <> · <span className="badge">{t.startable}</span></>}
             </p>
+            {e.startable && Object.keys(e.overridable ?? {}).length > 0 && (
+              <div className="row">
+                {Object.entries(e.overridable!).sort(([a], [b]) => a.localeCompare(b)).map(([key, o]) => (
+                  <label key={key}>
+                    {locale().startsWith("zh") ? o.label.zh : o.label.en}{" "}
+                    <select value={e.overrides?.[key] ?? ""} onChange={(ev) => void setDefault(e, key, ev.target.value)}>
+                      <option value="">{t.asDeclared}</option>
+                      {o.choices.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
             <h3>{t.inHand}</h3>
             {open.length ? (
               <ul className="plain">{open.map((c) => <li key={c.id}><Link to={"/items/" + c.id}>{c.title}</Link></li>)}</ul>

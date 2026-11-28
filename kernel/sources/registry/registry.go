@@ -21,10 +21,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -720,10 +723,40 @@ func planHandling(tx *store.Tx, in json.RawMessage) (domain.Source, string, erro
 	if err != nil {
 		return s, "", err
 	}
-	if h.Mode != domain.HandlingNormal && h.Mode != domain.HandlingRemindOnly {
-		return s, "", invalid("handling_mode must be normal or remind_only", "fix handling_mode")
+	if h.Mode != domain.HandlingNormal && h.Mode != domain.HandlingRemindOnly && h.Mode != domain.HandlingCreateItem {
+		return s, "", invalid("handling_mode must be normal, remind_only or create_item", "fix handling_mode")
+	}
+	if h.Mode == domain.HandlingCreateItem && s.HandlingMode != h.Mode {
+		agent, ok, err := CreateItemAllowed(tx, clock.Now())
+		if err != nil {
+			return s, "", err
+		}
+		if !ok { // 不静默降级成建议：卡上没开"替我拍板"就不能选（§9.3）
+			e := domain.NewError(domain.CodeConflict, "creating items directly needs the decide-for-me group on the card of the agent that handles sources ("+agent+")",
+				"open decide for me on that agent's permission card first, or keep this source on normal")
+			e.Reason = ReasonCreateItemNeedsDecide
+			return s, "", e
+		}
 	}
 	return s, h.Mode, nil
+}
+
+// ReasonCreateItemNeedsDecide 是选"直接立项"被拒的类别码：处理来源的 Agent 的权限卡没开"替我拍板"。
+const ReasonCreateItemNeedsDecide = "create_item_needs_decide"
+
+// CreateItemAllowed 报告"直接立项"现在能不能选：处理来源的 Agent（设置里指定的，没指定是默认 Agent，与来源批处理同一口径）
+// 的权限卡开了"替我拍板"。返回那个 Agent 的 id。
+func CreateItemAllowed(tx *store.Tx, now time.Time) (agent string, ok bool, err error) {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return "", false, err
+	}
+	sel, err := executors.Resolve(tx, pol, executors.Selection{Item: pol.SourcePipeline.Agent})
+	if err != nil {
+		return "", false, err
+	}
+	agent = sel.Snapshot.AgentID
+	return agent, agent != "" && pol.Card(agent).Allows(policy.GroupDecide, now), nil
 }
 
 // applyHandling 只接受 Web 上的本人：否则被开放了"改日常规则"的 Agent 能先切回常规处理再建建议（§14.3）。

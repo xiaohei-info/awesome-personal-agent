@@ -7,10 +7,12 @@
 package eventlog
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,7 +50,86 @@ CREATE INDEX eventlog_event_object ON eventlog_event(object, seq);`,
 	Version: 3, Ledger: 8, Name: "ledger-v8-event-import",
 	SQL: `ALTER TABLE eventlog_event ADD COLUMN import_batch TEXT NOT NULL DEFAULT '';
 ALTER TABLE eventlog_event ADD COLUMN recorded_at INTEGER NOT NULL DEFAULT 0;`,
+}, {
+	// 账本结构版本 14（§7.6）：按调用方会话查它写过的事项（"本会话在跟"、捕获与本回合去重）。只加索引，不改数据。
+	Version: 4, Ledger: 14, Name: "ledger-v14-event-session",
+	// 表达式带 json_valid：建索引时逐行求值，个别不是 JSON 的 actor（只出现在手工修过的账本里）不能让升级失败。
+	SQL: `CREATE INDEX eventlog_event_session ON eventlog_event((CASE WHEN json_valid(actor) THEN json_extract(actor, '$.session') END), seq);`,
 }}}
+
+// PrevOfType 返回 session 在 before 之前最近一条 typ 事件的序号；没有为 0（"本回合"的起点：上一次同类事件之后）。
+func PrevOfType(tx *store.Tx, session, typ string, before int64) (int64, error) {
+	r, err := tx.Query(`SELECT COALESCE(MAX(seq), 0) FROM eventlog_event WHERE `+sessionExpr+` = ? AND seq < ? AND type = ?`,
+		session, before, typ)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+	var seq int64
+	if r.Next() {
+		err = r.Scan(&seq)
+	}
+	if err == nil {
+		err = r.Err()
+	}
+	return seq, err
+}
+
+// sessionExpr 与索引 eventlog_event_session 的表达式逐字相同，查询才用得上索引。
+const sessionExpr = `(CASE WHEN json_valid(actor) THEN json_extract(actor, '$.session') END)`
+
+// Touch 是一个会话在一段事件里碰过的一个对象：最近一次的序号与出现过的事件类型（按首次出现排序）。
+type Touch struct {
+	Object string
+	Seq    int64
+	Types  []string
+}
+
+// SessionTouches 返回 session（调用方的 APA_SESSION）在 (after, upto] 里写过的事项（upto 为 0 不设上限），
+// 最近碰过的在前，至多 limit 个。墓碑化的事件不算。会话身份只用于这类归属查询，不参与授权（§14.3）。
+func SessionTouches(tx *store.Tx, session string, after, upto int64, limit int) ([]Touch, error) {
+	if session == "" {
+		return nil, nil
+	}
+	if upto <= 0 {
+		upto = math.MaxInt64
+	}
+	r, err := tx.Query(`SELECT object, type, seq FROM eventlog_event WHERE `+sessionExpr+` = ? AND seq > ? AND seq <= ?
+		AND tombstone = 0 AND object LIKE 'itm\_%' ESCAPE '\' ORDER BY seq`, session, after, upto)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	by := map[string]*Touch{}
+	for r.Next() {
+		var obj, typ string
+		var seq int64
+		if err := r.Scan(&obj, &typ, &seq); err != nil {
+			return nil, err
+		}
+		t := by[obj]
+		if t == nil {
+			t = &Touch{Object: obj}
+			by[obj] = t
+		}
+		t.Seq = seq
+		if !slices.Contains(t.Types, typ) {
+			t.Types = append(t.Types, typ)
+		}
+	}
+	if err := r.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Touch, 0, len(by))
+	for _, t := range by {
+		out = append(out, *t)
+	}
+	slices.SortFunc(out, func(a, b Touch) int { return cmp.Compare(b.Seq, a.Seq) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
 
 // Entry 是读出的事件；Tombstone 为真表示内容字段已被物理删除抹除。
 type Entry struct {

@@ -3,11 +3,14 @@ Hermes decides how to delegate. This module only
 
 - derives a stable executor id, label and handle from the way Hermes delegated (the model names the mech and its
   parameters, never the id);
-- recognises Hermes' dispatching tool calls after the fact (capture) and turns them into dispatch records;
+- recognises Hermes' dispatching tool calls after the fact (capture) and turns them into dispatch records, and
+  recognises the calls that bring a dispatched session's result back (completions);
 - checks handles against Hermes' own shapes before writing, and turns handles Hermes itself wrote back into resume
   hints for Hermes' own tools. Anything else is shown as reference only.
 
-Shared by the apa-tools and apa-receipt plugins; the per-process state lives in sys.modules so both see the same one.
+No per-process memory: which item a dispatch belongs to is the kernel's to know. A dispatch naming a delegated item is
+recorded on it; one naming no such item is recorded unattached and shown every turn until the model attaches it; a
+result is reported by the dispatch's session handle and the kernel finds the item.
 """
 import hashlib
 import json
@@ -15,9 +18,6 @@ import os
 import re
 import shlex
 import socket
-import sys
-import threading
-import types
 
 HARNESS = "hermes"
 MECHS = ("delegate_task", "paseo")
@@ -28,44 +28,6 @@ _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$")      # profile, provid
 _AGENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")       # paseo agent id
 _TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")  # paseo --host value (daemon endpoint or ssh host)
 _LOST = re.compile(r"not found|no such agent|unknown agent|does not exist", re.I)
-
-_state = sys.modules.setdefault("apa_hermes_dispatch_state", types.SimpleNamespace(
-    lock=threading.Lock(),
-    delegated={},   # Hermes session id -> item ids this session delegated (apa_delegate)
-    dispatched={},  # Hermes session id -> item ids this session recorded a dispatch for
-    by_session={},  # (item, session) -> latest dispatch id written from this process
-))
-
-
-def _add(table, session_id, item):
-    with _state.lock:
-        table.setdefault(session_id or "", set()).add(item)
-
-
-def remember_delegated(session_id, item):
-    _add(_state.delegated, session_id, item)
-
-
-def remember_dispatch(session_id, item, session, dispatch_id):
-    _add(_state.dispatched, session_id, item)
-    if dispatch_id:
-        with _state.lock:
-            _state.by_session[(item, session or "")] = dispatch_id
-
-
-def delegated(session_id):
-    with _state.lock:
-        return set(_state.delegated.get(session_id or "", ()))
-
-
-def dispatched(session_id):
-    with _state.lock:
-        return set(_state.dispatched.get(session_id or "", ()))
-
-
-def last_dispatch(item, session):
-    with _state.lock:
-        return _state.by_session.get((item, session or ""))
 
 
 def _seg(s):
@@ -153,9 +115,10 @@ def check_handle(h):
 
 # ---- capture after a dispatching tool call ----
 
-def _items(text, session_id):
-    mine = delegated(session_id)
-    return [i for i in dict.fromkeys(ITEM_ID.findall(text if isinstance(text, str) else json.dumps(text, default=str))) if i in mine]
+def _item(text):
+    """The first item id the call names, or None."""
+    m = ITEM_ID.search(text if isinstance(text, str) else json.dumps(text, default=str))
+    return m.group(0) if m else None
 
 
 def _parsed(result):
@@ -170,7 +133,7 @@ def _agent_id(output):
     """The agent id `paseo run` printed: JSON {agentId} or the first column under the AGENT ID header."""
     out = output or ""
     try:
-        v = json.loads(out)
+        v = json.loads(out[out.index("{"):] if "{" in out else out)
         v = v[0] if isinstance(v, list) and v else v
         if isinstance(v, dict) and _AGENT.match(str(v.get("agentId", ""))):
             return v["agentId"]
@@ -185,18 +148,24 @@ def _agent_id(output):
 
 
 def _paseo(argv):
-    """Parse a paseo dispatch command: (verb, opts, positionals) or None."""
+    """Parse one paseo command: (verb, opts, positionals) or None."""
     prog = os.path.basename(argv[0])
     rest = argv[1:]
     if prog == "paseo":
-        if not rest or rest[0] not in ("run", "send"):
+        opts = {}
+        while rest[:1] and rest[0].startswith("--") and rest[0] != "--":  # global options before the verb (--host)
+            key, eq, val = rest[0][2:].partition("=")
+            if not eq and len(rest) > 1 and key not in ("json",):
+                val, rest = rest[1], rest[1:]
+            opts[key], rest = val, rest[1:]
+        if not rest or rest[0] not in ("run", "send", "wait", "logs"):
             return None
         verb, rest = rest[0], rest[1:]
     elif prog == "paseo-profile-run":
-        verb = "profile-run"
+        verb, opts = "profile-run", {}
     else:
         return None
-    opts, pos, i = {}, [], 0
+    pos, i = [], 0
     while i < len(rest):
         a = rest[i]
         if a.startswith("--"):
@@ -213,64 +182,103 @@ def _paseo(argv):
     return verb, opts, pos
 
 
-def capture(tool_name, args, result, session_id):
-    """Dispatch records for a dispatching tool call: a list of (item, body, lost) where body is the `apa dispatch add`
-    input and lost names an earlier dispatch to mark lost. Empty when the call is not one Hermes knows, or names no item
-    this session delegated."""
+def _segments(command):
+    """The simple commands of a shell line (split on && || ; |), each as argv; unparsable lines give nothing."""
+    try:
+        lex = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return []
+    out, cur = [], []
+    for t in tokens:
+        if t and set(t) <= set(";&|"):
+            if cur:
+                out.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _record(item, assignee, enrollment, body):
+    """One `apa dispatch add` input: on the item when it names one, else unattached under the executor."""
+    return {"item": item, "assignee": assignee, "executor": enrollment, **body}
+
+
+def capture(tool_name, args, result, session_id=None):
+    """Dispatch records for a dispatching tool call: a list of dicts, each either an `apa dispatch add` input
+    {item?, assignee, executor, session?, resumable, handle, cwd?} or {"lost": session} for a resumed session that is gone.
+    Empty when the call is not one Hermes knows."""
     args = args if isinstance(args, dict) else {}
     if tool_name == "delegate_task":
         tasks = args.get("tasks") if isinstance(args.get("tasks"), list) else [args]
-        out = []
-        for t in tasks:
-            for item in _items(t, session_id):
-                out.append((item, {"resumable": False, "handle": {"mech": "delegate_task", "host": local_host()}}, None))
-        return out
+        eid, enroll = executor("delegate_task", {})
+        return [_record(_item(t), eid, enroll, {"resumable": False, "handle": {"mech": "delegate_task", "host": local_host()}}) for t in tasks]
     if tool_name != "terminal":
         return []
     command = args.get("command") or ""
-    try:
-        argv = shlex.split(command)
-    except ValueError:
-        return []
-    parsed = _paseo(argv) if argv else None
-    items = _items(command, session_id) if parsed else []
-    if not items:
-        return []
-    verb, opts, pos = parsed
-    target = opts.get("host", "")
-    if target and not _TARGET.match(target):
-        return []
-    host = _host_of(target) if target else local_host()
     r = _parsed(result)
     output = str(r.get("output") or "")
     ok = r.get("exit_code") == 0 and not r.get("error")
-    handle = {"mech": "paseo", "host": host}
-    if target:
-        handle["target"] = target
-    cwd = opts.get("cwd", "")
     out = []
-    for item in items:
+    for argv in _segments(command):
+        parsed = _paseo(argv)
+        if not parsed or parsed[0] not in ("run", "send", "profile-run"):
+            continue
+        verb, opts, pos = parsed
+        target = opts.get("host", "")
+        if target and not _TARGET.match(target):
+            continue
+        host = _host_of(target) if target else local_host()
+        handle = {"mech": "paseo", "host": host}
+        if target:
+            handle["target"] = target
+        item = _item(command)
         if verb == "send":
             agent = pos[0] if pos and _AGENT.match(pos[0]) else None
             if not agent:
                 continue
-            prev = last_dispatch(item, agent)
             if not ok and _LOST.search(output + str(r.get("error") or "")):
-                out.append((item, None, prev))  # the session is gone: mark the record lost, write nothing new
+                out.append({"lost": agent})  # the session is gone: mark its record lost, write nothing new
                 continue
-            body = {"session": agent, "resumable": True, "handle": {**handle, "agent_id": agent}}
-            if prev:
-                body["continues"] = prev
-            out.append((item, body, None))
+            # a resumed session: the kernel puts it on the item its earlier dispatch is attached to
+            out.append({"session": agent, "resumable": True, "handle": {**handle, "agent_id": agent}})
+            continue
+        params = {k: opts.get(k) for k in ("profile", "provider", "model")}
+        if verb == "profile-run" and pos:
+            params["profile"] = pos[0]
+        params["host"] = target
+        try:
+            eid, enroll = executor("paseo", params)
+        except Invalid:
             continue
         agent = _agent_id(output) if ok else None
         body = {"resumable": bool(agent), "handle": dict(handle)}
         if agent:
             body["session"], body["handle"]["agent_id"] = agent, agent
-        if cwd:
-            body["cwd"] = cwd
-        out.append((item, body, None))
+        if opts.get("cwd"):
+            body["cwd"] = opts["cwd"]
+        out.append(_record(item, eid, enroll, body))
     return out
+
+
+def completions(tool_name, args, result):
+    """Results that came back for dispatched sessions: (session handle, output, ok) for each `paseo wait <id>` or
+    `paseo logs <id>` the terminal call ran (the waiter line paseo prints is exactly that). The kernel finds the item."""
+    if tool_name != "terminal":
+        return []
+    r = _parsed(result)
+    output = str(r.get("output") or "")
+    ok = r.get("exit_code") == 0 and not r.get("error")
+    seen = []
+    for argv in _segments((args if isinstance(args, dict) else {}).get("command") or ""):
+        parsed = _paseo(argv)
+        if parsed and parsed[0] in ("wait", "logs") and parsed[2] and _AGENT.match(parsed[2][0]) and parsed[2][0] not in seen:
+            seen.append(parsed[2][0])
+    return [(agent, output, ok) for agent in seen]
 
 
 # ---- resume hints for handles that come back ----

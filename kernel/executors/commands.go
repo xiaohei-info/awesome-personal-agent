@@ -39,6 +39,7 @@ type Options struct {
 //	executor.confirm / executor.reject   本人在 Web 处理待确认声明
 //	executor.register  本人直接登记声明（主机配置文件走这里），立即生效
 //	executor.put / executor.remove       本人维护清单项
+//	executor.override  本人给执行者定可覆盖参数的默认值（只能取声明列出的值）
 //
 // 登记、确认、维护与 Agent 卡片都是 3b（造新权力，§14.3）：只有 Web 上的本人、再输一次口令后可做；
 // delegate 得到退出码 20（硬线），其余钥匙得到退出码 4（范围外）。
@@ -53,6 +54,7 @@ func Register(x *command.Executor, o Options) error {
 		{Name: "executor.register", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/settings/agents", Object: declObject, Apply: apply(register)},
 		{Name: "executor.put", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/executors", Object: putObject, Apply: put},
 		{Name: "executor.remove", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/executors", Object: idObject, Apply: remove},
+		{Name: "executor.override", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/executors", Object: overrideObject, Apply: override},
 	} {
 		if err := x.Register(s); err != nil {
 			return err
@@ -108,6 +110,17 @@ type idIn struct {
 
 func idObject(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 	var r idIn
+	if err := decode(in, &r); err != nil {
+		return authz.Object{}, err
+	}
+	if r.ID == "" {
+		return authz.Object{}, invalid("id is required")
+	}
+	return authz.Object{ID: "executors:" + r.ID}, nil
+}
+
+func overrideObject(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+	var r overrideIn
 	if err := decode(in, &r); err != nil {
 		return authz.Object{}, err
 	}
@@ -390,10 +403,13 @@ func Enroll(c *command.Ctx, id string, in Enrollment) error {
 	return err
 }
 
-// listed 是 executor.list 的一项；Allowed 只在带 project 时出现。
+// listed 是 executor.list 的一项；Allowed 只在带 project 时出现。Startable 表示 APA 能按生效的无头运行声明直接拉起它
+// （apa delegate --start），Overridable 是那份声明允许按次覆盖的参数与取值。
 type listed struct {
 	Entry
-	Allowed *bool `json:"allowed,omitempty"`
+	Allowed     *bool               `json:"allowed,omitempty"`
+	Startable   bool                `json:"startable,omitempty"`
+	Overridable map[string]Override `json:"overridable,omitempty"`
 }
 
 func (o Options) list(c *command.Ctx) (any, error) {
@@ -423,6 +439,13 @@ func (o Options) list(c *command.Ctx) (any, error) {
 	out := make([]listed, len(es))
 	for i, e := range es {
 		out[i].Entry = e
+		if e.Harness != "" {
+			if rec, ok, err := record(c.Tx, e.Harness, 0, StateActive); err != nil {
+				return nil, err
+			} else if ok && rec.Declaration.Headless != nil {
+				out[i].Startable, out[i].Overridable = true, rec.Declaration.Overrides
+			}
+		}
 		if proj != nil {
 			ok := proj.ExecutorAllowed(domain.ExecutorRef{ID: e.ID, Host: e.Host, Harness: e.Harness}, o.Owner)
 			out[i].Allowed = &ok

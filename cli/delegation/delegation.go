@@ -65,7 +65,20 @@ func executors(c *client.Ctx, args []string) error {
 	return send(c, nil, "GET", path, nil)
 }
 
-const delegateUsage = "usage: apa delegate --parent <id> --assignee <executor> [--executor <json file|->] [--title --summary --body --priority --project --reason --idempotency-key]"
+const delegateUsage = "usage: apa delegate --parent <id> --assignee <executor> [--executor <json file|->] [--title --summary --body --priority --project --reason --idempotency-key] " +
+	"[--start [--model <m>] [--thinking <t>] [--override <key=value>]...]   (--start: APA starts the executor itself; values must be ones apa executors lists)"
+
+type pairFlag map[string]string
+
+func (p pairFlag) String() string { return "" }
+func (p pairFlag) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+	if !ok || k == "" {
+		return usage("--override takes key=value", delegateUsage)
+	}
+	p[k] = val
+	return nil
+}
 
 func delegate(c *client.Ctx, args []string) error {
 	fs := flags("delegate")
@@ -75,6 +88,10 @@ func delegate(c *client.Ctx, args []string) error {
 	}
 	key := fs.String("idempotency-key", "", "")
 	exec := fs.String("executor", "", "")
+	start := fs.Bool("start", false, "")
+	model, thinking := fs.String("model", "", ""), fs.String("thinking", "", "")
+	overrides := pairFlag{}
+	fs.Var(overrides, "override", "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return usage("invalid arguments for delegate", delegateUsage)
 	}
@@ -86,6 +103,18 @@ func delegate(c *client.Ctx, args []string) error {
 		if *s != "" {
 			body[n] = *s
 		}
+	}
+	// --model 与 --thinking 是最常用的两项可覆盖参数的简写，内核只认声明里的键与取值（附录 A.2）。
+	for k, val := range map[string]string{"model": *model, "thinking": *thinking} {
+		if val != "" {
+			overrides[k] = val
+		}
+	}
+	if *start {
+		body["start"] = true
+	}
+	if len(overrides) > 0 {
+		body["overrides"] = map[string]string(overrides)
 	}
 	if *exec != "" { // 随委派登记执行者（§6.17）：{kind, host?, label?, handle?}，harness 取 APA_HARNESS
 		data, err := readFile(c, *exec)
@@ -102,14 +131,15 @@ type linkFlag []string
 func (l *linkFlag) String() string     { return strings.Join(*l, ",") }
 func (l *linkFlag) Set(v string) error { *l = append(*l, v); return nil }
 
-const reportUsage = "usage: apa report <id> --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link]... [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]"
+const reportUsage = "usage: apa report (<id> | --session <dispatch session handle>) --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link]... [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]"
 
 func report(c *client.Ctx, args []string) error {
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return usage("an item id is required first", reportUsage)
+	id := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		id, args = args[0], args[1:]
 	}
-	id := args[0]
 	fs := flags("report")
+	session := fs.String("session", "", "")
 	outcome, summary := fs.String("outcome", "", ""), fs.String("summary", "", "")
 	cursor, reason, version, key := fs.String("ack-cursor", "", ""), fs.String("reason", "", ""), fs.String("version", "", ""), fs.String("idempotency-key", "", "")
 	ev := map[string]*string{}
@@ -118,8 +148,11 @@ func report(c *client.Ctx, args []string) error {
 	}
 	var links linkFlag // --link 可重复：库内链接在报 done 时由内核登记为产出（主文档 §7.5）
 	fs.Var(&links, "link", "")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return usage("invalid arguments for report", reportUsage)
+	}
+	if (id == "") == (*session == "") {
+		return usage("give the item id first, or --session with the dispatch's session handle", reportUsage)
 	}
 	if *outcome == "" {
 		return usage("--outcome is required", reportUsage)
@@ -155,23 +188,33 @@ func report(c *client.Ctx, args []string) error {
 		}
 		hdr["If-Match"] = *version
 	}
+	if *session != "" { // 按会话句柄：内核按调用方 harness 记下的委派记录找到子事项（§6.17）
+		body["session"] = *session
+		return send(c, hdr, "POST", "/reports", body)
+	}
 	return send(c, hdr, "POST", "/items/"+url.PathEscape(id)+"/report", body)
 }
 
-const dispatchUsage = "usage: apa dispatch add <item> [--session S] [--resumable] [--cwd D] [--repo R] [--handle <json file|->] [--continues <dispatch>] [--idempotency-key K] | " +
-	"update <dispatch> [--state ended|lost] [--resumable true|false]"
+const dispatchUsage = "usage: apa dispatch add (<item> | --assignee <executor> [--executor <json file|->] [--about <item>]) [--session S] [--resumable] [--cwd D] [--repo R] [--handle <json file|->] [--continues <dispatch>] [--idempotency-key K] | " +
+	"attach <dispatch> --parent <item> [--title --summary --body --priority --reason] | untrack <dispatch> | " +
+	"update (<dispatch> | --session <handle>) [--state ended|lost] [--resumable true|false]   (--executor and --handle take a file, - for stdin, or inline JSON)"
 
 // dispatch 写或推进委派记录（§6.17）：harness 取 APA_HARNESS；同会话去重、句柄校验与授权都在内核。
+// add 不带事项 id 是还没挂到事项上的派活：之后每轮注入都提示，attach 挂上或 untrack 标为不跟踪。
 func dispatch(c *client.Ctx, args []string) error {
-	if len(args) < 2 || strings.HasPrefix(args[1], "-") {
-		return usage("apa dispatch needs add <item> or update <dispatch>", dispatchUsage)
+	if len(args) < 1 || (args[0] != "add" && args[0] != "update" && (len(args) < 2 || strings.HasPrefix(args[1], "-"))) {
+		return usage("apa dispatch needs add [<item>], attach <dispatch>, untrack <dispatch> or update <dispatch>", dispatchUsage)
 	}
-	sub, id, rest := args[0], args[1], args[2:]
+	sub, id, rest := args[0], "", args[1:]
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		id, rest = rest[0], rest[1:]
+	}
 	fs := flags("dispatch")
 	switch sub {
 	case "add":
 		session, cwd, repo, handle, cont, key := fs.String("session", "", ""), fs.String("cwd", "", ""), fs.String("repo", "", ""),
 			fs.String("handle", "", ""), fs.String("continues", "", ""), fs.String("idempotency-key", "", "")
+		assignee, exec, about := fs.String("assignee", "", ""), fs.String("executor", "", ""), fs.String("about", "", "")
 		resumable := fs.Bool("resumable", false, "")
 		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
 			return usage("invalid arguments for dispatch add", dispatchUsage)
@@ -184,13 +227,53 @@ func dispatch(c *client.Ctx, args []string) error {
 			}
 			body["handle"] = json.RawMessage(data)
 		}
-		return send(c, idem(*key), "POST", "/items/"+url.PathEscape(id)+"/dispatches", body)
-	case "update":
-		state, resumable := fs.String("state", "", ""), fs.String("resumable", "", "")
-		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
-			return usage("invalid arguments for dispatch update", dispatchUsage)
+		if id != "" {
+			return send(c, idem(*key), "POST", "/items/"+url.PathEscape(id)+"/dispatches", body)
+		}
+		if *assignee == "" {
+			return usage("give the delegated item, or --assignee for a dispatch not yet attached to an item", dispatchUsage)
+		}
+		body["assignee"] = *assignee
+		if *about != "" {
+			body["about"] = *about
+		}
+		if *exec != "" {
+			data, err := readFile(c, *exec)
+			if err != nil || !json.Valid(data) {
+				return usage("--executor must be a JSON file or - with valid JSON", dispatchUsage)
+			}
+			body["executor"] = json.RawMessage(data)
+		}
+		return send(c, idem(*key), "POST", "/dispatches", body)
+	case "attach":
+		v := map[string]*string{}
+		for _, n := range []string{"parent", "title", "summary", "body", "priority", "reason"} {
+			v[n] = fs.String(n, "", "")
+		}
+		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 || *v["parent"] == "" {
+			return usage("dispatch attach needs --parent <item>", dispatchUsage)
 		}
 		body := map[string]any{}
+		for n, s := range v {
+			if *s != "" {
+				body[n] = *s
+			}
+		}
+		return send(c, nil, "POST", "/dispatches/"+url.PathEscape(id)+"/attach", body)
+	case "untrack":
+		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
+			return usage("invalid arguments for dispatch untrack", dispatchUsage)
+		}
+		return send(c, nil, "PATCH", "/dispatches/"+url.PathEscape(id), map[string]any{"state": "ended"})
+	case "update":
+		state, resumable, session := fs.String("state", "", ""), fs.String("resumable", "", ""), fs.String("session", "", "")
+		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 || (id == "") == (*session == "") {
+			return usage("dispatch update needs <dispatch> or --session <handle>", dispatchUsage)
+		}
+		body := map[string]any{}
+		if *session != "" {
+			body["session"] = *session
+		}
 		if *state != "" {
 			body["state"] = *state
 		}
@@ -200,6 +283,9 @@ func dispatch(c *client.Ctx, args []string) error {
 				return usage("--resumable must be true or false", dispatchUsage)
 			}
 			body["resumable"] = b
+		}
+		if id == "" {
+			return send(c, nil, "PATCH", "/dispatches", body)
 		}
 		return send(c, nil, "PATCH", "/dispatches/"+url.PathEscape(id), body)
 	}
@@ -222,10 +308,13 @@ func declare(c *client.Ctx, args []string) error {
 	return send(c, nil, "POST", "/declarations", json.RawMessage(data))
 }
 
-// readFile 读声明文件；"-" 读标准输入。
+// readFile 读声明文件；"-" 读标准输入；以 { 开头的是行内 JSON（插件一次调用要同时给句柄与执行者登记时用）。
 func readFile(c *client.Ctx, name string) ([]byte, error) {
-	if name == "-" {
+	switch {
+	case name == "-":
 		return io.ReadAll(c.Env.Stdin)
+	case strings.HasPrefix(strings.TrimSpace(name), "{"):
+		return []byte(name), nil
 	}
 	return os.ReadFile(name)
 }

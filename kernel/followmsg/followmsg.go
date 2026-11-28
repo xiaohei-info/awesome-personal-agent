@@ -47,6 +47,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -711,6 +712,23 @@ func attachEvent() command.Spec {
 			}
 			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionAttached, "item": v.Item})
 			reason := strings.TrimSpace(v.Reason)
+			// 直接立项的来源（§9.3）：挂到已有事项时，处理它的 Agent 写的说明同时成为这件事的一条进展。
+			if ev, err := runner.Event(c.Tx, v.Event); err != nil {
+				return nil, err
+			} else if mode, err := registry.HandlingMode(c.Tx, ev.SourceID); err != nil {
+				return nil, err
+			} else if mode == domain.HandlingCreateItem && reason != "" {
+				w, err := items.AppendProgress(c.Tx, v.Item, reason, c.Caller.Actor.Principal, c.Now())
+				if err != nil {
+					return nil, err
+				}
+				if _, err := command.Bump(c.Tx, v.Item); err != nil {
+					return nil, err
+				}
+				if _, err := c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "progress from source event " + v.Event}); err != nil {
+					return nil, err
+				}
+			}
 			if reason == "" {
 				reason = "attached to item " + v.Item
 			}

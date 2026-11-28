@@ -13,6 +13,8 @@ const zh = {
   sessions: "可续接的会话",
   remove: "移除",
   notListed: "未登记",
+  startable: "可由 APA 直接派活",
+  asDeclared: "沿用自带的默认",
 };
 
 const en: typeof zh = {
@@ -26,6 +28,8 @@ const en: typeof zh = {
   sessions: "Sessions to resume",
   remove: "Remove",
   notListed: "Not registered",
+  startable: "APA can start it",
+  asDeclared: "Its own default",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };
