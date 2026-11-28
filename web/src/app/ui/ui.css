@@ -359,3 +359,18 @@ form.composer { max-width: none; gap: var(--sp-2); }
 form.composer textarea { min-height: 64px; }
 form.composer > .actions { justify-self: end; margin: 0; }
 .comment > form.composer { margin: var(--sp-2) 0 0 26px; }
+
+/* ---- 检索：命中的词用提示色的浅底标出；⌘K 面板分「页面」「事项」两段 ---- */
+mark { padding: 0 1px; color: inherit; background: var(--warn-soft); border-radius: 2px; }
+.palette li.palette-head { min-height: 0; padding: 8px 8px 4px; cursor: default; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.palette li.palette-head:first-child { padding-top: 2px; }
+.palette .palette-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.palette li small { flex: none; margin-left: var(--sp-3); }
+/* 事项页的检索命中：标题行、片段；展开后是一块浅底，列出命中在哪、含命中词的段落 */
+.search-hits > li.hit { display: block; padding: 6px var(--sp-3); }
+.hit-line { display: flex; align-items: center; gap: var(--sp-2); min-height: 24px; }
+.hit-snippet { margin: 2px 0 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.hit-more { display: grid; gap: 6px; margin: 6px 0 4px; padding: 8px 12px; font-size: 13px; background: color-mix(in oklch, var(--ink) 3%, var(--surface)); border-radius: var(--r-lg); }
+.hit-more p, .hit-more ul { margin: 0; }
+.hit-more li { padding: 2px 0; overflow-wrap: anywhere; }
+.search-summary { margin: 0 0 var(--sp-2); padding: 0 var(--sp-1); }

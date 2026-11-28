@@ -23,6 +23,7 @@ import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow }
 import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
 import { ItemRow, useCircleDone } from "./ItemRow";
 import { Discussion, type Said } from "./Discussion";
+import { SearchResults } from "./SearchResults";
 import { DeleteItem } from "./DeleteItem";
 import { ScheduleBlock, SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { deadlineText, deadlineValue, useHostClock } from "./schedule";
@@ -94,6 +95,8 @@ export function ItemsPage() {
 const PAGE_SIZE = 50;
 const DIMS = ["project", "kind", "phase", "priority", "planned", "origin", "tag"] as const;
 type Dim = (typeof DIMS)[number];
+// 检索时服务端能筛的维度（GET /search 的 project、phase、kind）。
+const SEARCH_DIMS: Dim[] = ["project", "phase", "kind"];
 const NONE = "-";
 // 来源按 origin.source 归组；定时安排建的（instance:<实例>）合成一组。
 const originKey = (s?: string) => (!s ? NONE : s.startsWith("instance:") ? "instance:" : s);
@@ -127,7 +130,9 @@ function ItemList() {
   const source = useNames("source");
   const { utc_offset: offset } = useHostClock(api);
   const get = (k: string) => params.get(k) ?? "";
-  const q = get("q"), sort = get("sort"), plannedFor = get("date");
+  const q = get("q"), sort = get("sort"), plannedFor = get("date"), after = get("after"), before = get("before");
+  // 搜索框有字时进入检索：列表换成统一检索的命中（SearchResults），筛选只留检索支持的项目、阶段、类型与变更时间。
+  const searching = !!q.trim();
   const view = views.find((x) => x.key === get("view"));
   const f = Object.fromEntries(DIMS.map((d) => [d, get(d)])) as Record<Dim, string>;
   // 改任何筛选都回到第一页；值为空即去掉这一项。
@@ -141,12 +146,12 @@ function ItemList() {
   useEffect(() => {
     setError(null);
     const qs = new URLSearchParams();
-    for (const [k, v] of [["q", q.trim()], ["sort", sort], ["planned_for", plannedFor]]) if (v) qs.set(k, v);
+    for (const [k, v] of [["sort", sort], ["planned_for", plannedFor]]) if (v) qs.set(k, v);
     api.get<{ items: Item[] }>("/items" + (qs.size ? "?" + qs : "")).then(
       (r) => setItems(r.items),
       (e) => setError(e),
     );
-  }, [api, q, sort, plannedFor]);
+  }, [api, sort, plannedFor]);
 
   const all = items ?? [];
   const projectOrder = useNamed("project").map((p) => p.id);
@@ -174,7 +179,7 @@ function ItemList() {
     return { d, opts: [...n.entries()].sort((a, b) => b[1] - a[1] || name(d, a[0]).localeCompare(name(d, b[0]))) };
   }).filter((x) => x.opts.length > 1 || f[x.d] || (x.d === "phase" && hidden > 0));
   const active = DIMS.filter((d) => f[d]);
-  const filtered = active.length > 0 || !!q || !!plannedFor || !!view;
+  const filtered = active.length > 0 || !!q || !!plannedFor || !!after || !!before || !!view;
   const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const page = Math.min(pages, Math.max(1, Number(get("page")) || 1));
   const rows = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -215,7 +220,7 @@ function ItemList() {
         </nav>
       )}
       <div className="filters">
-        {!view && facets.map(({ d, opts }) => (
+        {!view && facets.filter(({ d }) => !searching || SEARCH_DIMS.includes(d)).map(({ d, opts }) => (
           <label key={d} className={f[d] ? "on" : undefined}>
             {t.dims[d]}
             <select value={f[d]} onChange={(e) => set({ [d]: e.target.value })}>
@@ -229,16 +234,25 @@ function ItemList() {
           {t.search}
           <input type="search" value={q} onChange={(e) => set({ q: e.target.value })} placeholder={t.searchPlaceholder} />
         </label>
-        <label>
-          {t.sort}
-          <select value={sort} onChange={(e) => set({ sort: e.target.value })}>
-            {Object.entries(t.sorts).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-        </label>
-        <label className={plannedFor ? "on" : undefined}>
-          {t.plannedDate}
-          <input type="date" value={plannedFor} onChange={(e) => set({ date: e.target.value })} />
-        </label>
+        {searching ? (
+          <>
+            <label className={after ? "on" : undefined}>{t.changedFrom} <input type="date" value={after} onChange={(e) => set({ after: e.target.value })} /></label>
+            <label className={before ? "on" : undefined}>{t.changedTo} <input type="date" value={before} onChange={(e) => set({ before: e.target.value })} /></label>
+          </>
+        ) : (
+          <>
+            <label>
+              {t.sort}
+              <select value={sort} onChange={(e) => set({ sort: e.target.value })}>
+                {Object.entries(t.sorts).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
+            <label className={plannedFor ? "on" : undefined}>
+              {t.plannedDate}
+              <input type="date" value={plannedFor} onChange={(e) => set({ date: e.target.value })} />
+            </label>
+          </>
+        )}
         <Link className="btn primary filters-end" to="new">{t.create}</Link>
       </div>
       {filtered && (
@@ -250,17 +264,20 @@ function ItemList() {
           ))}
           {q && <button type="button" className="badge" onClick={() => set({ q: "" })} aria-label={t.removeFilter(t.search)}>{t.search}：{q} ✕</button>}
           {plannedFor && <button type="button" className="badge" onClick={() => set({ date: "" })} aria-label={t.removeFilter(t.plannedDate)}>{t.plannedDate}：{plannedFor} ✕</button>}
+          {after && <button type="button" className="badge" onClick={() => set({ after: "" })} aria-label={t.removeFilter(t.changedFrom)}>{t.changedFrom}：{after} ✕</button>}
+          {before && <button type="button" className="badge" onClick={() => set({ before: "" })} aria-label={t.removeFilter(t.changedTo)}>{t.changedTo}：{before} ✕</button>}
           <button type="button" className="link" onClick={() => setParams(sort ? { sort } : {}, { replace: true })}>{t.clearAll}</button>
         </p>
       )}
       {error != null && <ErrorNote error={error} />}
       {view && items && <ViewTable view={view} items={all} />}
-      {!items && error == null && <Skeleton label={t.loading} />}
-      {!view && items && !shown.length && error == null && (filtered
+      {!view && searching && <SearchResults query={{ q, project: f.project, phase: f.phase, kind: f.kind, after, before }} />}
+      {!items && error == null && !searching && <Skeleton label={t.loading} />}
+      {!view && !searching && items && !shown.length && error == null && (filtered
         ? <EmptyState title={t.noMatch} action={<button type="button" onClick={() => setParams(sort ? { sort } : {}, { replace: true })}>{t.clearFilters}</button>} />
         : <EmptyState title={t.noItems} note={t.noItemsNote} action={<Link className="btn" to="new">{t.create}</Link>} />)}
-      {!view && hidden > 0 && <p className="sub">{t.hiddenDropped(hidden)}</p>}
-      {!view && items && (
+      {!view && !searching && hidden > 0 && <p className="sub">{t.hiddenDropped(hidden)}</p>}
+      {!view && !searching && items && (
         <div aria-label={t.list} role="group">
           {pageGroups(rows).map(([pid, list]) => {
             const name = pid ? project(pid) : t.none.project;
@@ -284,7 +301,7 @@ function ItemList() {
           })}
         </div>
       )}
-      {!view && shown.length > PAGE_SIZE && (
+      {!view && !searching && shown.length > PAGE_SIZE && (
         <nav className="pager" aria-label={t.pager}>
           <button type="button" disabled={page <= 1} onClick={() => set({ page: String(page - 1) })}>{t.prev}</button>
           <span className="sub">{t.range((page - 1) * PAGE_SIZE + 1, (page - 1) * PAGE_SIZE + rows.length, shown.length)}</span>

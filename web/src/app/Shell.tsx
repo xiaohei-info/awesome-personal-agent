@@ -10,7 +10,8 @@ import { useSession } from "./session";
 import { toggleTheme } from "./theme";
 import type { Status } from "./status";
 import { useLeaveGuard } from "./leave";
-import { EmptyState, ErrorBoundary, ShortcutSheet, Toaster, typing } from "./ui";
+import { EmptyState, ErrorBoundary, Highlight, ShortcutSheet, Toaster, typing } from "./ui";
+import { useLabel } from "./values";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
@@ -403,33 +404,58 @@ function More({ nav, skip, onClose, link, status, onLogout }: {
 }
 
 /** ⌘K / Ctrl+K 跳转面板：从注册的页面生成，输入过滤、上下键选择、回车跳转、Esc 关闭；关闭后焦点回到打开前的位置。 */
+/** ⌘K 面板的一条事项命中（GET /search?type=item）。 */
+interface ItemHit { id: string; title: string; project_name?: string; phase?: string; snippet?: string }
+
 function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
   const lang = useLang();
   const t = useT(common);
+  const { api } = useSession();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
+  const [hits, setHits] = useState<{ q: string; list: ItemHit[] } | null>(null);
   const back = useRef(document.activeElement as HTMLElement | null);
   useEffect(() => () => back.current?.focus?.(), []);
 
   const needle = q.trim().toLowerCase();
+  // 事项段：停手 250ms 后检索，过时的响应丢掉（只认与当前输入一致的那次）。
+  useEffect(() => {
+    const query = q.trim();
+    if (!query) return setHits(null);
+    let live = true;
+    const timer = setTimeout(() => {
+      api.get<{ hits: ItemHit[] }>("/search?" + new URLSearchParams({ q: query, type: "item", limit: "8" }))
+        .then((r) => live && setHits({ q: query, list: r.hits ?? [] }), () => live && setHits({ q: query, list: [] }));
+    }, 250);
+    return () => { live = false; clearTimeout(timer); };
+  }, [api, q]);
   // 按导航顺序列出全部页面；小字是所在入口（与页面同名时不重复）。
   // 两种语言的页面名都能搜到，英文界面下输中文名也能跳转。
   const all = nav.entries.flatMap((e) => e.features.map((f) => ({ f, where: e.title === f.title[lang] ? "" : e.title })));
-  const list = all.filter(({ f, where }) => !needle || [f.title.zh, f.title.en, where, f.path].some((s) => s.toLowerCase().includes(needle)));
-  const at = Math.min(sel, Math.max(list.length - 1, 0));
-  const go = ({ f }: { f: Feature }) => {
+  const pages = all.filter(({ f, where }) => !needle || [f.title.zh, f.title.en, where, f.path].some((s) => s.toLowerCase().includes(needle)));
+  const items = hits && hits.q === q.trim() ? hits.list : [];
+  const searching = !!needle && (!hits || hits.q !== q.trim());
+  // 一张列表两段：页面在前，事项在后；最后一项是「在事项里搜全部」，落到事项页的检索。
+  type Opt = { key: string; go: () => void };
+  const opts: Opt[] = [
+    ...pages.map((x) => ({ key: "palette-" + x.f.id, go: () => navigate("/" + x.f.path) })),
+    ...items.map((h) => ({ key: "palette-item-" + h.id, go: () => navigate("/items/" + encodeURIComponent(h.id)) })),
+    ...(needle ? [{ key: "palette-all-items", go: () => navigate("/items?" + new URLSearchParams({ q: q.trim() })) }] : []),
+  ];
+  const at = Math.min(sel, Math.max(opts.length - 1, 0));
+  const go = (o: Opt) => {
     onClose();
-    navigate("/" + f.path);
+    o.go();
   };
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      if (list.length) setSel((at + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length);
+      if (opts.length) setSel((at + (e.key === "ArrowDown" ? 1 : opts.length - 1)) % opts.length);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (list[at]) go(list[at]);
+      if (opts[at]) go(opts[at]);
     } else if (e.key === "Escape") {
       e.preventDefault();
       onClose();
@@ -437,6 +463,10 @@ function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
       e.preventDefault(); // 面板是模态的，焦点留在输入框
     }
   };
+  const label = useLabel();
+  const opt = (n: number, children: ReactNode) => (
+    <li key={opts[n].key} id={opts[n].key} role="option" aria-selected={n === at} onMouseEnter={() => setSel(n)} onClick={() => go(opts[n])}>{children}</li>
+  );
 
   return (
     <div className="palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -447,7 +477,7 @@ function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
           aria-label={t.jumpLabel}
           aria-expanded="true"
           aria-controls="palette-list"
-          aria-activedescendant={list[at] ? "palette-" + list[at].f.id : undefined}
+          aria-activedescendant={opts[at]?.key}
           placeholder={t.jumpPlaceholder}
           value={q}
           onChange={(e) => {
@@ -457,14 +487,18 @@ function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
           onKeyDown={onKey}
         />
         <ul id="palette-list" role="listbox" aria-label={t.jumpList}>
-          {list.map((x, n) => (
-            <li key={x.f.id} id={"palette-" + x.f.id} role="option" aria-selected={n === at} onMouseEnter={() => setSel(n)} onClick={() => go(x)}>
-              {x.f.title[lang]}
-              {x.where && <small> {x.where}</small>}
-            </li>
-          ))}
+          {pages.length > 0 && needle && <li role="presentation" className="palette-head">{t.jumpList}</li>}
+          {pages.map((x, n) => opt(n, <>{x.f.title[lang]}{x.where && <small> {x.where}</small>}</>))}
+          {needle && <li role="presentation" className="palette-head">{t.jumpItems}{searching && <small> {t.jumpSearching}</small>}</li>}
+          {items.map((h, i) => opt(pages.length + i, (
+            <>
+              <span className="palette-title"><Highlight text={h.title} q={q} /></span>
+              <small>{[h.project_name, h.phase && label("phase", h.phase)].filter(Boolean).join(" · ")}</small>
+            </>
+          )))}
+          {needle && opt(opts.length - 1, <span className="palette-title">{t.jumpAllItems(q.trim())}</span>)}
         </ul>
-        {!list.length && <p className="palette-empty">{t.jumpEmpty}</p>}
+        {!needle && !pages.length && <p className="palette-empty">{t.jumpEmpty}</p>}
         <footer aria-hidden="true">
           <span>
             <kbd>↑</kbd> <kbd>↓</kbd> {t.jumpSelect}
