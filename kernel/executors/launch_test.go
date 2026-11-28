@@ -40,6 +40,8 @@ func TestLaunchArgsComeFromHandleAndDeclaredChoices(t *testing.T) {
 		`{"harness":"b","headless":{"command":["p","a{executor_args}"],"session":{"extract":"$.s"},"access":{"edit":[]}}}`,
 		`{"harness":"b","overrides":{"model":{"label":{"zh":"m","en":"m"},"args":["-m","{model}"],"choices":[]}},"headless":{"command":["p"],"session":{"extract":"$.s"},"access":{"edit":[]}}}`,
 		`{"harness":"b","executor_args":{"profile":["-p","free text"]},"headless":{"command":["p"],"session":{"extract":"$.s"},"access":{"edit":[]}}}`,
+		`{"harness":"b","headless":{"command":["p"],"session":{"extract":"$.s"},"access":{"edit":[]},"await":{"command":["w","{prompt}"]}}}`,
+		`{"harness":"b","headless":{"command":["p"],"session":{"extract":"$.s"},"access":{"edit":[]},"await":{"command":["w","{run_id}"],"executor_args":["host"]}}}`,
 	} {
 		if _, err := ParseDeclaration(json.RawMessage(bad)); err == nil {
 			t.Errorf("accepted %s", bad)

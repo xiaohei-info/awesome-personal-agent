@@ -84,6 +84,10 @@ type Headless struct {
 	// Cancel 是停掉这次运行在执行者那边所起会话的命令（附录 A.2）：运行超时、失败或内核重启时没了进程，
 	// 外呼调用器各调一次；内核杀掉的只是本机的进程，执行者在别处起的会话要靠它停。
 	Cancel *Cancel `json:"cancel,omitempty"`
+	// Await 是按句柄续等的命令（附录 A.2）：执行者那边的会话不随本机进程结束（如由别的守护进程拉起）时声明。
+	// 内核关停时只杀本机进程、不判失败、不调 Cancel；重启后在同一个 Run 上改跑它，等到对方结束并像原命令一样输出结果，
+	// 时限仍从首次拉起算；对方已不在时它以非零退出，按失败落账。写法同 Cancel。
+	Await *Cancel `json:"await,omitempty"`
 	// RemoteArgs 只在执行者不在 APA 主机上时追加：那样的运行不发运行凭据，回报走结构化输出（§13.6）。
 	RemoteArgs []string         `json:"remote_args,omitempty"`
 	ExitCodes  map[string][]int `json:"exit_codes,omitempty"`
@@ -582,12 +586,15 @@ func (h *Headless) validate() error {
 	if n := slices.Index(h.Command, ExecutorArgsMarker); n == 0 || n >= 0 && slices.Contains(h.Command[n+1:], ExecutorArgsMarker) {
 		return invalid("headless.command: %s may appear once, after the program", ExecutorArgsMarker)
 	}
-	if c := h.Cancel; c != nil {
+	for name, c := range map[string]*Cancel{"cancel": h.Cancel, "await": h.Await} {
+		if c == nil {
+			continue
+		}
 		if len(c.Command) == 0 || slices.Contains(c.Command, "") {
-			return invalid("headless.cancel.command must list non-empty argv elements")
+			return invalid("headless.%s.command must list non-empty argv elements", name)
 		}
 		for _, a := range c.Command {
-			if err := checkPlaceholders("headless.cancel.command", a, cancelPlaceholders); err != nil {
+			if err := checkPlaceholders("headless."+name+".command", a, cancelPlaceholders); err != nil {
 				return err
 			}
 		}

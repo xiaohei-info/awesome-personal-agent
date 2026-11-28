@@ -188,7 +188,8 @@ func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string
 		run.SessionID = runID
 		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)
 	}
-	spec := proc.Spec{OptionEnv: sel.Env, Command: argv, Dir: dir, RunDir: runDir, Cancel: hl.CancelArgv(decl, entry, runID, run.SessionID)}
+	spec := proc.Spec{OptionEnv: sel.Env, Command: argv, Dir: dir, RunDir: runDir, Cancel: hl.CancelArgv(decl, entry, runID, run.SessionID),
+		Await: hl.AwaitArgv(decl, entry, runID, run.SessionID)}
 	if err := executors.CheckRun(tx, run); err != nil {
 		return err
 	}

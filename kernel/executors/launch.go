@@ -65,10 +65,12 @@ func (d Declaration) validateArgs() error {
 			roles[o.Role] = true
 		}
 	}
-	if c := d.Headless; c != nil && c.Cancel != nil {
-		for _, key := range c.Cancel.ExecutorArgs {
-			if _, ok := d.ExecutorArgs[key]; !ok {
-				return invalid("headless.cancel.executor_args: %s is not an executor_args key", key)
+	if h := d.Headless; h != nil {
+		for name, c := range map[string]*Cancel{"cancel": h.Cancel, "await": h.Await} {
+			for _, key := range c.keys() {
+				if _, ok := d.ExecutorArgs[key]; !ok {
+					return invalid("headless.%s.executor_args: %s is not an executor_args key", name, key)
+				}
 			}
 		}
 	}
@@ -182,15 +184,31 @@ func Expand(cmd []string, vals map[string]string, extra []string) []string {
 
 // CancelArgv 是这次运行的取消命令；声明没有 cancel 时为空。
 func (h Headless) CancelArgv(d Declaration, e Entry, runID, sessionID string) []string {
-	if h.Cancel == nil {
+	return h.Cancel.argv(d, e, runID, sessionID)
+}
+
+// AwaitArgv 是这次运行的续等命令；声明没有 await 时为空。
+func (h Headless) AwaitArgv(d Declaration, e Entry, runID, sessionID string) []string {
+	return h.Await.argv(d, e, runID, sessionID)
+}
+
+func (c *Cancel) keys() []string {
+	if c == nil {
+		return nil
+	}
+	return c.ExecutorArgs
+}
+
+func (c *Cancel) argv(d Declaration, e Entry, runID, sessionID string) []string {
+	if c == nil {
 		return nil
 	}
 	r := strings.NewReplacer("{run_id}", runID, "{session_id}", sessionID)
-	out := make([]string, 0, len(h.Cancel.Command))
-	for _, a := range h.Cancel.Command {
+	out := make([]string, 0, len(c.Command))
+	for _, a := range c.Command {
 		out = append(out, r.Replace(a))
 	}
-	keys := h.Cancel.ExecutorArgs
+	keys := c.ExecutorArgs
 	if keys == nil {
 		keys = []string{}
 	}
