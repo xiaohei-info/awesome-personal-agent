@@ -334,3 +334,28 @@ dl.props select { width: 100%; height: 30px; padding-block: 3px; font-size: 13px
 .project-row > .trow-title { flex: none; max-width: 40%; }
 .project-row > .sub:not(.reasons) { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 @media (max-width: 820px) { .project-row > .sub:not(.reasons) { display: none; } }
+
+/* ---- 事项的讨论：按时间的评论流，作者头像（本人墨色、Agent 浅灰），回复挂在被回复的那条下（楼中楼，左侧一条细线） ---- */
+.discussion .stream, .discussion .replies { list-style: none; margin: 0; padding: 0; }
+.discussion .stream { margin-bottom: var(--sp-3); }
+.comment { padding: var(--sp-2) 0 var(--sp-1); }
+.comment-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: 13px; line-height: 20px; }
+.comment-head time, .stream-event time { font-size: 12px; color: var(--ink-3); }
+.author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.author b { font-weight: 600; }
+.author .badge { font-size: 11px; line-height: 16px; padding: 0 5px; }
+.avatar { display: inline-grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 600; line-height: 1; }
+.avatar[data-kind="owner"] { color: var(--paper); background: var(--ink); }
+.avatar[data-kind="agent"] { color: var(--ink-2); background: color-mix(in oklch, var(--ink) 10%, var(--surface)); }
+.comment-text { margin: 2px 0 0 26px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-acts { margin-left: 20px; }
+.comment-acts button.quiet { padding: 1px 6px; font-size: 12.5px; }
+.discussion .replies { margin: var(--sp-1) 0 0 9px; padding-left: 16px; border-left: 2px solid var(--line); }
+.stream-event { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 6px 0 6px 6px; font-size: 12.5px; color: var(--ink-3); }
+.stream-event > .dot { width: 6px; height: 6px; }
+.stream-event > .what { min-width: 0; color: var(--ink-2); }
+.stream-event > time { margin-left: auto; }
+form.composer { max-width: none; gap: var(--sp-2); }
+form.composer textarea { min-height: 64px; }
+form.composer > .actions { justify-self: end; margin: 0; }
+.comment > form.composer { margin: var(--sp-2) 0 0 26px; }

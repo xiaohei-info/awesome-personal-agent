@@ -52,7 +52,7 @@ export function fold(es: TraceEntry[]): TraceEntry[][] {
   return out;
 }
 
-function useWho() {
+export function useWho() {
   const t = useT(strings);
   const lang = useLang();
   const source = useNames("source");
@@ -112,7 +112,7 @@ function judged(t: T, a: Record<string, unknown>): string {
 }
 
 /** 一行的「做了什么 · 结果」。 */
-function What({ e, subjects }: { e: TraceEntry; subjects?: boolean }) {
+export function What({ e, subjects }: { e: TraceEntry; subjects?: boolean }) {
   const t = useT(strings);
   const label = useLabel();
   const executor = useNames("executor");

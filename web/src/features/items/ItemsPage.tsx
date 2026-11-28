@@ -22,6 +22,7 @@ import { TraceView } from "../trace/Trace";
 import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow } from "./ItemMaterials";
 import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
 import { ItemRow, useCircleDone } from "./ItemRow";
+import { Discussion, type Said } from "./Discussion";
 import { DeleteItem } from "./DeleteItem";
 import { ScheduleBlock, SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { deadlineText, deadlineValue, useHostClock } from "./schedule";
@@ -314,7 +315,7 @@ function pageGroups(rows: Item[]): [string, Item[]][] {
 const when = (at: string, precision?: string) => (precision === "day" ? new Date(at).toLocaleDateString(locale()) : new Date(at).toLocaleString(locale()));
 const grouped = (r: Relation, from: string) => r.from === from && isMaterialId(r.to) && (MATERIAL_RELATIONS as readonly string[]).includes(r.type);
 
-interface Detail { rejection?: Rejection; item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string; precision?: string }[]; materials: MaterialRel[] }
+interface Detail { rejection?: Rejection; item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: Said[]; materials: MaterialRel[] }
 
 /** 事项详情。embedded：放在速览侧栏里（没有页面外框与返回链接，id 由速览给）。 */
 export function ItemDetail({ embedded }: { embedded?: string } = {}) {
@@ -431,20 +432,12 @@ export function ItemDetail({ embedded }: { embedded?: string } = {}) {
 
           <ErrorBoundary><AttachedMessages itemId={id} /></ErrorBoundary>
 
-          <section aria-label={t.progress}>
-            <h2>{t.progress}</h2>
-            <ul aria-label={t.progress} className="rows">
-              {d.progress.map((p) => (
-                <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), credential(p.actor), when(p.at, p.precision)].filter(Boolean).join(" · ")}</span></li>
-              ))}
-            </ul>
-            <ProgressForm onSubmit={(b) => act(() => api.post(path + "/comments", b))} />
-          </section>
+          <ErrorBoundary resetKey={item.version}><Discussion item={item} said={d.progress} rev={item.version} onPosted={() => void load()} /></ErrorBoundary>
 
-          <section aria-label={t.changes}>
-            <h2>{t.timeline}</h2>
+          {/* 完整经过：讨论流只挑发言、决定、派活与后续消息，其余的机械记录在这里 */}
+          <Disclosure summary={<h2>{t.fullTrace}</h2>} aria-label={t.changes} persistKey="item.trace">
             <ErrorBoundary resetKey={item.version}><TraceView path={path + "/trace"} rev={item.version} /></ErrorBoundary>
-          </section>
+          </Disclosure>
 
           <Disclosure summary={<h2>{t.moreActions}</h2>} aria-label={t.moreActions} persistKey="item.more">
             <div className="facts">
