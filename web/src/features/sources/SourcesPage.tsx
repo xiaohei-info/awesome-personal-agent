@@ -97,14 +97,14 @@ function Rename({ s, onSaved }: { s: Source; onSaved: () => void }) {
   );
 }
 
-function Detail({ source, rejudgeDays, add, onChooseOutbound, onSaved }: { source: Source; rejudgeDays?: number; add?: string; onChooseOutbound: () => void; onSaved: () => void }) {
+function Detail({ source, createItem, rejudgeDays, add, onChooseOutbound, onSaved }: { source: Source; createItem: boolean; rejudgeDays?: number; add?: string; onChooseOutbound: () => void; onSaved: () => void }) {
   const t = useT(strings);
   const raw = useRaw();
   const st = source.stats;
   return (
     <section role="region" aria-label={t.detail(source.name)} className="panel">
       <h3>{source.name}{raw && <code className="raw-id">{source.id}</code>}</h3>
-      <HandlingMode source={source} onSaved={onSaved} />
+      <HandlingMode source={source} createItem={createItem} onSaved={onSaved} />
       {source.type === "webhook" && <WebhookKey source={source} />}
       <DefaultProject source={source} onSaved={onSaved} />
       <TrustedSenders source={source} add={add} />
@@ -130,11 +130,11 @@ function Detail({ source, rejudgeDays, add, onChooseOutbound, onSaved }: { sourc
 }
 
 /** 对话捕获的内部来源：只有处理方式可设，名字按项目称呼。 */
-function CaptureDetail({ source, onSaved }: { source: Source; onSaved: () => void }) {
+function CaptureDetail({ source, createItem, onSaved }: { source: Source; createItem: boolean; onSaved: () => void }) {
   const t = useT(strings);
   return (
     <section role="region" aria-label={t.detail(source.name)} className="panel">
-      <HandlingMode source={source} onSaved={onSaved} />
+      <HandlingMode source={source} createItem={createItem} onSaved={onSaved} />
       <RecentMessages source={source.id} />
     </section>
   );
@@ -155,6 +155,7 @@ function SourcesHome() {
   const { api } = useSession();
   const [sources, setSources] = useState<Source[] | null>(null);
   const [captures, setCaptures] = useState<Source[]>([]);
+  const [createItem, setCreateItem] = useState(false);
   const nameOf = useNames("source");
   const [error, setError] = useState<unknown>(null);
   const [params] = useSearchParams(); // 挂靠消息的「加入可读名单」带 ?open=<来源>&add=<发件人>
@@ -169,10 +170,11 @@ function SourcesHome() {
 
   const load = useCallback(
     () =>
-      api.get<{ sources: Source[]; capture_sources?: Source[] }>("/sources").then(
+      api.get<{ sources: Source[]; capture_sources?: Source[]; create_item_allowed?: boolean }>("/sources").then(
         (r) => {
           setSources(r.sources);
           setCaptures(r.capture_sources ?? []);
+          setCreateItem(r.create_item_allowed ?? false);
         },
         (e) => setError(e),
       ),
@@ -224,7 +226,9 @@ function SourcesHome() {
   const detailsButton = (id: string) => (
     <button aria-expanded={selected === id} onClick={() => setSelected(selected === id ? null : id)}>{t.details}</button>
   );
-  const reminding = (s: Source) => s.handling_mode === "remind_only" && <span className="badge">{t.handlingRemind}</span>;
+  const reminding = (s: Source) =>
+    (s.handling_mode === "remind_only" && <span className="badge">{t.handlingRemind}</span>) ||
+    (s.handling_mode === "create_item" && <span className="badge">{t.handlingCreate}</span>);
   const waiting = backlog?.outbound_unset ?? 0;
   const total = backlog?.count ?? 0;
   const ignoreAll = total > 0 && (
@@ -272,7 +276,7 @@ function SourcesHome() {
                 <div role="group" aria-label={t.ops(s.name)} className="ops">
                   <button onClick={() => toggle(s)}>{s.enabled ? t.disable : t.enable}</button> {detailsButton(s.id)}
                 </div>
-                {selected === s.id && <Detail key={rev} source={s} add={s.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={chooseOutbound} onSaved={() => void load()} />}
+                {selected === s.id && <Detail key={rev} source={s} createItem={createItem} add={s.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={chooseOutbound} onSaved={() => void load()} />}
               </li>
             ))}
             {captures.map((c) => {
@@ -281,7 +285,7 @@ function SourcesHome() {
                 <li key={s.id} id={`source-${s.id}`} aria-label={s.name}>
                   <span aria-hidden="true">{"\ud83d\udcac"}</span> <strong>{s.name}</strong> {reminding(s)}
                   <div role="group" aria-label={t.ops(s.name)} className="ops">{detailsButton(s.id)}</div>
-                  {selected === s.id && <CaptureDetail source={s} onSaved={() => void load()} />}
+                  {selected === s.id && <CaptureDetail source={s} createItem={createItem} onSaved={() => void load()} />}
                 </li>
               );
             })}

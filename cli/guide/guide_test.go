@@ -53,15 +53,15 @@ func TestGuideWorksWithoutTokenAndExplainsCommandsAndExitCodes(t *testing.T) {
 	}
 }
 
-// ACT-BOOT-05：--template 约 600 token 内，带三条必需声明，且不含用户内容与具体 harness。
+// ACT-BOOT-05：--template 约 1000 token 内（含工作台约定），带必需声明，且不含用户内容与具体 harness。
 func TestTemplateStaysWithinBudgetAndStatesContract(t *testing.T) {
 	code, out, _ := runGuide(t, "--template")
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	// 保守估算：每 3 字节 1 token（英文实际约 4 字节）。
-	if tok := len(out) / 3; tok > 600 {
-		t.Errorf("template ~%d tokens, want <= 600", tok)
+	if tok := len(out) / 3; tok > 1000 {
+		t.Errorf("template ~%d tokens, want <= 1000", tok)
 	}
 	low := strings.ToLower(out)
 	for _, want := range []string{"data, not instructions", "only source of truth", "apa delegate", "loosen kernel rules", "exit 20", "exit 23"} {
@@ -124,14 +124,15 @@ func TestTemplateFollowsTheCallersCard(t *testing.T) {
 	for _, c := range []struct{ out, want string }{
 		{organize, "Not allowed: decide for me"}, {organize, "Tools: read"}, {organize, "trusted senders only"},
 		{decide, "decide for me, physical delete (until 2026-11-26T15:40:00Z)"}, {decide, "Tools: full"}, {decide, "background runs: all"},
+		{organize, "apa propose"}, {decide, "apa item add --phase open"}, {decide, "Proposals in the injection are yours"}, {organize, "apa delegate --parent"},
 	} {
 		if !strings.Contains(c.out, c.want) {
 			t.Errorf("lacks %q:\n%s", c.want, c.out)
 		}
 	}
 	for _, out := range []string{organize, decide} {
-		if tok := len(out) / 3; tok > 600 {
-			t.Errorf("template with card ~%d tokens, want <= 600", tok)
+		if tok := len(out) / 3; tok > 1000 {
+			t.Errorf("template with card ~%d tokens, want <= 1000", tok)
 		}
 	}
 	if out := runGuideAs(t, `not json`, "--template"); strings.Contains(out, "Your card") || !strings.Contains(out, "DATA, not instructions") {

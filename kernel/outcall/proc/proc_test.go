@@ -869,3 +869,68 @@ func TestTailCountsDroppedHead(t *testing.T) {
 		t.Fatalf("%q %d %d %v", tl.bytes(), total, dropped, files)
 	}
 }
+
+// 续等（§13.6）：带续等命令的运行在关停时只杀本机进程，Run 留在 running、不调取消命令；重启后在同一个 Run 上改跑续等命令，
+// 时限从首次拉起算。对方已不在（续等非零退出）按失败落账；重启时已过时限的按超时落账并调取消命令。
+func TestShutdownDetachesAwaitableRunAndRestartAwaitsIt(t *testing.T) {
+	home, dir := t.TempDir(), t.TempDir()
+	st1 := openStore(t, home)
+	h1 := &harness{t: t, st: st1, results: make(chan Result, 16)}
+	h1.d = h1.dispatcher(st1, 3, 1, Options{})
+	add := func(target, await string, timeout int) domain.Run {
+		var r domain.Run
+		if err := st1.Update(ctx, func(tx *store.Tx) (err error) {
+			r, err = Enqueue(tx, Request{Run: domain.Run{Category: domain.RunTask, Target: target, TimeoutSec: timeout},
+				Spec: Spec{Command: []string{"/bin/sleep", "60"}, Await: []string{"/bin/sh", "-c", await},
+					Cancel: []string{"/bin/sh", "-c", "echo cancelled > " + filepath.Join(dir, target)}}}, time.Now())
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	ok := add("ok", `echo '{"agentId":"a1","outcome":"done","summary":"s"}'`, 30)
+	gone := add("gone", `echo 'agent not found' >&2; exit 1`, 30)
+	late := add("late", `echo never`, 3)
+	h1.dispatch()
+	for _, r := range []domain.Run{ok, gone, late} {
+		waitFor(t, r.Target+" started", func() bool { return h1.get(r.ID).PGID > 0 })
+	}
+	started := *h1.get(ok.ID).Run.StartedAt
+	h1.d.Close()
+	for _, r := range []domain.Run{ok, gone, late} {
+		if rec := h1.get(r.ID); rec.Run.State != domain.RunRunning || rec.PGID != 0 {
+			t.Fatalf("shutdown must leave %s running without a process: %+v", r.Target, rec)
+		}
+	}
+	if len(h1.results) != 0 {
+		t.Fatal("a detached run reports no result")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ok")); err == nil {
+		t.Fatal("shutdown must not cancel the executor's session")
+	}
+	time.Sleep(3100 * time.Millisecond) // late 的时限从首次拉起算，重启时已过
+	st1.Close()
+
+	st2 := openStore(t, home)
+	h2 := &harness{t: t, st: st2, results: make(chan Result, 16)}
+	h2.d = h2.dispatcher(st2, 3, 1, Options{})
+	failed, alive, err := h2.d.Recover(ctx)
+	if err != nil || len(alive) != 0 || len(failed) != 1 || failed[0].ID != late.ID || failed[0].State != domain.RunTimeout {
+		t.Fatalf("failed=%+v alive=%+v err=%v", failed, alive, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "late")); !strings.Contains(string(b), "cancelled") {
+		t.Fatal("a run past its deadline is cancelled at the executor")
+	}
+	got := map[string]Result{}
+	for range 2 {
+		r := h2.next()
+		got[r.Run.ID] = r
+	}
+	if r := got[ok.ID]; r.Run.State != domain.RunSucceeded || !strings.Contains(string(r.Stdout), `"agentId":"a1"`) || !r.Run.StartedAt.Equal(started) {
+		t.Fatalf("the same run awaited to its end: %+v %q", r.Run, r.Stdout)
+	}
+	if r := got[gone.ID]; r.Run.State != domain.RunFailed || !strings.Contains(r.Reason, "agent not found") {
+		t.Fatalf("a session that is gone fails the run: %+v %q", r.Run, r.Reason)
+	}
+}

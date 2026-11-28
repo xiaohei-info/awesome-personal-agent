@@ -399,7 +399,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	wk := k.wk
 	wk.Attach(x, k.result, logErr("wake receipt"))
 	if bg, err = background.New(background.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, Owner: owner,
-		Wake: wk, MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("background run", "run", run, "err", err) }}); err != nil {
+		ContextDir: l.RunCredentials, Wake: wk, MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("background run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
 	if k.rs, err = resume.New(resume.Options{Store: st, Packs: ld, Queue: k.disp, RunsDir: l.Runs, Owner: owner,
@@ -407,6 +407,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 	k.rs.Attach(x) // 回答与续接 Run 入队同一事务（§13.6）；事件规则随后命中时看到在途运行而跳过
+	bg.Attach(x)   // 委派即开工（apa delegate --start）：建子事项与 Run 入队同一事务（§7.5）
 
 	if err := errors.Join(
 		kitems.Register(x, kinds),

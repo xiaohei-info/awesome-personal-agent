@@ -7,9 +7,20 @@ Needs `apa` on PATH (or `APA_BIN`) plus the usual `APA_URL` / `APA_TOKEN`.
 Sections are callables rendered once per new session (Hermes freezes the result); any apa failure
 or a read over 2 s yields no section and never blocks the session.
 
+Submodules:
+
+- `instructions`: the standing instructions (`apa guide --template`) as a system prompt section.
+- `session_env`: the session identity on every terminal command of the session. Through `ctx.register_session_env`
+  Hermes gives each terminal child of a session `APA_SESSION=<Hermes session id>` and `APA_HARNESS=hermes`, so an `apa`
+  the model runs in a terminal carries the same identity as the plugins' own calls. The kernel uses it only to tell which
+  session wrote what (the inject cursor, "this session is tracking", the capture turn's dedupe, unattached dispatches);
+  it never decides what the session may do (design §11.2, §14.2). A process with no session gets nothing.
+
 ## Requirements
 
-Hermes with `register_system_prompt_section` (callable content) and `hermes_cli.plugins.render_system_prompt_sections`.
+Hermes with `register_system_prompt_section` (callable content), `hermes_cli.plugins.render_system_prompt_sections`, and
+`register_session_env` for the session identity (checked against the Hermes source on 2026-11-28: the local terminal
+environment calls the resolver with the child's session id).
 Verified on Hermes Agent v0.22.5 (commit `eefc4148cb23`); older builds without that API are unsupported.
 
 ## Live gate

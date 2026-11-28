@@ -40,6 +40,7 @@ import (
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
@@ -287,8 +288,9 @@ func forExternal(s domain.Source) domain.Source {
 
 func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	var (
-		out      []sourceView
-		captures []domain.Source // 对话捕获只给 Web 本人：来源页据此设处理方式
+		out        []sourceView
+		captures   []domain.Source // 对话捕获只给 Web 本人：来源页据此设处理方式
+		createItem bool
 	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
 		ss, err := registry.List(tx)
@@ -315,7 +317,11 @@ func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) er
 			out = append(out, v)
 		}
 		if p.Web {
-			captures, err = registry.ListCapture(tx)
+			if captures, err = registry.ListCapture(tx); err != nil {
+				return err
+			}
+			// "直接立项"能不能选：处理来源的 Agent 的权限卡开了"替我拍板"才行（§9.3），来源页据此置灰并说明原因。
+			_, createItem, err = registry.CreateItemAllowed(tx, clock.Now())
 		}
 		return err
 	}); err != nil {
@@ -324,6 +330,9 @@ func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) er
 	res := map[string]any{"sources": out}
 	if len(captures) > 0 {
 		res["capture_sources"] = captures
+	}
+	if p.Web {
+		res["create_item_allowed"] = createItem
 	}
 	return core.WriteJSON(w, http.StatusOK, res)
 }

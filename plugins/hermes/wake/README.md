@@ -26,5 +26,6 @@ Run-less deliveries on the same route (the kernel's proactive reminders, and bri
 chose to push into the main session; design §7.4) are notices: claim → `ctx.inject_message(facts)` → ack
 (`external_ref` = `main-session`). No credential is exchanged, so nothing changes for the run boundary above. The text has two
 parts split by a `———` line: for the person (the kernel's title and lines; for a decision also the numbered options,
-the recommendation and the link), then for the Agent (item id, option ids, how to relay it). A refused injection is failed back (kernel backoff,
-then Web unread); a notice whose ack was lost is re-acked, not injected a second time, by the same gateway process.
+the recommendation and the link), then for the Agent (delivery id, item id, option ids, how to relay it). A refused injection is failed back (kernel backoff,
+then Web unread); a notice whose ack was lost is re-acked, not injected a second time, by the same gateway process. Across a
+gateway restart that memory is gone, so the Agent part names the delivery id and the relay rule says one id is relayed once.

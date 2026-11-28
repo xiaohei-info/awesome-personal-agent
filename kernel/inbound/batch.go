@@ -15,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -84,13 +85,30 @@ func (s *Service) batchPromptTemplate() (packs.Prompt, bool) {
 
 // buildBatchPrompt 组装批处理提示词：正文取本人在设置页自定义的说明或内置模板正文，后面只附本批事件的元信息
 // （事件 id、来源、类型、时间、等级），绝不打包事件正文或原文（§9.3、§13.6）。
-func buildBatchPrompt(base string, evs []domain.SourceEvent, remindOnly map[string]bool) string {
+func buildBatchPrompt(base string, evs []domain.SourceEvent, modes map[string]string, turn map[string][]string) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(base))
 	b.WriteString("\n\n## 本批待处理来源事件（仅元信息，请用 `apa source event <id>` 读原文）\n")
-	if len(remindOnly) > 0 { // 由内核附加：本人改过批处理说明也一样看得到
+	has := func(mode string) bool {
+		for _, m := range modes {
+			if m == mode {
+				return true
+			}
+		}
+		return false
+	}
+	// 以下由内核附加：本人改过批处理说明也一样看得到。
+	if has(domain.HandlingRemindOnly) {
 		b.WriteString("标 mode=remind_only 的事件来自本人设为\"只口头提醒\"的来源：不得建建议（内核会拒绝）。在最后结论里口头带上它的要点，并用 `apa source remind <id>` 落账；" +
 			"确属已有事项的后续用 `apa source attach <id> --to <事项 id>`；纯噪声可以忽略。\n")
+	}
+	if has(domain.HandlingCreateItem) {
+		b.WriteString("标 mode=create_item 的事件来自本人设为\"直接立项\"的来源：`apa source propose` 建出的直接是进行中的事项；" +
+			"确属已有事项的后续用 `apa source attach <id> --to <事项 id> --reason <这次推进了什么>`，说明会同时记成那件事的一条进展。\n")
+	}
+	if len(turn) > 0 {
+		b.WriteString("带\"本回合已写\"的对话增量：列出的是主会话在这一回合里已经建过或写过的事项。主会话在场、上下文全，以它为准：" +
+			"同一件事只挂到这些事项上（`apa source attach`），不另建；与它们无关的才按上面的规矩处理。\n")
 	}
 	for i, ev := range evs {
 		at := ev.OccurredAt.UTC().Format(time.RFC3339)
@@ -99,13 +117,58 @@ func buildBatchPrompt(base string, evs []domain.SourceEvent, remindOnly map[stri
 			level = runner.LevelNormal
 		}
 		mode := ""
-		if remindOnly[ev.SourceID] {
-			mode = " | mode=" + domain.HandlingRemindOnly
+		if m := modes[ev.SourceID]; m == domain.HandlingRemindOnly || m == domain.HandlingCreateItem {
+			mode = " | mode=" + m
 		}
 		fmt.Fprintf(&b, "%d. id=%s | source=%s | type=%s | time=%s | level=%s%s\n",
 			i+1, ev.ID, ev.SourceID, ev.Type, at, level, mode)
+		for _, l := range turn[ev.ID] {
+			b.WriteString("   本回合已写：" + l + "\n")
+		}
 	}
 	return b.String()
+}
+
+// turnLimit 是一段对话增量最多附带几条"本回合已写"。
+const turnLimit = 10
+
+// turnWrites 是对话增量所属会话在这一回合（上一次捕获之后到这次捕获）写过的事项：事项 id、标题、阶段与写入的事件类型。
+// 只给对话捕获的事件；会话身份来自捕获请求本身（§9.3、§7.6），不参与授权。
+func turnWrites(tx *store.Tx, ev domain.SourceEvent) ([]string, error) {
+	if !IsCaptureSource(ev.SourceID) {
+		return nil, nil
+	}
+	es, err := eventlog.ReadObject(tx, ev.ID)
+	if err != nil {
+		return nil, err
+	}
+	var session string
+	var at int64
+	for _, e := range es {
+		if e.Event.Type == EvCaptured {
+			session, at = e.Event.Actor.Session, e.Event.Seq
+		}
+	}
+	if session == "" {
+		return nil, nil
+	}
+	from, err := eventlog.PrevOfType(tx, session, EvCaptured, at)
+	if err != nil {
+		return nil, err
+	}
+	ts, err := eventlog.SessionTouches(tx, session, from, at, turnLimit)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, t := range ts {
+		it, err := items.Get(tx, t.Object)
+		if err != nil {
+			continue // 已物理删除
+		}
+		out = append(out, fmt.Sprintf("%s「%s」（阶段 %s；%s）", it.ID, strings.Join(strings.Fields(it.Title), " "), it.Phase, strings.Join(t.Types, ", ")))
+	}
+	return out, nil
 }
 
 func expandArgs(in []string, pairs ...string) []string {
@@ -221,21 +284,26 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 		if err != nil || len(evs) == 0 {
 			return err
 		}
-		remindOnly := map[string]bool{}
+		modes, turn := map[string]string{}, map[string][]string{}
 		for _, e := range evs {
 			mode, err := registry.HandlingMode(tx, e.SourceID)
 			if err != nil {
 				return err
 			}
-			if mode == domain.HandlingRemindOnly {
-				remindOnly[e.SourceID] = true
+			modes[e.SourceID] = mode
+			lines, err := turnWrites(tx, e)
+			if err != nil {
+				return err
+			}
+			if len(lines) > 0 {
+				turn[e.ID] = lines
 			}
 		}
-		prompt := buildBatchPrompt(basePrompt, evs, remindOnly)
+		prompt := buildBatchPrompt(basePrompt, evs, modes, turn)
 		if err := os.WriteFile(filepath.Join(runDir, "prompt.txt"), []byte(prompt), 0o600); err != nil {
 			return err
 		}
-		argv := expandArgs(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
+		argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
 		argv = append(argv, selected.Args...)
 		argv = append(argv, hl.Output...)
 		argv = append(argv, hl.Access[access]...)

@@ -4,7 +4,7 @@ Install (next to `apa-core`): `ln -s "$PWD" ~/.hermes/plugins/apa-capture`, then
 Needs `APA_URL` / `APA_TOKEN` (or `apa login`).
 
 Candidate capture (design §11.2, appendix A.5): at `on_session_end` (turn level) the conversation delta is posted to
-`POST /v1/capture` as `{text, path, host}` with `X-APA-Session`, `X-APA-Harness: hermes` and an `Idempotency-Key` (candidates land as `proposed`). Hermes' `on_session_end` carries no transcript, so
+`POST /v1/capture` as `{text, path, host}` with `X-APA-Session`, `X-APA-Harness: hermes` and an `Idempotency-Key` (candidates land as the capture source's handling mode says: `proposed` by default, open items when the owner chose "create items", design §9.3). Hermes' `on_session_end` carries no transcript, so
 `post_llm_call` buffers each finished turn (`user:` / `assistant:`) per session; each turn is sent once.
 
 - On by default for every project (no per-project switch). A session whose directory matches no registered project repo falls back to the kernel's built-in Inbox project (`capture:<inbox_id>`), where extraction may still classify concrete items into a matching business project or leave them in Inbox. Under a run identity (`APA_RUN`, or the session's run context, see `tools/README.md`) the kernel never captures either, and the plugin only ever uses the run credential.

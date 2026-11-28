@@ -109,12 +109,12 @@ export function useDraft<T>(doc: unknown, init: () => T) {
 
 /** 分段按钮：两三个互斥取值，按下的那个就是当前值。 */
 export function Seg({ label, value, options, onChange, disabled }: {
-  label: string; value: string; options: [string, string][]; onChange: (v: string) => void; disabled?: boolean;
+  label: string; value: string; options: [string, string, boolean?][]; onChange: (v: string) => void; disabled?: boolean;
 }) {
   return (
     <div className="seg" role="group" aria-label={label}>
-      {options.map(([id, text]) => (
-        <button key={id} type="button" aria-pressed={value === id} disabled={disabled} onClick={() => onChange(id)}>
+      {options.map(([id, text, off]) => (
+        <button key={id} type="button" aria-pressed={value === id} disabled={disabled || off} onClick={() => onChange(id)}>
           {text}
         </button>
       ))}

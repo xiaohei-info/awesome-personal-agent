@@ -15,7 +15,7 @@ run_context = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(run_context)
 
 TIMEOUT_SECS = 2
-INSTRUCTION_VERSION = 3  # version of the standing instructions this plugin ships (kernel compares)
+INSTRUCTION_VERSION = 4  # version of the standing instructions this plugin ships (kernel compares)
 
 _keys = {}          # Hermes session id -> session key whose kernel cursor this process continues
 _reinject = set()   # session ids whose next turn must inject the full summary again (after compaction)
@@ -40,7 +40,8 @@ def _instruction_version():
 def pre_llm_call(session_id="", is_first_turn=False, **_):
     if not session_id:  # without a session the kernel keeps no cursor and would repeat everything
         return None
-    fresh = is_first_turn or session_id not in _keys or session_id in _reinject
+    first_here = session_id not in _keys  # first turn of this session in this process (e.g. after a gateway restart)
+    fresh = is_first_turn or first_here or session_id in _reinject
     if fresh:
         # A new kernel cursor makes `apa context` return the full projection again (resume, compaction);
         # the plain session id is kept for a genuinely new session.
@@ -50,6 +51,8 @@ def pre_llm_call(session_id="", is_first_turn=False, **_):
     key = _keys[session_id]
 
     ctx_args = ["context", "--session", key, "--scope", "cwd", "--format", "inject"]
+    if first_here and not is_first_turn:  # an older session seen first by this process (restart): its waits died with the old one
+        ctx_args += ["--in-flight"]
     jobs = [ctx_args]
     if fresh:  # the stale-instructions notice is asked for once per injection start
         ctx_args += ["--instruction", str(_instruction_version())]

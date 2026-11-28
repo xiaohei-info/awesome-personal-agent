@@ -165,6 +165,10 @@ type ctxOut struct {
 		ID string `json:"id"`
 	} `json:"project"`
 	Items []struct{ ID, Title string } `json:"items"`
+	// Overview 是不属于任何项目的会话从头读时的工作台概览（§7.6）。
+	Overview []struct {
+		Items []struct{ ID, Title string } `json:"items"`
+	} `json:"overview"`
 }
 
 func (k *kernel) ctx(vars map[string]string, args ...string) (ctxOut, result) {
@@ -183,6 +187,11 @@ func ids(o ctxOut) map[string]bool {
 	m := map[string]bool{}
 	for _, i := range o.Items {
 		m[i.ID] = true
+	}
+	for _, g := range o.Overview {
+		for _, i := range g.Items {
+			m[i.ID] = true
+		}
 	}
 	return m
 }
@@ -208,7 +217,7 @@ func TestContextSessionIncrementalIsKernelOwned(t *testing.T) {
 		t.Fatalf("env session must continue s1: %+v", o)
 	}
 	// 另一个会话从头读；无会话总是完整投影。
-	if o, _ = k.ctx(nil, "--session", "s2"); len(o.Items) != 3 {
+	if o, _ = k.ctx(nil, "--session", "s2"); len(ids(o)) != 3 {
 		t.Fatalf("new session must see everything: %+v", o)
 	}
 	n1, _ := k.ctx(nil)

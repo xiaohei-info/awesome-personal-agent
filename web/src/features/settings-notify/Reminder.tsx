@@ -128,6 +128,7 @@ function whereOf(key: string, pack?: string): string {
     case "source_failing":
       return "sources";
     case "run_failed":
+    case "delegation_result":
       return "runs";
     case "health":
       return "status";
@@ -209,6 +210,7 @@ function Explain({ k, target }: { k: string; target: Target }) {
     "task_failed:": [r.quietHeld, r.hourly],
     source_failing: [r.quietHeld, r.oncePerStreak],
     run_failed: [r.quietHeld, r.hourly],
+    delegation_result: [r.quietSkip, r.oncePerResult],
     health: [r.quietSend, r.noCap],
     new_proposals: [r.quietHeld, r.twoHours],
     source_alert: [r.quietSkip, cap, r.oncePerItem],
