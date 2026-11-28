@@ -30,7 +30,7 @@
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建；可带 `--deadline`、`--origin`、`--ext`（规则同 `apa item add`） | observer | |
 | `apa search <查询> [--type item\|material\|project\|source]... [--project] [--phase] [--kind] [--tag]... [--item] [--after] [--before] [--include-dropped] [--limit 1–50] [--cursor]` | 统一检索（主文档 §7.1）：跨项目按相关度排，中英文都可、整句可用、引号是短语；一页默认 10 条，输出不超过一次读取的字数上限，带 `total`、`withheld`、`next_cursor` 与至多三条 `next`；不带 `--project` 时当前目录所在项目的命中加权 | observer | 2 |
-| `apa item show <id> [--part body\|progress\|messages] [--offset <n>] [--full]` | 读一条事项：默认正文前 2000 字、最近 5 条进展与挂靠消息（消息不带 `detail` 与 `content`；按转发白名单过滤）、关系与关联键，`parts` 写明各部分有多少、给了多少，`next` 给分段读取与 `apa why`；`--part body --offset <n>` 从第 n 个字起读正文，`--part progress\|messages --offset <n>` 跳过最近的 n 条往前读，都不超过一次读取的字数上限；`--full` 给全部（主文档 §17.2） | observer | 2、5 |
+| `apa item show <id> [--part body\|messages] [--offset <n>] [--full]` | 读一条事项：默认正文前 2000 字、最近 5 条进展与挂靠消息（消息不带 `detail` 与 `content`；按转发白名单过滤）、关系与关联键，`parts` 写明各部分有多少、给了多少，`next` 至多三条（正文续读、进展多于 5 条时 `apa item thread <id>`、挂靠消息、关系另一端、`apa why`）；`--part body --offset <n>` 从第 n 个字起读正文，`--part messages --offset <n>` 跳过最近的 n 条往前读，都不超过一次读取的字数上限；更早的进展用 `apa item thread` 读；`--full` 给全部（主文档 §17.2） | observer | 2、5 |
 | `apa item list [筛选] [--limit 1–200] [--cursor] [--full]` | 列事项：默认一页 30 条，每行只有 id、标题、阶段、类型、项目、优先级、标签、执行者、状态说明、截止与计划、`version`、`chain_depth`、建立与最近变更时间，摘要截到 60 字（响应不含 `origins`、`groups`），输出不超过一次读取的字数上限，带 `total`、`next_cursor` 与 `next`；`--full` 给完整的行（仍分页）。筛选：`--phase`、`--kind`、`--project`、`--assignee`、`--tag`、`--q <全文>`（走统一检索，按相关度排）、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--from <日期> --to <日期>`（按日期范围读，同 HTTP 的 `from`、`to`）、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 2 |
 | `apa item add/update/transition/relate` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` 与 `--planned-slot "HH:MM - HH:MM"`（`update` 传空串清除；有时段必须有计划日期，否则退出码 2）；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐；`add`、`transition` 可带 `--evidence <说明或结果证据>`，进请求体的 `evidence`（委派子事项进入 `done` 必须带），只作记录，不参与权限判定。 | worker（自己的事项）；delegate（任意事项）。一档；以非 `proposed` 阶段新建、使事项离开 `proposed` 或 `needs_input` 为二档（见下文三档表） | 2、4、6、20、23 |
 | `apa item comment <id> --text [--reply-to <发言 id>] [--on <日期>]` | 在事项的讨论区发言（追加一条进展，内核命令 `item.progress`），不改阶段；`--reply-to` 回复同一事项里已有的一条发言，不在这个事项里为退出码 2；`--on` 不能晚于今天（主文档 §6.3） | worker（自己的事项）；delegate（任意事项） | 2、4 |
@@ -52,14 +52,15 @@
 | `apa report (<id> \| --session <句柄>) --outcome --summary [--pr --commit --branch --link --file] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`--summary` 必填。委派子事项报 `done` 时摘要就是结果，有 `--pr`、`--commit`、`--branch`、`--link` 或 `--file`（报告文件路径）就一并作为证据；其他事项报 `done` 必须带其中至少一项，否则退出码 2（主文档 §6.14 第 3 条）。`--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5）。`--session` 代替 id：按调用方 harness 记下的会话句柄找到委派记录所在的子事项，记录还没挂事项为 6。委派子事项上的回执同时成为父事项的一条进展 | 绑定该 assignee 的 worker、该运行的运行凭据、delegate | 2、4、5、6 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
-| `apa project list/show` | 读项目，含 repos 与允许的执行者，带项目卡片（各阶段条数、最近活动；`show` 另带最近五条事项与材料条数）与 `next` | observer | |
+| `apa project list [--full]` | 列项目：每行只有 `id`、`name`、`intro`（前 60 字）、`tags`、`status`、`system_role`，另带 `cards`（各阶段条数、最近活动）、`total` 与 `next`；整份不超过一次读取的字数上限，放不下的从末尾删并改提示按名字检索；`--full` 给完整的行（含 repos 与允许的执行者） | observer | |
+| `apa project show <id>` | 读一个项目，含 repos 与允许的执行者，带项目卡片（各阶段条数、最近活动、最近五条事项、材料条数、本项目规范）与 `next`（项目的未结事项、项目内检索、本项目规范，没有规范时是项目材料） | observer | 5 |
 | `apa project create/update` | 建项目、改基本信息（整理事项）；改对话捕获开关属"改日常规则与提醒"。`allowed_executors` 与远程地址属"Agent 与执行者配置"、外发范围属"数据去向"，各有自己的入口（`apa settings`、`apa project repos`），建项目时带 `allowed_executors` 为 2 | delegate | 2、23 |
 | `apa project repos add/remove` | 增改本机检出（整理事项）；远程地址属"Agent 与执行者配置"，这一组没开为 23 | worker | 4、23 |
 | **材料与规范** | | | |
 | `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design`。`apa material add --link <位置> --title <标题> [--project] [--kind]` 登记链接型材料（主文档 §12.8）：位置是 `vault:<库名>/<库内相对路径>` 或网址，kind 缺省 `reference`；同一项目内同一位置重复登记返回已有的那条。`apa material show` 对链接型只回位置与打开地址 | worker | 2、5 |
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
-| `apa material list` | 列出材料，可按项目、kind、标签筛选 | observer | |
-| `apa material show <id> [--rev]` | 读当前或指定修订；托管型只回位置 | observer | 5 |
+| `apa material list [--project]` | 列出材料，带 `total` 与 `next`；整份不超过一次读取的字数上限 | observer | |
+| `apa material show <id> [--rev] [--offset <n>] [--full]` | 读当前或指定修订；托管型只回位置。自有型的内容默认给前 2000 字，`parts.content` 写明总长；`--offset <n>` 从第 n 个字起读一段（不超过一次读取的字数上限）；`--full` 给全部；带 `next` | observer | 2、5 |
 | `apa blob put/get` | 附件 | worker / observer | |
 | `apa agents list` | 查看 Agent 卡、默认选择与可用原因 | observer | — |
 | `apa agents check` | 比对工作区 AGENTS.md | observer | 10、11 |
@@ -321,7 +322,7 @@
 
 `GET /items?limit=<n>[&cursor=<c>]`：只回一页，另带 `total`（筛选后的总数）与 `next_cursor`（缺省表示没有下一页）；`last_rejections`、`content_scopes` 只含这一页的事项。不带 `limit` 时回全部，与以前相同；HTTP 不设条数上限（升级前 `limit` 被忽略，带大数读全部的调用方照旧），命令行一页至多 200 条；只带 `cursor` 为 400。
 
-`GET /projects` 另带 `cards`（项目 id → `{"counts": {阶段: 条数}, "last_activity": "YYYY-MM-DD"}`），`GET /projects/{id}` 另带 `card`（同上，另有 `recent`：最近变更的五条事项 `{id, title, phase, updated}`，不含已放弃；`materials`：材料条数）。条数只数调用者读得到的事项（外部钥匙按档位，主文档 §14.14）。
+`GET /projects` 另带 `cards`（项目 id → `{"counts": {阶段: 条数}, "last_activity": "YYYY-MM-DD"}`），`GET /projects/{id}` 另带 `card`（同上，另有 `recent`：最近变更的五条事项 `{id, title, phase, updated}`，不含已放弃；`materials`：材料条数；`guideline`：本项目规范的材料 id，没有时缺省）。条数只数调用者读得到的事项（外部钥匙按档位，主文档 §14.14）。
 
 `GET /items?from=YYYY-MM-DD&to=YYYY-MM-DD`：按日期范围读，含首尾，`to` 不早于 `from`，跨度至多 62 天，两个参数须同时给，否则 400。收录 `planned_for` 落在范围内、或 `deadline` 所在的本机日落在范围内的事项，与其他筛选取交集；不按阶段过滤。带范围时响应另有 `today`（本机时区的今天）与 `utc_offset`（本机时区此刻的偏移，如 `+08:00`）。
 
@@ -552,6 +553,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 ## B.6 v0.2.0 对已有契约的改动
 
 账本结构版本 15（统一检索，2026-11-28，主文档 §7.1、§17.2、决定 99）：`search` 迁移 v3 丢弃 `material_search` 与 `material_search_state`，新建 `search_doc`、`search_index`（FTS5，分词器 `porter unicode61`）、`search_cursor`、`search_stat`；都是派生数据，升级后第一次检索时全量重建，不改业务数据、不回填、不追加事件。新增路由 `GET /search` 与命令 `apa search`；`GET /items` 增 `limit`、`cursor`（带上时响应另有 `total`、`next_cursor`）；`GET /projects` 增 `cards`、`GET /projects/{id}` 增 `card`；`GET /health` 增 `search`。**破坏性改动**：`GET /materials/search` 与 `apa material search` 删除，改用 `GET /search?type=material`、`apa search --type material`（命中的形状见 B.2：`hosted` 去掉，托管型以带 `path` 区分）；`GET /items?q=` 从"查询的每个词都要出现"改为"任一词命中、按相关度排"，结果会比以前多，不带 `sort` 时顺序是相关度；`apa item list` 默认一页 30 条、每行只留短字段，要完整的行带 `--full`，要更多条带 `--limit`（至多 200）或按 `next` 续页；`apa item show` 默认正文前 2000 字、最近 5 条进展与挂靠消息（消息不带 `detail`），要全部带 `--full`。HTTP 的 `GET /items`（不带 `limit`）与 `GET /items/{id}` 响应不变，Web 不受影响。**升级顺序**：内核与插件一起换（插件的 `apa_search` 工具改为调 `apa search`，旧插件调已删除的子命令会失败）。**回滚**：账本从 v14 升到 v15 不可原地降级，回滚须同时恢复旧二进制与升级前的账本快照；只丢升级后的写入，索引本身不需要备份。
+
+统一检索补齐（2026-11-28，不改账本结构，主文档 §7.1、§17.2、决定 99）：只做加法的有 `GET /projects/{id}` 的 `card.guideline`、`apa material show --offset/--full`、`apa project list --full`、插件工具 `apa_material_list`、`apa_material_show` 与 `apa_search` 的 `phase`、`kind`、`tag`、`after`、`before`。**行为变化**：检索里决定的问题、选项与答复随事项可搜（命中在 `body`），简报的排名乘 0.7；`apa project list` 默认每行只留短字段、`apa material show` 默认内容截到前 2000 字、`apa material list` 有上限，要原样带 `--full`；常驻说明版本 5 → 6。**破坏性改动**：`apa item show --part progress` 取消（与 `apa item thread` 重复），更早的进展改用 `apa item thread <id> --before`；插件工具 `apa_item_show` 的 `part` 只剩 `body`、`messages`。**升级顺序**：内核与插件一起换；旧插件只会收到常驻说明过期的提示。
 
 账本结构版本 14（协作工作台闭环与执行者托管委派，2026-11-28，主文档 §6.17、§7.5、§7.6、§9.3、§13.6）：只增列与索引，不回填、不改已有数据。`delegation` 迁移 3 给 `delegation_dispatch` 加 `run`、`origin`、`about`（`TEXT NOT NULL DEFAULT ''`）与索引 `delegation_dispatch_session(session)`；`executors` 迁移 4 给 `executors_entry` 加 `overrides TEXT NOT NULL DEFAULT ''`；`eventlog` 迁移 4 加表达式索引 `eventlog_event_session`（按 `actor` 里的会话，不是 JSON 的 `actor` 取空）。已有委派记录的三列为空，读作"harness 自己派出、已挂事项"；已有执行者没有默认覆盖值，拉起时不多传参数。
 
