@@ -58,11 +58,12 @@ details.disc > summary:not(.group-head):hover { background: var(--hover); }
 details.disc > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 details.disc > summary > .icon-chevron { color: var(--ink-3); transition: transform var(--dur-std) var(--ease-out); }
 details.disc[open] > summary > .icon-chevron { transform: rotate(90deg); }
-details.disc::details-content {
+/* 展开收起的高度过渡：所有折叠（Disclosure 与页面里原生的 details）都有；不支持 ::details-content 的浏览器直接开合 */
+details::details-content {
   block-size: 0; opacity: 0; overflow: clip;
   transition: block-size var(--dur-std) var(--ease-out), opacity var(--dur-std) var(--ease-out), content-visibility var(--dur-std) allow-discrete;
 }
-details.disc[open]::details-content { block-size: auto; opacity: 1; }
+details[open]::details-content { block-size: auto; opacity: 1; }
 /* 没换成 Disclosure 的原生 details（页面里的「说明」「高级」等）：同一个箭头与摘要行的样子，没有高度动画 */
 details:not(.disc) > summary { padding-block: 6px; list-style: none; cursor: pointer; }
 details:not(.disc) > summary::-webkit-details-marker { display: none; }
@@ -72,7 +73,7 @@ details:not(.disc) > summary::before {
 }
 details[open]:not(.disc) > summary::before { transform: rotate(45deg); }
 /* 里面有弹出菜单开着时不裁切，菜单才能伸出折叠区 */
-details.disc[open]:has([aria-expanded="true"])::details-content { overflow: visible; }
+details[open]:has([aria-expanded="true"])::details-content { overflow: visible; }
 
 /* ---- 提示条 ---- */
 .toaster {
@@ -374,3 +375,6 @@ mark { padding: 0 1px; color: inherit; background: var(--warn-soft); border-radi
 .hit-more p, .hit-more ul { margin: 0; }
 .hit-more li { padding: 2px 0; overflow-wrap: anywhere; }
 .search-summary { margin: 0 0 var(--sp-2); padding: 0 var(--sp-1); }
+
+/* 来源行的启用开关：一拨就存，旁边是保存状态 */
+label.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }

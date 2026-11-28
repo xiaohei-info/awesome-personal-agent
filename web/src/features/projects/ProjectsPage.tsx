@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Disclosure, EmptyState, Skeleton } from "../../app/ui";
-import { Link, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { loadDone, type Done } from "../done/DonePage";
@@ -69,15 +69,15 @@ function ProjectList() {
   useEffect(() => void api.get<{ items: Item[] }>("/items").then((r) => setItems(r.items), () => setItems(null)), [api]);
   const count = (pid: string, phase: string) => items?.filter((i) => i.project === pid && i.phase === phase).length ?? 0;
 
+  // 新建项目：点开再填；建好直接进新项目的页面（界面设计 §6.2 第 5 条）。
+  const [creating, setCreating] = useState(false);
+  const navigate = useNavigate();
   const create = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      await api.post("/projects", { name, intro, tags: splitTags(tags) });
+      const p = await api.post<Project>("/projects", { name, intro, tags: splitTags(tags) });
       setError(null);
-      setName("");
-      setIntro("");
-      setTags("");
-      await load();
+      navigate("/projects/" + encodeURIComponent(p.id));
     } catch (err) {
       setError(err);
     }
@@ -107,13 +107,19 @@ function ProjectList() {
             ))}
         </ul>
       )}
-      <h2>{t.create}</h2>
-      <form className="panel" onSubmit={create}>
-        <label>{t.name} <input value={name} onChange={(e) => setName(e.target.value)} /></label>
-        <label>{t.intro} <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
-        <label>{t.tags} <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
-        <button type="submit">{t.create}</button>
-      </form>
+      {creating ? (
+        <form className="panel new-project" aria-label={t.create} onSubmit={create}>
+          <label>{t.name} <input autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <label>{t.intro} <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
+          <label>{t.tags} <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
+          <div className="actions">
+            <button type="submit">{t.createSubmit}</button>
+            <button type="button" onClick={() => setCreating(false)}>{t.cancel}</button>
+          </div>
+        </form>
+      ) : (
+        <p><button type="button" onClick={() => setCreating(true)}>{t.newProject}</button></p>
+      )}
     </main>
   );
 }

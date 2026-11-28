@@ -96,17 +96,21 @@ describe("项目页", () => {
     expect(screen.getByRole("link", { name: "acc-open" })).toBeInTheDocument();
   });
 
-  it("新建项目：带 CSRF 提交，出现在列表；缺名称时显示服务端原因", async () => {
+  it("新建项目：点开再填，带 CSRF 提交，建好进新项目页；缺名称时显示服务端原因", async () => {
     const s = server();
     const u = userEvent.setup();
     mount(s.impl);
     await screen.findByRole("link", { name: "acc-work" });
-    await u.click(screen.getByRole("button", { name: "新建项目" }));
+    expect(screen.queryByLabelText("名称")).toBeNull(); // 点开再填
+    await u.click(screen.getByRole("button", { name: "＋ 新建项目" }));
+    expect(screen.getByLabelText("名称")).toHaveFocus();
+    await u.click(screen.getByRole("button", { name: "创建" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("name is required");
     await u.type(screen.getByLabelText("名称"), "acc-new");
     await u.type(screen.getByLabelText("标签（逗号分隔）"), "a, b");
-    await u.click(screen.getByRole("button", { name: "新建项目" }));
-    expect(await screen.findByRole("link", { name: "acc-new" })).toBeInTheDocument();
+    await u.click(screen.getByRole("button", { name: "创建" }));
+    // 建好直接进新项目的页面
+    expect(await screen.findByRole("heading", { level: 1, name: "acc-new" })).toBeInTheDocument();
     const post = s.calls.filter((c) => c.method === "POST" && c.body?.name === "acc-new")[0];
     expect(post.csrf).toBe("tok-1");
     expect(post.body.tags).toEqual(["a", "b"]);
