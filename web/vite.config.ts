@@ -10,6 +10,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/app/test-setup.ts"],
+    // 样式守线测试按原文读样式文件（style-tokens.check.test.ts）；普通的样式导入仍按默认不处理。
+    css: { include: [/\.css\?raw$/] },
     coverage: { provider: "v8", include: ["src/app/**", "src/features/**"], exclude: ["src/**/*.test.*", "src/app/test-setup.ts", "src/app/main.tsx"] },
   },
 });

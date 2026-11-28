@@ -76,7 +76,7 @@ describe("Web 新建与编辑事项", () => {
     const l = ledger();
     const u = userEvent.setup();
     mount(l);
-    await u.click(await screen.findByRole("button", { name: "新建" }));
+    await u.click(await screen.findByRole("link", { name: "新建" }));
     await u.type(await field("标题"), "WB-NEW 订机票");
     await u.selectOptions(await field("项目"), "acc-home");
     await u.type(await field("截止"), "2030-03-05T18:00");
@@ -96,7 +96,7 @@ describe("Web 新建与编辑事项", () => {
     const l = ledger();
     const u = userEvent.setup();
     mount(l);
-    await u.click(await screen.findByRole("button", { name: "新建" }));
+    await u.click(await screen.findByRole("link", { name: "新建" }));
     await u.type(await field("标题"), "WB-HO 整理接口文档");
     expect(screen.queryByText("建好后在「Agent 处理」里点「现在开始」开工")).toBeNull();
     await u.click(screen.getByRole("checkbox", { name: "建好后交给 Agent" }));
@@ -111,7 +111,7 @@ describe("Web 新建与编辑事项", () => {
     const l = ledger();
     const u = userEvent.setup();
     mount(l);
-    await u.click(await screen.findByRole("button", { name: "新建" }));
+    await u.click(await screen.findByRole("link", { name: "新建" }));
     await u.click(await screen.findByRole("button", { name: "创建" }));
     expect(l.calls.some((c) => c.method === "POST")).toBe(false);
     expect(await screen.findByRole("alert")).toHaveTextContent("标题");

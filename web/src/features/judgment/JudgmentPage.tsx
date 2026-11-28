@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import "./judgment.css";
@@ -172,7 +173,7 @@ export function JudgmentPage() {
       </div>
       {error != null && <ErrorNote error={error} />}
       {notice && <p role="status">{notice}</p>}
-      {(!stats || !settings) && error == null && <p role="status">{t.loading}</p>}
+      {(!stats || !settings) && error == null && <Skeleton shape="card" label={t.loading} />}
       {stats && settings &&
         templates.map((tpl) => {
           const rate = rates.find((r) => r.template === tpl);

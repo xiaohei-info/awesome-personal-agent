@@ -46,6 +46,9 @@ const zh = {
   settings: "项目设置：名称、仓库、执行者",
   inboxSettings: "项目设置：名称、执行者",
   builtin: "内置",
+  where: "项目页",
+  openN: (n: number) => `进行中 ${n}`,
+  decideN: (n: number) => `等你决定 ${n}`,
   inboxHint: "未指定项目的事项和日常对话默认进入这里",
   inboxStatusLocked: "内置 Inbox 始终保持活跃，不可暂停或归档",
 };
@@ -95,6 +98,9 @@ const en: typeof zh = {
   settings: "Project settings: name, repositories, executors",
   inboxSettings: "Project settings: name, executors",
   builtin: "Built-in",
+  where: "the project page",
+  openN: (n) => `${n} in progress`,
+  decideN: (n) => `${n} to decide`,
   inboxHint: "Unassigned items and general chats land here by default",
   inboxStatusLocked: "Built-in Inbox always stays active and cannot be paused or archived",
 };

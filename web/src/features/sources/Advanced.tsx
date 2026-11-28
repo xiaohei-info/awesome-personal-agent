@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { useLang, useT } from "../../app/i18n";
@@ -122,7 +123,7 @@ export function Ingests({ source }: { source: Source }) {
       {error !== null && <ErrorNote error={error} />}
       {notice && <p role="status">{notice}</p>}
       {items === null ? (
-        error === null && <p role="status">{t.loading}</p>
+        error === null && <Skeleton label={t.loading} />
       ) : items.length === 0 ? (
         <p className="sub">{t.noIngests}</p>
       ) : (
@@ -174,7 +175,7 @@ export function Rejects({ source }: { source: Source }) {
       <h4>{t.rejects}</h4>
       {error !== null && <ErrorNote error={error} />}
       {items === null ? (
-        error === null && <p role="status">{t.loading}</p>
+        error === null && <Skeleton label={t.loading} />
       ) : items.length === 0 ? (
         <p className="sub">{t.noRejects}</p>
       ) : (

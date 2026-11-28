@@ -1,4 +1,5 @@
 import { Route, Routes, useLocation } from "react-router-dom";
+import { ErrorBoundary, Skeleton } from "../../app/ui";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -134,7 +135,7 @@ export function Schedule() {
     .sort((a, b) => BRIEF_PACKS.indexOf(a.pack) - BRIEF_PACKS.indexOf(b.pack)); // 简报在前，复盘在后
   const routines = (instances ?? []).filter((x) => x.pack === ROUTINE);
 
-  if (!briefs || !instances) return <main>{error != null ? <ErrorNote error={error} /> : <p role="status">{t.loading}</p>}</main>;
+  if (!briefs || !instances) return <main>{error != null ? <ErrorNote error={error} /> : <Skeleton shape="card" label={t.loading} />}</main>;
 
   return (
     <main>
@@ -146,7 +147,7 @@ export function Schedule() {
         <div aria-label={t.instanceList}>
           {scheduled.map((i) => {
             const last = lastOf(i.id);
-            return <ScheduleCard key={i.id} i={i} fallback={defaults[i.pack] ?? ""} agentReady={agentReady} open={nav?.open === i.id} last={last && { id: last.id, at: last.created_at }} onChange={replace} />;
+            return <ErrorBoundary key={i.id}><ScheduleCard i={i} fallback={defaults[i.pack] ?? ""} agentReady={agentReady} open={nav?.open === i.id} last={last && { id: last.id, at: last.created_at }} onChange={replace} /></ErrorBoundary>;
           })}
         </div>
         <More open={!scheduled.length} label={t.more}>

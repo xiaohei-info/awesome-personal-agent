@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
@@ -72,9 +73,9 @@ export function SpotCheckPage() {
       {error != null && <ErrorNote error={error} />}
       {notice && <p role="status">{notice}</p>}
       {pool === null ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : pool.length === 0 ? (
-        <p className="empty">{t.done}</p>
+        <EmptyState title={t.done} />
       ) : (
         <ul aria-label={t.list} className="rows spot">
           {pool.map((e) => (

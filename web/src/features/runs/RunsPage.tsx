@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -199,9 +200,9 @@ export function RunsPage() {
         </div>
       )}
       {runs === null ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : runs.length === 0 ? (
-        <p className="empty">{t.empty}</p>
+        <EmptyState title={t.empty} />
       ) : (
         <ul aria-label={t.log} className="rows log">
           {fold(runs).map((g) => <Line key={g[0].id} runs={g} />)}

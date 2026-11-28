@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { PageHead } from "../../app/page";
 import { errorText } from "../../app/i18n";
 import { useT } from "../../app/i18n";
@@ -45,7 +46,7 @@ export function SettingsVaultsPage() {
         <button onClick={() => void load()}>{t.retry}</button>
       </main>
     );
-  if (!doc) return <main><p role="status">{t.loading}</p></main>;
+  if (!doc) return <main><Skeleton shape="card" label={t.loading} /></main>;
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>

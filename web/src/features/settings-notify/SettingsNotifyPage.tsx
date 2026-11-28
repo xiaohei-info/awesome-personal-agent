@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
@@ -40,7 +41,7 @@ export function SettingsNotifyPage() {
 
 function Loading() {
   const t = useT(strings);
-  return useScopeReady() ? null : <p role="status">{t.loading}</p>;
+  return useScopeReady() ? null : <Skeleton shape="card" label={t.loading} />;
 }
 
 type Put = (fields: Record<string, unknown>) => Promise<number>;

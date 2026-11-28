@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Skeleton } from "../../app/ui";
 import { Link, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
@@ -42,7 +43,7 @@ function Confirm() {
 
   if (!known) return <main><p role="alert">{t.unsupported(act ?? t.missingDo)}</p><p><Link to="/">{t.home}</Link></p></main>;
   if (error != null && !item) return <main><ErrorNote error={error} /><p><Link to="/">{t.home}</Link></p></main>;
-  if (!item) return <main><p role="status">{t.loading}</p></main>;
+  if (!item) return <main><Skeleton shape="card" label={t.loading} /></main>;
 
   const path = "/items/" + encodeURIComponent(id);
   const ifMatch = { "If-Match": String(item.version) };

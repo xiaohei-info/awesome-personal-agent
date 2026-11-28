@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { EmptyState, ErrorBoundary, Skeleton } from "../../app/ui";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -92,12 +93,13 @@ export function ExecutorsPage() {
       <PageHead>{t.title}</PageHead>
       {error && <div role="alert">{error}</div>}
       {cards === null ? (
-        !error && <p role="status">{t.loading}</p>
+        !error && <Skeleton label={t.loading} />
       ) : cards.length === 0 ? (
-        <p className="empty">{t.empty}</p>
+        <EmptyState title={t.empty} />
       ) : (
         cards.map(({ e, listed, open, last, sessions }) => (
-          <article key={e.id} className="card" aria-label={e.label || e.id}>
+          <ErrorBoundary key={e.id}>
+          <article className="card" aria-label={e.label || e.id}>
             <h2>{e.label || e.id}</h2>
             <p className="sub">
               {[e.host, e.harness].filter(Boolean).join(" · ")}
@@ -146,6 +148,7 @@ export function ExecutorsPage() {
               <div><button className="danger" onClick={() => remove(e.id)}>{t.remove}</button></div>
             )}
           </article>
+          </ErrorBoundary>
         ))
       )}
     </main>

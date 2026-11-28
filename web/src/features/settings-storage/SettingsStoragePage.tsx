@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { PageHead } from "../../app/page";
 import { errorText, locale, useT } from "../../app/i18n";
 import { useSession } from "../../app/session";
@@ -42,7 +43,7 @@ export function SettingsStoragePage() {
         <button onClick={() => void load()}>{t.retry}</button>
       </main>
     );
-  if (!data) return <main><p role="status">{t.loading}</p></main>;
+  if (!data) return <main><Skeleton shape="card" label={t.loading} /></main>;
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
