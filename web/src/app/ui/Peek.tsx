@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useT } from "../i18n";
 import { Close, Down, External, Up } from "./icons";
 import { strings } from "./strings";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 // 侧边速览（规格 §4 第 3 件）：地址加 ?peek=<id>，可收藏，旧地址不受影响；列表把当前顺序交给它，它负责上一件、下一件、
 // Esc 与「在新页打开」。打开时焦点进面板，关闭后回到原来的行。视口窄于 1100px 时没有速览，调用方照旧整页打开。
@@ -73,7 +74,7 @@ export function PeekPanel({ id, ids, href, title, onOpen, onClose, children }: {
         <Link to={href} aria-label={t.openFull} data-tip={t.openFull}><External /></Link>
         <button type="button" aria-label={t.close} data-tip={t.close + " Esc"} onClick={onClose}><Close /></button>
       </header>
-      <div className="peek-body">{children}</div>
+      <div className="peek-body"><ErrorBoundary resetKey={id}>{children}</ErrorBoundary></div>
     </aside>
   );
 }

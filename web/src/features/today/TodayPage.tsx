@@ -11,10 +11,10 @@ import { useItemTitle, useNamed } from "../../app/names";
 import { loadDone, loadProgress } from "../done/DonePage";
 import { monday } from "../calendar/layout";
 import { hostClock, hostParts, useHostClock } from "../items/schedule";
-import { RowActions, type RowAct } from "../items/RowActions";
+import { DoneCircle, RowActions, type RowAct } from "../items/RowActions";
 import { Val, useLabel } from "../../app/values";
 import { ItemDetail } from "../items/ItemsPage";
-import { Disclosure, EmptyState, LIST_KEYS, PeekPanel, Skeleton, collapse, rowEl, toast, toastError, undoToast, useListKeys, usePageKeys, usePeek } from "../../app/ui";
+import { Disclosure, EmptyState, ErrorBoundary, Icon, LIST_KEYS, PeekPanel, Skeleton, collapse, rowEl, toast, toastError, undoToast, useListKeys, usePageKeys, usePeek } from "../../app/ui";
 import { strings } from "./strings";
 
 // 今天（界面设计 §3.2、§5.2）：自上而下五块，空的不显示——要你处理、Agent 交回的、今天的事、提醒、久未推进（默认折叠）。
@@ -193,13 +193,13 @@ export function TodayPage() {
   const empty = !!data && !top.length && !back.length && !todays.length && !reminders.length && !data.stale.length;
 
   return (
-    <main>
-      <PageHead>{t.title}</PageHead>
+    <main className="wide today">
+      <PageHead compact>{t.title}</PageHead>
       {error != null && <ErrorNote error={error} reveal />}
       {top.length > 0 && (
-        <section aria-label={t.blocks.top} className="panel">
+        <section aria-label={t.blocks.top}>
           <h2>{t.blocks.top}</h2>
-          <ul className="rows">
+          <ul className="rows flat">
             {top.map((x) => (
               <li key={x.key} className="act-row">
                 <div><span>{x.red ? <strong>{x.text}</strong> : x.text}</span></div>
@@ -212,7 +212,7 @@ export function TodayPage() {
       {back.length > 0 && (
         <section aria-label={t.blocks.back}>
           <h2>{t.blocks.back}</h2>
-          <ul className="rows">{back.map((r) => <BackRow key={r.id} run={r} />)}</ul>
+          <ErrorBoundary><ul className="rows flat">{back.map((r) => <BackRow key={r.id} run={r} />)}</ul></ErrorBoundary>
         </section>
       )}
       {!data ? (
@@ -224,24 +224,27 @@ export function TodayPage() {
               <h2>{t.count(t.blocks.today, todays.length)}</h2>
               {groups.map(([pid, es]) => {
                 const name = pid ? projects.find((p) => p.id === pid)?.name ?? "" : t.noProject;
+                // 每个项目组各自一道错误边界：一组渲染出错只换掉这一组。
                 return (
-                  <section key={pid} aria-label={name} className="today-group">
+                  <ErrorBoundary key={pid}>
+                  <section aria-label={name} className="today-group">
                     <Disclosure head defaultOpen persistKey={"today.group." + (pid || "-")}
                       summary={<h3>{pid ? <Link to={"/projects/" + encodeURIComponent(pid)}>{name}</Link> : name}{" "}<span className="count-n">{es.length}</span></h3>}>
-                      <ul className="rows">
+                      <ul className="rows flat">
                         {es.map((e) => (
                           <TodayRow key={e.item.id} entry={e} cursor={cursor === e.item.id} peeked={peek.id === e.item.id} entering={entering === e.item.id}
-                            onPeek={peek.enabled ? () => peek.open(e.item.id) : undefined} onChange={(it, what) => void replace(it, what, e.item)} />
+                            onPeek={peek.enabled ? () => peek.open(e.item.id) : undefined} onChange={(it, what) => void replace(it, what, e.item)} onDone={() => void doneById(e.item.id)} />
                         ))}
                       </ul>
                     </Disclosure>
                   </section>
+                  </ErrorBoundary>
                 );
               })}
             </section>
           )}
-          {reminders.length > 0 && <Reminders list={reminders} />}
-          {data.stale.length > 0 && <Stale items={data.stale} act={act} />}
+          {reminders.length > 0 && <ErrorBoundary><Reminders list={reminders} /></ErrorBoundary>}
+          {data.stale.length > 0 && <ErrorBoundary><Stale items={data.stale} act={act} /></ErrorBoundary>}
           {empty && <EmptyState title={t.allClear} note={t.allClearNote} action={<Link className="btn" to="/items">{t.seeItems}</Link>} />}
           {doneN && (
             <p className="sub">
@@ -310,12 +313,13 @@ const ifMatch = (it: Item) => ({ "If-Match": String(it.version) });
 const md = (d: string) => d.slice(5);
 
 /**
- * 今天的一件事：标题下一行写它为什么在这——计划哪天（过了的写「已过」）、今天截止、逾期（带原截止日）、紧急或高优先级，
- * 三类用不同的标记，不混在一起；行上四个快捷操作（RowActions，与事项列表共用）。项目名在组标题上，这里不重复。
+ * 今天的一件事，一行（Multica 式扁平行）：行首状态圆圈（点一下完成，带撤销提示）、优先级小图标、标题；
+ * 为什么在这（逾期、今天截止、计划哪天）与时段靠右成一列次要字；行上其余操作悬停才出现（RowActions compact）。项目名在组标题上，这里不重复。
  */
-function TodayRow({ entry, onChange, cursor, peeked, entering, onPeek }: {
+function TodayRow({ entry, onChange, onDone, cursor, peeked, entering, onPeek }: {
   entry: Entry;
   onChange: (it: Item, what: RowAct) => void;
+  onDone: () => void;
   cursor?: boolean;
   peeked?: boolean;
   entering?: boolean;
@@ -330,17 +334,24 @@ function TodayRow({ entry, onChange, cursor, peeked, entering, onPeek }: {
   const marks: { cls: string; text: string }[] = [];
   if (why.includes("overdue") && due) marks.push({ cls: "badge bad", text: t.why.overdue(md(due.date)) });
   if (why.includes("due") && due) marks.push({ cls: "badge warn", text: due.time === "23:59:59" ? t.why.dueToday : t.why.dueAt(due.time.slice(0, 5)) });
-  if (why.includes("high")) marks.push({ cls: "badge warn", text: item.priority === "urgent" ? t.why.urgent : t.why.high });
   if (why.includes("planned") && item.planned_for) marks.push({ cls: "badge plain", text: item.planned_for < today ? t.why.plannedPast(md(item.planned_for)) : t.why.plannedToday });
+  const prio = item.priority === "urgent" || item.priority === "high" ? item.priority : null;
   return (
-    <li data-item={item.id} data-cursor={cursor || undefined} data-peeked={peeked || undefined} className={entering ? "row-enter" : undefined}>
-      <div className="act-row">
-        <div>
-          {item.planned_slot && <span className="badge plain">{item.planned_slot}</span>}{" "}
-          <Link to={itemPath(item)} onClick={(e) => { if (e.shiftKey && onPeek) { e.preventDefault(); onPeek(); } }}>{item.title}</Link>
-          <span className="sub reasons">{marks.map((m) => <span key={m.text} className={m.cls}>{m.text}</span>)}</span>
-        </div>
-        <RowActions item={item} where={t.where} onChange={onChange} />
+    <li data-item={item.id} data-cursor={cursor || undefined} data-peeked={peeked || undefined} className={["trow", entering && "row-enter"].filter(Boolean).join(" ")}>
+      <div className="act-row trow-line">
+        <DoneCircle item={item} onDone={onDone} />
+        {prio && (
+          <span className="prio" data-prio={prio}>
+            {prio === "urgent" ? <Icon.PrioUrgent /> : <Icon.PrioHigh />}
+            <span className="sr-only">{prio === "urgent" ? t.why.urgent : t.why.high}</span>
+          </span>
+        )}
+        <Link className="trow-title" to={itemPath(item)} onClick={(e) => { if (e.shiftKey && onPeek) { e.preventDefault(); onPeek(); } }}>{item.title}</Link>
+        <span className="sub reasons">
+          {item.planned_slot && <span className="slot">{item.planned_slot}</span>}
+          {marks.map((m) => <span key={m.text} className={m.cls}>{m.text}</span>)}
+        </span>
+        <RowActions compact item={item} where={t.where} onChange={onChange} />
       </div>
     </li>
   );
@@ -371,7 +382,7 @@ function Reminders({ list }: { list: Reminder[] }) {
     <section aria-label={t.blocks.reminders} id="reminders">
       <h2>{t.count(t.blocks.reminders, shown.length)}</h2>
       {error != null && <ErrorNote error={error} reveal />}
-      <ul className="rows">
+      <ul className="rows flat">
         {shown.map((d) => (
           <li key={d.id} className="act-row" aria-label={d.content.title} data-delivery={d.id}>
             <div>
@@ -423,7 +434,7 @@ function Stale({ items, act }: { items: Item[]; act: (fn: () => Promise<unknown>
 
   return (
     <Disclosure aria-label={t.groups.stale} persistKey="today.stale" summary={<h2>{t.count(t.groups.stale, items.length)}</h2>}>
-      <ul className="rows">
+      <ul className="rows flat">
         {items.map((it) => (
           <li key={it.id}>
             <label><input type="checkbox" checked={picked.has(it.id)} onChange={() => toggle(it.id)} aria-label={t.select(it.title)} /> </label>
@@ -431,7 +442,7 @@ function Stale({ items, act }: { items: Item[]; act: (fn: () => Promise<unknown>
           </li>
         ))}
       </ul>
-      <div className="panel actions">
+      <div className="actions stale-bar">
         <label>{t.how}
           <select value={choice} onChange={(e) => setChoice(e.target.value as StaleChoice)}>
             <option value="continue">{t.choices.continue}</option>

@@ -25,3 +25,21 @@ export const Up = make("up", <path d="M6 15l6-6 6 6" />);
 export const Down = make("down", <path d="M6 9l6 6 6-6" />);
 export const Spinner = make("spinner", <path d="M12 3a9 9 0 109 9" />);
 export const EmptyList = make("empty", <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M8 9h8M8 13h5" /></>);
+
+// 优先级标记（行内 14px，实心，颜色跟随文字）：紧急是带叹号的方块，高是三格柱。
+export function PrioUrgent() {
+  return (
+    <svg className="icon sm icon-prio" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="currentColor" />
+      <path d="M8 4.5v4.5" stroke="var(--surface)" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="8" cy="11.4" r="1" fill="var(--surface)" />
+    </svg>
+  );
+}
+export function PrioHigh() {
+  return (
+    <svg className="icon sm icon-prio" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+      <rect x="2" y="8" width="3.5" height="6" rx="1" /><rect x="6.25" y="5" width="3.5" height="9" rx="1" /><rect x="10.5" y="2" width="3.5" height="12" rx="1" />
+    </svg>
+  );
+}

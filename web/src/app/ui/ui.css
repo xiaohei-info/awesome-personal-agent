@@ -29,23 +29,24 @@
   :is(li, .act-row):hover > .act-row > [data-row-actions] > *,
   li[data-cursor="true"] [data-row-actions] > *,
   [data-row-actions]:focus-within > *,
-  [data-row-actions]:has([aria-expanded="true"]) > * { opacity: 1; pointer-events: auto; }
+  [data-row-actions]:has([aria-expanded="true"]) > *,
+  .trow:focus-within [data-row-actions] > * { opacity: 1; pointer-events: auto; }
   /* 行内次要按钮是 ghost 款：无边框透明底，悬停才有底色；主操作保持描边款 */
   /* !important 盖过 styles.css 里 main button 的通用描边（同 .seg、.chips 的做法） */
   main [data-row-actions] > button:not([data-keep]) { border-color: transparent !important; background: transparent !important; color: var(--ink-2); }
   main [data-row-actions] > button:not([data-keep]):hover:not(:disabled) { background: var(--hover) !important; color: var(--ink); }
 }
 
-/* ---- 分组头：吸顶、灰底不透明、左侧箭头、右侧灰色计数 ---- */
+/* ---- 分组头（Multica 式）：细的吸顶条，箭头、名称、紧跟名称的灰色计数；底色由墨色淡混在面板色上，不透明 ---- */
 .group-head {
   position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: var(--sp-2);
-  min-height: var(--group-h); margin: 0 0 var(--sp-2); padding: 0 var(--sp-3); border-radius: var(--r-lg);
-  font-size: 14px; font-weight: 600; background: var(--sunken); cursor: pointer; list-style: none;
+  min-height: 36px; margin: 0; padding: 0 var(--sp-3); border-radius: var(--r-lg);
+  font-size: 13px; font-weight: 600; background: color-mix(in oklch, var(--ink) 4%, var(--surface)); cursor: pointer; list-style: none;
   transition: background-color var(--dur-micro) var(--ease-out);
 }
-.group-head:hover { background: color-mix(in oklch, var(--ink) 6%, var(--sunken)); }
+.group-head:hover { background: color-mix(in oklch, var(--ink) 7%, var(--surface)); }
 .group-head::-webkit-details-marker { display: none; }
-.group-head .count-n { margin-left: auto; font-weight: 400; font-size: 12.5px; color: var(--ink-3); }
+.group-head .count-n { font-weight: 400; font-size: 12px; color: var(--ink-3); }
 .group-head a { text-decoration: none; }
 .group-head a:hover { text-decoration: underline; }
 
@@ -82,8 +83,11 @@ details.disc[open]:has([aria-expanded="true"])::details-content { overflow: visi
 .toaster > .toast[data-leaving="true"] { animation: toast-out var(--dur-micro) var(--ease-in) forwards; }
 .toast > .toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .toast > .dot { align-self: center; }
-.toast button.toast-act { padding: 2px 8px; font-weight: 600; color: var(--ink); background: none; border: 0; border-radius: var(--r-md); cursor: pointer; }
-.toast button.toast-act:hover { background: var(--hover); }
+/* 撤销按钮是实心小按钮（Multica 的提示条），成功类提示左侧一个绿色勾 */
+.toast > .icon-check { color: var(--ok); }
+.toast button.toast-act { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; font-weight: 600; color: var(--paper); background: var(--ink); border: 0; border-radius: var(--r-md); cursor: pointer; }
+.toast button.toast-act:hover { background: color-mix(in oklch, var(--ink) 86%, var(--paper)); }
+.toast button.toast-act kbd { height: 16px; min-width: 16px; color: inherit; background: transparent; border-color: color-mix(in oklch, var(--paper) 45%, transparent); }
 .toast button.toast-close { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; color: var(--ink-3); background: none; border: 0; border-radius: var(--r-md); cursor: pointer; }
 .toast button.toast-close:hover { color: var(--ink); background: var(--hover); }
 .toast kbd { margin-left: 2px; }
@@ -158,9 +162,13 @@ details.disc[open]:has([aria-expanded="true"])::details-content { overflow: visi
 @keyframes skel-delay { from { visibility: hidden; } to { visibility: hidden; } }
 .skel { display: block; height: 12px; background: var(--sunken); border-radius: var(--r-md); animation: skel-pulse 2s cubic-bezier(.4, 0, .6, 1) 200ms infinite; }
 @keyframes skel-pulse { 50% { opacity: .5; } }
-ul.rows.skel-rows > li { display: grid; gap: 8px; align-content: center; min-height: var(--row-h-2); }
-.skel-rows .skel:first-child { width: 60%; }
-.skel-rows .skel:last-child { width: 35%; height: 10px; }
+/* 列表骨架照真行的样子：一条分组条，下面是 36px 的行（圆圈、标题、靠右的次要信息） */
+.skel-rows { display: grid; }
+.skel-rows > .skel-bar { height: 36px; margin-bottom: 2px; border-radius: var(--r-lg); }
+.skel-row { display: flex; align-items: center; gap: var(--sp-3); height: var(--row-h); padding: 0 var(--sp-3); }
+.skel-row > .skel { width: 38%; height: 10px; }
+.skel-row > .skel-dot { flex: none; width: 14px; height: 14px; border-radius: 50%; }
+.skel-row > .skel-meta { width: 64px; margin-left: auto; }
 .skel-card { display: grid; gap: 10px; }
 .skel-card .skel:first-child { width: 40%; height: 16px; }
 .skel-card .skel:nth-child(3) { width: 85%; }
@@ -218,4 +226,102 @@ ul.rows.skel-rows > li { display: grid; gap: 8px; align-content: center; min-hei
 
 /* 摘要行里的标题沿用标题字号，去掉外边距 */
 details.disc > summary > :is(h2, h3) { margin: 0; }
-.group-head > h3 { display: flex; flex: 1; align-items: center; gap: var(--sp-2); font-size: 14px; }
+.group-head > h3 { display: flex; flex: 1; align-items: center; gap: var(--sp-2); font-size: 13px; }
+
+/* ===== Multica 式列表页（今天页先用；交互样式规格 §5.2、§5.5，本人目视意见 2026-11-28） ===== */
+
+/* 宽版页面：内容跟随窗口宽度；宽屏时外框留纸色，内容放进一块圆角面板（Multica 的画布），暖纸感只留在大背景上 */
+main.wide { max-width: none; padding: var(--sp-2) var(--sp-6) 80px; }
+@media (min-width: 821px) {
+  .shell:has(main.wide) > nav { background: transparent; border-right-color: transparent; }
+  .shell > section:has(> main.wide) {
+    margin: var(--sp-2) var(--sp-2) var(--sp-2) 0; min-height: calc(100vh - 16px);
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow-surface);
+  }
+}
+main.wide h2 { margin: var(--sp-6) 0 var(--sp-2); padding: 0 var(--sp-1); font: 600 13px/20px var(--sans); color: var(--ink-2); }
+main.wide > section:first-of-type > h2 { margin-top: var(--sp-3); }
+main.wide details.disc > summary > h2 { margin: 0; padding: 0; }
+
+/* 扁平行：整宽、连续、不浮成卡片；行与行只隔一条很淡的线 */
+:is(ul, ol).rows.flat { margin: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
+:is(ul, ol).rows.flat > li {
+  min-height: var(--row-h); padding: 0 var(--sp-3); gap: 0 var(--sp-2); font-size: 14px; line-height: 20px;
+  border-bottom: 1px solid color-mix(in oklch, var(--line) 55%, transparent); border-radius: 0;
+}
+:is(ul, ol).rows.flat > li:last-child { border-bottom: 0; }
+:is(ul, ol).rows.flat > li.act-row { padding-block: 6px; }
+.rows.flat > li .actions { margin-top: 0; }
+.rows.flat .act-row .sub:not(.reasons) { display: inline; margin-left: var(--sp-2); }
+.rows.flat > li > .act-row > div > .sub { display: block; margin-left: 0; }
+.rows.flat > li.act-row > :is(a.btn, .actions) { margin-left: auto; }
+.rows.flat :is(.btn, button):not(.bare):not(.link) { min-height: 28px; padding: 3px 10px; font-size: 13px; }
+
+/* 今天的一行：圆圈 · 优先级 · 标题（单行截断）……靠右的次要信息；行内展开的表单换到下一行 */
+.trow { position: relative; }
+.trow-line { flex-wrap: wrap; gap: 0 var(--sp-2); min-height: var(--row-h); width: 100%; }
+.trow-title { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-decoration: none; }
+.trow-title:hover { text-decoration: none; }
+.trow [data-row-actions] > button, .trow [data-row-actions] > .row-more > button { font-size: 13px; font-weight: 400; }
+.trow .sub.reasons { display: flex; flex: none; flex-wrap: nowrap; gap: var(--sp-3); margin: 0 0 0 auto; font-size: 12px; line-height: 20px; color: var(--ink-3); }
+.trow .reasons .badge { padding: 0; font-size: 12px; line-height: 20px; color: var(--ink-3); background: none; border-radius: 0; }
+.trow .reasons .badge::before { display: none; }
+.trow .reasons .badge.bad { color: var(--seal); }
+.trow .reasons .badge.warn { color: var(--warn); }
+.trow .reasons .slot { font-variant-numeric: tabular-nums; }
+.trow-line > :is(.row-panel, [role="alert"]) { flex-basis: 100%; margin: 0 0 var(--sp-2) 26px; }
+/* 行内展开（排时间、记进展、删除确认、Agent 处理）：一块浅灰底的紧凑条，不再是浮起的卡片；排时间的字段排成一行 */
+.trow-line > .row-panel { padding: 10px 12px; background: color-mix(in oklch, var(--ink) 3%, var(--surface)); border: 0; border-radius: var(--r-lg); box-shadow: none; animation: row-in var(--dur-fast) var(--ease-out); }
+.trow-line > form.row-panel { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2) var(--sp-3); max-width: none; }
+.trow-line > form.row-panel :is(fieldset, fieldset > .actions) { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2) var(--sp-3); max-width: none; margin: 0; padding: 0; border: 0; }
+.trow-line > form.row-panel legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.trow-line > form.row-panel label { font-size: 12px; }
+.trow-line > form.row-panel :is(fieldset > .actions > label, > label) { flex: none; }
+.trow-line > form.row-panel input:not([type="checkbox"]) { width: auto; height: 30px; padding: 3px 8px; }
+.trow-line > form.row-panel label:has(> input[type="checkbox"]) { height: 30px; font-size: 13px; }
+.trow-line > form.row-panel > .actions { margin: 0; }
+.prio { display: inline-flex; flex: none; color: var(--warn); }
+.prio[data-prio="urgent"] { color: var(--seal); }
+
+/* 行首状态圆圈：点一下完成；悬停时圈里预显一个勾（Multica 的状态图标位置） */
+.status-circle {
+  position: relative; display: inline-grid; flex: none; place-items: center; width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0 2px 0 0;
+  color: transparent; background: none; border: 1.5px solid var(--ink-3); border-radius: 50%; cursor: pointer;
+  transition: border-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out), background-color var(--dur-micro) var(--ease-out);
+}
+.status-circle .icon { width: 10px; height: 10px; }
+button.status-circle:hover:not(:disabled), button.status-circle:focus-visible { color: var(--ink-2); border-color: var(--ink-2); background: var(--hover); }
+.status-circle[data-phase="waiting"] { border-style: dashed; }
+.status-circle[data-off] { border-style: dotted; cursor: help; }
+.status-circle[data-phase="done"] { border-color: var(--ok); background: var(--ok); }
+.status-circle[data-phase="dropped"] { border-color: var(--ink-3); opacity: .6; }
+.status-circle[data-tip]::after { left: 0; transform: translate(0, 2px); }
+.status-circle[data-tip]:is(:hover, :focus-visible)::after { transform: translate(0, 0); }
+
+/* 行上的其余操作：宽屏悬停才浮在行尾，盖住次要信息、不挤动它；窄屏收进「更多」 */
+@media (hover: hover) and (pointer: fine) and (min-width: 821px) {
+  .trow-line > [data-row-actions] {
+    position: absolute; right: var(--sp-2); top: 4px; z-index: 1; height: 28px; margin: 0; padding-left: var(--sp-6);
+    background: linear-gradient(to right, transparent, color-mix(in oklch, var(--ink) 4%, var(--surface)) var(--sp-6));
+  }
+  .trow:not(:hover):not(:focus-within):not([data-cursor="true"]) .trow-line > [data-row-actions]:not(:has([aria-expanded="true"])) { visibility: hidden; }
+}
+@media (max-width: 820px) {
+  main.wide { padding: var(--sp-2) var(--sp-2) 56px; }
+  .trow .trow-line { min-height: 44px; }
+  .trow .trow-line > .actions { flex: none; flex-wrap: nowrap; margin: 0; }
+  .trow .trow-line > .actions > .row-more { flex: none; }
+  /* !important 盖过 styles.css 里 main button 的通用描边（同 .seg、.chips 的做法） */
+  main .trow .trow-line > .actions > .row-more > button { width: auto; min-height: 32px; padding: 2px 8px; color: var(--ink-2); background: transparent !important; border-color: transparent !important; }
+  .status-circle { width: 20px; height: 20px; }
+  .trow .sub.reasons { gap: var(--sp-2); }
+  .trow .reasons .badge.plain { display: none; }
+}
+
+/* 错误边界的提示：沿用空状态的版式，不用 [role="alert"] 的红底一行字 */
+.render-failed[role="alert"] { margin: 0; padding: 0; font-size: inherit; color: inherit; background: none; border-radius: 0; }
+main > .render-failed .empty-state { padding-top: 64px; }
+@media (max-width: 820px) { .status-circle[data-tip]::after { display: none; } }
+
+/* 久未推进的批量处理条：一行，不再是卡片 */
+.stale-bar { align-items: flex-end; margin: var(--sp-2) 0 0; padding: var(--sp-2) var(--sp-3); }

@@ -163,6 +163,8 @@ const zh = {
   detailWhere: "事项页",
   rowMore: "更多",
   rowMoreFor: (title: string) => `更多操作：${title}`,
+  circleDone: "点一下完成",
+  circleDelegation: "委派要带证据，去详情里完成",
   hiddenDropped: (n: number) => `已隐藏 ${n} 件已放弃的事项；在「阶段」筛选里选「已放弃」可查看、找回`,
 };
 
@@ -325,6 +327,8 @@ const en: typeof zh = {
   detailWhere: "the item page",
   rowMore: "More",
   rowMoreFor: (title) => `More actions: ${title}`,
+  circleDone: "Click to finish",
+  circleDelegation: "Delegations need evidence; finish in details",
   hiddenDropped: (n) => `${n} dropped item(s) hidden; pick Dropped under Phase to see or restore them`,
 };
 

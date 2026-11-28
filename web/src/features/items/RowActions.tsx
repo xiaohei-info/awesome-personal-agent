@@ -10,7 +10,7 @@ import type { Item } from "./ItemsPage";
 import { SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { useHostClock } from "./schedule";
 import { ProgressForm } from "../today/ProgressForm";
-import { Menu } from "../../app/ui";
+import { Icon, Menu } from "../../app/ui";
 
 /** 行上做了什么：done、plan、progress、edit（交给 Agent 等其余改动）。 */
 export type RowAct = "done" | "plan" | "progress" | "edit" | "drop";
@@ -24,7 +24,23 @@ import { strings } from "./strings";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export function RowActions({ item, where, onChange }: { item: Item; where: string; onChange: (it: Item, what: RowAct) => void }) {
+/**
+ * 行首的状态圆圈（Multica 式）：点一下就是「完成」，与行上的完成按钮同一个接口（调用方给 onDone）。
+ * 委派完成要带证据（§6.14），圆圈不可点、悬停说明去详情；已结束或待接受的只画状态。
+ */
+export function DoneCircle({ item, onDone, busy }: { item: Item; onDone: () => void; busy?: boolean }) {
+  const t = useT(strings);
+  if (["proposed", "done", "dropped"].includes(item.phase)) return <span className="status-circle" data-phase={item.phase} aria-hidden="true" />;
+  if (item.kind === "delegation") return <span className="status-circle" data-phase={item.phase} data-off role="img" tabIndex={0} data-tip={t.circleDelegation} aria-label={t.circleDelegation} />;
+  return (
+    <button type="button" className="bare status-circle" data-phase={item.phase} aria-label={t.done} data-tip={t.circleDone} disabled={busy} onClick={onDone}>
+      <Icon.Check size="sm" />
+    </button>
+  );
+}
+
+/** compact：今天页的扁平行——完成由行首圆圈做（DoneCircle），这里不再放「完成」；窄屏全部收进「更多」。 */
+export function RowActions({ item, where, onChange, compact }: { item: Item; where: string; onChange: (it: Item, what: RowAct) => void; compact?: boolean }) {
   const t = useT(strings);
   const { api } = useSession();
   const narrow = useNarrow();
@@ -72,7 +88,7 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
     <>
       {/* data-row-actions：桌面上悬停或聚焦到这一行才显出次要操作；data-keep 的「完成」常显（交互样式规格 §5.2）。 */}
       <span className="actions" role="group" aria-label={t.rowActions(item.title)} data-row-actions>
-        <button type="button" aria-expanded={open === "plan"} onClick={() => setOpen(open === "plan" ? null : "plan")}>{t.rowPlan}</button>
+        {!(compact && narrow) && <button type="button" aria-expanded={open === "plan"} onClick={() => setOpen(open === "plan" ? null : "plan")}>{t.rowPlan}</button>}
         {/* 交给 Agent 只对任务（交给 Agent 的规则只认任务，§13.6）。 */}
         {!narrow && item.kind === "task" && <button type="button" aria-expanded={open === "agent"} disabled={busy} onClick={() => void handoff()}>{handed ? t.rowAgent : t.rowHandoff}</button>}
         {!narrow && <button type="button" aria-expanded={open === "progress"} onClick={() => setOpen(open === "progress" ? null : "progress")}>{t.rowProgress}</button>}
@@ -80,13 +96,14 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
           <button type="button" aria-expanded={open === "more"} onClick={() => setOpen(open === "more" ? null : "more")}>{t.rowMore}</button>
         ) : (
           <Menu trigger={t.rowMore} label={t.rowMoreFor(item.title)} items={[
+            ...(compact ? [{ label: t.rowPlan, onSelect: () => setOpen(open === "plan" ? null : "plan") }] : []),
             ...(item.kind === "task" ? [{ label: handed ? t.rowAgent : t.rowHandoff, disabled: busy, onSelect: () => { focusAgentRef.current = true; void handoff(); } }] : []),
             { label: t.rowProgress, onSelect: () => setOpen(open === "progress" ? null : "progress") },
             { label: t.del, disabled: busy, onSelect: () => setOpen(open === "delete" ? null : "delete") },
           ]} />
         )}
         {/* 委派完成要带证据（§6.14），去详情填；其余一键完成。放在最后：次要操作隐藏时仍占位，常显的「完成」贴在行尾。 */}
-        {item.kind !== "delegation" && <button type="button" data-keep disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done")}>{t.done}</button>}
+        {!compact && item.kind !== "delegation" && <button type="button" data-keep disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done")}>{t.done}</button>}
       </span>
       {err != null && <div className="row-panel"><ErrorNote error={err} /></div>}
       {open === "more" && (

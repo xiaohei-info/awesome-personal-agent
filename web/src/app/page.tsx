@@ -9,13 +9,13 @@ export const COUNTS_EVENT = "apa:counts";
 // 外壳按当前页面所在的导航入口提供小字页眉；页面只写标题，不重复声明入口。
 export const SectionContext = createContext<string | undefined>(undefined);
 
-/** 页头：小字入口名 + 宋体 h1 + 可选导语。 */
-export function PageHead({ children, lede }: { children: ReactNode; lede?: ReactNode }) {
+/** 页头：小字入口名 + 宋体 h1 + 可选导语。compact：工具条上已有入口与页签，只留一行小标题（列表型页面，Multica 式）。 */
+export function PageHead({ children, lede, compact }: { children: ReactNode; lede?: ReactNode; compact?: boolean }) {
   const section = useContext(SectionContext);
   return (
     <>
-      {section && <p className="eyebrow">{section}</p>}
-      <h1>{children}</h1>
+      {section && !compact && <p className="eyebrow">{section}</p>}
+      <h1 className={compact ? "compact" : undefined}>{children}</h1>
       {lede && <p className="lede">{lede}</p>}
     </>
   );

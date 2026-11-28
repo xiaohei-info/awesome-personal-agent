@@ -10,3 +10,4 @@ export { Menu, Popover, type MenuItem } from "./Menu";
 export { ConfirmInline, ConfirmDialog } from "./Confirm";
 export { SaveState, Skeleton, EmptyState, Clamp, type Save } from "./feedback";
 export { collapse } from "./motion";
+export { ErrorBoundary } from "./ErrorBoundary";

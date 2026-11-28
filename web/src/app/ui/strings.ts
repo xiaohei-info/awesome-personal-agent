@@ -20,6 +20,11 @@ const zh = {
   next: "下一件",
   position: (n: number, m: number) => `${n} / ${m}`,
   cancel: "取消",
+  // 错误边界：渲染出错时的简短提示（不露堆栈与内核词）
+  failPage: "这一页没能显示出来",
+  failBlock: "这一块没能显示出来",
+  failNote: "可能是一时的问题，点重试；还不行就刷新页面",
+  retry: "重试",
   keysTitle: "快捷键",
   keysNone: "这一页没有快捷键",
   keys: {
@@ -55,6 +60,10 @@ const en: typeof zh = {
   next: "Next",
   position: (n, m) => `${n} / ${m}`,
   cancel: "Cancel",
+  failPage: "This page couldn't be shown",
+  failBlock: "This part couldn't be shown",
+  failNote: "It may be temporary. Retry, or reload the page",
+  retry: "Retry",
   keysTitle: "Keyboard shortcuts",
   keysNone: "No shortcuts on this page",
   keys: {

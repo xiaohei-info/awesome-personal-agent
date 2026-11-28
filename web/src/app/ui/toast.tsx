@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { errorText, useT } from "../i18n";
-import { Close } from "./icons";
+import { Check, Close } from "./icons";
 import { strings } from "./strings";
 
 // 提示条（规格 §4 第 1 件）：全局唯一，外壳挂一次 <Toaster />。
@@ -121,7 +121,7 @@ export function Toaster() {
       onMouseEnter={() => { paused = true; }} onMouseLeave={() => { paused = false; }}>
       {items.map((x) => (
         <li key={x.id} className="toast" role={x.error ? "alert" : "status"} data-leaving={x.leaving || undefined}>
-          {x.error && <span className="dot bad" aria-hidden="true" />}
+          {x.error ? <span className="dot bad" aria-hidden="true" /> : <Check size="sm" />}
           <span className="toast-text">{x.text}</span>
           {x.undo && (
             <button type="button" className="toast-act" onClick={() => void runUndo(x)}>

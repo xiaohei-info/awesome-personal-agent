@@ -33,9 +33,10 @@ export function Skeleton({ shape = "rows", n = 5, label }: { shape?: "rows" | "c
     <div className="skel-wrap" role="status" aria-label={label ?? t.loading}>
       <span className="sr-only">{label ?? t.loading}</span>
       {shape === "rows" && (
-        <ul className="rows skel-rows" aria-hidden="true">
-          {Array.from({ length: n }, (_, i) => <li key={i}><span className="skel" /><span className="skel" /></li>)}
-        </ul>
+        <div className="skel-rows" aria-hidden="true">
+          <span className="skel skel-bar" />
+          {Array.from({ length: n }, (_, i) => <div key={i} className="skel-row"><span className="skel skel-dot" /><span className="skel" /><span className="skel skel-meta" /></div>)}
+        </div>
       )}
       {shape === "card" && (
         <div className="panel skel-card" aria-hidden="true"><span className="skel" /><span className="skel" /><span className="skel" /><span className="skel" /></div>

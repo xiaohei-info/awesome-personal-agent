@@ -77,7 +77,7 @@ kbd {
 .shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); min-height: 100vh; }
 .shell > nav {
   position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column;
-  padding: 20px 12px 14px; border-right: 1px solid var(--line);
+  padding: 16px 8px 12px; border-right: 1px solid var(--line);
   background: color-mix(in oklch, var(--sunken) 70%, transparent);
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 18px; }
@@ -88,14 +88,15 @@ kbd {
 }
 .brand b { display: block; font: 600 15px/1.2 var(--serif); letter-spacing: .04em; }
 .brand small { display: block; font-size: 11.5px; color: var(--ink-3); }
-.shell > nav h2 { margin: 16px 8px 4px; font-size: 11px; font-weight: 500; color: var(--ink-3); letter-spacing: .14em; }
-.shell > nav ul { list-style: none; margin: 0; padding: 0; }
+/* 侧栏按 Multica：分组小标题 12px 中等字重、不加字距；行高 32、左右 12、圆角 8、14px 墨色字；当前页平底浅灰。 */
+.shell > nav h2 { margin: 16px 12px 4px; font-size: 12px; font-weight: 500; line-height: 16px; color: var(--ink-3); letter-spacing: 0; }
+.shell > nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 .shell > nav a {
-  display: flex; align-items: center; justify-content: space-between; min-height: var(--nav-row-h); padding: 6px 10px; border-radius: var(--r-lg);
-  color: var(--ink-2); text-decoration: none; transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+  display: flex; align-items: center; justify-content: space-between; min-height: var(--nav-row-h); padding: 6px 12px; border-radius: var(--r-lg);
+  font-size: 14px; line-height: 20px; color: var(--ink); text-decoration: none; transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
 }
-.shell > nav a:hover { background: var(--hover); color: var(--ink); }
-.shell > nav a.active { background: var(--selected); color: var(--ink); font-weight: 600; }
+.shell > nav a:hover { background: var(--hover); }
+.shell > nav a.active { background: var(--selected); font-weight: 500; }
 .count { min-width: 20px; padding: 0 6px; border-radius: 99px; font: 600 11px/18px var(--sans); text-align: center; color: oklch(98% 0.01 60); background: var(--seal); }
 /* 灰色数字：可以处理、不处理也不卡住任何事（建议、抽查）；红色只留给「等你决定」（界面设计 §5.1）。 */
 .count.quiet { color: var(--ink-2); background: var(--sunken); }
@@ -106,9 +107,8 @@ kbd {
 .act-row > div { flex: 1 1 220px; min-width: 0; }
 .act-row .sub { display: block; }
 .act-row > .row-panel { flex-basis: 100%; margin: 0; }
-/* 今天的事：每行一串「为什么在这」的标记（逾期、今天截止、紧急/高、计划），按项目分组 */
+/* 今天的事：每行一串「为什么在这」的标记（逾期、今天截止、计划），按项目分组；行的样式在 ui.css 的 .trow */
 .sub.reasons { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; }
-.today-group { margin: 0 0 var(--sp-3); }
 /* 手机宽度：主操作与「更多」菜单入口收紧间距并排一行，次要动作收进「更多」菜单，不换行不横向溢出 */
 @media (max-width: 820px) {
   .act-row > .actions { flex: 1 1 100%; flex-wrap: nowrap; gap: 6px; margin-top: 8px; }
@@ -150,12 +150,14 @@ kbd {
 .nav-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
 .nav-foot > div { display: flex; gap: 6px; margin-top: 8px; }
 
-/* 入口内的页签：每个页签是一个页面的原地址 */
-.tabs { display: flex; gap: 2px; max-width: 800px; margin: 0; padding: 10px 40px 0; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
-.tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; white-space: nowrap; color: var(--ink-2); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.tabs a:hover { color: var(--ink); }
-.tabs a.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
-.tabs + main { padding-top: 22px; }
+/* 紧凑工具条：入口名 › 页签（每个页签是一个页面的原地址），右侧 ⌘K；高 48、下边线（Multica 的页头栏） */
+.toolbar { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--bar-h); padding: 0 var(--sp-3) 0 var(--sp-6); border-bottom: 1px solid var(--line); }
+.toolbar .crumb { font-size: 14px; font-weight: 500; white-space: nowrap; }
+.toolbar .crumb-sep { color: var(--ink-3); }
+.tabs { display: flex; gap: 2px; min-width: 0; margin: 0; padding: 0; overflow-x: auto; scrollbar-width: none; }
+.tabs a { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; white-space: nowrap; font-size: 13.5px; color: var(--ink-2); text-decoration: none; border-radius: var(--r-md); transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out); }
+.tabs a:hover { color: var(--ink); background: var(--hover); }
+.tabs a.on { color: var(--ink); font-weight: 500; background: var(--selected); }
 
 /* 手机上的"更多"抽屉 */
 .shell > nav .more { margin-left: auto; white-space: nowrap; }
@@ -173,10 +175,9 @@ kbd {
 .sheet-foot { display: flex; gap: 8px; margin-top: 14px; }
 .sheet-foot button { min-height: 44px; }
 
-.topbar { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 40px 0; }
 .jump {
-  display: inline-flex; align-items: center; gap: 28px; padding: 5px 8px 5px 12px; cursor: pointer;
-  font: inherit; color: var(--ink-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow);
+  display: inline-flex; align-items: center; gap: 28px; height: 30px; margin-left: auto; padding: 0 6px 0 10px; cursor: pointer;
+  font: inherit; font-size: 13px; color: var(--ink-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
 }
 .jump:hover { color: var(--ink); border-color: var(--line-2); }
 .jump span:last-child { display: inline-flex; gap: 3px; }
@@ -186,6 +187,8 @@ main { max-width: 800px; padding: 18px 40px 80px; }
 .eyebrow { margin: 0 0 6px; font-size: 12px; letter-spacing: .14em; color: var(--ink-3); }
 h1 { margin: 0 0 6px; font: 600 30px/1.3 var(--serif); letter-spacing: .01em; }
 h1 em { font-style: normal; color: var(--seal); }
+h1.compact { margin: var(--sp-3) 0 var(--sp-2); font: 600 18px/1.4 var(--serif); }
+main > h1.compact { margin-bottom: var(--sp-2); }
 .lede { margin: 0 0 26px; color: var(--ink-2); font-size: 14.5px; }
 main h2 { margin: var(--sp-8) 0 var(--sp-3); font: 600 17px/1.4 var(--serif); }
 h3 { margin: var(--sp-4) 0 var(--sp-2); font-size: 14px; font-weight: 600; }
@@ -253,11 +256,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0; 
 /* 按钮：墨色为主，朱砂只给不可逆操作 */
 button { font: 500 13.5px/20px var(--sans); }
 /* 默认高 32（5 + 20 + 5 + 边框）；行内的次要按钮另见 ui.css 的 [data-row-actions]。 */
-.btn, main button:not(.options button):not(.quiet):not(.link):not(.row-more-menu button), nav button {
+.btn, main button:not(.options button):not(.quiet):not(.link):not(.row-more-menu button):not(.bare), nav button {
   padding: 5px 12px; cursor: pointer; color: var(--ink); background: var(--surface);
   border: 1px solid var(--line-2); border-radius: var(--r-lg); transition: background-color var(--dur-micro), border-color var(--dur-micro), transform var(--dur-micro);
 }
-main button:not(.options button):not(.quiet):not(.link):not(.row-more-menu button):hover:not(:disabled), nav button:hover { border-color: var(--ink-3); }
+main button:not(.options button):not(.quiet):not(.link):not(.row-more-menu button):not(.bare):hover:not(:disabled), nav button:hover { border-color: var(--ink-3); }
 main button[type="submit"], button.primary { color: var(--paper) !important; background: var(--ink) !important; border-color: var(--ink) !important; }
 main button[type="submit"]:hover:not(:disabled), button.primary:hover:not(:disabled) { background: color-mix(in oklch, var(--ink) 86%, var(--paper)) !important; }
 button.danger { color: var(--seal) !important; border-color: color-mix(in oklch, var(--seal) 40%, var(--line)) !important; }
@@ -348,8 +351,8 @@ pre code { padding: 0; background: none; }
   .shell > nav ul { display: flex; gap: 2px; } .shell > nav a { white-space: nowrap; gap: 6px; padding: 8px 10px; }
   .shell > nav { padding: 8px 6px; gap: 2px; } .shell > nav a { min-height: 44px; padding: 8px 6px; }
   .shell > nav .more { min-height: 44px; padding: 8px 6px; border: 0; background: none; box-shadow: none; color: var(--ink-2); }
-  .topbar { display: none; } main { padding: 22px 16px 56px; } h1 { font-size: 25px; }
-  .tabs { padding: 4px 16px 0; } .tabs a { min-height: 44px; padding: 8px 10px; }
+  main { padding: 22px 16px 56px; } h1 { font-size: 25px; } h1.compact { font-size: 18px; }
+  .toolbar { padding: 0 8px; } .toolbar .crumb, .toolbar .crumb-sep, .jump { display: none; } .tabs a { height: 44px; padding: 0 10px; }
   .login { grid-template-columns: 1fr; } .login .pitch { padding: 40px 24px; border-right: 0; border-bottom: 1px solid var(--line); }
   .login .gate { padding: 32px 24px; }
   kbd { display: none; } .options button { min-height: 44px; }

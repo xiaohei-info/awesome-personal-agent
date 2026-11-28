@@ -168,7 +168,8 @@ describe("今天页（flow-web-workbench）", () => {
     expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/WB-B/transition", body: { to: "done", reason: "在今天页完成" } });
     expect(await screen.findByText("已完成：事项 WB-B")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("link", { name: "事项 WB-B" })).toBeNull());
-    expect(within(await rowOf("事项 WB-A")).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "记进展", "更多", "完成"]);
+    // 行首圆圈就是「完成」（Multica 式），其余操作排在行尾
+    expect(within(await rowOf("事项 WB-A")).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["完成", "排时间", "交给 Agent", "记进展", "更多"]);
     expect(within(screen.getByRole("region", { name: "今天的事" })).getByRole("heading", { level: 2 })).toHaveTextContent("（1）");
   });
 
@@ -230,10 +231,16 @@ describe("今天页（flow-web-workbench）", () => {
     const todays = await screen.findByRole("region", { name: "今天的事" });
     await waitFor(() => expect(within(todays).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["工作 2", "家务 1", "没归项目的 1"]));
     expect(within(todays).getByRole("heading", { level: 2 })).toHaveTextContent("（4）");
-    const marks = (title: string) => [...screen.getByRole("link", { name: title }).closest("li")!.querySelectorAll(".reasons > span")].map((x) => `${x.className}|${x.textContent}`);
+    const marks = (title: string) => [...screen.getByRole("link", { name: title }).closest("li")!.querySelectorAll(".reasons > .badge")].map((x) => `${x.className}|${x.textContent}`);
     expect(marks("交报告")).toEqual(["badge bad|逾期 · 原截止 11-20"]);
-    expect(marks("修线上问题")).toEqual(["badge warn|紧急", "badge plain|计划 01-02，已过"]);
-    expect(marks("看牙")).toEqual(["badge warn|高优先级"]);
+    expect(marks("修线上问题")).toEqual(["badge plain|计划 01-02，已过"]);
+    expect(marks("看牙")).toEqual([]);
+    // 优先级是标题前的小图标，读屏读得出「紧急」「高优先级」
+    const prio = (title: string) => screen.getByRole("link", { name: title }).closest("li")!.querySelector(".prio");
+    expect(prio("修线上问题")).toHaveAttribute("data-prio", "urgent");
+    expect(prio("修线上问题")).toHaveTextContent("紧急");
+    expect(prio("看牙")).toHaveTextContent("高优先级");
+    expect(prio("交电费")).toBeNull();
     expect(marks("交电费")).toEqual(["badge plain|计划今天"]);
     expect(within(within(todays).getByRole("region", { name: "工作" })).getAllByRole("link").map((l) => l.textContent)).toEqual(["工作", "修线上问题", "交报告"]);
   });

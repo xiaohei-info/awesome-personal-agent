@@ -10,7 +10,7 @@ import { useSession } from "./session";
 import { toggleTheme } from "./theme";
 import type { Status } from "./status";
 import { useLeaveGuard } from "./leave";
-import { ShortcutSheet, Toaster, typing } from "./ui";
+import { ErrorBoundary, ShortcutSheet, Toaster, typing } from "./ui";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
@@ -102,7 +102,12 @@ function ShellBody({ features: all }: { features: Feature[] }) {
     </NavItem>
   );
   const bar = nav.entries.filter((e) => (MOBILE as string[]).includes(e.id));
-  const routes = <AppRoutes all={all} nav={nav} entryOf={entryOf} noPages={t.noPages} />;
+  // 路由级错误边界：页面渲染出错只换掉内容区，导航与工具条照常；换页（地址变了）自动重置。
+  const routes = (
+    <ErrorBoundary page resetKey={pathname}>
+      <AppRoutes all={all} nav={nav} entryOf={entryOf} noPages={t.noPages} />
+    </ErrorBoundary>
+  );
 
   return (
     <div className="shell">
@@ -163,7 +168,15 @@ function ShellBody({ features: all }: { features: Feature[] }) {
         {error && <p role="alert">{error}</p>}
       </nav>
       <section>
-        <div className="topbar">
+        {/* 紧凑工具条（Multica 的页头栏）：入口名 › 页签，右侧 ⌘K。 */}
+        <header className="toolbar">
+          {here && <span className="crumb">{here.title}</span>}
+          {here && here.features.length > 1 && !inSettings && (
+            <>
+              <span className="crumb-sep" aria-hidden="true">›</span>
+              <Tabs entry={here} current={current} counts={counts} />
+            </>
+          )}
           <button className="jump" aria-label={t.jumpLabel} onClick={() => setJumping(true)}>
             <span>{t.jump}</span>
             <span aria-hidden="true">
@@ -171,8 +184,7 @@ function ShellBody({ features: all }: { features: Feature[] }) {
               <kbd>K</kbd>
             </span>
           </button>
-        </div>
-        {here && here.features.length > 1 && !inSettings && <Tabs entry={here} current={current} counts={counts} />}
+        </header>
         <BackBar />
         {inSettings && narrow && !atHome && (
           <Link className="back" to={"/" + SETTINGS_HOME}>
