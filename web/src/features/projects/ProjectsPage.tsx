@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Link, Route, Routes, useParams } from "react-router-dom";
+import { Disclosure, EmptyState, Skeleton } from "../../app/ui";
+import { Link, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
-import { Go, PageHead } from "../../app/page";
+import { PageHead } from "../../app/page";
 import { loadDone, type Done } from "../done/DonePage";
 import { hostClock } from "../items/schedule";
 import { ProjectMaterials } from "../materials-hosted/ProjectMaterials";
 import type { Item } from "../items/ItemsPage";
+import { ItemRow, useCircleDone } from "../items/ItemRow";
 import { useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { PROJECT_STATUS } from "../../app/ids";
@@ -62,6 +64,10 @@ function ProjectList() {
     [api],
   );
   useEffect(() => void load(), [load]);
+  // 每行靠右两个数：进行中几件、等你决定几件（等你决定大于 0 用醒目色）；取不到就不显示。
+  const [items, setItems] = useState<Item[] | null>(null);
+  useEffect(() => void api.get<{ items: Item[] }>("/items").then((r) => setItems(r.items), () => setItems(null)), [api]);
+  const count = (pid: string, phase: string) => items?.filter((i) => i.project === pid && i.phase === phase).length ?? 0;
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -81,18 +87,22 @@ function ProjectList() {
     <main>
       <PageHead>{t.title}</PageHead>
       {error != null && <ErrorNote error={error} />}
-      {projects && !projects.length && error == null && <p className="empty">{t.none}</p>}
+      {projects && !projects.length && error == null && <EmptyState title={t.none} />}
       {!!projects?.length && (
         <ul aria-label={t.list} className="rows">
           {[...projects]
             .sort((a, b) => Number(isInbox(b)) - Number(isInbox(a)))
             .map((p) => (
-              <li key={p.id}>
-                <Link to={p.id}>{p.name}</Link>{" "}
-                {isInbox(p) && <span className="badge">{t.builtin}</span>}{" "}
-                <span className={"badge" + (p.status === "active" ? " ok" : "")}><Val k="projectStatus" id={p.status} /></span>
-                {isInbox(p) && <span className="sub">{t.inboxHint}</span>}
-                {p.tags?.length ? <span className="sub">{p.tags.map((t) => "#" + t).join(" ")}</span> : null}
+              <li key={p.id} className="project-row">
+                <Link className="trow-title" to={p.id}>{p.name}</Link>
+                {isInbox(p) && <span className="badge plain">{t.builtin}</span>}
+                {p.status !== "active" && <span className="badge plain"><Val k="projectStatus" id={p.status} /></span>}
+                <span className="sub">{isInbox(p) ? t.inboxHint : p.intro}</span>
+                <span className="sub reasons">
+                  {p.tags?.length ? <span>{p.tags.map((t) => "#" + t).join(" ")}</span> : null}
+                  {items && <span>{t.openN(count(p.id, "open"))}</span>}
+                  {items && <span className={count(p.id, "needs_input") ? "bad" : undefined}>{t.decideN(count(p.id, "needs_input"))}</span>}
+                </span>
               </li>
             ))}
         </ul>
@@ -126,22 +136,21 @@ function ProjectDetail() {
   }, [load]);
 
   if (loadErr != null) return <main><ErrorNote error={loadErr} /><Link to="/projects">{t.back}</Link></main>;
-  if (!p) return <main><p role="status">{t.loading}</p></main>;
+  if (!p) return <main><Skeleton shape="card" label={t.loading} /></main>;
   const inbox = isInbox(p);
   return (
     <main>
-      <p className="eyebrow"><Link to="/projects">{t.back}</Link></p>
+      <p className="backbar"><Link to="/projects">{t.back}</Link></p>
       <h1>{p.name} {inbox && <span className="badge">{t.builtin}</span>}</h1>
       {p.intro ? <p className="lede">{p.intro}</p> : inbox && <p className="lede">{t.inboxHint}</p>}
       <ProjectItems id={p.id} />
       <ProjectMaterials project={p.id} />
       {/* 进项目是来看事的：名称、仓库、执行者这些设置低频，收在页底，仍是它们唯一的编辑处。 */}
-      <details>
-        <summary>{inbox ? t.inboxSettings : t.settings}</summary>
+      <Disclosure summary={<h2>{inbox ? t.inboxSettings : t.settings}</h2>} persistKey="project.settings">
         <EditForm key={p.id + p.name} p={p} onSaved={setP} />
         {!inbox && <Repos p={p} onChange={setP} />}
         <Executors p={p} onSaved={setP} />
-      </details>
+      </Disclosure>
     </main>
   );
 }
@@ -364,26 +373,31 @@ function ProjectItems({ id }: { id: string }) {
   }, [api, id]);
   const proposed = items?.filter((i) => i.phase === "proposed").length ?? 0;
   const active = GROUPS.map((ph) => [ph, items?.filter((i) => i.phase === ph) ?? []] as const).filter(([, l]) => l.length);
-  const row = (i: Item, sub?: string) => (
-    <li key={i.id}><Go to={"/items/" + encodeURIComponent(i.id)}>{i.title}</Go>{sub && <span className="sub"> {sub}</span>}</li>
+  // 行上操作之后只换这一件；离开了这个阶段的照新阶段重新归组（都在前端，不重读整页）。
+  const replace = (it: Item) => setItems((l) => l && l.map((x) => (x.id === it.id ? it : x)));
+  const finish = useCircleDone(t.where, replace);
+  const from = { from: useLocation().pathname };
+  const row = (i: Item, meta?: string) => (
+    <ItemRow key={i.id} item={i} where={t.where} to={"/items/" + encodeURIComponent(i.id)} state={from} meta={meta && <span>{meta}</span>} onChange={replace} onDone={() => void finish(i)} />
   );
   return (
     <section aria-label={t.items}>
       {error != null && <ErrorNote error={error} />}
-      {items && !items.length && <p className="sub">{t.noItems}</p>}
+      {!items && error == null && <Skeleton label={t.loading} n={3} />}
+      {items && !items.length && <EmptyState title={t.noItems} />}
       {!!items?.length && !active.length && <p className="sub">{t.noActive}</p>}
       {active.map(([ph, l]) => (
         <section key={ph} aria-label={t.phaseGroup[ph]}>
-          <h2>{t.phaseGroup[ph]} <span className="sub">{l.length}</span></h2>
-          <ul className="rows">{l.map((i) => row(i, i.planned_for && t.planned(i.planned_for)))}</ul>
+          <Disclosure head defaultOpen persistKey={"project.group." + ph} summary={<h2>{t.phaseGroup[ph]} <span className="count-n">{l.length}</span></h2>}>
+            <ul className="rows">{l.map((i) => row(i, i.planned_for && t.planned(i.planned_for)))}</ul>
+          </Disclosure>
         </section>
       ))}
       {proposed > 0 && <p className="sub">{t.proposed(proposed)} · <Link to="/proposals">{t.toProposals}</Link></p>}
       {done.length > 0 && (
-        <details>
-          <summary>{t.doneGroup(done.length)}</summary>
+        <Disclosure head summary={<h2>{t.doneGroup(done.length)}</h2>} persistKey="project.done">
           <ul className="rows">{done.map((d) => row(d.item, t.doneOn(d.day)))}</ul>
-        </details>
+        </Disclosure>
       )}
     </section>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { locale, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
@@ -77,7 +78,7 @@ export function RawColumn({ id }: { id: string }) {
     <section role="region" aria-label={t.rawTitle}>
       <h2>{t.rawTitle}</h2>
       {error != null && <ErrorNote error={error} />}
-      {!data && error == null && <p role="status">{t.loading}</p>}
+      {!data && error == null && <Skeleton label={t.loading} />}
       {deleted && <p role="status">{t.rawDeleted}</p>}
       {data && !deleted && (
         <>

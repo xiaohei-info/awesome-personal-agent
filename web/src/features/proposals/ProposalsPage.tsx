@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { EmptyState, ErrorBoundary, Skeleton } from "../../app/ui";
 import { Link } from "react-router-dom";
 import { PageReminder, ProposalsMin } from "../settings-notify/Reminder";
 import { ApiError, type ApiClient } from "../../app/api";
@@ -561,9 +562,9 @@ function Ignored({ undoBatch, tick }: { undoBatch: (batch: string, key: string) 
     reload();
   }, [reload, tick]);
   if (error != null) return <ErrorNote error={error} />;
-  if (!data) return <p role="status">{t.loading}</p>;
+  if (!data) return <Skeleton label={t.loading} />;
   const mine = data.items.filter((i) => data.dismissals[i.id]);
-  if (mine.length === 0) return <p className="empty">{t.ignoredEmpty}</p>;
+  if (mine.length === 0) return <EmptyState title={t.ignoredEmpty} />;
   const at = (i: Proposal) => data.dismissals[i.id].at;
   const batches = groupBy(mine, (i) => data.dismissals[i.id].batch ?? "")
     .sort((a, b) => (a[0] === "" ? 1 : b[0] === "" ? -1 : at(b[1][0]).localeCompare(at(a[1][0]))));
@@ -759,9 +760,12 @@ export function ProposalsPage() {
 
   const pick = (id: string) => (on: boolean) => setChosen((c) => (on ? [...c.filter((x) => x !== id), id] : c.filter((x) => x !== id)));
   const card = (i: Proposal, selectable = true) => (
-    <Card key={i.id} item={i} failure={failure?.id === i.id ? failure.error : undefined} rejection={rejections[i.id]} candidates={() => candidates(i.id)}
-      onAct={(id, action, body) => act(id, action, body, i.id)} onSaved={load} ready={ready}
-      checked={chosen.includes(i.id)} onCheck={selectable ? pick(i.id) : undefined} />
+    // 每张建议卡各自一道错误边界：一张渲染出错只换掉这一张。
+    <ErrorBoundary key={i.id}>
+      <Card item={i} failure={failure?.id === i.id ? failure.error : undefined} rejection={rejections[i.id]} candidates={() => candidates(i.id)}
+        onAct={(id, action, body) => act(id, action, body, i.id)} onSaved={load} ready={ready}
+        checked={chosen.includes(i.id)} onCheck={selectable ? pick(i.id) : undefined} />
+    </ErrorBoundary>
   );
   const stamp = (s: string) => (s ? new Date(s).toLocaleString() : "");
   const range = (its: Proposal[]) => t.range(stamp(its[0].created_at ?? ""), stamp(its[its.length - 1].created_at ?? ""));
@@ -881,33 +885,17 @@ export function ProposalsPage() {
           )}
         </div>
       )}
-      <label>
-        {t.show}
-        <select value={view} onChange={(e) => { setView(e.target.value as "pending" | "ignored"); setNote(""); }}>
-          <option value="pending">{t.showPending}</option>
-          <option value="ignored">{t.showIgnored}</option>
-        </select>
-      </label>
-      {note && <p role="status" aria-label={t.undoHead}>{note}</p>}
-      {receipts.length > 0 && (
-        <ul className="rows" aria-label={t.receipts}>
-          {receipts.map((r) => (
-            <li key={r.id} role="status">
-              {r.title}{t.colon}{r.text}{r.to && <> · <Link to={r.to}>{t.seeItem}</Link></>}
-              {r.missing && <Prereqs label={it.prereqs} items={pre} />}
-            </li>
-          ))}
-        </ul>
-      )}
-      {view === "ignored" ? (
-        <Ignored undoBatch={undoBatch} tick={ignoredTick} />
-      ) : items === null ? (
-        error == null && <p role="status">{t.loading}</p>
-      ) : items.length === 0 ? (
-        <p className="empty">{t.empty}</p>
-      ) : (
-        <>
-          <div className="actions">
+      {/* 一行筛选：显示哪类，待处理时再按来源、项目筛 */}
+      <div className="filters">
+        <label>
+          {t.show}
+          <select value={view} onChange={(e) => { setView(e.target.value as "pending" | "ignored"); setNote(""); }}>
+            <option value="pending">{t.showPending}</option>
+            <option value="ignored">{t.showIgnored}</option>
+          </select>
+        </label>
+        {view === "pending" && !!items?.length && (
+          <>
             <label>
               {t.source}
               <select value={source} onChange={(e) => setSource(e.target.value)}>
@@ -926,9 +914,30 @@ export function ProposalsPage() {
                 ))}
               </select>
             </label>
-          </div>
+          </>
+        )}
+      </div>
+      {note && <p role="status" aria-label={t.undoHead}>{note}</p>}
+      {receipts.length > 0 && (
+        <ul className="rows" aria-label={t.receipts}>
+          {receipts.map((r) => (
+            <li key={r.id} role="status">
+              {r.title}{t.colon}{r.text}{r.to && <> · <Link to={r.to}>{t.seeItem}</Link></>}
+              {r.missing && <Prereqs label={it.prereqs} items={pre} />}
+            </li>
+          ))}
+        </ul>
+      )}
+      {view === "ignored" ? (
+        <Ignored undoBatch={undoBatch} tick={ignoredTick} />
+      ) : items === null ? (
+        error == null && <Skeleton label={t.loading} />
+      ) : items.length === 0 ? (
+        <EmptyState title={t.empty} />
+      ) : (
+        <>
           {chosenShown.length > 0 && (
-            <div className="panel" role="region" aria-label={t.selectedHead}>
+            <div className="sticky-bar selected-bar" role="region" aria-label={t.selectedHead}>
               <p>{t.selected(chosenShown.length)} · <button type="button" className="link" onClick={() => setChosen([])}>{t.clearSelection}</button></p>
               <Bulk key={"a" + chosenShown.join()} label={t.acceptSelected(chosenShown.length)} plan={acceptText(chosenShown)} confirm={t.confirmAccept(chosenShown.length)} onConfirm={(key) => selected(chosenShown, "accept", "", key)} />
               <Bulk key={"d" + chosenShown.join()} label={t.ignoreSelected(chosenShown.length)} plan={t.ignorePlan(chosenShown.length)} confirm={t.confirmIgnore(chosenShown.length)} reason onConfirm={(key, r) => selected(chosenShown, "dismiss", r, key)} />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
@@ -111,7 +112,7 @@ export function SettingsOutwardApiPage() {
         <div><button type="submit" className="primary" disabled={busy}>{t.issue}</button></div>
       </form>
       {creds === null ? (
-        !error && <p role="status">{t.loading}</p>
+        !error && <Skeleton shape="card" label={t.loading} />
       ) : creds.length === 0 ? (
         <p className="sub">{t.none}</p>
       ) : (

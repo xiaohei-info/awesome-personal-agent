@@ -82,6 +82,8 @@ function mount(fetchImpl: typeof fetch, path = "/items") {
   );
 }
 
+// 详情右栏「属性」里某一项的值（阶段、截止……）。
+const prop = (name: string) => within(screen.getByRole("complementary", { name: "属性" })).getByText(name, { selector: "dt" }).nextElementSibling?.textContent;
 const timeline = async () => within(await screen.findByRole("list", { name: "处理经过" }));
 
 beforeEach(() => sessionStorage.clear());
@@ -90,7 +92,7 @@ describe("事项列表与详情（ACT-ITEM-01）", () => {
   it("CLI 建的事项在 Web 可见：标题、阶段 open，经过里一句「Agent（凭据名）· 新建了」", async () => {
     mount(ledger().impl);
     await userEvent.click(await screen.findByRole("link", { name: "item-a" }));
-    expect(await screen.findByText(/现在：进行中/)).toBeInTheDocument();
+    await waitFor(() => expect(prop("阶段")).toBe("进行中"));
     const tl = await timeline();
     expect(tl.getAllByRole("listitem")).toHaveLength(1);
     expect(tl.getByRole("listitem")).toHaveTextContent(/^Agent（del-1）新建了/);
@@ -143,11 +145,11 @@ describe("转阶段（主操作区）", () => {
     await userEvent.selectOptions(screen.getByLabelText("等待对象类别"), "external");
     await userEvent.type(screen.getByLabelText("等待对象"), "报价单");
     await userEvent.click(screen.getByRole("button", { name: "确认转为等待" }));
-    expect(await screen.findByText(/现在：等待中/)).toBeInTheDocument();
+    await waitFor(() => expect(prop("阶段")).toBe("等待中"));
     expect(last()).toEqual({ to: "waiting", reason: "在事项页改为等待中", waiting_on: { kind: "external", ref: "报价单" } });
 
     await userEvent.click(within(await screen.findByRole("group", { name: "改阶段" })).getByRole("button", { name: "回到进行中" }));
-    expect(await screen.findByText(/现在：进行中/)).toBeInTheDocument();
+    await waitFor(() => expect(prop("阶段")).toBe("进行中"));
     expect(last()).toMatchObject({ to: "open" });
 
     expect(screen.queryByRole("button", { name: /不做了/ })).toBeNull(); // 旧的第二个放弃入口已去掉
@@ -169,7 +171,7 @@ describe("删除（转到已放弃，不物理删除）", () => {
     expect(screen.getByText(/会移到已放弃，之后还能从已放弃里找回，不会真正抹掉记录/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(last()).toEqual({ to: "dropped", reason: "在事项页删除（移到已放弃）" }));
-    expect(await screen.findByText(/现在：已放弃/)).toBeInTheDocument();
+    await waitFor(() => expect(prop("阶段")).toBe("已放弃"));
     expect(screen.queryByRole("button", { name: "删除…" })).toBeNull();
     expect(screen.getByRole("button", { name: "重新打开" })).toBeInTheDocument(); // 找回
   });
@@ -187,12 +189,12 @@ describe("设截止（ACT-LIF-03）", () => {
 
     await waitFor(() => expect(Date.parse(l.items[0].deadline!)).toBe(new Date("2030-03-01T09:30").getTime()));
     expect(l.calls.find((c) => c.method === "PATCH")).toMatchObject({ ifMatch: "1" });
-    expect(await screen.findByText(/截止 2030-03-01 09:30/)).toBeInTheDocument();
+    await waitFor(() => expect(prop("截止")).toBe("2030-03-01 09:30"));
 
     await userEvent.click(block.getByLabelText("具体时刻"));
     await userEvent.click(block.getByRole("button", { name: "保存排期" }));
     await waitFor(() => expect(Date.parse(l.items[0].deadline!)).toBe(new Date("2030-03-01T23:59:59").getTime()));
-    expect(await screen.findByText(/截止 2030-03-01(?! )/)).toBeInTheDocument(); // 只到日：不写 23:59
+    await waitFor(() => expect(prop("截止")).toBe("2030-03-01")); // 只到日：不写 23:59
 
     fireEvent.change(block.getByLabelText("截止"), { target: { value: "" } });
     await userEvent.click(block.getByRole("button", { name: "保存排期" }));

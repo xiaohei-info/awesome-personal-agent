@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
@@ -50,7 +51,7 @@ export function AudienceChoice({ value, onChange }: { value: string | null; onCh
 export function SourceScopeTable({ sources, value, onChange }: { sources: Source[] | null; value: Scopes; onChange: (s: Scopes) => void }) {
   const t = useT(strings);
   const id = useId();
-  if (sources === null) return <p role="status">{t.loading}</p>;
+  if (sources === null) return <Skeleton shape="card" label={t.loading} />;
   const set = (src: string, tier: string) => {
     const next = { ...value };
     if (tier) next[src] = tier;

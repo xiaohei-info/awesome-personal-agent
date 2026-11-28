@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
@@ -19,10 +20,10 @@ export function BriefDetail() {
     api.get<{ item: Brief }>("/items/" + encodeURIComponent(id)).then((r) => setB(r.item), setError);
   }, [api, id]);
   if (error != null) return <main><ErrorNote error={error} /></main>;
-  if (!b) return <main><p role="status">{t.loading}</p></main>;
+  if (!b) return <main><Skeleton shape="card" label={t.loading} /></main>;
   return (
     <main>
-      <p className="eyebrow"><Link to="..">{t.backToBriefs}</Link></p>
+      <p className="backbar"><Link to="..">{t.backToBriefs}</Link></p>
       <article aria-label={t.brief(b.title)}>
         <h1>{b.title}</h1>
         <p className="meta">{[b.spec?.period, when(b.created_at)].filter(Boolean).join(" · ")}</p>

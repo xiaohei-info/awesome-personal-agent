@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { useSearchParams } from "react-router-dom";
 import { ErrorNote } from "../../app/errors";
 import { useNames } from "../../app/names";
@@ -187,9 +188,9 @@ export function AgentChangesPage() {
         </div>
       )}
       {steps === null ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : shown.length === 0 ? (
-        <p className="empty">{t.empty}</p>
+        <EmptyState title={t.empty} />
       ) : (
         shown.map((s) => <Row key={s.seq} s={s} reverted={reverted.has(s.seq)} resumed={resumedAfter(s)} onRevert={revert} />)
       )}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
@@ -223,7 +224,7 @@ export function SourceBacklog({ source, rejudgeDays, onChooseOutbound }: { sourc
       {error !== null && <ErrorNote error={error} />}
       {notice && <p role="status">{notice}</p>}
       {items === null ? (
-        error === null && <p role="status">{t.loading}</p>
+        error === null && <Skeleton label={t.loading} />
       ) : items.length === 0 ? (
         <p className="sub">{t.noUnjudged}</p>
       ) : (

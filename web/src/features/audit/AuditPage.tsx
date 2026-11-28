@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -166,8 +167,8 @@ export function AuditPage() {
         </div>
       </form>
       {error != null && <ErrorNote error={error} />}
-      {!events && error == null && <p role="status">{t.loading}</p>}
-      {events && !events.length && <p className="empty">{t.empty}</p>}
+      {!events && error == null && <Skeleton label={t.loading} />}
+      {events && !events.length && <EmptyState title={t.empty} />}
       {events && events.length > 0 && (
         <ul aria-label={t.events} className="rows">
           {fold(events).map((g) => g.batch ? <ImportFold key={g.list[0].seq} entry={g} /> : <Row key={g.list[0].seq} e={g.list[0]} />)}

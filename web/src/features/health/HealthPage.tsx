@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageReminder } from "../settings-notify/Reminder";
 import { Go, PageHead } from "../../app/page";
@@ -165,7 +166,7 @@ export function HealthPage() {
         </>
       )}
       {!st ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : (
         <>
           {st.act.length > 0 && (

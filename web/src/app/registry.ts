@@ -14,6 +14,7 @@ export const SECTIONS = {
   projects: { title: { zh: "项目", en: "Projects" } },
   sources: { title: { zh: "消息来源", en: "Sources" } },
   automation: { title: { zh: "定时安排", en: "Schedules" } },
+  executors: { title: { zh: "执行者", en: "Executors" } },
   usage: { title: { zh: "用量", en: "Usage" } },
   settings: { title: { zh: "设置", en: "Settings" } },
   diag: { title: { zh: "诊断", en: "Diagnostics" } },
@@ -24,7 +25,7 @@ export type SectionId = keyof typeof SECTIONS;
 export const NAV: { group: Text; sections: SectionId[] }[] = [
   { group: { zh: "处理", en: "Act" }, sections: ["today", "decisions", "proposals"] },
   { group: { zh: "工作", en: "Work" }, sections: ["items", "projects"] },
-  { group: { zh: "自动化", en: "Automate" }, sections: ["sources", "automation", "usage"] },
+  { group: { zh: "自动化", en: "Automate" }, sections: ["sources", "automation", "executors", "usage"] },
 ];
 export const SETTINGS: SectionId = "settings";
 export const DIAG: SectionId = "diag";
