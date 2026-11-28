@@ -88,7 +88,7 @@ describe("事项列表（对齐工作台任务库）", () => {
     mount(s.impl);
     const user = userEvent.setup();
     const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展", "更多"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "记进展", "更多", "完成"]);
     await user.click(within(row).getByRole("button", { name: "记进展" }));
     await user.type(within(within(row).getByRole("group", { name: "记进展：甲" })).getByLabelText("进展"), "联调通过");
     await user.click(within(row).getByRole("button", { name: "保存" }));
@@ -185,7 +185,7 @@ describe("事项列表（对齐工作台任务库）", () => {
       mount(s.impl);
       const user = userEvent.setup();
       const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
-      expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "完成", "更多"]);
+      expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "更多", "完成"]);
 
       const delegationRow = screen.getByRole("link", { name: "委派件" }).closest("li")!;
       expect(within(delegationRow).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "更多"]);

@@ -26,6 +26,7 @@ import { DeleteItem } from "./DeleteItem";
 import { ScheduleBlock, SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { deadlineText, deadlineValue, useHostClock } from "./schedule";
 import { ApiError } from "../../app/api";
+import { Skeleton } from "../../app/ui";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -285,10 +286,13 @@ const grouped = (r: Relation, from: string) => r.from === from && isMaterialId(r
 
 interface Detail { rejection?: Rejection; item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string; precision?: string }[]; materials: MaterialRel[] }
 
-function ItemDetail() {
+/** 事项详情。embedded：放在速览侧栏里（没有页面外框与返回链接，id 由速览给）。 */
+export function ItemDetail({ embedded }: { embedded?: string } = {}) {
   const t = useT(strings);
   const label = useLabel();
-  const { id = "" } = useParams();
+  const { id: routeId = "" } = useParams();
+  const id = embedded ?? routeId;
+  const Wrap = embedded ? "div" : "main";
   const { api } = useSession();
   const [d, setD] = useState<Detail | null>(null);
   const [loadErr, setLoadErr] = useState<unknown>(null);
@@ -337,8 +341,8 @@ function ItemDetail() {
     }
   };
 
-  if (loadErr != null) return <main><ErrorNote error={loadErr} /></main>;
-  if (!d) return <main><p role="status">{t.loading}</p></main>;
+  if (loadErr != null) return <Wrap><ErrorNote error={loadErr} /></Wrap>;
+  if (!d) return <Wrap><Skeleton shape="card" label={t.loading} /></Wrap>;
   const { item } = d;
   const path = "/items/" + encodeURIComponent(id);
   const ifMatch = { "If-Match": String(item.version) };
@@ -353,8 +357,8 @@ function ItemDetail() {
   // 自上而下（界面设计 §3.2）：①标题、状态一句与随阶段变化的主操作（等你决定时直接是问题卡）②Agent 处理 ③正文
   // ④进展与经过 ⑤「更多操作」折叠：状态标签、截止、转阶段、关联、材料、关联键。
   return (
-    <main>
-      <p className="eyebrow"><Link to={back}>{t.back}</Link></p>
+    <Wrap>
+      {!embedded && <p className="eyebrow"><Link to={back}>{t.back}</Link></p>}
       <h1>{item.title}</h1>
       <p className="lede">
         {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.planned_for && t.planAt(item.planned_for, item.planned_slot), item.deadline && t.due(deadlineText(item.deadline, offset))].filter(Boolean).join(" · ")}
@@ -460,7 +464,7 @@ function ItemDetail() {
           <KeyForm key={"k" + item.version} onSubmit={(key) => act(() => api.post(path + "/correlation-keys", { key }, ifMatch))} />
         </details>
       </details>
-    </main>
+    </Wrap>
   );
 }
 

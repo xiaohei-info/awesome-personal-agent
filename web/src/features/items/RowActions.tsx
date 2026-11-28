@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ErrorNote } from "../../app/errors";
 import { useT } from "../../app/i18n";
 import { HANDOFF_TAG } from "../../app/ids";
@@ -10,6 +10,7 @@ import type { Item } from "./ItemsPage";
 import { SlotFields, slotForm, slotValue } from "./ScheduleBlock";
 import { useHostClock } from "./schedule";
 import { ProgressForm } from "../today/ProgressForm";
+import { Menu } from "../../app/ui";
 
 /** 行上做了什么：done、plan、progress、edit（交给 Agent 等其余改动）。 */
 export type RowAct = "done" | "plan" | "progress" | "edit" | "drop";
@@ -28,33 +29,12 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
   const { api } = useSession();
   const narrow = useNarrow();
   const [open, setOpen] = useState<"plan" | "agent" | "progress" | "more" | "delete" | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const menuId = useId();
-  const moreWrapRef = useRef<HTMLSpanElement>(null);
-  const moreBtnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const agentPanelRef = useRef<HTMLDivElement>(null);
-  const focusEdgeRef = useRef<"first" | "last">("first");
   const focusAgentRef = useRef(false);
   const path = "/items/" + encodeURIComponent(item.id);
   const ifMatch = { "If-Match": String(item.version) };
-
-  useEffect(() => {
-    if (!narrow) setMenuOpen(false);
-  }, [narrow]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const btns = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
-    (focusEdgeRef.current === "last" ? btns[btns.length - 1] : btns[0])?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (!moreWrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
 
   useEffect(() => {
     if (open === "agent" && focusAgentRef.current) {
@@ -88,87 +68,25 @@ export function RowActions({ item, where, onChange }: { item: Item; where: strin
     if (await tagWrite([...(item.tags ?? []), HANDOFF_TAG])) setOpen("agent");
   };
 
-  const openMenu = (edge: "first" | "last") => {
-    focusEdgeRef.current = edge;
-    setMenuOpen(true);
-  };
-  const onTriggerKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      openMenu("first");
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      openMenu("last");
-    } else if (e.key === "Escape" && menuOpen) {
-      e.preventDefault();
-      setMenuOpen(false);
-    }
-  };
-  const onMenuKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const btns = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
-    const idx = btns.indexOf(document.activeElement as HTMLButtonElement);
-    if (e.key === "Escape") {
-      e.preventDefault();
-      setMenuOpen(false);
-      moreBtnRef.current?.focus();
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (btns.length) btns[(idx + 1) % btns.length]?.focus();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (btns.length) btns[(idx - 1 + btns.length) % btns.length]?.focus();
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      btns[0]?.focus();
-    } else if (e.key === "End") {
-      e.preventDefault();
-      btns[btns.length - 1]?.focus();
-    } else if (e.key === "Tab") {
-      setMenuOpen(false);
-    }
-  };
-
   return (
     <>
-      <span className="actions" role="group" aria-label={t.rowActions(item.title)}>
-        <button type="button" aria-expanded={open === "plan"} onClick={() => { setMenuOpen(false); setOpen(open === "plan" ? null : "plan"); }}>{t.rowPlan}</button>
+      {/* data-row-actions：桌面上悬停或聚焦到这一行才显出次要操作；data-keep 的「完成」常显（交互样式规格 §5.2）。 */}
+      <span className="actions" role="group" aria-label={t.rowActions(item.title)} data-row-actions>
+        <button type="button" aria-expanded={open === "plan"} onClick={() => setOpen(open === "plan" ? null : "plan")}>{t.rowPlan}</button>
         {/* 交给 Agent 只对任务（交给 Agent 的规则只认任务，§13.6）。 */}
         {!narrow && item.kind === "task" && <button type="button" aria-expanded={open === "agent"} disabled={busy} onClick={() => void handoff()}>{handed ? t.rowAgent : t.rowHandoff}</button>}
-        {/* 委派完成要带证据（§6.14），去详情填；其余一键完成。 */}
-        {item.kind !== "delegation" && <button type="button" disabled={busy} onClick={() => { setMenuOpen(false); void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done"); }}>{t.done}</button>}
         {!narrow && <button type="button" aria-expanded={open === "progress"} onClick={() => setOpen(open === "progress" ? null : "progress")}>{t.rowProgress}</button>}
         {!narrow ? (
           <button type="button" aria-expanded={open === "more"} onClick={() => setOpen(open === "more" ? null : "more")}>{t.rowMore}</button>
         ) : (
-          <span className="row-more" ref={moreWrapRef}>
-            <button
-              ref={moreBtnRef}
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-controls={menuOpen ? menuId : undefined}
-              onClick={() => (menuOpen ? setMenuOpen(false) : openMenu("first"))}
-              onKeyDown={onTriggerKeyDown}
-            >
-              {t.rowMore}
-            </button>
-            {menuOpen && (
-              <div id={menuId} ref={menuRef} className="row-more-menu" role="menu" aria-label={t.rowMoreFor(item.title)} onKeyDown={onMenuKeyDown}>
-                {item.kind === "task" && (
-                  <button type="button" role="menuitem" disabled={busy} onClick={() => { setMenuOpen(false); focusAgentRef.current = true; void handoff(); }}>
-                    {handed ? t.rowAgent : t.rowHandoff}
-                  </button>
-                )}
-                <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setOpen(open === "progress" ? null : "progress"); }}>
-                  {t.rowProgress}
-                </button>
-                <button type="button" role="menuitem" disabled={busy} onClick={() => { setMenuOpen(false); setOpen(open === "delete" ? null : "delete"); }}>
-                  {t.del}
-                </button>
-              </div>
-            )}
-          </span>
+          <Menu trigger={t.rowMore} label={t.rowMoreFor(item.title)} items={[
+            ...(item.kind === "task" ? [{ label: handed ? t.rowAgent : t.rowHandoff, disabled: busy, onSelect: () => { focusAgentRef.current = true; void handoff(); } }] : []),
+            { label: t.rowProgress, onSelect: () => setOpen(open === "progress" ? null : "progress") },
+            { label: t.del, disabled: busy, onSelect: () => setOpen(open === "delete" ? null : "delete") },
+          ]} />
         )}
+        {/* 委派完成要带证据（§6.14），去详情填；其余一键完成。放在最后：次要操作隐藏时仍占位，常显的「完成」贴在行尾。 */}
+        {item.kind !== "delegation" && <button type="button" data-keep disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done")}>{t.done}</button>}
       </span>
       {err != null && <div className="row-panel"><ErrorNote error={err} /></div>}
       {open === "more" && (

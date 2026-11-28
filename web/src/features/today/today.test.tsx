@@ -129,8 +129,14 @@ describe("今天页（flow-web-workbench）", () => {
     await user.clear(within(form).getByLabelText("计划日期"));
     await user.type(within(form).getByLabelText("计划日期"), "2999-05-06");
     await user.click(within(form).getByRole("button", { name: "确定" }));
-    expect(await screen.findByText("「事项 WB-A」已改到 2999-05-06，不在今天的事里了")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "事项 WB-A" })).toBeNull();
+    // 改到以后：这一行离开今天，右下角出可撤销的提示；撤销写回原来的计划日期（没有时段就清掉），带新版本号。
+    const note = await screen.findByText("已改到 05-06");
+    await waitFor(() => expect(screen.queryByRole("link", { name: "事项 WB-A" })).toBeNull());
+    await user.click(within(note.closest("li")!).getByRole("button", { name: /撤销/ }));
+    await waitFor(() => expect(writes(s)).toHaveLength(3));
+    expect(writes(s)[2]).toEqual({ method: "PATCH", path: "/v1/items/WB-A", body: { planned_for: "2000-01-01", planned_slot: null, reason: "在今天页撤销" }, headers: expect.objectContaining({ "If-Match": "4" }) });
+    expect(await screen.findByText("已改回原来的安排")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "事项 WB-A" })).toBeInTheDocument();
   });
 
   it("ACT-WBN-08 交给 Agent：行上一键加交给 Agent 的标记，在行下展开事项详情同一块 Agent 处理，可直接现在开始；不是任务的没有这个按钮", async () => {
@@ -160,10 +166,37 @@ describe("今天页（flow-web-workbench）", () => {
     await user.click(within(await rowOf("事项 WB-B")).getByRole("button", { name: "完成" }));
     await waitFor(() => expect(writes(s)).toHaveLength(1));
     expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/WB-B/transition", body: { to: "done", reason: "在今天页完成" } });
-    expect(await screen.findByRole("link", { name: "「事项 WB-B」已完成，不在今天的事里了" })).toHaveAttribute("href", "/items/WB-B");
-    expect(screen.queryByRole("link", { name: "事项 WB-B" })).toBeNull();
-    expect(within(await rowOf("事项 WB-A")).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "完成", "记进展", "更多"]);
+    expect(await screen.findByText("已完成：事项 WB-B")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("link", { name: "事项 WB-B" })).toBeNull());
+    expect(within(await rowOf("事项 WB-A")).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "记进展", "更多", "完成"]);
     expect(within(screen.getByRole("region", { name: "今天的事" })).getByRole("heading", { level: 2 })).toHaveTextContent("（1）");
+  });
+
+  it("完成后撤销：按 Z 用现有接口改回原来的阶段（带新版本号），这一行回到今天的事，提示写明处理经过留下两步", async () => {
+    const s = live([mk("WB-A", { planned_for: TODAY }), mk("WB-B", { planned_for: TODAY })]);
+    mount(s.impl);
+    const user = userEvent.setup();
+    await user.click(within(await rowOf("事项 WB-B")).getByRole("button", { name: "完成" }));
+    await screen.findByText("已完成：事项 WB-B");
+    await waitFor(() => expect(screen.queryByRole("link", { name: "事项 WB-B" })).toBeNull());
+    await user.keyboard("z");
+    await waitFor(() => expect(writes(s)).toHaveLength(2));
+    expect(writes(s)[1]).toEqual({ method: "POST", path: "/v1/items/WB-B/transition", body: { to: "open", reason: "在今天页撤销" }, headers: expect.objectContaining({ "If-Match": "2" }) });
+    expect(await screen.findByText("已改回进行中，处理经过会留下这两步")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "事项 WB-B" })).toBeInTheDocument();
+  });
+
+  it("键盘：J 移到第一行并描边，E 完成这一行", async () => {
+    const s = live([mk("WB-A", { planned_for: TODAY }), mk("WB-B", { planned_for: TODAY })]);
+    mount(s.impl);
+    const user = userEvent.setup();
+    const row = await rowOf("事项 WB-A");
+    await user.keyboard("j");
+    expect(row).toHaveAttribute("data-cursor", "true");
+    await user.keyboard("e");
+    await waitFor(() => expect(writes(s)).toHaveLength(1));
+    expect(writes(s)[0]).toMatchObject({ method: "POST", path: "/v1/items/WB-A/transition", body: { to: "done" } });
+    expect(await screen.findByText("已完成：事项 WB-A")).toBeInTheDocument();
   });
 
   it("记进展：行上按钮就地展开一个输入框与保存，写一次进展；这一行留在原处，底部本周进展条数随即加一（同事同日算一条）", async () => {

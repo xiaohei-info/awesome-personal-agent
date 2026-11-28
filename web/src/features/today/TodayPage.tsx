@@ -1,6 +1,6 @@
 import { useFaultSay, type Fault } from "../../app/notice";
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { Go, PageHead } from "../../app/page";
 import { refreshCounts, useAttention, type Reminder } from "../../app/attention";
@@ -12,13 +12,17 @@ import { loadDone, loadProgress } from "../done/DonePage";
 import { monday } from "../calendar/layout";
 import { hostClock, hostParts, useHostClock } from "../items/schedule";
 import { RowActions, type RowAct } from "../items/RowActions";
-import { Val } from "../../app/values";
+import { Val, useLabel } from "../../app/values";
+import { ItemDetail } from "../items/ItemsPage";
+import { Disclosure, EmptyState, LIST_KEYS, PeekPanel, Skeleton, collapse, rowEl, toast, toastError, undoToast, useListKeys, usePageKeys, usePeek } from "../../app/ui";
 import { strings } from "./strings";
 
 // 今天（界面设计 §3.2、§5.2）：自上而下五块，空的不显示——要你处理、Agent 交回的、今天的事、提醒、久未推进（默认折叠）。
 // 「要你处理」与导航角标、状态灯取同一份注意力汇总；今天的事取自 GET /v1/today（附录 B.2），操作交给既有事项接口。
 // 今天的事对齐工作台「今日焦点」：计划今天或更早、今天到期、已逾期、高优先级四类合在一起，按项目分组，每行标出它为什么在这；
 // 行上四个快捷操作：排时间（日期与时段）、交给 Agent、完成、记进展。
+// 交互（交互样式规格 §3.1）：完成、放弃、改排期之后弹可撤销的提示，撤销就是用现有接口改回去（拍板项 3：立即写入、撤销时改回）；
+// 离开今天的那一行先收起再移除。J/K 移动当前行，Enter 打开，空格或 Shift+点击标题在右侧速览，E 完成，Z 撤销。
 interface Today { planned: Item[]; due: Item[]; pending: Item[]; stale: Item[]; overdue?: Item[]; high_priority?: Item[] }
 type Why = "planned" | "due" | "overdue" | "high";
 export interface Entry { item: Item; why: Why[] }
@@ -61,8 +65,12 @@ export function TodayPage() {
   const [error, setError] = useState<unknown>(null);
   const [since] = useState(() => localStorage.getItem(SEEN) ?? "");
   const [doneN, setDoneN] = useState<{ today: number; week: number; progress: number | null } | null>(null);
-  const [left, setLeft] = useState<{ id: string; text: string }[]>([]);
+  const [entering, setEntering] = useState<string | null>(null);
   const projects = useNamed("project");
+  const label = useLabel();
+  const navigate = useNavigate();
+  const peek = usePeek();
+  usePageKeys(LIST_KEYS);
 
   const load = useCallback(
     () => api.get<Today>("/today").then((r) => setData(r), (e) => setError(e)),
@@ -100,19 +108,65 @@ export function TodayPage() {
   };
 
   // 行上操作之后：先把这一件换成服务端的最新值，再静默重取一次 GET /today，按新的分组与先后就地重排（不显示加载、不卸载页面，滚动位置不动）。
-  // 归不归今天由服务端定，前端不复刻口径；因此离开了今天的那一件（做完、改到以后）在块顶留一行说明去了哪。
-  const replace = (it: Item, what: RowAct) => {
+  // 归不归今天由服务端定，前端不复刻口径；离开了今天的那一行先收起再移除，焦点落到下一行。
+  // 完成、放弃、改排期弹可撤销的提示（判定看服务端返回的这一件，写入失败时不弹）。
+  const replace = async (it: Item, what: RowAct, before?: Item) => {
     const swap = (l?: Item[]) => l?.map((x) => (x.id === it.id ? it : x));
     setData((d) => d && { ...d, planned: swap(d.planned)!, due: swap(d.due)!, overdue: swap(d.overdue), high_priority: swap(d.high_priority) });
-    api.get<Today>("/today").then((r) => {
-      setData(r);
-      if (!todayEntries(r).some((e) => e.item.id === it.id)) {
-        const text = what === "done" || it.phase === "done" ? t.leftDone(it.title) : what === "plan" && it.planned_for ? t.leftPlan(it.title, it.planned_for) : t.leftOther(it.title);
-        setLeft((l) => [{ id: it.id, text }, ...l.filter((x) => x.id !== it.id)].slice(0, 3));
-      }
-    }, () => undefined);
+    if (before) offerUndo(before, it, what);
+    const r = await api.get<Today>("/today").catch(() => null);
     refreshCounts();
     countDone();
+    if (!r) return;
+    if (!todayEntries(r).some((e) => e.item.id === it.id)) {
+      const ids = order.current;
+      const next = ids[ids.indexOf(it.id) + 1] ?? ids[ids.indexOf(it.id) - 1];
+      await collapse(rowEl(it.id));
+      if (peek.id === it.id) peek.close();
+      const to = next && rowEl(next)?.querySelector<HTMLElement>("a");
+      if (to && document.activeElement === document.body) to.focus({ preventScroll: true });
+    }
+    setData(r);
+  };
+
+  const undoWith = async (fn: () => Promise<unknown>, done: string, id: string) => {
+    try {
+      await fn();
+      setEntering(id);
+      toast(done);
+    } catch (e) {
+      toastError(t.undoFailed(msg(e)));
+    }
+    const r = await api.get<Today>("/today").catch(() => null);
+    if (r) setData(r);
+    refreshCounts();
+    countDone();
+  };
+
+  /** 撤销提示：完成与放弃改回原来的阶段（等待中的带回原来在等的对象），改排期写回原来的计划日期与时段。 */
+  const offerUndo = (before: Item, after: Item, what: RowAct) => {
+    const path = itemPath(after);
+    if ((what === "done" && after.phase === "done") || (what === "drop" && after.phase === "dropped")) {
+      const back = { to: before.phase, reason: t.undoReason, ...(before.phase === "waiting" && before.waiting_on && { waiting_on: before.waiting_on }) };
+      const text = what === "done" ? t.toastDone(after.title) : after.kind === "delegation" ? t.toastDropDelegation(after.title) : t.toastDrop(after.title);
+      undoToast(text, () => undoWith(() => api.post(path + "/transition", back, ifMatch(after)), t.undone(label("phase", before.phase)), after.id));
+    } else if (what === "plan" && (after.planned_for !== before.planned_for || after.planned_slot !== before.planned_slot)) {
+      const when = [after.planned_for && md(after.planned_for), after.planned_slot].filter(Boolean).join(" ");
+      undoToast(t.toastPlan(when), () => undoWith(() => api.patch(path, { planned_for: before.planned_for ?? null, planned_slot: before.planned_slot ?? null, reason: t.undoReason }, ifMatch(after)), t.undonePlan, after.id));
+    }
+  };
+
+  // 键盘「完成」：与行上的「完成」同一个接口，写完重读这一件再交给 replace。
+  const doneById = async (id: string) => {
+    const it = todayEntries(data ?? { planned: [], due: [], pending: [], stale: [] }).find((e) => e.item.id === id)?.item;
+    if (!it || it.kind === "delegation" || ["proposed", "done", "dropped"].includes(it.phase)) return;
+    try {
+      await api.post(itemPath(it) + "/transition", { to: "done", reason: t.doneReason }, ifMatch(it));
+    } catch (e) {
+      toastError(e);
+    }
+    const r = await api.get<{ item: Item }>(itemPath(it)).catch(() => null);
+    if (r) void replace(r.item, "done", it);
   };
 
   const a = attention;
@@ -123,6 +177,18 @@ export function TodayPage() {
     a.proposals > 0 && { key: "proposals", text: t.top.proposals(a.proposals), button: t.top.toProposals, to: "/proposals", red: false },
   ].filter((x): x is { key: string; text: string; button: string; to: string; red: boolean } => !!x) : [];
   const todays = data ? todayEntries(data) : [];
+  const groups = byProject(todays, projects.map((p) => p.id));
+  const order = useRef<string[]>([]);
+  order.current = groups.flatMap(([, es]) => es.map((e) => e.item.id));
+  const cursor = useListKeys({
+    ids: order.current,
+    onOpen: (id) => navigate(itemPath({ id } as Item)),
+    onPeek: (id) => (peek.enabled ? (peek.id === id ? peek.close() : peek.open(id)) : navigate(itemPath({ id } as Item))),
+    onDone: (id) => void doneById(id),
+    onMove: (id) => peek.id && peek.open(id),
+    onEscape: () => !!peek.id && (peek.close(), true),
+  });
+  const peeked = peek.id ? todays.find((e) => e.item.id === peek.id)?.item : undefined;
   const reminders = a?.reminders ?? [];
   const empty = !!data && !top.length && !back.length && !todays.length && !reminders.length && !data.stale.length;
 
@@ -150,19 +216,25 @@ export function TodayPage() {
         </section>
       )}
       {!data ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : (
         <>
-          {(todays.length > 0 || left.length > 0) && (
+          {todays.length > 0 && (
             <section aria-label={t.blocks.today}>
               <h2>{t.count(t.blocks.today, todays.length)}</h2>
-              {left.map((x) => <p key={x.id} role="status" className="sub"><Link to={"/items/" + encodeURIComponent(x.id)}>{x.text}</Link></p>)}
-              {byProject(todays, projects.map((p) => p.id)).map(([pid, es]) => {
+              {groups.map(([pid, es]) => {
                 const name = pid ? projects.find((p) => p.id === pid)?.name ?? "" : t.noProject;
                 return (
                   <section key={pid} aria-label={name} className="today-group">
-                    <h3>{pid ? <Link to={"/projects/" + encodeURIComponent(pid)}>{name}</Link> : name} <span className="sub">{es.length}</span></h3>
-                    <ul className="rows">{es.map((e) => <TodayRow key={e.item.id} entry={e} onChange={replace} />)}</ul>
+                    <Disclosure head defaultOpen persistKey={"today.group." + (pid || "-")}
+                      summary={<h3>{pid ? <Link to={"/projects/" + encodeURIComponent(pid)}>{name}</Link> : name}{" "}<span className="count-n">{es.length}</span></h3>}>
+                      <ul className="rows">
+                        {es.map((e) => (
+                          <TodayRow key={e.item.id} entry={e} cursor={cursor === e.item.id} peeked={peek.id === e.item.id} entering={entering === e.item.id}
+                            onPeek={peek.enabled ? () => peek.open(e.item.id) : undefined} onChange={(it, what) => void replace(it, what, e.item)} />
+                        ))}
+                      </ul>
+                    </Disclosure>
                   </section>
                 );
               })}
@@ -170,13 +242,18 @@ export function TodayPage() {
           )}
           {reminders.length > 0 && <Reminders list={reminders} />}
           {data.stale.length > 0 && <Stale items={data.stale} act={act} />}
-          {empty && <p className="empty">{t.allClear}</p>}
+          {empty && <EmptyState title={t.allClear} note={t.allClearNote} action={<Link className="btn" to="/items">{t.seeItems}</Link>} />}
           {doneN && (
             <p className="sub">
               {doneN.week ? t.doneLine(doneN.today, doneN.week) : t.doneNone} · {doneN.progress != null && <>{t.progressLine(doneN.progress)} · </>}<Link to="/done">{t.seeDone}</Link>
             </p>
           )}
         </>
+      )}
+      {peek.id && (
+        <PeekPanel key="peek" id={peek.id} ids={order.current} href={itemPath({ id: peek.id } as Item)} title={peeked?.title ?? ""} onOpen={peek.open} onClose={peek.close}>
+          <ItemDetail key={peek.id} embedded={peek.id} />
+        </PeekPanel>
       )}
     </main>
   );
@@ -236,7 +313,15 @@ const md = (d: string) => d.slice(5);
  * 今天的一件事：标题下一行写它为什么在这——计划哪天（过了的写「已过」）、今天截止、逾期（带原截止日）、紧急或高优先级，
  * 三类用不同的标记，不混在一起；行上四个快捷操作（RowActions，与事项列表共用）。项目名在组标题上，这里不重复。
  */
-function TodayRow({ entry, onChange }: { entry: Entry; onChange: (it: Item, what: RowAct) => void }) {
+function TodayRow({ entry, onChange, cursor, peeked, entering, onPeek }: {
+  entry: Entry;
+  onChange: (it: Item, what: RowAct) => void;
+  cursor?: boolean;
+  peeked?: boolean;
+  entering?: boolean;
+  /** 宽屏才有：Shift+点击标题在右侧速览，普通点击照旧整页打开（拍板项 1）。 */
+  onPeek?: () => void;
+}) {
   const t = useT(strings);
   const { api } = useSession();
   const { utc_offset: offset, today } = useHostClock(api);
@@ -248,10 +333,11 @@ function TodayRow({ entry, onChange }: { entry: Entry; onChange: (it: Item, what
   if (why.includes("high")) marks.push({ cls: "badge warn", text: item.priority === "urgent" ? t.why.urgent : t.why.high });
   if (why.includes("planned") && item.planned_for) marks.push({ cls: "badge plain", text: item.planned_for < today ? t.why.plannedPast(md(item.planned_for)) : t.why.plannedToday });
   return (
-    <li data-item={item.id}>
+    <li data-item={item.id} data-cursor={cursor || undefined} data-peeked={peeked || undefined} className={entering ? "row-enter" : undefined}>
       <div className="act-row">
         <div>
-          {item.planned_slot && <span className="badge plain">{item.planned_slot}</span>} <Link to={itemPath(item)}>{item.title}</Link>
+          {item.planned_slot && <span className="badge plain">{item.planned_slot}</span>}{" "}
+          <Link to={itemPath(item)} onClick={(e) => { if (e.shiftKey && onPeek) { e.preventDefault(); onPeek(); } }}>{item.title}</Link>
           <span className="sub reasons">{marks.map((m) => <span key={m.text} className={m.cls}>{m.text}</span>)}</span>
         </div>
         <RowActions item={item} where={t.where} onChange={onChange} />
@@ -264,26 +350,30 @@ function TodayRow({ entry, onChange }: { entry: Entry; onChange: (it: Item, what
 function Reminders({ list }: { list: Reminder[] }) {
   const { api } = useSession();
   const t = useT(strings);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [gone, setGone] = useState<Set<string>>(new Set());
   const [error, setError] = useState<unknown>(null);
+  // 「知道了」当场收起这一行；失败就回来并就地报错（以服务端为准）。
   const read = async (id: string) => {
-    setBusy(id);
     setError(null);
+    await collapse(document.querySelector<HTMLElement>(`#reminders li[data-delivery="${CSS.escape(id)}"]`));
+    setGone((g) => new Set(g).add(id));
     try {
       await api.post("/deliveries/" + encodeURIComponent(id) + "/read");
     } catch (e) {
       setError(e);
+      setGone((g) => { const n = new Set(g); n.delete(id); return n; });
     }
-    setBusy(null);
     refreshCounts();
   };
+  const shown = list.filter((d) => !gone.has(d.id));
+  if (!shown.length && error == null) return null;
   return (
     <section aria-label={t.blocks.reminders} id="reminders">
-      <h2>{t.count(t.blocks.reminders, list.length)}</h2>
+      <h2>{t.count(t.blocks.reminders, shown.length)}</h2>
       {error != null && <ErrorNote error={error} reveal />}
       <ul className="rows">
-        {list.map((d) => (
-          <li key={d.id} className="act-row" aria-label={d.content.title}>
+        {shown.map((d) => (
+          <li key={d.id} className="act-row" aria-label={d.content.title} data-delivery={d.id}>
             <div>
               <span>{d.content.title}</span>
               {d.content.summary && <span className="sub">{plainLinks(d.content.summary)}</span>}
@@ -295,7 +385,7 @@ function Reminders({ list }: { list: Reminder[] }) {
             </div>
             <span className="actions">
               {d.content.web_url ? <a className="btn" href={d.content.web_url}>{t.open}</a> : d.item && <Link className="btn" to={"/items/" + encodeURIComponent(d.item)}>{t.open}</Link>}
-              <button type="button" disabled={busy === d.id} onClick={() => void read(d.id)}>{t.gotIt}</button>
+              <button type="button" onClick={() => void read(d.id)}>{t.gotIt}</button>
             </span>
           </li>
         ))}
@@ -332,8 +422,7 @@ function Stale({ items, act }: { items: Item[]; act: (fn: () => Promise<unknown>
     });
 
   return (
-    <details aria-label={t.groups.stale}>
-      <summary>{t.count(t.groups.stale, items.length)}</summary>
+    <Disclosure aria-label={t.groups.stale} persistKey="today.stale" summary={<h2>{t.count(t.groups.stale, items.length)}</h2>}>
       <ul className="rows">
         {items.map((it) => (
           <li key={it.id}>
@@ -353,6 +442,6 @@ function Stale({ items, act }: { items: Item[]; act: (fn: () => Promise<unknown>
         {choice === "reschedule" && <label>{t.newDate} <input type="date" aria-label={t.batchDate} value={date} onChange={(e) => setDate(e.target.value)} /></label>}
         <button type="button" disabled={!ok} onClick={apply}>{t.apply(picked.size)}</button>
       </div>
-    </details>
+    </Disclosure>
   );
 }

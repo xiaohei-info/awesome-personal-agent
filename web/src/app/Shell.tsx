@@ -10,6 +10,7 @@ import { useSession } from "./session";
 import { toggleTheme } from "./theme";
 import type { Status } from "./status";
 import { useLeaveGuard } from "./leave";
+import { ShortcutSheet, Toaster, typing } from "./ui";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
@@ -51,6 +52,7 @@ function ShellBody({ features: all }: { features: Feature[] }) {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [jumping, setJumping] = useState(false);
   const [more, setMore] = useState(false);
+  const [help, setHelp] = useState(false);
   const attention = useAttention();
   const status = attention?.status ?? null;
   useHashLanding(pathname, hash);
@@ -74,6 +76,9 @@ function ShellBody({ features: all }: { features: Feature[] }) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setJumping((o) => !o);
+      } else if (e.key === "?" && !e.metaKey && !e.ctrlKey && !typing(e.target)) {
+        e.preventDefault();
+        setHelp((o) => !o);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -184,6 +189,8 @@ function ShellBody({ features: all }: { features: Feature[] }) {
         )}
       </section>
       {jumping && <Palette nav={nav} onClose={() => setJumping(false)} />}
+      {help && <ShortcutSheet onClose={() => setHelp(false)} />}
+      <Toaster />
       {more && (
         <More
           nav={nav}
