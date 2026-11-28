@@ -25,6 +25,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -49,7 +50,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module, delegation.Module, runner.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module, delegation.Module, runner.Module, search.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -131,6 +132,9 @@ func exit(err error) int {
 func TestPurgeItemTombstonesEventsKeepsSequence(t *testing.T) {
 	e := setup(t)
 	id := e.must(t, owner, "item.create", map[string]any{"title": marker, "kind": "task", "reason": marker, "evidence": marker})["id"].(string)
+	if r, err := search.Search(bg, e.st, search.Query{Text: marker}, nil); err != nil || len(r.Hits) != 1 { // 先让索引里有它
+		t.Fatalf("indexed before purge: %+v %v", r, err)
+	}
 	before := e.events(t)
 	cursor := before[len(before)-1].Event.Seq
 
@@ -140,6 +144,23 @@ func TestPurgeItemTombstonesEventsKeepsSequence(t *testing.T) {
 	}
 	if err := e.st.View(bg, func(tx *store.Tx) error { _, err := items.Get(tx, id); return err }); exit(err) != domain.ExitNotFound {
 		t.Fatalf("item projection survived purge: %v", err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query("SELECT COUNT(*) FROM search_doc WHERE object = ?", id)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		var n int64
+		if r.Next() {
+			err = r.Scan(&n)
+		}
+		if err == nil && n != 0 {
+			err = errors.New("purged item is still in the search index")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	after := e.events(t)

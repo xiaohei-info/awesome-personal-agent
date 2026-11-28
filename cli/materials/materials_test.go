@@ -19,9 +19,11 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apimat "github.com/xiaohei-info/awesome-personal-agent/api/materials"
 	apiproj "github.com/xiaohei-info/awesome-personal-agent/api/projects"
+	apisearch "github.com/xiaohei-info/awesome-personal-agent/api/search"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/materials"
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
@@ -37,6 +39,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -55,7 +58,7 @@ func newKernel(t *testing.T) *kernel {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, kdelivery.Module, kcontext.Module, km.Module, search.Module, hosted.Module, core.Module, executors.Module, delegation.Module} {
+		items.Module, kdelivery.Module, kcontext.Module, km.Module, search.Module, runner.Module, hosted.Module, core.Module, executors.Module, delegation.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +75,7 @@ func newKernel(t *testing.T) *kernel {
 		}
 	}
 	au := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apimat.Routes(st, x, nil), apictx.Routes(st), apiproj.Routes(st, x)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apimat.Routes(st, x, nil), apictx.Routes(st), apiproj.Routes(st, x), apisearch.Routes(st)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +192,7 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	if l := k.ok(auth.Observer, "material", "list", "--project", "prj_none").json(t)["materials"].([]any); len(l) != 0 {
 		t.Fatalf("list other project: %v", l)
 	}
-	if h := k.ok(auth.Observer, "material", "search", "stdin", "--project", k.prj, "--limit", "5").json(t)["hits"].([]any); len(h) == 0 {
+	if h := k.ok(auth.Observer, "search", "stdin", "--type", "material", "--project", k.prj, "--limit", "5").json(t)["hits"].([]any); len(h) == 0 {
 		t.Fatal("search found nothing")
 	}
 	if k.apa(auth.Observer, "material", "show", "mat_missing").code != domain.ExitNotFound {
@@ -221,12 +224,17 @@ func TestHostedMaterialAddShowAndCommitConflict(t *testing.T) {
 		t.Fatalf("hosted registration: %v", m)
 	}
 	// 托管型只索引元数据：路径片段命中并带位置，正文里才有的词不命中。
-	hits := k.ok(auth.Observer, "material", "search", "design.md").json(t)["hits"].([]any)
+	hits := k.ok(auth.Observer, "search", "design.md", "--type", "material").json(t)["hits"].([]any)
 	if len(hits) != 1 || hits[0].(map[string]any)["path"] != "git@example.com:me/doc.git:docs/design.md" {
 		t.Fatalf("hosted path search: %v", hits)
 	}
-	if hits := k.ok(auth.Observer, "material", "search", "zebracrossing").json(t)["hits"].([]any); len(hits) != 0 {
+	zero := k.ok(auth.Observer, "search", "zebracrossing", "--type", "material").json(t)
+	if hits := zero["hits"].([]any); len(hits) != 0 {
 		t.Fatalf("hosted body term must not hit: %v", hits)
+	}
+	// 零命中给出口：查已放弃的、查来源事件（apa search 的"下一步"）。
+	if n := zero["next"].([]any); len(n) != 2 || !strings.Contains(n[0].(string), "--include-dropped") || !strings.HasSuffix(n[1].(string), "--type source") {
+		t.Fatalf("zero-hit next: %v", n)
 	}
 	if c := k.apa(auth.Worker, "material", "commit", id, "--from", write(t, "x"), "--reason", "r"); c.code != domain.ExitConflict {
 		t.Fatalf("commit on hosted: %d %s", c.code, c.errOut)

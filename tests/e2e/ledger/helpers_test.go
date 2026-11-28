@@ -86,7 +86,7 @@ func addTask(t *testing.T, e *baseline.Env, title string, extra ...string) strin
 // show 用 OBS 读事项，返回 `apa item show` 里的 item 对象。
 func show(t *testing.T, e *baseline.Env, id string) map[string]any {
 	t.Helper()
-	it, _ := ok(t, e.Apa(e.OBS, "", "item", "show", id), "item show "+id)["item"].(map[string]any)
+	it, _ := ok(t, e.Apa(e.OBS, "", "item", "show", id, "--full"), "item show "+id)["item"].(map[string]any)
 	if it == nil {
 		t.Fatalf("item show %s 没有 item", id)
 	}

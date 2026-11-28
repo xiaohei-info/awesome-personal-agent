@@ -25,6 +25,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	ksearch "github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -57,7 +58,7 @@ func newRig(t *testing.T, ph khealth.PackHealth) *rig {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, clock.Module, core.Module,
-		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module, items.Module} {
+		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module, items.Module, ksearch.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

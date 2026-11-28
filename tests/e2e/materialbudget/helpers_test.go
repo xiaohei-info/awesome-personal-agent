@@ -292,7 +292,7 @@ func (k *kit) item(id string) itemView {
 	var out struct {
 		Item itemView `json:"item"`
 	}
-	if err := json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", id).Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", id, "--full").Stdout), &out); err != nil {
 		k.t.Fatalf("apa item show 输出不是 JSON: %v", err)
 	}
 	return out.Item

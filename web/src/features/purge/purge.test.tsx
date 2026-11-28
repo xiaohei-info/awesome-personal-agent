@@ -16,8 +16,10 @@ function server(o: { deny?: boolean } = {}) {
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url.startsWith("/v1/items?")) return json(200, { items: new URL(url, "http://x").searchParams.get("q") === "续保" ? [{ id: "it-1", title: "续保材料确认" }] : [] });
-    if (url.startsWith("/v1/materials/search?")) return json(200, { hits: [] });
+    if (url.startsWith("/v1/search?")) {
+      const sp = new URL(url, "http://x").searchParams;
+      return json(200, { hits: sp.get("q") === "续保" && sp.get("include_dropped") === "true" ? [{ type: "item", id: "it-1", title: "续保材料确认" }] : [], total: 0 });
+    }
     if (url === "/v1/settings/purge" && method === "POST") {
       if (o.deny) return json(403, { code: "web_only", why: "purge can only be used by the owner in the Web UI", next: "open the Web UI" });
       if (body.object === "mat-1") return json(200, { object: "mat-1", kind: "material", events: 3, blobs_removed: ["aa11"], blobs_retained: ["bb22"] });

@@ -37,7 +37,7 @@ function backend(o: { materials?: Mat[]; revisions?: Rev[]; hits?: any[]; propos
     }
     if (q === "/v1/items") return json(200, { items: [{ id: "item_1", title: "登录改造", project: "acc-open" }, { id: "item_2", title: "买菜清单", project: "acc-home" }] });
     if (q === "/v1/settings/policy") return json(200, { version: 1, material_write: { default: "proposed", kinds: { minutes: "direct", design: "proposed" } } });
-    if (q === "/v1/materials/search") return json(200, { hits: o.hits ?? [], ...{ _q: u.search } });
+    if (q === "/v1/search") return json(200, { hits: o.hits ?? [], ...{ _q: u.search } });
     if (q === "/v1/materials" && method === "POST") {
       const id = "mat_new" + materials.length;
       const state = proposedKinds.includes(body.kind) ? "proposed" : "current";
@@ -374,21 +374,21 @@ describe("关联事项（ACT-MAT-13）", () => {
 });
 
 describe("检索与筛选（ACT-MAT-09 / ACT-MAT-13）", () => {
-  it("搜索框走 /materials/search，只显示 id、标题、片段；中文词原样透传", async () => {
-    const b = backend({ materials: [note()], hits: [{ id: "mat_x", title: "登录排查", kind: "worknote", project: "acc-open", hosted: false, snippet: "…登录超时的根因…" }] });
+  it("搜索框走 /search?type=material，只显示 id、标题、片段；中文词原样透传", async () => {
+    const b = backend({ materials: [note()], hits: [{ type: "material", id: "mat_x", title: "登录排查", kind: "worknote", project: "acc-open", snippet: "…登录超时的根因…" }] });
     mount(b.impl);
     await userEvent.type(await screen.findByLabelText("搜索材料"), "超时");
     await userEvent.click(screen.getByRole("button", { name: "搜索" }));
     const hit = await screen.findByRole("listitem", { name: "mat_x" });
     expect(hit).toHaveTextContent("登录排查");
     expect(hit).toHaveTextContent("登录超时的根因");
-    expect(b.calls.some((c) => c.path.startsWith("/v1/materials/search?") && new URL(c.path, "http://x").searchParams.get("q") === "超时")).toBe(true);
+    expect(b.calls.some((c) => c.path.startsWith("/v1/search?") && new URL(c.path, "http://x").searchParams.get("q") === "超时")).toBe(true);
   });
 
   it("按项目、kind、关联事项筛选；托管型命中标明来源与路径", async () => {
     const b = backend({
       materials: [note(), design],
-      hits: [{ id: "mat_h", title: "仓库设计", kind: "design", project: "acc-open", hosted: true, path: "docs/a.md" }],
+      hits: [{ type: "material", id: "mat_h", title: "仓库设计", kind: "design", project: "acc-open", path: "docs/a.md" }],
     });
     mount(b.impl);
     await screen.findByRole("button", { name: "周会纪要" });
@@ -408,7 +408,7 @@ describe("检索与筛选（ACT-MAT-09 / ACT-MAT-13）", () => {
     const hit = await screen.findByRole("listitem", { name: "mat_h" });
     expect(hit).toHaveTextContent("在仓库里（只读）");
     expect(hit).toHaveTextContent("docs/a.md");
-    const call = b.calls.find((c) => c.path.startsWith("/v1/materials/search?"))!;
+    const call = b.calls.find((c) => c.path.startsWith("/v1/search?"))!;
     const sp = new URL(call.path, "http://x").searchParams;
     expect(sp.get("item")).toBe("item_1");
     expect(sp.get("kind")).toBe("design");

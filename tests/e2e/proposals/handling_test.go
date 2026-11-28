@@ -68,7 +68,7 @@ func (k *kit) attachedEvents(target, prop string) []step {
 func (k *kit) full(id string) map[string]any {
 	k.t.Helper()
 	var out map[string]any
-	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", id).Stdout), &out))
+	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", id, "--full").Stdout), &out))
 	return out
 }
 
@@ -338,7 +338,7 @@ func TestFlowProposalHandling(t *testing.T) {
 			t.Errorf("PA 的 reason 应记并入 T3: %q", reason)
 		}
 		if !k.relatesTo(pa, t3) {
-			t.Errorf("PA 与 T3 应有 relates 关系: %s", k.apa(k.OBS, 0, "item", "show", pa).Stdout)
+			t.Errorf("PA 与 T3 应有 relates 关系: %s", k.apa(k.OBS, 0, "item", "show", pa, "--full").Stdout)
 		}
 		if !slices.Contains(k.messages(t3), "prh 合同第二版意见") {
 			t.Errorf("prh-att-1 应成为 T3 的挂靠消息: %v", k.messages(t3))

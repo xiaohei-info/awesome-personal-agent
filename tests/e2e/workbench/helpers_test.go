@@ -103,7 +103,7 @@ func (k *kit) item(id string) map[string]any {
 	var out struct {
 		Item map[string]any `json:"item"`
 	}
-	jsonOf(k.t, k.apa(k.OBS, 0, "item", "show", id).Stdout, &out)
+	jsonOf(k.t, k.apa(k.OBS, 0, "item", "show", id, "--full").Stdout, &out)
 	if out.Item == nil {
 		k.t.Fatalf("item show %s 输出不是事项", id)
 	}
@@ -119,7 +119,7 @@ func (k *kit) progress(id string) []map[string]any {
 	var out struct {
 		Progress []map[string]any `json:"progress"`
 	}
-	jsonOf(k.t, k.apa(k.OBS, 0, "item", "show", id).Stdout, &out)
+	jsonOf(k.t, k.apa(k.OBS, 0, "item", "show", id, "--full").Stdout, &out)
 	return out.Progress
 }
 

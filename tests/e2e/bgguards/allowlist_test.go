@@ -63,7 +63,7 @@ func subjects(ms []msgView) string {
 // showMessages 是 `apa item show` 输出里合并的挂靠消息。
 func (f *fx) showMessages(token, item string) string {
 	f.t.Helper()
-	return f.apa(token, 0, "item", "show", item).Stdout
+	return f.apa(token, 0, "item", "show", item, "--full").Stdout
 }
 
 // contextOf 取 `apa context --scope item --item <id>` 的原始输出与该事项的确认游标。

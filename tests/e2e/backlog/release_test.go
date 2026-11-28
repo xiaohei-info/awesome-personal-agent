@@ -382,7 +382,7 @@ func TestBacklogReleaseFlow(t *testing.T) {
 				t.Fatalf("新建议应都是 %s: %s", hi, e.Subject)
 			}
 			var it struct{ Item struct{ Title, Body string } }
-			k.must(json.Unmarshal([]byte(k.Apa(k.OBS, "", "item", "show", e.Item).Stdout), &it))
+			k.must(json.Unmarshal([]byte(k.Apa(k.OBS, "", "item", "show", e.Item, "--full").Stdout), &it))
 			if it.Item.Title == "" {
 				t.Fatalf("新建议 %s 没有标题", e.Item)
 			}

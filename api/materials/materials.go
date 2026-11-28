@@ -1,6 +1,6 @@
 // Package materials 是材料分组的 HTTP 路由（附录 B.2、设计 §12.4）：
 //
-//	GET/POST /materials          GET/PATCH /materials/{id}          GET /materials/search
+//	GET/POST /materials          GET/PATCH /materials/{id}          （检索并入 GET /search）
 //	GET/POST /materials/{id}/revisions     POST /materials/{id}/revert
 //	POST /revisions/{id}/confirm|reject      GET /revisions/pending（全站待确认的修订）
 //	GET /materials/{id}/content  POST /materials/{id}/changes   （托管型，需要 hosted.Service）
@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
@@ -34,7 +33,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -53,7 +51,6 @@ func Routes(st *store.Store, x *command.Executor, hs *hosted.Service) core.Route
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/materials", Handler: h.list})
 		r.Handle(core.Route{Method: "POST", Path: "/materials", Handler: h.create})
-		r.Handle(core.Route{Method: "GET", Path: "/materials/search", Handler: h.search})
 		r.Handle(core.Route{Method: "GET", Path: "/materials/{id}", Handler: h.get})
 		r.Handle(core.Route{Method: "PATCH", Path: "/materials/{id}", Handler: h.write("material.update", http.StatusOK)})
 		r.Handle(core.Route{Method: "GET", Path: "/materials/{id}/revisions", Handler: h.revisions})
@@ -379,57 +376,6 @@ func (h *handlers) pending(w http.ResponseWriter, r *http.Request, p *core.Princ
 		ps = []km.Pending{}
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"pending": ps})
-}
-
-func (h *handlers) search(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if err := readable(p); err != nil {
-		return err
-	}
-	v := r.URL.Query()
-	q := search.Query{Text: v.Get("q"), Project: v.Get("project"), Kind: v.Get("kind"), Tags: v["tag"], Item: v.Get("item")}
-	for name, dst := range map[string]*time.Time{"after": &q.After, "before": &q.Before} {
-		if s := v.Get(name); s != "" {
-			t, err := time.Parse(time.RFC3339, s)
-			if err != nil {
-				return invalid(name+" must be an RFC 3339 time", "fix "+name+" and retry")
-			}
-			*dst = t
-		}
-	}
-	if s := v.Get("limit"); s != "" {
-		n, err := strconv.Atoi(s)
-		if err != nil || n < 1 {
-			return invalid("limit must be a positive integer", "fix limit and retry")
-		}
-		q.Limit = n
-	}
-	hits, err := search.Search(r.Context(), h.st, q)
-	if err != nil {
-		return err
-	}
-	if p.Caller.External() { // 正文命中会暴露看不到正文的材料：外部钥匙只留按全文能读的材料
-		if err := h.st.View(r.Context(), func(tx *store.Tx) error {
-			rs := readscope.New(tx, p.Caller)
-			kept := hits[:0]
-			for _, hit := range hits {
-				t, err := rs.MaterialTier(hit.ID)
-				if err != nil {
-					return err
-				}
-				if t == readscope.Full {
-					kept = append(kept, hit)
-				}
-			}
-			hits = kept
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	if hits == nil {
-		hits = []search.Hit{}
-	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"hits": hits})
 }
 
 // content 把 hosted.View 渲染成附录 B.2 的三态。读取失败是降级结果（unavailable），不是错误。

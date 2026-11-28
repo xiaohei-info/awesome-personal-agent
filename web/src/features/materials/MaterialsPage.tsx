@@ -12,7 +12,7 @@ import { MATERIAL_KIND } from "../../app/ids";
 import { Pick, Val } from "../../app/values";
 
 // 形状对应 GET/POST /v1/materials、GET /v1/materials/{id}[/revisions]、POST /v1/materials/{id}/revisions|revert、
-// POST /v1/revisions/{id}/confirm|reject、GET /v1/materials/search（附录 B.2）。
+// POST /v1/revisions/{id}/confirm|reject、GET /v1/search?type=material（附录 B.2）。
 // 写入策略（direct/proposed）、基线冲突、规范生效只认 Web、授权都在服务端；本页只提交并如实展示服务端的回答。
 // 托管型的只读展示与发起修改由 features/materials-hosted 负责。
 interface Material extends LinkInfo {
@@ -35,12 +35,12 @@ interface Revision {
   state: "current" | "proposed" | "superseded";
   at: string;
 }
+// 统一检索的一条命中（GET /search?type=material）：托管型回路径、不回片段。
 interface Hit {
   id: string;
   title: string;
   kind: string;
-  project: string;
-  hosted: boolean;
+  project?: string;
   snippet?: string;
   path?: string;
 }
@@ -132,13 +132,13 @@ export function MaterialsPage() {
   const search = async () => {
     setError(null);
     if (!q.trim() && !item.trim()) return reload(project);
-    const sp = new URLSearchParams();
+    const sp = new URLSearchParams({ type: "material", limit: "50" });
     if (q.trim()) sp.set("q", q.trim());
     if (item.trim()) sp.set("item", item.trim());
     if (project) sp.set("project", project);
     if (kind) sp.set("kind", kind);
     try {
-      setHits((await api.get<{ hits: Hit[] }>("/materials/search?" + sp)).hits);
+      setHits((await api.get<{ hits: Hit[] }>("/search?" + sp)).hits);
     } catch (e) {
       setError(e);
     }
@@ -200,7 +200,7 @@ export function MaterialsPage() {
         <ul className="rows">
           {hits.map((h) => (
             <li key={h.id} aria-label={h.id}>
-              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub"><Val k="materialKind" id={h.kind} /> · {projectName(h.project) || t.global} · {h.hosted ? t.hosted : t.owned}
+              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub"><Val k="materialKind" id={h.kind} /> · {projectName(h.project ?? "") || t.global} · {h.path ? t.hosted : t.owned}
               {h.path && <> · {h.path}</>}</span>
               {h.snippet && <p className="sub">{h.snippet}</p>}
             </li>

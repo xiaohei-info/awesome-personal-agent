@@ -7,7 +7,7 @@ package kcontext
 //     普通字段改动只对"本会话在跟"的事项给出。
 //   - 增量里"渲染出来与游标那一刻相同"的事项不带：事件变了而注入里能看见的那一行没变，不算变化；
 //     挂靠消息只有这一次真的转交了才算变化。
-//   - 整份注入有 InjectBudget 字的上限：事项行按组截断并写明另有几条；投递与跟进消息在读取时已记为送达，不截。
+//   - 整份注入有 InjectBudget 字的上限，“另有几条”的说明行也计在内：事项行按组截断并写明另有几条；投递与跟进消息在读取时已记为送达，不截。
 //   - 未挂事项的派活在记下它的会话里每轮都提示，直到挂上或标为不跟踪（§6.17）。
 
 import (
@@ -301,20 +301,7 @@ func unchanged(tx *store.Tx, it domain.Item, after int64) (bool, error) {
 
 var groupTitles = map[string]string{GroupDecide: "等你决定", GroupDispatches: "在途派活", GroupToday: "今天与逾期", GroupTracking: "本会话在跟"}
 
-// budget 记着还剩多少字。
-type budget struct{ left int }
-
 func runes(s string) int { return len([]rune(s)) }
-
-// take 能放下 s 就扣掉并返回真。
-func (b *budget) take(s string) bool {
-	n := runes(s)
-	if n > b.left {
-		return false
-	}
-	b.left -= n
-	return true
-}
 
 func itemLines(e Entry) string {
 	deadline := "无"
@@ -343,19 +330,12 @@ func moreLine(n int, query string) string {
 	return s + "\n"
 }
 
-// renderGroups 按上限渲染概览：放不下的行计入该组的"另有"。
-func renderGroups(groups []OverviewGroup, b *budget) string {
+// renderGroups 渲染概览，至多放 *keep 条事项（按顺序），放不下的计入该组的“另有”；
+// 名额用完时后面的组不再列标题，合成一行“另有”。说明行与事项行一起计入整份的字数上限（由 Inject 选 keep）。
+func renderGroups(groups []OverviewGroup, keep *int) string {
 	var out strings.Builder
 	for gi, g := range groups {
-		title := groupTitles[g.Key]
-		switch {
-		case g.Key == GroupProject && g.Project == "":
-			title = "不属于任何项目的未结"
-		case g.Key == GroupProject:
-			title = "项目 " + oneLine(g.Name) + "（" + g.Project + "）未结"
-		}
-		head := "## " + title + "\n"
-		if !b.take(head) {
+		if *keep == 0 && len(g.Items) > 0 {
 			rest := 0
 			for _, r := range groups[gi:] {
 				rest += len(r.Items) + r.More
@@ -363,20 +343,21 @@ func renderGroups(groups []OverviewGroup, b *budget) string {
 			out.WriteString(moreLine(rest, "apa inbox、apa today、apa item list --phase open --project <id>"))
 			break
 		}
-		out.WriteString(head)
-		more := g.More
-		for i, e := range g.Items {
-			l := itemLines(e)
-			if !b.take(l) {
-				more += len(g.Items) - i
-				break
-			}
-			out.WriteString(l)
+		title := groupTitles[g.Key]
+		switch {
+		case g.Key == GroupProject && g.Project == "":
+			title = "不属于任何项目的未结"
+		case g.Key == GroupProject:
+			title = "项目 " + oneLine(g.Name) + "（" + g.Project + "）未结"
 		}
-		if more > 0 {
-			l := moreLine(more, g.Query)
-			b.left -= runes(l) // 截断说明必须带上，哪怕略超
-			out.WriteString(l)
+		out.WriteString("## " + title + "\n")
+		n := min(*keep, len(g.Items))
+		for _, e := range g.Items[:n] {
+			out.WriteString(itemLines(e))
+		}
+		*keep -= n
+		if more := g.More + len(g.Items) - n; more > 0 {
+			out.WriteString(moreLine(more, g.Query))
 		}
 	}
 	return out.String()

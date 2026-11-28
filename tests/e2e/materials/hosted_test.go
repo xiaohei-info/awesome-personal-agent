@@ -151,13 +151,13 @@ func TestFlowMaterialHosted(t *testing.T) {
 		type hits struct {
 			Hits []map[string]any `json:"hits"`
 		}
-		body := decode[hits](t, f.apa(f.OBS, 0, "material", "search", "zebra-ledger").Stdout)
+		body := decode[hits](t, f.apa(f.OBS, 0, "search", "zebra-ledger", "--type", "material").Stdout)
 		eq(t, "正文词不命中", len(body.Hits), 0)
-		path := decode[hits](t, f.apa(f.OBS, 0, "material", "search", "design.md").Stdout)
-		if len(path.Hits) != 1 || path.Hits[0]["id"] != design || path.Hits[0]["hosted"] != true {
+		path := decode[hits](t, f.apa(f.OBS, 0, "search", "design.md", "--type", "material").Stdout)
+		if len(path.Hits) != 1 || path.Hits[0]["id"] != design || path.Hits[0]["path"] == nil || path.Hits[0]["snippet"] != nil {
 			t.Fatalf("路径片段应命中该托管材料: %v", path.Hits)
 		}
-		if raw := f.apa(f.OBS, 0, "material", "search", "design.md").Stdout; !strings.Contains(raw, designDoc) {
+		if raw := f.apa(f.OBS, 0, "search", "design.md", "--type", "material").Stdout; !strings.Contains(raw, designDoc) {
 			t.Errorf("命中应回路径: %s", raw)
 		}
 	})
@@ -283,5 +283,5 @@ func (f *fx) itemShow(id string) map[string]any {
 	f.t.Helper()
 	return decode[struct {
 		Item map[string]any `json:"item"`
-	}](f.t, f.apa(f.OBS, 0, "item", "show", id).Stdout).Item
+	}](f.t, f.apa(f.OBS, 0, "item", "show", id, "--full").Stdout).Item
 }

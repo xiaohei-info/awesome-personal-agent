@@ -103,7 +103,7 @@ func (k *kit) delegate(args ...string) baseline.Result {
 // item 以 OBS 读事项。
 func (k *kit) item(id string) map[string]any {
 	k.t.Helper()
-	r := k.Apa(k.OBS, "", "item", "show", id)
+	r := k.Apa(k.OBS, "", "item", "show", id, "--full")
 	k.expect("item show "+id, r, 0)
 	var out struct {
 		Item map[string]any `json:"item"`
@@ -175,7 +175,7 @@ func (k *kit) webOK(method, path, body string, want int) string {
 // itemsOf 列出某项目下的全部事项 id → assignee。
 func (k *kit) itemsOf(project string) map[string]string {
 	k.t.Helper()
-	r := k.Apa(k.OBS, "", "item", "list", "--project", k.Projects[project])
+	r := k.Apa(k.OBS, "", "item", "list", "--project", k.Projects[project], "--full", "--limit", "200")
 	k.expect("item list", r, 0)
 	var out struct {
 		Items []struct {

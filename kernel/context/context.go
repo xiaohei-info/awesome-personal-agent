@@ -33,7 +33,7 @@ import (
 
 // InstructionVersion 是常驻指令的当前版本；插件带着自己持有的版本来问，过期就提示更新。
 // 常驻指令（`apa guide`）的内容变化时递增。
-const InstructionVersion = 4
+const InstructionVersion = 5
 
 // Module 登记会话游标表。游标是事件序号，只属于本模块。
 var Module = store.Module{Name: "context", Migrations: []store.Migration{{
@@ -640,7 +640,7 @@ func oneLine(s string) string {
 
 // Inject 渲染注入文本；没有任何要说的（增量为空、指令未过期）返回空串，不注入。
 // 整份至多 InjectBudget 字：先放项目上下文、材料、投递、未挂的派活与跟进消息（投递与消息读取时已记送达，不截），
-// 余下的字数按概览分组与增量事项行截断，截掉的写明另有几条与查询命令。
+// 余下的字数按概览分组与增量事项行截断，截掉的写明另有几条与查询命令；说明行与事项行一起计入上限。
 func (r Result) Inject() string {
 	if len(r.Items) == 0 && len(r.Overview) == 0 && len(r.Unattached) == 0 && len(r.InFlight) == 0 && len(r.Materials) == 0 && len(r.Deliveries) == 0 &&
 		len(r.Messages) == 0 && r.Project == nil && !r.Instruction.Stale {
@@ -741,18 +741,34 @@ func (r Result) Inject() string {
 		line(&tail, "事项 ", m.Item, " 的跟进消息：")
 		tail.WriteString(m.Inject())
 	}
-	b := &budget{left: InjectBudget - runes(head.String()) - runes(tail.String())}
-	var body strings.Builder
-	body.WriteString(renderGroups(r.Overview, b))
-	for i, e := range r.Items {
-		l := itemLines(e)
-		if !b.take(l) {
-			body.WriteString(moreLine(len(r.Items)-i, "apa context --scope all"))
+	// 事项行能放几条：从全部往下减，直到连同“另有几条”的说明行整份不超过上限。
+	// 头尾（项目、材料、投递、消息）不截；只有它们本身就超过上限时整份才会超出。
+	total := len(r.Items)
+	for _, g := range r.Overview {
+		total += len(g.Items)
+	}
+	fixed := runes(head.String()) + runes(tail.String())
+	var body string
+	for keep := total; keep >= 0; keep-- {
+		if body = r.body(keep); fixed+runes(body) <= InjectBudget {
 			break
 		}
-		body.WriteString(l)
 	}
-	return head.String() + body.String() + tail.String()
+	return head.String() + body + tail.String()
+}
+
+// body 是概览分组与增量事项行，至多放 keep 条事项，其余写明另有几条与查询命令。
+func (r Result) body(keep int) string {
+	var b strings.Builder
+	b.WriteString(renderGroups(r.Overview, &keep))
+	n := min(keep, len(r.Items))
+	for _, e := range r.Items[:n] {
+		b.WriteString(itemLines(e))
+	}
+	if n < len(r.Items) {
+		b.WriteString(moreLine(len(r.Items)-n, "apa context --scope all"))
+	}
+	return b.String()
 }
 
 // lastDispatchLine 是注入里"上次怎么派的"一行：不带句柄，别的 harness 写的标仅供参考。

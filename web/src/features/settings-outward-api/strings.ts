@@ -6,14 +6,16 @@ import { common } from "../../app/strings";
 // 接口说明只写已实现的路由与参数（附录 B.2、B.3）。
 // 方法说明每条一句；路径、参数、示例与返回是代码，在页面文件里（不分语言）。
 const zhMethods = [
-  { name: "读事项（导出）", what: "全部事项，按参数筛选与排序" },
+  { name: "检索", what: "跨项目按相关度检索事项、材料与项目，只给这把钥匙读得到的" },
+  { name: "读事项（导出）", what: "全部事项，按参数筛选与排序；带 limit 时分页" },
   { name: "读单个事项", what: "全文、进展、关联与关联键" },
   { name: "读材料", what: "材料登记，可按项目筛" },
   { name: "读单份材料", what: "登记与当前修订全文；rev 取某次修订" },
   { name: "订阅事件", what: "长轮询拉取事项、材料等的变化，游标由你保存" },
 ];
 const enMethods: typeof zhMethods = [
-  { name: "Read items (export)", what: "All items, filtered and sorted by parameters" },
+  { name: "Search", what: "Ranked search over items, materials and projects; only what this key may read" },
+  { name: "Read items (export)", what: "All items, filtered and sorted by parameters; paged when limit is given" },
   { name: "Read one item", what: "Full text, progress, relations, keys" },
   { name: "Read materials", what: "Material records, optionally by project" },
   { name: "Read one material", what: "Record and current revision; rev picks one" },

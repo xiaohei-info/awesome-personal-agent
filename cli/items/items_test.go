@@ -7,9 +7,11 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apifm "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
@@ -25,8 +27,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	ksearch "github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
@@ -50,7 +54,7 @@ type kernel struct {
 func newKernel(t *testing.T) *kernel {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, executors.Module, runner.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, executors.Module, runner.Module, core.Module, km.Module, ksearch.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -319,6 +323,18 @@ func TestRelateAndListFilters(t *testing.T) {
 	}
 	if r := k.apa(auth.Observer, "item", "list", "--sort", "bogus"); r.code == 0 {
 		t.Fatal("unknown sort must fail")
+	}
+	// 有界：--limit 一页，带总数与续页命令；按续页能翻完（§17.2）。
+	page := k.ok(auth.Observer, "item", "list", "--limit", "2").json(t)
+	if len(page["items"].([]any)) != 2 || page["total"] != float64(3) || page["next_cursor"] != "2" ||
+		!strings.Contains(page["next"].([]any)[0].(string), "--cursor '2'") {
+		t.Fatalf("page 1 = %v", page)
+	}
+	if l := list("--limit", "2", "--cursor", "2"); len(l) != 1 {
+		t.Fatalf("page 2 = %v", l)
+	}
+	if r := k.apa(auth.Observer, "item", "list", "--limit", "201"); r.code != domain.ExitUsage {
+		t.Fatalf("limit over 200: %d", r.code)
 	}
 	k.ok(auth.Worker, "item", "relate", child, "--to", parent, "--type", "parent", "--remove", "--reason", "undo")
 	if rels := k.ok(auth.Observer, "item", "show", child).json(t)["relations"].([]any); len(rels) != 0 {
@@ -678,13 +694,13 @@ func TestItemListByOrigin(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src")); len(got) != 3 {
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src", "--full")); len(got) != 3 {
 		t.Fatalf("by source: %v", got)
 	}
-	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src", "--origin-ref", "O-0001")); len(got) != 1 || got[0] != "O-0001" {
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src", "--origin-ref", "O-0001", "--full")); len(got) != 1 || got[0] != "O-0001" {
 		t.Fatalf("by source and ref: %v", got)
 	}
-	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "other")); len(got) != 0 {
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "other", "--full")); len(got) != 0 {
 		t.Fatalf("other source: %v", got)
 	}
 }
@@ -726,4 +742,40 @@ func agentAudience(k auth.Kind) string {
 		return auth.AudienceInternal
 	}
 	return ""
+}
+
+// item show 默认截正文前 2000 字、只给最近 5 条进展，写明总量并给出分段读取的命令；--part 分段取其余，--full 照旧给全部。
+func TestItemShowIsBoundedAndSegmented(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem()
+	long := strings.Repeat("长", 2500) + "尾"
+	k.ok(auth.Worker, "item", "update", id, "--body", long, "--reason", "r")
+	for i := range 7 {
+		k.ok(auth.Worker, "item", "progress", id, "--text", "进展"+strconv.Itoa(i))
+	}
+	out := k.ok(auth.Observer, "item", "show", id).json(t)
+	parts := out["parts"].(map[string]any)
+	if b := out["item"].(map[string]any)["body"].(string); utf8.RuneCountInString(b) != 2000 || parts["body"].(map[string]any)["chars"] != float64(2501) {
+		t.Fatalf("body head: %v", parts)
+	}
+	if ps := out["progress"].([]any); len(ps) != 5 || ps[4].(map[string]any)["text"] != "进展6" || parts["progress"].(map[string]any)["count"] != float64(7) {
+		t.Fatalf("latest progress: %v", ps)
+	}
+	if n := out["next"].([]any); n[0] != "apa item show "+id+" --part body --offset 2000" {
+		t.Fatalf("next: %v", n)
+	}
+	seg := k.ok(auth.Observer, "item", "show", id, "--part", "body", "--offset", "2000").json(t)
+	if seg["body"] != strings.Repeat("长", 500)+"尾" || len(seg["next"].([]any)) != 0 {
+		t.Fatalf("body segment: %v", seg)
+	}
+	older := k.ok(auth.Observer, "item", "show", id, "--part", "progress", "--offset", "5").json(t)
+	if ps := older["progress"].([]any); len(ps) != 2 || ps[0].(map[string]any)["text"] != "进展0" {
+		t.Fatalf("older progress: %v", older)
+	}
+	if full := k.ok(auth.Observer, "item", "show", id, "--full").json(t); full["item"].(map[string]any)["body"] != long || len(full["progress"].([]any)) != 7 {
+		t.Fatal("--full must give everything")
+	}
+	if r := k.apa(auth.Observer, "item", "show", id, "--part", "nope"); r.code != domain.ExitUsage {
+		t.Fatalf("bad part: %d", r.code)
+	}
 }
