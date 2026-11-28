@@ -40,18 +40,24 @@ Hermes decides how to delegate, with its own tools. There is no "executor id -> 
   Segments are lower-cased with anything outside `[a-z0-9_-]` turned into `-`; `<host>` is the machine part of paseo's
   `--host` (`user@mbp.local:22` -> `mbp`), kept verbatim as `target`. Ids over 64 characters keep a 55-character prefix plus
   8 hex of their SHA-1.
-- **Dispatches are captured after the call** (apa-receipt's `post_tool_call`), when the arguments name a child item this
-  Hermes session delegated (or read with `apa_item_history`):
+- **`apa_delegate` with `start`** asks APA to start the executor itself (`apa delegate --start`, design §13.6), for
+  executors `apa_executors` lists as `startable`; `start_model` and `start_thinking` (passed as `--model`, `--thinking`)
+  must be values that list shows, else the kernel refuses with exit 2. (`model` alone stays the paseo model of a `mech`.) Without `start` Hermes dispatches with its own tools as below.
+- **Dispatches are captured after the call** (apa-receipt's `post_tool_call`), every time: on the delegated item the
+  arguments name, otherwise unattached under the executor id (an item the call names that is not that executor's
+  delegated item becomes `about`):
 
   | Tool call | Dispatch record |
   |---|---|
   | `delegate_task` | no session, not resumable, handle `{mech: delegate_task, host}` |
   | `terminal`: `paseo run ...` or `paseo-profile-run [--host H] <profile> <prompt>` | session = the agent id printed under `AGENT ID` (or `agentId` in JSON), resumable when found, handle `{mech: paseo, host, target?, agent_id}`, `cwd` from `--cwd` |
-  | `terminal`: `paseo send [--host H] <agent> ...` | same agent as session, `continues` = this process's last dispatch for that item and agent; when paseo says the agent is not found, that dispatch is marked `lost` instead |
+  | `terminal`: `paseo send [--host H] <agent> ...` | `--session <agent>` with no item: the kernel puts it on the item that agent's earlier dispatch is attached to, as a continuation; when paseo says the agent is not found, `apa dispatch update --session <agent> --state lost` instead |
 
-  The record is written before the report, with an idempotency key; the kernel keeps one running record per item, harness
-  and session, so a manual `apa_dispatch` for the same dispatch adds nothing. The "delegated in this session" set lives in
-  the Hermes process and is lost on restart; `apa_item_history` refills it, and `apa_dispatch` covers the rest.
+  The record is written before any report, with an idempotency key; the kernel keeps one running record per item (or
+  unattached executor), harness and session, so a manual `apa_dispatch` for the same dispatch adds nothing. Nothing is
+  remembered in the Hermes process, so a restart loses nothing. Unattached dispatches come back in every injection with
+  the commands to attach or untrack them; `apa_dispatch` with `action: attach` (`parent`, optional `title`) or
+  `action: untrack` does that, and `action: add` covers dispatches Hermes does not recognise.
 - **Handles are data.** `apa_dispatch` refuses handles outside the shapes above before calling `apa`. `apa_item_history`
   returns `apa context --scope item` with a `hermes` hint per dispatch: for records Hermes wrote whose handles match these
   shapes, how to resume with `terminal` (`paseo send ...`) or start anew the same way; everything else is

@@ -57,16 +57,6 @@ def apa(tmp_path, monkeypatch):
 OTHER = "itm_ffee00112233"
 
 
-@pytest.fixture(autouse=True)
-def delegated():
-    """What apa_delegate would have remembered: the items these Hermes sessions delegated (shared plugin state)."""
-    import types
-    st = sys.modules.setdefault("apa_hermes_dispatch_state", types.SimpleNamespace())
-    st.lock, st.dispatched, st.by_session = __import__("threading").Lock(), {}, {}
-    st.delegated = {s: {ITEM, OTHER} for s in ("main-1", "s", "parent-9")}
-    return st
-
-
 @pytest.fixture
 def hooks():
     ctx = Ctx()
@@ -90,6 +80,10 @@ def all_calls(tmp, n, wait=5, keep=lambda c: True):
 def calls(tmp, n, wait=5):
     """The reports (dispatch records are checked separately)."""
     return all_calls(tmp, n, wait, keep=lambda c: c["argv"][0] == "report")
+
+
+def dispatches(tmp, n, wait=5):
+    return all_calls(tmp, n, wait, keep=lambda c: c["argv"][0] == "dispatch")
 
 
 def flag(argv, name):
@@ -123,39 +117,40 @@ def test_receipt_report_carries_harness_hermes(apa, hooks):
     assert set((apa / "log.harness").read_text().split()) == {"hermes"}  # the dispatch record and the report
 
 
-def test_no_item_id_means_no_capture(apa, hooks):
+def test_no_item_id_means_no_report(apa, hooks):
     hooks["post_tool_call"](tool_name="delegate_task", session_id="s", args={"goal": "research X"},
                             result=json.dumps({"results": [{"task_index": 0, "status": "completed", "summary": "ok"}]}))
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": "codex exec 'no id here'"},
                             result=json.dumps({"output": "x", "exit_code": 0}))
     hooks["subagent_stop"](parent_session_id="s", child_summary="found nothing", child_status="completed")
     assert calls(apa, 1, wait=0.5) == []
+    # the delegate_task still went somewhere: it is recorded unattached, under its executor (§6.17)
+    (d,) = dispatches(apa, 1)
+    assert d["argv"][:3] == ["dispatch", "add", "--idempotency-key"] and flag(d["argv"], "--assignee").startswith("hermes.delegate_task.")
 
 
-def test_non_executor_tools_are_ignored_even_with_an_item_id(apa, hooks):
+def test_other_tools_and_other_programs_are_never_captured(apa, hooks):
     hooks["post_tool_call"](tool_name="read_file", session_id="s", args={"path": f"/tmp/{ITEM}"}, result="{}")
-    # the parent's own apa call, and an item this session did not delegate
-    for cmd in (f"apa delegate --parent {ITEM}", "ls itm_0000aaaa1111"):
+    # the parent's own apa call, a command that only names an item, and a program Hermes does not delegate with
+    for cmd in (f"apa delegate --parent {ITEM}", "ls itm_0000aaaa1111", f"codex exec 'x {ITEM}'"):
         hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": cmd},
                                 result=json.dumps({"output": "x", "exit_code": 0}))
-    hooks["post_tool_call"](tool_name="terminal", session_id="other-session", args={"command": f"codex exec 'x {ITEM}'"},
-                            result=json.dumps({"output": "x", "exit_code": 0}))
     assert all_calls(apa, 1, wait=0.5) == []
 
 
-def test_terminal_naming_a_delegated_item_reports_by_exit_code(apa, hooks):
-    cmd = f"codex exec 'work on it. Ledger item: {ITEM}'"
+def test_paseo_waiter_reports_by_the_session_handle(apa, hooks):
+    cmd = "PASEO_TASK='fix | quick' paseo wait agt_42 --timeout 10800 --json && paseo logs agt_42 --filter text --tail 1"
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": cmd},
-                            result=json.dumps({"output": "all green, PR #7", "exit_code": 0, "error": None}))
+                            result=json.dumps({"output": '{"status":"idle"}\nall green, PR #7', "exit_code": 0, "error": None}))
     (c,) = calls(apa, 1)
-    assert c["argv"][:2] == ["report", ITEM] and flag(c["argv"], "--outcome") == "done" and flag(c["argv"], "--summary") == "all green, PR #7"
+    assert c["argv"][:3] == ["report", "--session", "agt_42"] and flag(c["argv"], "--outcome") == "done" and flag(c["argv"], "--pr") == "#7"
+    assert c["session"] == "s"
 
 
-def test_terminal_failure_reports_blocked(apa, hooks):
-    hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": f"codex exec 'x {ITEM}'"},
-                            result=json.dumps({"output": "", "exit_code": 2, "error": "boom"}))
-    (c,) = calls(apa, 1)
-    assert flag(c["argv"], "--outcome") == "blocked" and flag(c["argv"], "--summary") == "boom"
+def test_a_wait_that_failed_reports_nothing(apa, hooks):
+    hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": "paseo wait agt_42 --timeout 5"},
+                            result=json.dumps({"output": "", "exit_code": 1, "error": "timed out"}))
+    assert all_calls(apa, 1, wait=0.5) == []
 
 
 def test_subagent_stop_reports_to_the_parent_session(apa, hooks):
@@ -314,33 +309,38 @@ def test_missing_binary_is_logged(apa, hooks, monkeypatch):
     assert f"item={ITEM}" in line and "cannot run apa" in line
 
 
-# ---- 委派记录的自动捕获（§6.17）：派出工具调用后先记委派，再回执；认不出的工具不记 ----
+# ---- 委派记录的自动捕获（§6.17）：派出时记委派（点名委派子事项的记在它上面，否则未挂事项）；认不出的工具不记 ----
 
-def dispatches(tmp, n, wait=5):
-    return all_calls(tmp, n, wait, keep=lambda c: c["argv"][0] == "dispatch")
-
-
-def test_paseo_run_records_a_dispatch_then_the_report(apa, hooks):
+def test_paseo_run_records_a_dispatch_on_the_item_it_names(apa, hooks):
     cmd = f"paseo-profile-run --host mbp team-quick 'fix login. Ledger item: {ITEM}'"
     out = "AGENT ID      STATUS   PROVIDER  CWD        TITLE\nagt_42        idle     codex     /w/app     fix login\n"
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": cmd}, result=json.dumps({"output": out, "exit_code": 0}))
-    got = all_calls(apa, 2)
-    assert [c["argv"][:2] for c in got] == [["dispatch", "add"], ["report", ITEM]]  # dispatch first
-    d = got[0]["argv"]
-    assert d[2] == ITEM and flag(d, "--session") == "agt_42" and "--resumable" in d and flag(d, "--idempotency-key").startswith("hermes-dispatch-")
-    assert (apa / "log.harness").read_text().split() == ["hermes", "hermes"]
+    (d,) = dispatches(apa, 1)
+    a = d["argv"]
+    assert a[2] == ITEM and flag(a, "--session") == "agt_42" and "--resumable" in a and flag(a, "--idempotency-key").startswith("hermes-dispatch-")
+    # the kernel decides: a delegated item takes the record, any other item is only a hint on an unattached one
+    assert flag(a, "--assignee") == "hermes.paseo.mbp.team-quick" and json.loads(flag(a, "--executor"))["handle"]["profile"] == "team-quick"
+    assert (apa / "log.harness").read_text().split() == ["hermes"]
+    assert calls(apa, 1, wait=0.5) == []  # a dispatch is not a result
 
 
-def test_paseo_send_continues_the_last_dispatch_and_lost_marks_it(apa, hooks, delegated):
-    delegated.by_session[(ITEM, "agt_42")] = "dsp_9"
+def test_paseo_run_naming_no_item_is_recorded_unattached(apa, hooks):
+    out = json.dumps({"agentId": "agt_7", "status": "running"})
+    hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": "paseo run --no-wait --provider codex 'compare libs'"},
+                            result=json.dumps({"output": out, "exit_code": 0}))
+    (d,) = dispatches(apa, 1)
+    assert d["argv"][2] == "--idempotency-key" and flag(d["argv"], "--assignee").startswith("hermes.paseo.") and flag(d["argv"], "--session") == "agt_7"
+
+
+def test_paseo_send_continues_by_session_and_lost_marks_it(apa, hooks):
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": f"paseo send --host mbp agt_42 'review comment for {ITEM}'"},
                             result=json.dumps({"output": "sent", "exit_code": 0}))
     (d,) = dispatches(apa, 1)
-    assert flag(d["argv"], "--continues") == "dsp_9" and flag(d["argv"], "--session") == "agt_42"
+    assert d["argv"][2] == "--idempotency-key" and flag(d["argv"], "--session") == "agt_42" and "--resumable" in d["argv"]
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": f"paseo send agt_42 'again {ITEM}'"},
                             result=json.dumps({"output": "", "exit_code": 1, "error": "Agent agt_42 not found"}))
     got = dispatches(apa, 2)
-    assert got[1]["argv"] == ["dispatch", "update", "dsp_9", "--state", "lost"]
+    assert got[1]["argv"] == ["dispatch", "update", "--session", "agt_42", "--state", "lost"]
 
 
 def test_delegate_task_records_a_non_resumable_dispatch(apa, hooks):
@@ -348,10 +348,11 @@ def test_delegate_task_records_a_non_resumable_dispatch(apa, hooks):
                             result=json.dumps({"results": [{"task_index": 0, "status": "completed", "summary": "PR #5"}]}))
     (d,) = dispatches(apa, 1)
     assert d["argv"][:3] == ["dispatch", "add", ITEM] and "--resumable" not in d["argv"] and "--session" not in d["argv"]
+    assert flag(d["argv"], "--assignee").startswith("hermes.delegate_task.")
 
 
-def test_unrecognised_tools_record_no_dispatch(apa, hooks):
+def test_unrecognised_tools_record_nothing(apa, hooks):
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": f"codex exec 'x {ITEM}'"},
                             result=json.dumps({"output": "ok", "exit_code": 0}))
     hooks["post_tool_call"](tool_name="web_search", session_id="s", args={"query": ITEM}, result="{}")
-    assert len(calls(apa, 1)) == 1 and dispatches(apa, 1, wait=0.5) == []
+    assert all_calls(apa, 1, wait=0.5) == []

@@ -1,4 +1,4 @@
 name: apa-core
 version: 0.1.0
-description: "APA: standing instructions (apa guide --template) as a Hermes system prompt section."
+description: "APA: standing instructions (apa guide --template) as a Hermes system prompt section, and the session identity (APA_SESSION, APA_HARNESS) on every terminal command of the session."
 author: awesome-personal-agent
