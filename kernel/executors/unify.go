@@ -65,7 +65,7 @@ func Unify(tx *store.Tx, referenced []string) (Unified, error) {
 		if err != nil {
 			return u, err
 		}
-		if err := newEntry(tx, Executor{ID: id, Kind: KindExternalCLI, Label: c.Name}, d.Harness, overrides); err != nil {
+		if err := newEntry(tx, Executor{ID: id, Kind: KindExternalCLI, Label: c.Name}, d.Harness, overrides, c.ID); err != nil {
 			return u, err
 		}
 		u.Map[c.ID], u.Executors = id, append(u.Executors, id)
@@ -92,12 +92,15 @@ func Unify(tx *store.Tx, referenced []string) (Unified, error) {
 		} else if ok {
 			if e.Harness == h {
 				u.Map["legacy:"+h] = h
+				if _, err := tx.Exec("UPDATE executors_entry SET legacy_agent = ? WHERE id = ?", "legacy:"+h, h); err != nil {
+					return u, err
+				}
 			} else {
 				u.Skipped["legacy:"+h] = "executor id " + h + " belongs to " + e.Harness
 			}
 			continue
 		}
-		if err := newEntry(tx, Executor{ID: h, Kind: KindExternalCLI, Label: rec.Declaration.DisplayName()}, h, nil); err != nil {
+		if err := newEntry(tx, Executor{ID: h, Kind: KindExternalCLI, Label: rec.Declaration.DisplayName()}, h, nil, "legacy:"+h); err != nil {
 			return u, err
 		}
 		u.Map["legacy:"+h], u.Executors = h, append(u.Executors, h)
@@ -162,13 +165,14 @@ func freeID(tx *store.Tx, want, fallback string) (string, error) {
 	return want, nil
 }
 
-func newEntry(tx *store.Tx, e Executor, harness string, overrides map[string]string) error {
+func newEntry(tx *store.Tx, e Executor, harness string, overrides map[string]string, legacy string) error {
 	if err := putEntry(tx, e, harness); err != nil {
 		return err
 	}
-	if len(overrides) == 0 {
-		return nil
+	doc := ""
+	if len(overrides) > 0 {
+		doc = string(payload(overrides))
 	}
-	_, err := tx.Exec("UPDATE executors_entry SET overrides = ? WHERE id = ?", string(payload(overrides)), e.ID)
+	_, err := tx.Exec("UPDATE executors_entry SET overrides = ?, legacy_agent = ? WHERE id = ?", doc, legacy, e.ID)
 	return err
 }

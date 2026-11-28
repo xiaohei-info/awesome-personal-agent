@@ -88,7 +88,7 @@ func executors(c *client.Ctx, args []string) error {
 	return send(c, nil, "GET", path, nil)
 }
 
-// useExecutor 选执行者（§13.6）：分工的日常、主执行者改 PUT /settings/agents，来源处理改 PUT /settings/source-pipeline，
+// useExecutor 选执行者（§13.6）：分工的日常、主执行者改 PUT /settings/policy，来源处理改 PUT /settings/source-pipeline，
 // 规则固定的执行者改 rule_executor。先读现值再整段写回（带读到的策略版本，期间别处改过则冲突）；能不能改由内核按权限卡判定。
 func useExecutor(c *client.Ctx, args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -102,7 +102,7 @@ func useExecutor(c *client.Ctx, args []string) error {
 		return usage("give exactly one of --as and --rule", useUsage)
 	}
 	ctx := context.Background()
-	route := "/settings/agents"
+	route := "/settings/policy"
 	if *as == "source" {
 		route = "/settings/source-pipeline"
 	}

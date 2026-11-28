@@ -83,8 +83,8 @@ func Pick(pol policy.Policy, sel Selection) (id, source string) {
 	return pol.DefaultExecutor, SourceDefault
 }
 
-// Want 是要拉起谁：Executor 为空表示没选。Delegated 为真表示运行目标是委派子事项（即开工、@、runner=task 的规则）：
-// 只有这种运行能交给不在 APA 主机上的执行者（有跨机模板与结构化回报，§13.6）。Host 是 APA 主机名。
+// Want 是要拉起谁：Executor 为空表示没选。Delegated 为真表示这是委派即开工（apa delegate --start、讨论 @）：
+// 只有这种运行能交给不在 APA 主机上的执行者（有跨机模板与结构化回报、不发运行凭据，§13.6）。Host 是 APA 主机名。
 type Want struct {
 	Executor, Source, Runner, Host string
 	Delegated                      bool
@@ -183,9 +183,11 @@ func (t Target) AccessReason(request string) string {
 
 // Spec 是一次拉起的运行参数：Once 是单次覆盖（只能取声明列出的值）；Resume 非空时按声明的 resume 接着这个会话，
 // ContextName 是续接沿用的运行上下文文件名（空为运行 id）。ContextDir 为空或执行者不在本机时 {run_context} 展开为空。
+// ReportSchema 为真表示调用方在运行目录写了回报结构文件（委派即开工），{report_schema} 才展开为它的路径，否则为空。
 type Spec struct {
 	RunID, RunDir, Prompt, ContextDir, ContextName, Resume string
 	Once                                                   map[string]string
+	ReportSchema                                           bool
 }
 
 // Built 是拼好的命令与运行记录要写的字段。
@@ -220,7 +222,7 @@ func (t Target) Build(pol policy.Policy, s Spec) (Built, error) {
 		runContext = filepath.Join(s.ContextDir, name)
 	}
 	schema := ""
-	if s.RunDir != "" {
+	if s.ReportSchema && s.RunDir != "" {
 		schema = filepath.Join(s.RunDir, ReportSchemaFile)
 	}
 	vals := map[string]string{"{prompt}": s.Prompt, "{run_dir}": s.RunDir, "{run_context}": runContext, "{run_id}": s.RunID, "{report_schema}": schema}
@@ -352,9 +354,14 @@ func Pipeline(pol policy.Policy) (id, source string) {
 	return pol.DefaultExecutor, SourceDefault
 }
 
-// ForDeclaration 是执行者统一切换前入队的运行（快照里只有 Agent 卡 id）对应的执行者（§16.5）：声明下只有一个执行者时取它，
-// 否则取 id 与声明同名的那个（兼容卡迁来的）；都没有为空。
+// ForDeclaration 是执行者统一切换前入队的运行（快照里只有 Agent 卡 id）对应的执行者（§16.5）：切换时由它换来的那个
+// （legacy_agent），否则声明下只有一个执行者时取它，再否则取 id 与声明同名的那个；都没有为空。
 func ForDeclaration(tx *store.Tx, agentID string) (string, error) {
+	var id string
+	if err := query(tx, func(r *store.Rows) error { return r.Scan(&id) },
+		"SELECT id FROM executors_entry WHERE legacy_agent = ? AND legacy_agent <> '' ORDER BY id LIMIT 1", agentID); err != nil || id != "" {
+		return id, err
+	}
 	key := policy.AgentKey(agentID)
 	es, err := List(tx)
 	if err != nil {

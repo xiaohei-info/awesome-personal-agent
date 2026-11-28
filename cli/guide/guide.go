@@ -30,6 +30,8 @@ Commands:
   items        search, item, propose
   decisions    ask, decide, accept, dismiss
   delegation   executors, delegate, dispatch, report, handback   (run apa delegate before handing work to anyone)
+  who runs     every background run uses one executor: apa executors --runner task|main_session|source_batch previews which;
+               apa executors set <id> --model <m> sets its defaults; apa executors use <id> --as daily|main|source (or --rule <rule>) chooses it
   projects     project, material, blob, agents sync|check
   sources      source (event, propose, attach, remind = mentioned to the user only, ignore, auth, webhook, ingests, replay)
   outward      events --follow, ext run|check, connection

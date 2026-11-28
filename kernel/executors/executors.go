@@ -456,11 +456,12 @@ ALTER TABLE executors_entry ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
 	Version: 4, Ledger: 14, Name: "ledger-v14-executor-overrides",
 	SQL: `ALTER TABLE executors_entry ADD COLUMN overrides TEXT NOT NULL DEFAULT '';`,
 }, {
-	// 账本结构版本 18（§16.5，17 归讨论里的 @）："谁来干活"统一为执行者：选人只选执行者，按声明列执行者的查询走这个索引。
+	// 账本结构版本 18（§16.5，17 归讨论里的 @）："谁来干活"统一为执行者。legacy_agent 记执行者统一切换时由哪个旧 Agent
+	// （卡 id 或 legacy:<程序>）换来，切换前入队、可续接的运行据它找回执行者；其余条目为空。只增列。
 	// executors_agent（旧 Agent 卡）保留只读，不再写；数据的换算由启动时的一次性切换做（cli/serve 的 switchExecutors），
-	// 结构版本因此加一，旧程序打不开切换过的账本（回退要用升级前的备份）。
+	// 旧程序打不开切换过的账本（回退要用升级前的备份）。
 	Version: 5, Ledger: 18, Name: "ledger-v18-executor-unify",
-	SQL: `CREATE INDEX executors_entry_harness ON executors_entry(harness);`,
+	SQL: `ALTER TABLE executors_entry ADD COLUMN legacy_agent TEXT NOT NULL DEFAULT '';`,
 }}}
 
 func invalid(format string, a ...any) error {

@@ -148,7 +148,7 @@ func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string
 			return err
 		}
 	}
-	built, err := t.Build(pol, executors.Spec{RunID: runID, RunDir: runDir, Prompt: prompt, ContextDir: s.o.ContextDir, Once: once})
+	built, err := t.Build(pol, executors.Spec{RunID: runID, RunDir: runDir, Prompt: prompt, ContextDir: s.o.ContextDir, Once: once, ReportSchema: true})
 	if err != nil {
 		return err
 	}

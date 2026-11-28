@@ -33,6 +33,16 @@ func TestUnifyKeepsTheCardsLaunchCommand(t *testing.T) {
 	if u.Map["agent_D"] != "hermes-daily" || u.Map["legacy:hermes"] != "hermes" || u.Skipped["agent_off"] == "" || !slices.Equal(u.Declarations, []string{"agent_D"}) {
 		t.Fatalf("%+v", u)
 	}
+	if err := e.st.View(bg, func(tx *store.Tx) error { // 切换前入队的运行按旧 Agent id 找回执行者
+		for old, want := range map[string]string{"agent_D": "hermes-daily", "legacy:hermes": "hermes"} {
+			if got, err := ForDeclaration(tx, old); err != nil || got != want {
+				t.Fatalf("%s → %q %v", old, got, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	pol := policy.Default()
 	pol.BackgroundPersona = true
 	pol.AgentCards = map[string]policy.Card{"agent_D": {Tool: "edit"}}
