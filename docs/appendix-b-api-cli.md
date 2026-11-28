@@ -33,8 +33,8 @@
 | `apa item show <id> [--part body\|progress\|messages] [--offset <n>] [--full]` | 读一条事项：默认正文前 2000 字、最近 5 条进展与挂靠消息（消息不带 `detail` 与 `content`；按转发白名单过滤）、关系与关联键，`parts` 写明各部分有多少、给了多少，`next` 给分段读取与 `apa why`；`--part body --offset <n>` 从第 n 个字起读正文，`--part progress\|messages --offset <n>` 跳过最近的 n 条往前读，都不超过一次读取的字数上限；`--full` 给全部（主文档 §17.2） | observer | 2、5 |
 | `apa item list [筛选] [--limit 1–200] [--cursor] [--full]` | 列事项：默认一页 30 条，每行只有 id、标题、阶段、类型、项目、优先级、标签、执行者、状态说明、截止与计划、`version`、`chain_depth`、建立与最近变更时间，摘要截到 60 字（响应不含 `origins`、`groups`），输出不超过一次读取的字数上限，带 `total`、`next_cursor` 与 `next`；`--full` 给完整的行（仍分页）。筛选：`--phase`、`--kind`、`--project`、`--assignee`、`--tag`、`--q <全文>`（走统一检索，按相关度排）、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--from <日期> --to <日期>`（按日期范围读，同 HTTP 的 `from`、`to`）、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 2 |
 | `apa item add/update/transition/relate` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` 与 `--planned-slot "HH:MM - HH:MM"`（`update` 传空串清除；有时段必须有计划日期，否则退出码 2）；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐；`add`、`transition` 可带 `--evidence <说明或结果证据>`，进请求体的 `evidence`（委派子事项进入 `done` 必须带），只作记录，不参与权限判定。 | worker（自己的事项）；delegate（任意事项）。一档；以非 `proposed` 阶段新建、使事项离开 `proposed` 或 `needs_input` 为二档（见下文三档表） | 2、4、6、20、23 |
-| `apa item comment <id> --text [--reply-to <发言 id>] [--on <日期>]` | 在事项的讨论区发言（追加一条进展，内核命令 `item.progress`），不改阶段；`--reply-to` 回复同一事项里已有的一条发言，不在这个事项里为退出码 2；`--on` 不能晚于今天（主文档 §6.3） | worker（自己的事项）；delegate（任意事项） | 2、4 |
-| `apa item thread <id> [--before <游标>] [--limit <条数>] [--full]` | 读事项的讨论流（同 `GET /items/{id}/thread`）：最新的在后，缺省 20 条、至多 100 条，整页不超过读取上限；更早的用上一页的 `before` 读；不带 `--full` 时每行不带原始记录 | observer | 2、5 |
+| `apa item comment <id> --text [--reply-to <发言 id>] [--mention <执行者 id>]... [--model <值>] [--thinking <值>] [--override <键=值>]... [--on <日期>]` | 在事项的讨论区发言（追加一条进展，内核命令 `item.progress`），不改阶段；`--reply-to` 回复同一事项里已有的一条发言，不在这个事项里为退出码 2；`--on` 不能晚于今天（主文档 §6.3）。`--mention` 可重复、至多 3 个，取 `apa executors` 里的执行者 id，或 `session:main`（常驻主会话）：带它时内核命令为 `delegate.mention`，为每个被 @ 的执行者建委派子事项并由 APA 拉起，执行者的回执作为对这条发言的回复写回，@ 主会话发一条唤醒；任何一个叫不动整条不生效（不在项目名单为 21，其余为 6，错误写明是哪一个与类别码）。`--model`、`--thinking`、`--override` 只在恰好 @ 一个执行者时可用，取值同 `apa delegate --start` | worker（自己的事项）；delegate（任意事项）；带 `--mention` 同 `apa delegate` | 2、4、6、21、23 |
+| `apa item thread <id> [--before <游标>] [--limit <条数>] [--full] [--format json\|tree]` | 读事项的讨论流（同 `GET /items/{id}/thread`）：最新的在后，缺省 20 条、至多 100 条，整页不超过读取上限；更早的用上一页的 `before` 读；不带 `--full` 时每行不带原始记录。发言带 `reply_to` 与 `mentions`（@ 了谁、各自状态）；`--format tree` 输出文字的回复树：回复缩进在被回复的那条下面，@ 的状态写在发言末尾 | observer | 2、5 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option` | Agent 替本人回答问题（二档）：该 Agent 的档位放开拍板才生效，答案记为 Agent 所答，本人可在"Agent 改动"逐次撤回 | delegate | 2、4、6、23 |
@@ -110,8 +110,8 @@
 
 | 组 | 命令 | Agent 发起而这一组没开时 |
 |---|---|---|
-| 查看 | `credential.list`（只有 Web 登录）、`executor.list`、`executor.pending`、`delegate.dispatch_list`、`blob.get` | 退出码 23 |
-| 整理事项 | `decision.request`；`delegate.create`、`delegate.attach`、`delegate.report`、`delegate.dispatch`、`delegate.dispatch_update`；`followmsg.handback`；`rule.create_timer`；`material.commit`、`material.link`、`material.add`、`blob.put`；`inbound.capture`；`project.create`、`project.update`、`project.checkout.set`、`project.checkout.remove`；`executor.declare`；`agents.check`、`agents.sync`；`item.create`、`item.update`、`item.transition`、`item.relate`、`item.progress`。按状态归组：以 `proposed` 之外的阶段新建、使事项离开 `proposed` 或 `needs_input` 的转阶段为"替我拍板"；改事项的指定 Agent、改项目的对话捕获开关为"改日常规则与提醒" | 退出码 23；做过的可在"Agent 改动"撤回 |
+| 查看 | `credential.list`（只有 Web 登录）、`executor.list`、`executor.pending`、`delegate.dispatch_list`、`delegate.mentionable`、`blob.get` | 退出码 23 |
+| 整理事项 | `decision.request`；`delegate.create`、`delegate.attach`、`delegate.mention`、`delegate.report`、`delegate.dispatch`、`delegate.dispatch_update`；`followmsg.handback`；`rule.create_timer`；`material.commit`、`material.link`、`material.add`、`blob.put`；`inbound.capture`；`project.create`、`project.update`、`project.checkout.set`、`project.checkout.remove`；`executor.declare`；`agents.check`、`agents.sync`；`item.create`、`item.update`、`item.transition`、`item.relate`、`item.progress`。按状态归组：以 `proposed` 之外的阶段新建、使事项离开 `proposed` 或 `needs_input` 的转阶段为"替我拍板"；改事项的指定 Agent、改项目的对话捕获开关为"改日常规则与提醒" | 退出码 23；做过的可在"Agent 改动"撤回 |
 | 处理来源事件 | `inbound.propose_unjudged`、`inbound.attach_event`、`inbound.remind`、`inbound.split`、`inbound.unmerge`、`inbound.ignore_unjudged`、`inbound.backlog_rules`、`inbound.backlog_score`、`inbound.backlog_rejudge`、`inbound.backlog_restore`；`source.replay`、`source.fetch_attachment` | 退出码 23 |
 | 替我拍板 | `decision.answer`、`proposal.accept`、`proposal.dismiss`、`proposal.attach`、`proposal.merge`、`revision.confirm`、`revision.reject`、`channel.answer`。按状态归组：回答 AGENTS.md 漂移问题、确认或拒绝规范类修订为"改日常规则与提醒"。`channel.answer` 是本人经渠道回答，只看渠道回答人白名单，不看权限卡 | 退出码 23，不写入；`web_url` 指向该对象。修订在这一组没开时留待确认（主文档 §14.3） |
 | 改日常规则与提醒 | `source.set_enabled`、`source.rename`、`source.set_content_retention`、`source.set_handling_mode`（只有 Web 上的本人能改，组开着时 Agent 得 20）、`retention.set`；`instance.create`、`instance.update`、`instance.toggle`、`instance.run`；`item.start`、`item.revert`；`rule.set_mode`；`judgment.review`；`material.revert`、`material.update`；`agents.resolve`。按状态归组：新建或修改实例时改了它的执行 Agent 为"Agent 与执行者配置" | 退出码 23，`web_url` 指向该动作的设置页 |
@@ -172,7 +172,8 @@
 | | `GET /today` | 今天的清单，六组：`planned`、`due`、`pending`、`stale`、`overdue`（截止的本机日早于今天、未结束，按截止先后）、`high_priority`（紧急或高、未结束，紧急在前）；一件事可在几组里同时出现 | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
 | | 已有路由 GET /items 的新增查询参数 | `progress_from`、`progress_to`：只列进展日落在范围内的事项，响应另带 `progress`（主文档 §7.1） | observer |
-| | `POST /items/{id}/comments` | 在讨论区发言 `{text, on?, reply_to?}`（内核命令 `item.progress`）；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate |
+| | `POST /items/{id}/comments` | 在讨论区发言 `{text, on?, reply_to?, mentions?, overrides?}`（内核命令 `item.progress`；`mentions` 非空时为 `delegate.mention`，主文档 §6.3）；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate；带 `mentions` 同 `POST /delegations` |
+| | `GET /items/{id}/mentionable` | 事项讨论里的 @ 候选（`delegate.mentionable`），见下文 | observer |
 | | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 登记或移除关联键 `{key, domain?}`（经 `item.relate`；`GET /items/{id}` 返回 `correlation_keys[]`） | 同 `relations` |
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
 | | `POST /items/{id}/transition`，`POST /items/{id}/relations` | 转阶段、关联 | 同上 |
@@ -335,9 +336,13 @@
 
 事项字段 `proposal`：只读，由入站流水线写入：`{recommend, attach_to?, reason, low_confidence, sources[], merges?[], similar?[], not_same?[], split_from?}`（主文档 §6.3、§9.3）。`merges[]` 每条 `{event, source, title, summary?, kind?, project?, by, score?, judgment?, at}`，`by` 取 `merge_key`、`classifier`、`chat`；`similar[]` 每条 `{item, score, judgment?}`，是只提示、没有合并的相似建议；`not_same[]` 是本人拆开过的建议 id；`split_from` 是这条建议从哪条拆出来的。`GET /items?phase=proposed` 可带 `sort=score` 按初筛分数排序。
 
-`POST /items/{id}/comments` 的请求体 `{"text": "…", "on": "YYYY-MM-DD", "reply_to": "<发言 id>"}`，`on`、`reply_to` 可省略；`on` 不能晚于今天，`reply_to` 必须是同一事项里已有的一条发言（进展的 `id`），否则 400；成功返回 201 与这条发言（`comment`，字段同 `progress[]` 的一条，回复另带 `reply_to`），Event 为 `item.progress_added`。发言不改阶段，不推进 `version` 以外的字段。
+`POST /items/{id}/comments` 的请求体 `{"text": "…", "on": "YYYY-MM-DD", "reply_to": "<发言 id>"}`，`on`、`reply_to` 可省略；`on` 不能晚于今天，`reply_to` 必须是同一事项里已有的一条发言（进展的 `id`），否则 400；成功返回 201 与这条发言（`comment`，字段同 `progress[]` 的一条，回复另带 `reply_to`，带 @ 的另带 `mentions`），Event 为 `item.progress_added`。发言不改阶段，不推进 `version` 以外的字段。
 
-`GET /items/{id}/thread?before=&limit=&full=` 返回讨论流的一页 `{entries, more?, before?}`：`entries` 与事项经过（`GET /items/{id}/trace` 的 `entries`）同一份合成、同样按凭据级别裁剪，按时间先后，取最新的 `limit` 条（缺省 20，1–100），发言是 `kind: progress` 的行（`args.id`、`text`、`reply_to?`），决定、派活与回报、后续消息在同一条流里；不带 `full=1` 时每行不带 `steps`。整页 JSON 不超过注入的字数上限（4000 字）：装不下的更早行计入 `more`，`before` 是读更早一页时传的游标；最新一行单独就超出时只截它的 `args.text` 并标 `args.truncated`，全文用 `GET /items/{id}` 的 `progress[]` 读。`before` 不是这条流里的位置、`limit` 越界为 400。
+带 @ 的发言另给 `"mentions": ["<执行者 id>", "session:main"]`（1–3 个、不重复；空数组等于没给）与可选的 `"overrides": {"model": "…"}`（只在恰好 @ 一个执行者时）。内核在一个事务里写发言、为每个执行者建委派子事项（`origin` 为 `{"source": "mention", "ref": "<发言 id>"}`，父事项转 `waiting`）并入队运行，事件依次为 `item.progress_added`、每个执行者的 `delegation.created` 与父事项的阶段变化、`delegation.dispatched`、`background.launched`；响应另带 `items`（建出的子事项 id）。事项不在 `open`、`waiting` 时只能发言不能 @ 执行者。任一对象叫不动时整条不生效：不在项目名单为 403（退出码 21），其余为 409，`why` 写明对象与类别码（与 `GET /items/{id}/mentionable` 的 `reason` 同一套，另有 `self`：不能 @ 自己）；链路深度超过上限为 409、`reason: chain_depth_exceeded`。
+
+`GET /items/{id}/mentionable` 返回 `{"candidates": [{"id", "kind", "label"?, "host"?, "remote"?, "ok", "reason"?, "overridable"?}]}`：第一项是主会话（`id: "session:main"`、`kind: "main"`），其后是名录里的每个执行者（`kind: "executor"`，含不在 APA 主机上的，`remote: true`；本人自己的执行者 id 不在列）。`ok` 为假时 `reason` 是类别码：`item_phase`（事项不在进行中或等待）、`unknown`、`not_startable`（不是由已确认的无头运行声明登记的）、`unavailable`（所属 Agent 现在拉不起）、`not_allowed`（不在项目名单）、`busy`（在这件事上还有一次没跑完）；主会话为 `main_not_set`、`main_unavailable`、`main_cannot_wake`。`overridable` 是声明允许按次覆盖的参数与取值（同 `GET /executors`）。只读，不写账本。
+
+`GET /items/{id}/thread?before=&limit=&full=` 返回讨论流的一页 `{entries, more?, before?}`：`entries` 与事项经过（`GET /items/{id}/trace` 的 `entries`）同一份合成、同样按凭据级别裁剪，按时间先后，取最新的 `limit` 条（缺省 20，1–100），发言是 `kind: progress` 的行（`args.id`、`text`、`reply_to?`、`mentions?`），`mentions` 每项 `{target, kind: executor|main, state, item?, run?}`：执行者的 `state` 为 `running`（含排队）、`replied`（子事项完成）、`blocked`（卡住或没交回结果）、`stopped`（子事项放弃）、`missing`，`item` 是由它建出的子事项、`run` 是最近一次运行；主会话为 `sent`、`delivered`、`not_delivered`（留 Web 未读）、`withdrawn`；决定、派活与回报、后续消息在同一条流里；不带 `full=1` 时每行不带 `steps`。整页 JSON 不超过注入的字数上限（4000 字）：装不下的更早行计入 `more`，`before` 是读更早一页时传的游标；最新一行单独就超出时只截它的 `args.text` 并标 `args.truncated`，全文用 `GET /items/{id}` 的 `progress[]` 读。`before` 不是这条流里的位置、`limit` 越界为 400。
 
 `GET /items` 返回 `last_rejections`（事项 id → 最近一次未处理的退出码 23 拒绝：`seq`、`at`、`actor`、`action`、`code`、`reason`、`why`；旧模型留下的拒绝另带 `grant`），`GET /items/{id}` 返回 `last_rejection`；对未终结的事项给出：`needs_input`、`proposed` 在其后有回答或阶段变化前给出，`open`、`waiting` 在其后事项有任何变更前给出（被拒的写入不转阶段，主文档 §14.5）。被拒的写入从不生效。事项的 `ask` 可带 `code`、`params`（内核生成的问题的类别码与参数，主文档 §6.3）；agent 凭据写它们返回用法错误。`GET /audit/events` 可加 `grant=<授权单 id>` 查旧模型授权单的签发、使用与撤销记录（只读历史，主文档 §14.5）。
 
@@ -577,6 +582,14 @@ token 消耗小改（2026-11-27，主文档 §13.6、§17.2）：不改账本结
 - **委派历史**：`apa context --scope item` 的 `history[].dispatches` 与注入里的"上次"一行，挂在目标事项本身的记录排前，其余照旧按开始时间倒序。
 - **命令行**：新增 `apa executors set`。
 - **用量**：`usage_record` 新增 `undeclared INTEGER NOT NULL DEFAULT 0`（`usage` 迁移 2）；`GET /usage` 的计数加 `undeclared`。已有记录取 0，仍按"未回报"显示，因为当时是否声明没有留下。
+
+账本结构版本 17（讨论里的 @，2026-11-28，主文档 §6.3、决定 101）：`item_progress` 新增 `mentions TEXT NOT NULL DEFAULT ''`（`items` 迁移 7，被 @ 的对象以逗号分隔），不回填、不改已有行，已有发言都没有 @；进展事件载荷的 `progress` 带 @ 时另带 `mentions`，旧载荷不变。只做加法：
+- 命令 `delegate.mention`（整理事项）、`delegate.mentionable`（查看）；路由 `GET /items/{id}/mentionable`；`POST /items/{id}/comments` 的请求体可带 `mentions`、`overrides`，响应可带 `items`。
+- 命令行 `apa item comment` 加 `--mention`、`--model`、`--thinking`、`--override`；`apa item thread` 加 `--format tree`；讨论流的发言行加 `args.mentions`。
+- 委派子事项新增 `origin.source = mention`；投递 id 前缀 `mention:`（@ 主会话的唤醒），不随事项变化作废。
+- 委派回执的状态标签改为只取摘要首行（全文照旧写进父事项的进展）；`background-run` 的两份任务模板各加一句"来自讨论"的说明，"不再委派"改为不用 `apa delegate` 再委派、可在讨论里 @。
+- 常驻指令版本 6：工作台约定加一行讨论里的 @；附带插件同步到 6，旧插件下一轮会看到"常驻指令已过期"的提示。
+- 旧二进制会拒绝打开结构版本 17 的账本。
 
 账本结构版本 16（事项讨论区，2026-11-28，主文档 §6.3）：`item_progress` 新增 `reply_to TEXT NOT NULL DEFAULT ''`（`items` 迁移 6），不回填、不改已有行，已有进展都不是回复；进展事件载荷的 `progress` 回复时另带 `reply_to`，旧载荷不变，折叠照旧。结构版本 14、15 由同期的另两批改动占用（委派开工、检索），按合入顺序落到主干。破坏性改动：`apa item progress` 改名 `apa item comment`，`POST /items/{id}/progress` 改为 `POST /items/{id}/comments`（响应里刚写的那条从 `progress` 改为 `comment`），旧名与旧路由删除；内核命令 `item.progress`、事件类型 `item.progress_added` 与已有数据不变。新增 `apa item thread`、`GET /items/{id}/thread`，处理经过 `progress` 行的 `args` 增 `id` 与 `reply_to`。**调用方要改的**：脚本、提示词与本人改写过的处理说明里的 `apa item progress` 改为 `apa item comment`（参数不变）；首批 harness 插件的 `apa_item_progress` 工具改名 `apa_item_comment`，重新装插件。**回滚**：账本升到 16 后不可原地降级；回滚须同时恢复旧二进制与升级前的账本快照。
 
