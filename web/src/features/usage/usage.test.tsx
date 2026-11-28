@@ -72,7 +72,7 @@ describe("用量", () => {
     expect(uses.getByText("其他")).toBeInTheDocument();
     expect((await region("按模型")).getByText("默认模型").parentElement).toHaveTextContent("未回报用量");
     const row = within(screen.getByRole("table", { name: "按用途", hidden: true })).getByRole("row", { name: /甲 · 任务/, hidden: true });
-    expect(row).toHaveTextContent(/默认模型22(未回报){5}$/); // 没回报的不写 0
+    expect(row).toHaveTextContent(/默认模型220(未回报){5}$/); // 没回报的不写 0；未提供一列为 0
     expect(document.body.textContent).not.toMatch(/inbound_screen|tmpl_unknown_x/);
 
     await userEvent.click((await region("每日 Token")).getByRole("button", { name: "按用途" }));
@@ -91,6 +91,18 @@ describe("用量", () => {
     expect((await region("每日次数")).getByRole("note")).toHaveTextContent("图按次数画");
     expect((await region("按模型")).getByText("默认模型").parentElement).toHaveTextContent("2 次 · 未回报用量");
     expect(screen.queryByRole("region", { name: "每日 Token" })).toBeNull();
+  });
+
+  it("执行者没提供用量：写未提供，与未回报分开计，不写 0", async () => {
+    const noSource = { part: "agent", purpose: "task", agent: "乙", ...c(2, 0), undeclared: 2 };
+    week = { since, rows: [noSource, WEEK.rows[3]], slots: WEEK.slots,
+      series: [{ slot: "2026-11-25", part: "agent", ...c(2, 0), undeclared: 2 }, WEEK.series[3]] };
+    open();
+    expect((await region("次数")).getByText("2 次未提供用量")).toBeInTheDocument();
+    expect(screen.queryByText(/次未回报用量/)).toBeNull();
+    expect((await region("按用途")).getByText("乙 · 任务").parentElement).toHaveTextContent("2 次 · 该 Agent 未提供用量");
+    const row = within(screen.getByRole("table", { name: "按用途", hidden: true })).getByRole("row", { name: /乙 · 任务/, hidden: true });
+    expect(row).toHaveTextContent(/默认模型202(未提供){5}$/);
   });
 
   it("今天没有记录：空态并可切回近 7 天；读取失败可重试", async () => {
