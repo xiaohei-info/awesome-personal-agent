@@ -5,3 +5,4 @@ followmsg
 authz
 inboundrules
 sourcesv2
+search

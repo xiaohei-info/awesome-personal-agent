@@ -35,7 +35,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> [--part body|progress|messages --offset --full] | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --limit --cursor --full] | add | update <id> | comment <id> --text <t> [--reply-to <comment id>] [--on <YYYY-MM-DD>] | thread <id> [--before <n> --limit <n> --full] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> [--part body|messages --offset --full] | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --limit --cursor --full] | add | update <id> | comment <id> --text <t> [--reply-to <comment id>] [--on <YYYY-MM-DD>] | thread <id> [--before <n> --limit <n> --full] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 const (
 	todayUsage = "usage: apa today [--full]"
@@ -291,8 +291,9 @@ const (
 	summaryChars = 60   // item list 每行摘要的字数
 )
 
-const showUsage = "usage: apa item show <id> [--part body|progress|messages] [--offset <n>] [--full]; " +
-	"by default the body is cut to its first 2000 characters and only the latest 5 progress notes and messages are shown"
+const showUsage = "usage: apa item show <id> [--part body|messages] [--offset <n>] [--full]; " +
+	"by default the body is cut to its first 2000 characters and only the latest 5 comments and messages are shown; " +
+	"older comments: apa item thread <id>"
 
 func show(c *client.Ctx, args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -303,7 +304,7 @@ func show(c *client.Ctx, args []string) error {
 	fs.SetOutput(io.Discard)
 	part, full, offset := fs.String("part", "", ""), fs.Bool("full", false, ""), fs.Int("offset", 0, "")
 	if err := fs.Parse(rest); err != nil || fs.NArg() != 0 || *offset < 0 || *full && *part != "" ||
-		!slices.Contains([]string{"", "body", "progress", "messages"}, *part) {
+		!slices.Contains([]string{"", "body", "messages"}, *part) {
 		return usage("invalid arguments for item show", showUsage)
 	}
 	path := "/items/" + url.PathEscape(id)
@@ -331,26 +332,15 @@ func show(c *client.Ctx, args []string) error {
 	self := "apa item show " + id
 	switch *part {
 	case "body":
-		rs := []rune(body)
-		from := min(*offset, len(rs))
-		var seg map[string]any
-		// 一段取多少：从上限往下减，直到连同转义与续读命令整份不超过一次读取的上限。
-		for to := min(len(rs), from+kcontext.InjectBudget); ; to -= max(1, (to-from)/10) {
-			seg = map[string]any{"id": id, "body": string(rs[from:to]), "chars": len(rs), "offset": from, "next": []string{}}
-			if to < len(rs) {
-				seg["next"] = []string{self + " --part body --offset " + strconv.Itoa(to)}
+		return c.Print(client.Segment(body, *offset, kcontext.InjectBudget, func(seg string, to int) map[string]any {
+			out := map[string]any{"id": id, "body": seg, "chars": utf8.RuneCountInString(body), "offset": min(*offset, to), "next": []string{}}
+			if to < utf8.RuneCountInString(body) {
+				out["next"] = []string{self + " --part body --offset " + strconv.Itoa(to)}
 			}
-			if to <= from+1 || client.Size(seg) <= kcontext.InjectBudget {
-				break
-			}
-		}
-		return c.Print(seg)
-	case "progress", "messages":
-		list := progress
-		if *part == "messages" {
-			list = msgs.Messages
-		}
-		return c.Print(older(self, *part, list, *offset))
+			return out
+		}))
+	case "messages":
+		return c.Print(older(self, *part, msgs.Messages, *offset))
 	}
 	// 默认：正文前 bodyHead 字、最近 recentN 条进展与消息（消息不带正文预览），写明各部分的总量与给了多少。
 	parts := map[string]any{}
@@ -377,15 +367,29 @@ func show(c *client.Ctx, args []string) error {
 	if len(parts) > 0 {
 		out["parts"] = parts
 	}
+	// 逐级往下（§17.2）：正文续读、更早的发言（讨论流）、挂靠消息、关系另一端、经过；至多三条。
 	var next []string
 	if parts["body"] != nil {
 		next = append(next, self+" --part body --offset "+strconv.Itoa(bodyHead))
 	}
 	if parts["progress"] != nil {
-		next = append(next, self+" --part progress --offset "+strconv.Itoa(recentN))
+		next = append(next, "apa item thread "+id)
 	}
 	if len(msgs.Messages) > 0 {
 		next = append(next, self+" --part messages")
+	}
+	if rels, _ := out["relations"].([]any); len(rels) > 0 {
+		if r, ok := rels[0].(map[string]any); ok {
+			other, _ := r["to"].(string)
+			if other == id {
+				other, _ = r["from"].(string)
+			}
+			if strings.HasPrefix(other, "mat_") {
+				next = append(next, "apa material show "+other)
+			} else if other != "" {
+				next = append(next, "apa item show "+other)
+			}
+		}
 	}
 	out["next"] = append(next, "apa why "+id)[:min(3, len(next)+1)]
 	return c.Print(out)
@@ -414,7 +418,7 @@ func thread(c *client.Ctx, args []string) error {
 	return c.Print(out)
 }
 
-// older 是进展或挂靠消息的一页：从最近的往前数，跳过 offset 条，按先后排列；连同续读命令整份不超过一次读取的上限。
+// older 是挂靠消息的一页：从最近的往前数，跳过 offset 条，按先后排列；连同续读命令整份不超过一次读取的上限。
 func older(self, part string, list []any, offset int) map[string]any {
 	end := max(0, len(list)-offset)
 	rows := list[max(0, end-listMax):end]

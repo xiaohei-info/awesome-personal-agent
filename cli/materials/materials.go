@@ -1,6 +1,7 @@
 // Package materials 实现 `apa material add/commit/list/show` 与 `apa blob put/get`（检索并入 `apa search --type material`）（附录 B.1「材料与规范」、设计 §12.3–12.4）。
 // 只是内核 /v1/materials、/v1/blobs 的薄客户端：托管型 commit 返回 6、observer 提交返回 4、回退与确认只在 Web，都由内核判定。
-// show 不带托管型正文（正文只有 Web 能读），只回位置。
+// show 不带托管型正文（正文只有 Web 能读），只回位置；自有型的内容默认给前 2000 字，--offset 分段读其余、--full 给全部，
+// list 不超过一次读取的字数上限；两者都带"下一步"（§17.2）。
 package materials
 
 import (
@@ -11,16 +12,19 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
 const materialUsage = "usage: apa material add --repo R --path P [--project ID] [--kind K] [--title T] [--tag T]... [--commit SHA] [--reason S] | " +
 	"add --link <vault:NAME/PATH|URL> --title T [--project ID] [--kind K] [--tag T]... [--reason S] | " +
 	"commit <id> --from FILE|- --reason S [--based-on REV] | commit --from FILE|- --reason S --kind K --title T [--project ID] [--tag T]... | " +
-	"list [--project ID] | show <id> [--rev REV]"
+	"list [--project ID] | show <id> [--rev REV] [--offset N] [--full]"
 
 const blobUsage = "usage: apa blob put <file> | get <sha256> [--out FILE]"
 
@@ -74,17 +78,82 @@ func material(c *client.Ctx, args []string) error {
 		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
 			return usage("invalid arguments for material list", materialUsage)
 		}
-		return call(c, "GET", "/materials"+query(url.Values{"project": {*project}}), nil)
+		return list(c, *project)
 	case "show":
 		id, rest := splitID(rest)
 		fs := newFlags("show")
-		rev := fs.String("rev", "", "")
-		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 || id == "" {
-			return usage("show takes a material id and optional --rev", materialUsage)
+		rev, full, offset := fs.String("rev", "", ""), fs.Bool("full", false, ""), fs.Int("offset", -1, "")
+		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 || id == "" || *full && *offset >= 0 {
+			return usage("show takes a material id and optional --rev, --offset or --full", materialUsage)
 		}
-		return call(c, "GET", "/materials/"+url.PathEscape(id)+query(url.Values{"rev": {*rev}}), nil)
+		return show(c, id, *rev, *offset, *full)
 	}
 	return usage("unknown material subcommand "+sub, materialUsage)
+}
+
+// contentHead 是 material show 默认给的内容字数（与 item show 的正文同一口径）。
+const contentHead = 2000
+
+// list 是材料清单：从末尾删行直到不超过一次读取的上限，写明总数；下一步读第一条。
+func list(c *client.Ctx, project string) error {
+	var out map[string]any
+	if err := c.Do(context.Background(), "GET", "/materials"+query(url.Values{"project": {project}}), nil, &out); err != nil {
+		return err
+	}
+	rows, _ := out["materials"].([]any)
+	out["total"] = len(rows)
+	client.Fit(out, "materials", kcontext.InjectBudget, func(kept int) {
+		out["next"] = []string{"apa search <words> --type material"}
+		if kept > 0 {
+			if m, ok := rows[0].(map[string]any); ok {
+				id, _ := m["id"].(string)
+				out["next"] = []string{"apa material show " + id, "apa search <words> --type material"}
+			}
+		}
+	})
+	return c.Print(out)
+}
+
+// show 读一份材料。默认内容截到前 contentHead 字并在 parts 写明总长；--offset 从第 n 个字起读一段（整份不超过上限）；--full 原样。
+func show(c *client.Ctx, id, rev string, offset int, full bool) error {
+	var out map[string]any
+	if err := c.Do(context.Background(), "GET", "/materials/"+url.PathEscape(id)+query(url.Values{"rev": {rev}}), nil, &out); err != nil {
+		return err
+	}
+	if full {
+		return c.Print(out)
+	}
+	self := "apa material show " + id
+	if rev != "" {
+		self += " --rev " + rev
+	}
+	v, _ := out["revision"].(map[string]any)
+	content, _ := v["content"].(string)
+	n := utf8.RuneCountInString(content)
+	if offset >= 0 {
+		return c.Print(client.Segment(content, offset, kcontext.InjectBudget, func(seg string, to int) map[string]any {
+			o := map[string]any{"id": id, "content": seg, "chars": n, "offset": min(offset, to), "next": []string{}}
+			if to < n {
+				o["next"] = []string{self + " --offset " + strconv.Itoa(to)}
+			}
+			return o
+		}))
+	}
+	var next []string
+	if n > contentHead {
+		v["content"] = string([]rune(content)[:contentHead])
+		out["parts"] = map[string]any{"content": map[string]int{"chars": n, "shown": contentHead}}
+		next = append(next, self+" --offset "+strconv.Itoa(contentHead))
+	}
+	if rels, _ := out["relations"].([]any); len(rels) > 0 {
+		if r, ok := rels[0].(map[string]any); ok {
+			if from, _ := r["from"].(string); from != "" && from != id {
+				next = append(next, "apa item show "+from)
+			}
+		}
+	}
+	out["next"] = append(next, "apa why "+id)
+	return c.Print(out)
 }
 
 // query 只带非空参数。

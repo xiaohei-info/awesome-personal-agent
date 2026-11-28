@@ -5,3 +5,4 @@ packloader
 events
 outbound
 briefwb
+search

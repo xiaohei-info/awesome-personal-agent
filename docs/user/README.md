@@ -7,6 +7,7 @@
 | [quickstart.md](quickstart.md) | 安装、初始化、启动、第一次看到价值 | 第一次使用 |
 | [run-tiers.md](run-tiers.md) | 三档运行形态：只有内核、加模型端点、加 Agent，各自可用与不可用的能力 | 想知道手里有什么就能用什么 |
 | [troubleshooting.md](troubleshooting.md) | 用 `apa doctor` 定位问题，常见症状与处理 | 装不上、跑不起来、没有提醒 |
+| [memory.md](memory.md) | APA 与 Agent 记忆怎么分工：什么进 APA、什么留在记忆，Agent 何时先查 APA | 同时在用 Agent 自带或外接的记忆 |
 | [security.md](security.md) | 远程访问、登录与会话、外发范围、凭据与备份的保管 | 把 Web 暴露到本机之外之前 |
 | [upgrade.md](upgrade.md) | 备份、升级、回退，升级后本机验证清单 L1–L12 | 升级已有部署 |
 | [uninstall.md](uninstall.md) | 干净地卸载 | 不再使用时 |

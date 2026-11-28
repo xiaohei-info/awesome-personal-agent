@@ -22,6 +22,8 @@ export interface Signal {
 export interface HealthReport {
   healthy: boolean;
   signals: Signal[];
+  /** 检索统计（GET /health 的 search，附录 B.2）：总次数、零命中、只命中部分词的次数与第一次计数的日期；不是信号，不影响 healthy。 */
+  search?: { queries: number; zero: number; partial: number; since?: string };
 }
 
 /**

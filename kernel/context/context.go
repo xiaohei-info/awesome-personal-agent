@@ -33,7 +33,7 @@ import (
 
 // InstructionVersion 是常驻指令的当前版本；插件带着自己持有的版本来问，过期就提示更新。
 // 常驻指令（`apa guide`）的内容变化时递增。
-const InstructionVersion = 5
+const InstructionVersion = 6
 
 // Module 登记会话游标表。游标是事件序号，只属于本模块。
 var Module = store.Module{Name: "context", Migrations: []store.Migration{{
@@ -679,7 +679,7 @@ func (r Result) Inject() string {
 		}
 	}
 	if len(r.Overview) > 0 {
-		line(&head, "工作台概览（各组至多 ", strconv.Itoa(OverviewGroupRows), " 条）：")
+		line(&head, "工作台概览（各组至多 ", strconv.Itoa(OverviewGroupRows), " 条；找过去的事用 apa search <词>，看一个项目用 apa project show <id>）：")
 	}
 	for _, m := range r.Materials {
 		line(&tail, "- 材料 ", m.ID, " | ", oneLine(m.Title), " | ", m.Kind, " | 变更：", oneLine(m.Summary))

@@ -106,13 +106,14 @@ func webOnlyExecutors() error {
 	return domain.NewError(domain.CodeInvalidRequest, "allowed_executors is not part of creating a project", "create the project, then set it with PUT /v1/settings/projects/{id}/allowed-executors")
 }
 
-// Card 是项目卡片（§12.1）：现算的各阶段事项条数与最近活动日；单个项目另带最近变更的事项与材料条数。
+// Card 是项目卡片（§12.1）：现算的各阶段事项条数与最近活动日；单个项目另带最近变更的事项、材料条数与本项目规范。
 // 外部钥匙只数它读得到的事项（读取闸，§14.14）。
 type Card struct {
 	Counts       map[domain.Phase]int `json:"counts"`
 	LastActivity string               `json:"last_activity,omitempty"` // 本机日期 YYYY-MM-DD
 	Recent       []RecentItem         `json:"recent,omitempty"`
 	Materials    *int                 `json:"materials,omitempty"`
+	Guideline    string               `json:"guideline,omitempty"` // 本项目规范（材料 id）；没有时缺省
 }
 
 // RecentItem 是卡片里的一条最近变更（已放弃的不列）。
@@ -198,6 +199,11 @@ func (a *api) get(w http.ResponseWriter, r *http.Request, p *core.Principal) err
 		ms, err := km.List(tx, out.Project.ID)
 		n := len(ms)
 		out.Card.Materials = &n
+		for _, m := range ms {
+			if m.Kind == km.KindGuideline {
+				out.Card.Guideline = m.ID
+			}
+		}
 		return err
 	}); err != nil {
 		return err
