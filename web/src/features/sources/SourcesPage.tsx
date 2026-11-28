@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EmptyState, Skeleton } from "../../app/ui";
+import { EmptyState, type Save, SaveState, Skeleton, toast } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { PageReminder, SourceAlertRule } from "../settings-notify/Reminder";
 import { PageHead } from "../../app/page";
@@ -49,6 +49,35 @@ function Schedule({ s }: { s?: string }) {
   if (!s) return null;
   const p = period(s);
   return <span className="sub">{p ? t.every(p.n, t.units[p.unit]) : t.cron}</span>;
+}
+
+/** 启用开关（即改即存，界面设计 §6.1）：一拨就写，旁边是保存状态；失败就拨回去并写原因，最后以服务端回读为准。 */
+function EnabledSwitch({ s, onSaved }: { s: Source; onSaved: () => void }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const [on, setOn] = useState(s.enabled);
+  const [state, setState] = useState<Save>("idle");
+  useEffect(() => setOn(s.enabled), [s.enabled]);
+  const flip = async () => {
+    const next = !on;
+    setOn(next);
+    setState("saving");
+    try {
+      await api.patch(`/sources/${encodeURIComponent(s.id)}`, { enabled: next });
+      setState("saved");
+    } catch (e) {
+      setOn(!next);
+      setState({ failed: e });
+    }
+    onSaved();
+  };
+  return (
+    <label className="switch">
+      <input type="checkbox" role="switch" checked={on} aria-label={t.enabledOf(s.name)} onChange={() => void flip()} />
+      {t.enable}
+      <SaveState state={state} />
+    </label>
+  );
 }
 
 /** 来源的状态一句话：读取失败 / 已停用 / 正常，加上最近一次读到的时间。 */
@@ -163,7 +192,6 @@ function SourcesHome() {
   const [selected, setSelected] = useState<string | null>(params.get("open"));
   const navigate = useNavigate();
   const chooseOutbound = () => navigate(MODEL_SOURCES);
-  const [notice, setNotice] = useState<string | null>(null);
   const [rev, setRev] = useState(0); // 积压变化后让打开的详情重读
   const [backlog, setBacklog] = useState<Backlog | null>(null);
   const [models, setModels] = useState<Models | null>(null);
@@ -205,15 +233,6 @@ function SourcesHome() {
     );
   }, [api, load, loadBacklog]);
 
-  const toggle = async (s: Source) => {
-    setError(null);
-    try {
-      await api.patch(`/sources/${encodeURIComponent(s.id)}`, { enabled: !s.enabled });
-    } catch (e) {
-      setError(e);
-    }
-    await load();
-  };
   const changed = () => {
     setRev((n) => n + 1);
     loadBacklog();
@@ -238,7 +257,7 @@ function SourcesHome() {
       body={{ all: true }}
       onDone={(err, n) => {
         setError(err);
-        setNotice(err ? null : t.ignoredAll(n));
+        if (!err) toast(t.ignoredAll(n));
         setSelected(null); // 打开的详情列表已过时
         loadBacklog();
       }}
@@ -249,7 +268,6 @@ function SourcesHome() {
       <PageHead lede={t.lede}>{t.title}</PageHead>
       <PageReminder row="source_failing"><SourceAlertRule /></PageReminder>
       {error !== null && <ErrorNote error={error} />}
-      {notice && <p role="status">{notice}</p>}
       {waiting > 0 && <p className="badge warn"><Link to={MODEL_SOURCES}>{t.unsetNotice(waiting)}</Link></p>}
       <section role="region" aria-label={t.list}>
         {sources === null ? (
@@ -274,7 +292,7 @@ function SourcesHome() {
                 <Rename s={s} onSaved={() => { forgetNames(api, "source"); void load(); }} />{" "}
                 <span className="sub">{(s.source_type && t.kinds[s.source_type]) || <Val k="sourceType" id={s.type} />}</span> <Schedule s={s.schedule} /> <Status s={s} /> {reminding(s)}
                 <div role="group" aria-label={t.ops(s.name)} className="ops">
-                  <button onClick={() => toggle(s)}>{s.enabled ? t.disable : t.enable}</button> {detailsButton(s.id)}
+                  <EnabledSwitch s={s} onSaved={() => void load()} /> {detailsButton(s.id)}
                 </div>
                 {selected === s.id && <Detail key={rev} source={s} createItem={createItem} add={s.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={chooseOutbound} onSaved={() => void load()} />}
               </li>

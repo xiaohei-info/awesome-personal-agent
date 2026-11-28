@@ -1,5 +1,5 @@
 import { withSession } from "../../app/test-session";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -17,7 +17,12 @@ function mount(fetchImpl: typeof fetch, at = "/settings/notify") {
   );
 }
 const section = async (name: string) => within(await screen.findByRole("region", { name }));
-const saveIn = async (name: string) => userEvent.click((await section(name)).getByRole("button", { name: `保存${name}` }));
+// 卡片即改即存（界面设计 §6.1）：勾选、下拉当场存，文字离开输入框时存。saveIn 让焦点离开当前输入框，再等这一轮存完。
+const saveIn = async (name: string) => {
+  await section(name);
+  act(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+};
 const options = (el: HTMLElement) => within(el).getAllByRole("option").map((o) => o.getAttribute("value"));
 
 beforeEach(() => sessionStorage.clear());
@@ -50,8 +55,8 @@ describe("设置 › 提醒与推送：全局项与总览", () => {
     expect(p.getByText("开着：提醒只放今天页；问题照进「等你决定」；来源读不到、运行失败等告警照发。")).toBeInTheDocument();
     await userEvent.type(p.getByLabelText("到这个时间自动恢复（留空表示一直暂停）"), "2030-01-01T10:00");
     await saveIn("暂停所有提醒");
-    await waitFor(() => expect(s.puts).toHaveLength(1));
-    const body = s.puts[0].body.disturb;
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.mutes.at(-1)).toHaveProperty("until"));
+    const body = s.puts.at(-1)!.body.disturb;
     expect(body.mutes).toEqual([{ scope: "source", id: "src_mail_qq" }, { scope: "all", id: "", until: new Date("2030-01-01T10:00").toISOString() }]);
     expect(body).not.toHaveProperty("delivery");
     expect(body).not.toHaveProperty("delivery_saved");
@@ -59,8 +64,8 @@ describe("设置 › 提醒与推送：全局项与总览", () => {
     expect(list.getAllByRole("group")).toHaveLength(1); // 只有按来源的那一条
     await userEvent.click(list.getByRole("button", { name: "恢复 1" }));
     await saveIn("暂停名单");
-    await waitFor(() => expect(s.puts).toHaveLength(2));
-    expect(s.puts[1].body.disturb.mutes).toEqual([{ scope: "all", id: "", until: new Date("2030-01-01T10:00").toISOString() }]);
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.mutes).toHaveLength(1));
+    expect(s.puts.at(-1)!.body.disturb.mutes).toEqual([{ scope: "all", id: "", until: new Date("2030-01-01T10:00").toISOString() }]);
     await userEvent.click(p.getByRole("switch", { name: "暂停所有提醒" }));
     await saveIn("暂停所有提醒");
     await waitFor(() => expect(s.puts.at(-1)!.body.disturb.mutes).toEqual([]));
@@ -74,7 +79,7 @@ describe("设置 › 提醒与推送：全局项与总览", () => {
     await waitFor(() => expect(options(d.getByLabelText("默认渠道"))).toEqual(["", "channel:ch-iphone", "channel:slack"]));
     await userEvent.selectOptions(d.getByLabelText("默认渠道"), "channel:slack");
     await saveIn("默认渠道");
-    await waitFor(() => expect(s.puts).toHaveLength(1));
+    await waitFor(() => expect(s.puts).toHaveLength(1)); // 下拉一改就存，只存一次
     const body = s.puts[0].body.disturb;
     expect(body.delivery).toEqual({ ...s.doc.disturb.delivery, default_channel: "channel:slack" });
     expect(body.delivery.rows).toEqual(policyServer({ v28: true }).doc.disturb.delivery.rows);
@@ -112,29 +117,28 @@ describe("设置 › 提醒与推送：全局项与总览", () => {
 });
 
 describe("设置 › 提醒与推送：每节各自保存", () => {
-  it("ACT-DLV-16/24: 日上限与暂停名单各自保存；今天已推的条数显示在上限下面；没改动时保存不可点", async () => {
+  it("ACT-DLV-16/24: 日上限与暂停名单各自即改即存；今天已推的条数显示在上限下面；没改动时不发请求", async () => {
     const s = policyServer();
     mount(s.impl);
     const cap = await section("每天最多推几条");
     expect(await cap.findByText("今天已推 7 条，上限 20 条")).toBeInTheDocument();
     expect(cap.getByText("超出的当天只放在今天页。")).toBeInTheDocument();
-    expect(cap.getByRole("button", { name: "保存每天最多推几条" })).toBeDisabled();
+    expect(cap.queryByRole("button")).toBeNull(); // 没有保存按钮
     await userEvent.clear(cap.getByLabelText("每天最多推（条）"));
     await userEvent.type(cap.getByLabelText("每天最多推（条）"), "3");
-    expect(cap.getByText("未保存")).toBeInTheDocument();
+    expect(s.puts).toHaveLength(0); // 还在输入：停手或离开输入框才存
     const m = await section("暂停名单");
     await userEvent.click(m.getByRole("button", { name: "＋ 暂停一个" }));
     expect(options(m.getByLabelText("暂停1 类型"))).toEqual(["source", "project", "item"]); // 全部暂停是上面的总开关，不在名单里选
     await userEvent.selectOptions(m.getByLabelText("暂停1 类型"), "project");
     await waitFor(() => expect(options(m.getByLabelText("暂停1 对象"))).toContain("acc-home"));
     await userEvent.selectOptions(m.getByLabelText("暂停1 对象"), "acc-home");
+    // 选好暂停对象当场存了暂停名单；日上限离开输入框才存，只发这一节
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.mutes).toEqual([{ scope: "project", id: "acc-home" }]));
+    await userEvent.click(cap.getByLabelText("每天最多推（条）"));
     await saveIn("每天最多推几条");
-    await cap.findByRole("status");
-    // 只发这一节：日上限改了，暂停里没保存的草稿不带上
-    expect(s.puts.at(-1)!.body.disturb).toEqual({ routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 3, mutes: [] });
-    await saveIn("暂停名单");
-    await m.findByRole("status");
-    expect(s.puts.at(-1)!.body.disturb).toEqual({ routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 3, mutes: [{ scope: "project", id: "acc-home" }] });
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb).toEqual({ routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 3, mutes: [{ scope: "project", id: "acc-home" }] }));
+    expect(await cap.findByText("已保存")).toBeInTheDocument();
     await userEvent.type(m.getByLabelText("暂停1 到期"), "2030-01-01T10:00");
     await saveIn("暂停名单");
     await waitFor(() => expect(s.doc.disturb.mutes[0].until).toBe(new Date("2030-01-01T10:00").toISOString()));
@@ -166,7 +170,7 @@ describe("设置 › 提醒与推送：每节各自保存", () => {
     await userEvent.clear(d.getByLabelText("每天最多推（条）"));
     await userEvent.type(d.getByLabelText("每天最多推（条）"), "-2");
     await saveIn("每天最多推几条");
-    expect(await d.findByRole("alert")).toHaveTextContent("每天最多推的条数要是不小于 0 的整数");
+    expect(await d.findByText(/没保存：每天最多推的条数要是不小于 0 的整数/)).toBeInTheDocument();
     expect(s.puts).toHaveLength(0);
   });
 
@@ -176,7 +180,7 @@ describe("设置 › 提醒与推送：每节各自保存", () => {
     const q = await section("安静时段");
     await userEvent.click(q.getByLabelText("开启安静时段"));
     await saveIn("安静时段");
-    await q.findByRole("status");
+    await waitFor(() => expect(s.puts.at(-1)?.body.disturb.quiet).toBeTruthy());
     let body = s.puts.at(-1)!.body.disturb;
     expect(body.quiet).toMatchObject({ start: "22:00", end: "08:00" });
     expect(typeof body.quiet.zone).toBe("string");
@@ -186,7 +190,7 @@ describe("设置 › 提醒与推送：每节各自保存", () => {
     const m = await section("不急的提醒合成一条");
     await userEvent.selectOptions(m.getByLabelText("不急的提醒合成一条"), "15");
     await saveIn("不急的提醒合成一条");
-    await m.findByRole("status");
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.merge_window_sec).toBe(900));
     body = s.puts.at(-1)!.body.disturb;
     expect(body).toMatchObject({ merge_window_sec: 900, quiet_exempt: true, routes: { decision: "inject", health: "web" } });
     expect(body).not.toHaveProperty("remind_on_deadline");

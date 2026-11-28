@@ -1,5 +1,5 @@
 import { withSession } from "../../app/test-session";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -114,7 +114,7 @@ describe("设置 › Agent", () => {
     expect(c.getByText("已接好，可以用了")).toBeInTheDocument();
   });
 
-  it("权限卡：工具档位列出声明里这一档的工具，没声明的置灰；十组按卡显示，高风险五组折叠；保存只调一次权限卡路由", async () => {
+  it("权限卡：工具档位列出声明里这一档的工具，没声明的置灰；十组按卡显示，高风险五组折叠；即改即存，只调权限卡路由", async () => {
     const s = server({ live: [hermes(1, "active", ["read", "edit"])] });
     mount(s.impl, PAGE);
     const c = await card();
@@ -129,9 +129,9 @@ describe("设置 › Agent", () => {
     const purge = within(perm.getByRole("group", { name: "物理删除" }));
     expect(purge.getByRole("combobox")).not.toHaveTextContent("一直");
     await userEvent.click(purge.getByRole("radio", { name: "允许" }));
-    await userEvent.click(perm.getByRole("button", { name: "保存权限" }));
-    await waitFor(() => expect(writes(s, "/card")).toHaveLength(1));
-    const put = writes(s, "/card")[0];
+    await waitFor(() => expect(writes(s, "/card").at(-1)?.body.groups.purge?.until).toBeTruthy());
+    expect(writes(s, "/settings/policy")).toHaveLength(0); // 只调权限卡路由
+    const put = writes(s, "/card").at(-1)!;
     expect(put.url).toBe("/v1/settings/agents/legacy%3Ahermes/card");
     expect(put.body).toMatchObject({ tool: "edit", groups: { view: {}, organize: {}, source_events: {}, decide: {} }, version: 1 });
     expect(put.body.groups.purge.until).toBeTruthy();
@@ -358,15 +358,15 @@ describe("设置 › Agent › 所有 Agent 共用 › Agent 后台运行时限"
     // 改为 0.5 小时并保存 → PUT /v1/settings/policy { background_run_timeout_sec: 1800 }
     await userEvent.clear(input);
     await userEvent.type(input, "0.5");
-    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    act(() => input.blur()); // 即改即存：离开输入框时存
     await waitFor(() => expect(writes(s, "/settings/policy")).toContainEqual({ method: "PUT", url: "/v1/settings/policy", body: { background_run_timeout_sec: 1800 } }));
 
     // 超出范围（0.1 小时 / 25 小时）不发请求并显示错误
     const countBefore = writes(s, "/settings/policy").length;
     await userEvent.clear(input);
     await userEvent.type(input, "0.1");
-    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
-    expect(await within(card).findByRole("alert")).toHaveTextContent("请填写 0.25 到 24 之间的数字");
+    act(() => input.blur());
+    expect(await within(card).findByText(/没保存：请填写 0.25 到 24 之间的数字/)).toBeInTheDocument();
     expect(writes(s, "/settings/policy")).toHaveLength(countBefore);
 
     // 恢复默认按钮回到 4 小时
@@ -382,8 +382,7 @@ describe("设置 › Agent › 所有 Agent 共用 › Agent 后台运行的人�
     const card = await screen.findByRole("region", { name: "Agent 后台运行的人格和记忆" });
     const box = within(card).getByRole("checkbox", { name: "Agent 后台运行带上人格和记忆" });
     expect(box).not.toBeChecked();
-    await userEvent.click(box);
-    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    await userEvent.click(box); // 勾上就存
     await waitFor(() => expect(writes(s, "/settings/policy")).toContainEqual({ method: "PUT", url: "/v1/settings/policy", body: { background_persona: true } }));
   });
 });
@@ -396,8 +395,7 @@ describe("设置 › Agent › 所有 Agent 共用 › 思考强度", () => {
     expect(within(card).getByLabelText("判断要不要处理、急不急")).toHaveValue("low");
     expect(within(card).getByRole("option", { name: "低（默认）" })).toBeInTheDocument();
     expect(within(card).getAllByRole("option", { name: "不指定" })).toHaveLength(3);
-    await userEvent.selectOptions(within(card).getByLabelText("后台 Agent 运行"), "high");
-    await userEvent.click(within(card).getByRole("button", { name: /保存/ }));
+    await userEvent.selectOptions(within(card).getByLabelText("后台 Agent 运行"), "high"); // 选了就存
     await waitFor(() => expect(writes(s, "/settings/policy")).toContainEqual({ method: "PUT", url: "/v1/settings/policy", body: { thinking: { judge: "low", write: "medium", background: "high" } } }));
   });
 });
@@ -434,12 +432,11 @@ describe("设置 › Agent：同页多处保存共用的策略版本号", () => 
   it("权限卡连着保存两次都成功", async () => {
     mount(versioned({ live: [hermes(1, "active")] }), PAGE);
     const perm = within(await (await card()).findByRole("region", { name: "权限" }));
-    const save = perm.getByRole("button", { name: "保存权限" });
+    // 即改即存：连着改两次，第二次等第一次拿到新版本号再存，都不冲突
     for (const choice of ["允许", "不允许"]) {
       await userEvent.click(within(perm.getByRole("group", { name: "替我拍板" })).getByRole("radio", { name: choice }));
-      await userEvent.click(save);
-      await waitFor(() => expect(save).toBeDisabled()); // 存好后草稿与服务端一致
-      expect(perm.queryByRole("alert")).toBeNull();
+      await waitFor(() => expect(perm.getByRole("heading", { name: /权限/ })).toHaveTextContent("已保存"));
+      expect(perm.queryByText(/没保存/)).toBeNull();
     }
   });
 });

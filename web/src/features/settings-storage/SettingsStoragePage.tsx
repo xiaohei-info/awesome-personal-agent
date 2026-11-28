@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Skeleton } from "../../app/ui";
+import { SaveState, Skeleton, useAutoSave } from "../../app/ui";
 import { PageHead } from "../../app/page";
 import { errorText, locale, useT } from "../../app/i18n";
 import { useSession } from "../../app/session";
@@ -71,25 +71,18 @@ function SourceRow({ s }: { s: Usage }) {
   const { api } = useSession();
   const saved = s.retention_days == null ? "" : String(s.retention_days);
   const [text, setText] = useState(saved);
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function save() {
+  const [stored, setStored] = useState(saved);
+  // 即改即存：离开输入框或停手时存；不是正整数在本地拦下。
+  const auto = useAutoSave(async () => {
     const v = text.trim();
-    if (v && !/^\d+$/.test(v)) return setStatus({ ok: false, text: t.bad });
-    setBusy(true);
-    setStatus(null);
-    try {
-      const r = await api.put<{ days: number | null }>(`/settings/sources/${encodeURIComponent(s.id)}/content-retention`, { days: v ? Number(v) : null });
-      setText(r.days == null ? "" : String(r.days));
-      setStatus({ ok: true, text: t.savedRow });
-    } catch (e) {
-      setStatus({ ok: false, text: errorText(e) });
-    } finally {
-      setBusy(false);
-    }
-  }
+    if (v && !/^\d+$/.test(v)) throw new Error(t.bad);
+    const r = await api.put<{ days: number | null }>(`/settings/sources/${encodeURIComponent(s.id)}/content-retention`, { days: v ? Number(v) : null });
+    const next = r.days == null ? "" : String(r.days);
+    setText(next);
+    setStored(next);
+  }, text.trim() !== stored);
   return (
-    <div role="group" aria-label={s.name} className="stack">
+    <div role="group" aria-label={s.name} className="stack" {...auto.on}>
       <div className="line">
         <strong>{s.name}</strong>
         <span>{t.events}: {s.events}</span>
@@ -98,9 +91,8 @@ function SourceRow({ s }: { s: Usage }) {
       </div>
       <div className="line">
         <input type="number" min={1} max={36500} step={1} aria-label={t.days(s.name)} placeholder={t.placeholder} value={text} onChange={(e) => setText(e.target.value)} />
-        <button type="button" className="primary" disabled={busy} aria-label={t.saveRow(s.name)} onClick={() => void save()}>{t.save}</button>
+        <SaveState state={auto.state} />
       </div>
-      {status && <p role={status.ok ? "status" : "alert"}>{status.text}</p>}
     </div>
   );
 }
@@ -111,33 +103,25 @@ function KeepPanel() {
   const { api } = useSession();
   const [keep, setKeep] = useState<Keep | null>(null);
   const [text, setText] = useState({ run_days: "", ingest_days: "", judgment_days: "" });
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       const k = await api.get<Keep>("/settings/retention");
       setKeep(k);
       setText({ run_days: String(k.run_days), ingest_days: String(k.ingest_days), judgment_days: String(k.judgment_days) });
     } catch (e) {
-      setStatus({ ok: false, text: errorText(e) });
+      setLoadErr(errorText(e));
     }
   }, [api]);
   useEffect(() => void load(), [load]);
-  async function save() {
+  // 即改即存：三项一起发（整段替换）；有一项不是整数就在本地拦下，原因写在标题旁。
+  const dirty = !!keep && (["run_days", "ingest_days", "judgment_days"] as const).some((k) => text[k].trim() !== String(keep[k]));
+  const auto = useAutoSave(async () => {
     const v = Object.values(text).map((x) => x.trim());
-    if (v.some((x) => !/^\d+$/.test(x))) return setStatus({ ok: false, text: t.keepBad });
-    setBusy(true);
-    setStatus(null);
-    try {
-      await api.put("/settings/retention", { run_days: Number(v[0]), ingest_days: Number(v[1]), judgment_days: Number(v[2]) });
-      setStatus({ ok: true, text: t.keepSaved });
-      await load();
-    } catch (e) {
-      setStatus({ ok: false, text: errorText(e) });
-    } finally {
-      setBusy(false);
-    }
-  }
+    if (v.some((x) => !/^\d+$/.test(x))) throw new Error(t.keepBad);
+    await api.put("/settings/retention", { run_days: Number(v[0]), ingest_days: Number(v[1]), judgment_days: Number(v[2]) });
+    await load();
+  }, dirty);
   const rows: [keyof typeof text, string, string, string][] = [
     ["run_days", t.keepRun, t.keepRunDel, t.keepRunKeep],
     ["ingest_days", t.keepIngest, t.keepIngestDel, t.keepIngestKeep],
@@ -145,8 +129,9 @@ function KeepPanel() {
   ];
   const s = keep?.last_sweep;
   return (
-    <section aria-label={t.keepTitle} className="panel stack">
-      <h2>{t.keepTitle}</h2>
+    <section aria-label={t.keepTitle} className="panel stack" {...auto.on}>
+      <h2>{t.keepTitle}<SaveState state={auto.state} /></h2>
+      {loadErr && <p role="alert">{loadErr}</p>}
       <p className="sub">{t.keepLede}</p>
       {keep && (
         <p role="status" aria-label="last-sweep">
@@ -164,10 +149,7 @@ function KeepPanel() {
           <p className="sub">{removes}<br />{keeps}</p>
         </div>
       ))}
-      <div className="line">
-        <button type="button" className="primary" disabled={busy || !keep} onClick={() => void save()}>{t.keepSave}</button>
-      </div>
-      {status && <p role={status.ok ? "status" : "alert"}>{status.text}</p>}
+
     </section>
   );
 }

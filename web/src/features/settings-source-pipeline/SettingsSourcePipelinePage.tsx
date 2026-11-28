@@ -205,7 +205,7 @@ function PromptEditor({ title, hint, value, builtin, onSave }: PromptProps & { b
       <textarea rows={16} aria-label={title} value={text} onChange={(e) => setText(e.target.value)} />
       <div className="actions">
         {text.trim() !== builtin && (
-          <button type="button" className="quiet" onClick={() => setText(builtin)}>{t.resetDefault}</button>
+          <button type="button" className="quiet" data-save onClick={() => setText(builtin)}>{t.resetDefault}</button>
         )}
       </div>
     </Card>

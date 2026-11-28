@@ -7,7 +7,7 @@ import { CHANNEL_PREFIX } from "../../app/vocab";
 import type { Delivery, Target } from "./matrix";
 import { apply, choiceOf, choicesFor, current, kindOf, push, switchOf, targetOf, type Choice, type State } from "./reminders";
 import { rstrings } from "./strings";
-import { Disclosure } from "../../app/ui";
+import { Disclosure, SaveState, useAutoSave } from "../../app/ui";
 
 // 每类提醒唯一可编辑的位置（设计 v2 §3、§4）：一个单选、一句开关后果、一句按当前数据的预览，长解释收在"说明"里。
 // 一个页面里的单选共用一个 ReminderScope：同一份 disturb 文档，保存后用服务端规整过的结果替换，免得两处各拿旧文档互相覆盖。
@@ -384,28 +384,22 @@ function MinInput() {
   const { state, putDisturb } = useReminderScope();
   const saved = push(state.disturb, "new_proposals");
   const [v, setV] = useState(String(saved.min ?? 10));
-  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => setV(String(saved.min ?? 10)), [saved.min]);
   const n = Number(v);
-  const save = async () => {
-    if (!Number.isInteger(n) || n < 1) return setNote({ ok: false, text: t.minInvalid });
+  // 即改即存：停手或离开输入框时存；不是正整数在本地拦下。
+  const auto = useAutoSave(async () => {
+    if (!Number.isInteger(n) || n < 1) throw new Error(t.minInvalid);
     const all: Record<string, unknown> = {};
     for (const cat of ["source_failing", "template_failed", "run_failed", "new_proposals"]) {
       const r = push(state.disturb, cat);
       all[cat] = { on: r.on, ...(state.disturb.push?.[cat]?.route ? { route: state.disturb.push[cat].route } : {}), ...(cat === "new_proposals" ? { min: n } : {}) };
     }
-    try {
-      await putDisturb({ push: all });
-      setNote({ ok: true, text: t.saved });
-    } catch (e) {
-      setNote({ ok: false, text: msg(e) });
-    }
-  };
+    await putDisturb({ push: all });
+  }, n !== (saved.min ?? 10));
   return (
-    <div className="sentence">
+    <div className="sentence" {...auto.on}>
       <label>{t.minLabel} <input type="number" min={1} aria-label={t.minLabel} value={v} onChange={(e) => setV(e.target.value)} /></label>
-      <button type="button" disabled={n === (saved.min ?? 10)} onClick={() => void save()}>{t.save}</button>
-      {note && <span role={note.ok ? "status" : "alert"} className={"saved-note" + (note.ok ? "" : " bad")}>{note.text}</span>}
+      <SaveState state={auto.state} />
     </div>
   );
 }

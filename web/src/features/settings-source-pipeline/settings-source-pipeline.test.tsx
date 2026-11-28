@@ -1,11 +1,16 @@
 import { withSession } from "../../app/test-session";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
 
+// 卡片即改即存（界面设计 §6.1）：开关当场存，文字离开输入框时存。blur 让焦点离开输入框，再等这一轮存完。
+const blur = async () => {
+  act(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+};
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -83,7 +88,7 @@ describe("设置 › 来源处理", () => {
     await userEvent.clear(batchInput);
     await userEvent.type(batchInput, "5");
     await userEvent.click(within(sched).getByLabelText("开"));
-    await userEvent.click(within(sched).getByRole("button", { name: /^保存/ }));
+    await blur();
     await waitFor(() =>
       expect(s.puts.at(-1)).toEqual({
         url: "/v1/settings/source-pipeline",
@@ -94,7 +99,7 @@ describe("设置 › 来源处理", () => {
     await screen.findByDisplayValue("内置判断标准");
     const judgeCard = screen.getByRole("region", { name: "判断标准（哪些值得处理）" });
     await userEvent.type(await screen.findByRole("textbox", { name: "判断标准（哪些值得处理）" }), "  报销和合同都算紧急  ");
-    await userEvent.click(within(judgeCard).getByRole("button", { name: /^保存/ }));
+    await blur();
     await waitFor(() =>
       expect(s.puts.at(-1)?.body.source_pipeline.judge_prompt).toBe("内置判断标准  报销和合同都算紧急"),
     );
@@ -105,7 +110,7 @@ describe("设置 › 来源处理", () => {
     open(s.impl);
     const card = await screen.findByRole("region", { name: "本人身份" });
     await userEvent.type(within(card).getByRole("textbox", { name: "本人身份" }), "  昵称阿江  ");
-    await userEvent.click(within(card).getByRole("button", { name: /^保存/ }));
+    await blur();
     await waitFor(() => expect(s.puts.at(-1)?.body.source_pipeline.owner_identity).toBe("昵称阿江"));
     expect(s.puts.at(-1)?.body.source_pipeline.judge_prompt).toBeUndefined();
   });
@@ -121,10 +126,9 @@ describe("设置 › 来源处理", () => {
     expect(box).toHaveValue("我的说明");
     await userEvent.click(batch.getByRole("button", { name: "恢复默认" }));
     expect(box).toHaveValue("内置批处理说明");
-    expect(s.puts).toHaveLength(0);
-    await userEvent.click(batch.getByRole("button", { name: /^保存/ }));
+    // 恢复默认当场存：与默认相同的内容按没改过存（发空串）
     await waitFor(() => expect(s.puts.at(-1)?.body.source_pipeline.batch_prompt).toBe(""));
-    await waitFor(() => expect(batch.getByRole("button", { name: /^保存/ })).toBeDisabled());
+    expect(s.puts).toHaveLength(1);
     expect(box).toHaveValue("内置批处理说明");
   });
 
@@ -141,7 +145,7 @@ describe("设置 › 来源处理", () => {
     const daily = within(retryCard).getByLabelText(/每天最多处理/);
     await userEvent.clear(daily);
     await userEvent.type(daily, "15");
-    await userEvent.click(within(retryCard).getByRole("button", { name: /^保存/ }));
+    await blur();
     await waitFor(() =>
       expect(s.puts.at(-1)?.body.source_pipeline).toMatchObject({ max_retries: 4, daily_batch_limit: 15 }),
     );
@@ -150,7 +154,7 @@ describe("设置 › 来源处理", () => {
     const lo = within(bandCard).getByLabelText("下限");
     await userEvent.clear(lo);
     await userEvent.type(lo, "0.2");
-    await userEvent.click(within(bandCard).getByRole("button", { name: /^保存/ }));
+    await blur();
     await waitFor(() =>
       expect(s.puts.at(-1)).toEqual({
         url: "/v1/settings/judgment",
@@ -163,7 +167,7 @@ describe("设置 › 来源处理", () => {
     expect(hi).toHaveValue(0.8);
     await userEvent.clear(hi);
     await userEvent.type(hi, "0.9");
-    await userEvent.click(within(urgent).getByRole("button", { name: /^保存/ }));
+    await blur();
     await waitFor(() =>
       expect(s.puts.at(-1)?.body.bands).toEqual([
         { template: "triage-screen", low: 0.2, high: 0.6 },
@@ -179,8 +183,8 @@ describe("设置 › 来源处理", () => {
     const batchInput = within(sched).getByLabelText(/攒够几条就处理/);
     await userEvent.clear(batchInput);
     await userEvent.type(batchInput, "500");
-    await userEvent.click(within(sched).getByRole("button", { name: /^保存/ }));
-    expect(await within(sched).findByRole("alert")).toHaveTextContent("1 到 100");
+    await blur();
+    expect(await within(sched).findByText(/没保存：.*1 到 100/)).toBeInTheDocument();
     expect(s.puts).toHaveLength(0);
   });
 

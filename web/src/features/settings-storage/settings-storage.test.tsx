@@ -1,5 +1,5 @@
 import { withSession } from "../../app/test-session";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +50,12 @@ function mount(fetchImpl: typeof fetch) {
 }
 const row = async (name: string) => within(await screen.findByRole("group", { name }));
 
+// 即改即存（界面设计 §6.1）：离开输入框时存。blur 让焦点离开输入框，再等这一轮存完。
+const blur = async () => {
+  act(() => (document.activeElement as HTMLElement | null)?.blur?.());
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+};
+
 beforeEach(() => sessionStorage.clear());
 
 describe("设置 › 存储", () => {
@@ -75,16 +81,15 @@ describe("设置 › 存储", () => {
     mount(s.impl);
     const b = await row("日历");
     await userEvent.type(b.getByLabelText("日历 保留天数"), "30");
-    await userEvent.click(b.getByRole("button", { name: "保存日历保留天数" }));
-    await b.findByRole("status");
+    await blur();
+    await waitFor(() => expect(s.puts).toHaveLength(1));
     const a = await row("邮件");
     await userEvent.clear(a.getByLabelText("邮件 保留天数"));
-    await userEvent.click(a.getByRole("button", { name: "保存邮件保留天数" }));
-    await a.findByRole("status");
-    expect(s.puts).toEqual([
+    await blur();
+    await waitFor(() => expect(s.puts).toEqual([
       { url: "/v1/settings/sources/src_b/content-retention", body: { days: 30 } },
       { url: "/v1/settings/sources/src_a/content-retention", body: { days: null } },
-    ]);
+    ]));
   });
 
   it("本地拒绝非整数不发请求；服务端拒绝时原因原样显示、输入保留", async () => {
@@ -93,13 +98,13 @@ describe("设置 › 存储", () => {
     const b = await row("日历");
     const input = b.getByLabelText("日历 保留天数");
     await userEvent.type(input, "1.5");
-    await userEvent.click(b.getByRole("button", { name: "保存日历保留天数" }));
-    expect(await b.findByRole("alert")).toHaveTextContent("保留天数须是 1 到 36500 的整数");
+    await blur();
+    expect(await b.findByText(/没保存：保留天数须是 1 到 36500 的整数/)).toBeInTheDocument();
     expect(s.puts).toHaveLength(0);
     await userEvent.clear(input);
     await userEvent.type(input, "99999");
-    await userEvent.click(b.getByRole("button", { name: "保存日历保留天数" }));
-    expect(await b.findByRole("alert")).toHaveTextContent(/36500/);
+    await blur();
+    expect(await b.findByText(/没保存：.*36500/)).toBeInTheDocument();
     expect(input).toHaveValue(99999);
   });
 
@@ -121,14 +126,13 @@ describe("设置 › 存储", () => {
     expect(run).toHaveValue(30);
     await userEvent.clear(run);
     await userEvent.type(run, "7");
-    await userEvent.click(keepPanel.getByRole("button", { name: "保存保留期" }));
-    await keepPanel.findByText("保留期已保存，下次清理起按新值");
-    expect(s.puts.at(-1)).toEqual({ url: "/v1/settings/retention", body: { run_days: 7, ingest_days: 30, judgment_days: 180 } });
+    await blur();
+    await waitFor(() => expect(s.puts.at(-1)).toEqual({ url: "/v1/settings/retention", body: { run_days: 7, ingest_days: 30, judgment_days: 180 } }));
     const j = keepPanel.getByLabelText("判断记录（天）");
     await userEvent.clear(j);
     await userEvent.type(j, "5");
-    await userEvent.click(keepPanel.getByRole("button", { name: "保存保留期" }));
-    expect(await keepPanel.findByRole("alert")).toHaveTextContent("judgment_days must be 0 (never clear) or between 30 and 3650");
+    await blur();
+    expect(await keepPanel.findByText(/没保存：.*judgment_days must be 0 \(never clear\) or between 30 and 3650/)).toBeInTheDocument();
     expect(j).toHaveValue(5);
   });
 });
