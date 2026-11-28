@@ -35,7 +35,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> [--part body|progress|messages --offset --full] | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --limit --cursor --full] | add | update <id> | comment <id> --text <t> [--reply-to <comment id>] [--on <YYYY-MM-DD>] | thread <id> [--before <n> --limit <n> --full] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> [--part body|progress|messages --offset --full] | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref --limit --cursor --full] | add | update <id> | comment <id> --text <t> [--reply-to <comment id>] [--mention <executor id or session:main>]... [--model --thinking --override <k=v>...] [--on <YYYY-MM-DD>] | thread <id> [--before <n> --limit <n> --full --format json|tree] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 const (
 	todayUsage = "usage: apa today [--full]"
@@ -44,9 +44,14 @@ const (
 
 // 各写子命令的完整用法：参数错误时放进 next，-h / --help 时整段输出。
 const (
-	updateUsage     = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --daily-at <HH:MM, empty clears; a planned date clears it> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
-	commentUsage    = "usage: apa item comment <id> --text <text> [--reply-to <comment id on the same item, from apa item thread>] [--on <YYYY-MM-DD, not later than today>]"
-	threadUsage     = "usage: apa item thread <id> [--before <before from the previous page>] [--limit <1-100, default 20>] [--full]; newest last, the page stays within the read budget; without --full each entry omits its raw events (steps)"
+	updateUsage  = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --daily-at <HH:MM, empty clears; a planned date clears it> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
+	commentUsage = "usage: apa item comment <id> --text <text> [--reply-to <comment id on the same item, from apa item thread>] " +
+		"[--mention <executor id, or session:main for the resident main session>]... (at most 3; each mentioned executor gets a child item and APA starts it, its report comes back as a reply; " +
+		"anyone who cannot be started fails the whole comment; no --mention wakes no one) " +
+		"[--model <m>] [--thinking <t>] [--override <key=value>]... (only with exactly one executor mentioned; values from apa executors) [--on <YYYY-MM-DD, not later than today>]"
+	threadUsage = "usage: apa item thread <id> [--before <before from the previous page>] [--limit <1-100, default 20>] [--full] [--format json|tree]; " +
+		"newest last, the page stays within the read budget; without --full each entry omits its raw events (steps); " +
+		"comments carry reply_to and mentions (who was mentioned and how far each got); --format tree prints the replies nested under what they answer"
 	transitionUsage = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <note or result evidence> --version <n>]"
 	relateUsage     = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove]"
 )
@@ -77,7 +82,7 @@ func item(c *client.Ctx, args []string) error {
 	case "update":
 		return write(c, args, "update", "PATCH", "")
 	case "comment":
-		return write(c, args, "comment", "POST", "/comments")
+		return comment(c, args)
 	case "thread":
 		return thread(c, args)
 	case "transition":
@@ -222,9 +227,6 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	case "update":
 		fields = itemFields[1:]
 		hint = updateUsage
-	case "comment":
-		fields = []string{"text", "on", "reply-to"}
-		hint = commentUsage
 	case "transition":
 		fields = []string{"to", "reason", "waiting-on"}
 		hint = transitionUsage
@@ -240,9 +242,6 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	body, err := f.body(hint)
 	if err != nil {
 		return err
-	}
-	if sub == "comment" && body["text"] == nil {
-		return usage("--text is required", hint)
 	}
 	if sub == "transition" {
 		if body["to"] == nil {
@@ -391,27 +390,173 @@ func show(c *client.Ctx, args []string) error {
 	return c.Print(out)
 }
 
+// listFlag 是可重复给出的字符串参数。
+type listFlag []string
+
+func (l *listFlag) String() string     { return "" }
+func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
+
+// pairFlag 是可重复给出的 key=value 参数。
+type pairFlag map[string]string
+
+func (p pairFlag) String() string { return "" }
+func (p pairFlag) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+	if !ok || k == "" {
+		return usage("--override takes key=value", "e.g. --override model=m1")
+	}
+	p[k] = val
+	return nil
+}
+
+// comment：POST /items/{id}/comments。带 --mention 时内核写发言并叫起被 @ 的执行者或主会话（delegate.mention，§6.3）。
+func comment(c *client.Ctx, args []string) error {
+	f, _ := newForm("item comment", []string{"text", "on", "reply-to", "model", "thinking"}, []string{"version", "idempotency-key"}, nil)
+	var mentions listFlag
+	overrides := pairFlag{}
+	f.fs.Var(&mentions, "mention", "")
+	f.fs.Var(overrides, "override", "")
+	id, err := f.parse(args, true, commentUsage)
+	if err != nil {
+		return err
+	}
+	body, err := f.body(commentUsage)
+	if err != nil {
+		return err
+	}
+	if body["text"] == nil {
+		return usage("--text is required", commentUsage)
+	}
+	for _, k := range []string{"model", "thinking"} {
+		if _, ok := body[k]; ok {
+			overrides[k] = *f.vals[k]
+			delete(body, k)
+		}
+	}
+	if len(overrides) > 0 {
+		if len(mentions) != 1 || mentions[0] == domain.MentionMain {
+			return usage("--model, --thinking and --override only apply with exactly one executor mentioned", commentUsage)
+		}
+		body["overrides"] = map[string]string(overrides)
+	}
+	if len(mentions) > 0 {
+		body["mentions"] = []string(mentions)
+	}
+	return send(c, f, "POST", "/items/"+url.PathEscape(id)+"/comments", body)
+}
+
 // thread：GET /items/{id}/thread，讨论流的一页；页大小与字数上限由内核守住。
 func thread(c *client.Ctx, args []string) error {
-	f, bools := newForm("item thread", []string{"before", "limit"}, nil, []string{"full"})
+	f, bools := newForm("item thread", []string{"before", "limit", "format"}, nil, []string{"full"})
 	id, err := f.parse(args, true, threadUsage)
 	if err != nil {
 		return err
 	}
+	format := *f.vals["format"]
+	if format != "" && format != "json" && format != "tree" {
+		return usage("--format is json or tree", threadUsage)
+	}
 	q := url.Values{}
 	for n, v := range f.vals {
-		if *v != "" {
+		if *v != "" && n != "format" {
 			q.Set(n, *v)
 		}
 	}
 	if *bools["full"] {
 		q.Set("full", "1")
 	}
-	var out map[string]any
-	if err := c.Do(bg, "GET", "/items/"+url.PathEscape(id)+"/thread?"+q.Encode(), nil, &out); err != nil {
+	var out threadPage
+	if err := c.Do(bg, "GET", "/items/"+url.PathEscape(id)+"/thread?"+q.Encode(), nil, &out.raw); err != nil {
 		return err
 	}
-	return c.Print(out)
+	if format != "tree" {
+		return c.Print(out.raw)
+	}
+	b, _ := json.Marshal(out.raw)
+	if err := json.Unmarshal(b, &out); err != nil {
+		return err
+	}
+	_, err = io.WriteString(c.Env.Stdout, out.tree(id))
+	return err
+}
+
+// threadPage 是讨论流一页里画回复树要用的字段（附录 B.2 GET /items/{id}/thread）。
+type threadPage struct {
+	raw     map[string]any
+	Entries []struct {
+		At   time.Time `json:"at"`
+		Who  struct{ Kind, Name string }
+		Kind string `json:"kind"`
+		Args struct {
+			ID       string `json:"id"`
+			Text     string `json:"text"`
+			ReplyTo  string `json:"reply_to"`
+			Mentions []struct {
+				Target, State string
+			} `json:"mentions"`
+		} `json:"args"`
+	} `json:"entries"`
+	More   int   `json:"more"`
+	Before int64 `json:"before"`
+}
+
+// tree 把一页画成文字：发言按回复关系缩进在被回复的那条下面，其余经过各占一行；@ 的状态写在发言末尾。
+func (p threadPage) tree(item string) string {
+	kids := map[string][]int{}
+	here := map[string]bool{}
+	for _, e := range p.Entries {
+		if e.Kind == "progress" {
+			here[e.Args.ID] = true
+		}
+	}
+	for i, e := range p.Entries {
+		if e.Kind == "progress" && here[e.Args.ReplyTo] {
+			kids[e.Args.ReplyTo] = append(kids[e.Args.ReplyTo], i)
+		}
+	}
+	var b strings.Builder
+	if p.More > 0 {
+		fmt.Fprintf(&b, "(%d earlier; apa item thread %s --before %d --format tree)\n", p.More, item, p.Before)
+	}
+	var line func(i, depth int)
+	line = func(i, depth int) {
+		e := p.Entries[i]
+		who := e.Who.Name
+		if who == "" {
+			who = e.Who.Kind
+		}
+		b.WriteString(strings.Repeat("  ", depth))
+		if depth > 0 {
+			b.WriteString("└ ")
+		}
+		at := e.At.Local().Format("01-02 15:04")
+		if e.Kind != "progress" {
+			fmt.Fprintf(&b, "· %s %s %s\n", at, who, e.Kind)
+			return
+		}
+		text, _, _ := strings.Cut(e.Args.Text, "\n")
+		if r := []rune(text); len(r) > 120 {
+			text = string(r[:120]) + "…"
+		}
+		fmt.Fprintf(&b, "[%s] %s %s: %s", e.Args.ID, at, who, text)
+		for _, m := range e.Args.Mentions {
+			fmt.Fprintf(&b, "  @%s(%s)", m.Target, m.State)
+		}
+		if e.Args.ReplyTo != "" && depth == 0 {
+			fmt.Fprintf(&b, "  (reply to %s)", e.Args.ReplyTo)
+		}
+		b.WriteString("\n")
+		for _, k := range kids[e.Args.ID] {
+			line(k, depth+1)
+		}
+	}
+	for i, e := range p.Entries {
+		if e.Kind == "progress" && here[e.Args.ReplyTo] {
+			continue // 画在被回复的那条下面
+		}
+		line(i, 0)
+	}
+	return b.String()
 }
 
 // older 是进展或挂靠消息的一页：从最近的往前数，跳过 offset 条，按先后排列；连同续读命令整份不超过一次读取的上限。

@@ -56,6 +56,8 @@ type Options struct {
 	Owner string
 	// OnError 接收提交后补做父事项状态失败的错误，必填：失败时父事项会停在 waiting，不能静默。
 	OnError func(commit command.Commit, err error)
+	// Host 是 APA 主机名，只用于在 @ 候选里标出不在本机的执行者。
+	Host string
 }
 
 func invalid(why string) error {
@@ -153,6 +155,8 @@ type createIn struct {
 	// kernel/background 的同事务回调里，不通过则整条命令不生效。Overrides 是这一次覆盖的可覆盖参数（只能取声明列出的值）。
 	Start     bool              `json:"start,omitempty"`
 	Overrides map[string]string `json:"overrides,omitempty"`
+	// origin 只由内核填（由 @ 建出的子事项记发起的发言），调用方写不了。
+	origin *domain.Origin
 }
 
 // StartInput 是 delegate.create 里交给拉起方的部分：kernel/background 从命令输入读它。
@@ -186,7 +190,7 @@ func Register(x *command.Executor, o Options) error {
 	if o.OnError == nil {
 		return invalid("delegation: Options.OnError is required")
 	}
-	for _, s := range []command.Spec{o.create(), o.attach(), report(), settle(), o.dispatch(), o.dispatchUpdate(), dispatchList()} {
+	for _, s := range []command.Spec{o.create(), o.attach(), o.mention(), o.mentionable(), report(), settle(), o.dispatch(), o.dispatchUpdate(), dispatchList()} {
 		if err := x.Register(s); err != nil {
 			return err
 		}
@@ -296,7 +300,7 @@ func (o Options) createChild(c *command.Ctx, v createIn) (created, error) {
 		prio = domain.PriorityNormal
 	}
 	child := domain.Item{Phase: domain.PhaseOpen, Kind: domain.KindDelegation, Title: title, Summary: v.Summary, Body: v.Body,
-		Priority: prio, Project: parent.Project, Assignee: v.Assignee,
+		Priority: prio, Project: parent.Project, Assignee: v.Assignee, Origin: v.origin,
 		// 后台运行建立的子事项带 unattended 并沿链路继承；本人显式重新委派开始新链路（§7.5）。
 		ItemKernelState: domain.ItemKernelState{ChainDepth: c.ChainDepth,
 			Unattended: c.Caller.Level == authz.LevelRun || (parent.Unattended && c.Caller.Level != authz.LevelWeb)}}
@@ -465,10 +469,12 @@ func report() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Tx, c.Input)
-			label := v.Summary
+			text := v.Summary
 			if v.Outcome == OutcomeBlocked {
-				label = "blocked: " + v.Summary
+				text = "blocked: " + v.Summary
 			}
+			// 状态标签只取首行：评估类的回执可能上千字，全文写进父事项的进展（讨论里的回复）。
+			label, _, _ := strings.Cut(text, "\n")
 			_, child, snap, err := items.Revise(c.Tx, v.ID, "delegate.report", c.Now(), func(it *domain.Item) error {
 				it.StatusLabel = label
 				if v.Outcome == OutcomeDone {
@@ -501,7 +507,7 @@ func report() command.Spec {
 				return nil, err
 			}
 			if child.Kind == domain.KindDelegation {
-				if err := parentProgress(c, child, label); err != nil {
+				if err := parentProgress(c, child, text); err != nil {
 					return nil, err
 				}
 			}
@@ -525,8 +531,9 @@ func report() command.Spec {
 }
 
 // parentProgress 把委派子事项的回执同时写成父事项的一条进展（§7.5）：本人看事项看的是父事项，回报不能只留在子事项里。
+// 由 @ 建出的子事项，这条进展就是对发起那条发言的回复（reply_to），正文是回执全文；其余在前面带上子事项标题。
 // 父事项已结束时不写。
-func parentProgress(c *command.Ctx, child domain.Item, label string) error {
+func parentProgress(c *command.Ctx, child domain.Item, text string) error {
 	parent, ok, err := items.ParentOf(c.Tx, child.ID)
 	if err != nil || !ok {
 		return err
@@ -536,7 +543,11 @@ func parentProgress(c *command.Ctx, child domain.Item, label string) error {
 		return err
 	}
 	// 证据留在子事项的回执上（事项页逐条可点），进展只写这一句：进展会进摘要等模型请求，不把外部链接带过去。
-	w, err := items.AppendProgress(c.Tx, parent, child.Title+"："+label, c.Caller.Actor.Principal, c.Now())
+	pr := domain.Progress{Text: child.Title + "：" + text, Actor: c.Caller.Actor.Principal}
+	if child.Origin != nil && child.Origin.Source == OriginMention {
+		pr.Text, pr.ReplyTo = text, child.Origin.Ref
+	}
+	w, err := items.AppendComment(c.Tx, parent, pr, c.Now())
 	if err != nil {
 		return err
 	}

@@ -112,7 +112,7 @@ const (
 	KSynced    = "synced"    // 系统同步来源对象的更新；args: fields[]
 	KAbsorbed  = "absorbed"  // 另一条建议补到这里；item 是那条建议
 	KAttachTo  = "attach_to" // 这条建议补到了 item
-	KProgress  = "progress"  // 讨论区的一条发言；args: id, text, reply_to?
+	KProgress  = "progress"  // 讨论区的一条发言；args: id, text, reply_to?, mentions?（[]Mention：@ 了谁、各自到哪一步）
 	KDeadline  = "deadline_passed"
 	KDecision  = "decision"  // args: state（requested、resolved）
 	KFollow    = "follow"    // 后续消息；args: message, subject, state（attached、processed、handed_back、released）
@@ -619,9 +619,10 @@ type itemPayload struct {
 	Proposal string          `json:"proposal"`
 	Message  string          `json:"message"`
 	Progress *struct {
-		ID      string `json:"id"`
-		Text    string `json:"text"`
-		ReplyTo string `json:"reply_to"`
+		ID       string   `json:"id"`
+		Text     string   `json:"text"`
+		ReplyTo  string   `json:"reply_to"`
+		Mentions []string `json:"mentions"`
 	} `json:"progress"`
 	Dispatch *struct {
 		Executor string `json:"executor"`
@@ -717,6 +718,13 @@ func (b builder) item(id string, fromMessage bool) ([]Entry, error) {
 				e.Args = map[string]any{"id": p.Progress.ID, "text": p.Progress.Text}
 				if p.Progress.ReplyTo != "" {
 					e.Args["reply_to"] = p.Progress.ReplyTo
+				}
+				if len(p.Progress.Mentions) > 0 {
+					ms, err := mentions(b.tx, id, p.Progress.ID, p.Progress.Mentions)
+					if err != nil {
+						return nil, err
+					}
+					e.Args["mentions"] = ms
 				}
 			}
 		case t == domain.EvItemDeadlinePassed:

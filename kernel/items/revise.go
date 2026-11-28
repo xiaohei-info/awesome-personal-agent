@@ -133,6 +133,15 @@ func Relate(tx *store.Tx, from, to, typ string, at time.Time) (json.RawMessage, 
 
 // AppendProgress 在调用方事务内给事项追加一条进展（与 item.progress 同一落法）。调用方追加返回的事件并对 item 做一次 command.Bump。
 func AppendProgress(tx *store.Tx, item, text, actor string, at time.Time) (Write, error) {
+	return AppendComment(tx, item, domain.Progress{Text: text, Actor: actor}, at)
+}
+
+// AppendComment 追加一条发言 p（文字、操作者，可带所指日期、回复与 @），id 与时刻由这里定：id 随条数递增，同一时刻追加的几条
+// 仍按写入先后排序。输入先经 CheckComment；所指日期不晚于 at 所在的本机日。写回的 Write 带完整的进展（含 id）。
+func AppendComment(tx *store.Tx, item string, p domain.Progress, at time.Time) (Write, error) {
+	if p.On != "" && p.On > Today(at) { // 时钟只在命令里，所以"不晚于今天"在这里判
+		return Write{}, invalid("on cannot be later than today")
+	}
 	cur, err := Get(tx, item)
 	if err != nil {
 		return Write{}, err
@@ -141,7 +150,7 @@ func AppendProgress(tx *store.Tx, item, text, actor string, at time.Time) (Write
 	if err != nil {
 		return Write{}, err
 	}
-	p := domain.Progress{ID: fmt.Sprintf("%s.p%06d", item, len(prev)+1), Text: text, Actor: actor, At: at.UTC()}
+	p.ID, p.At = fmt.Sprintf("%s.p%06d", item, len(prev)+1), at.UTC()
 	if err := insertProgress(tx, item, p); err != nil {
 		return Write{}, err
 	}

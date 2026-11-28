@@ -384,3 +384,46 @@ func TestRemoveExecutorIsWebOnly(t *testing.T) {
 		t.Fatalf("removed executor still listed: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// 讨论里的 @（§6.3）：候选列出主会话与名录里的执行者及叫不动的类别码；带 mentions 的发言走 delegate.mention，
+// 任一叫不动整条不生效（不在项目名单为 403/21，其余 409），什么也不写；空的 mentions 是普通发言。
+func TestMentionCandidatesAndRefusedMentions(t *testing.T) {
+	e := setup(t)
+	proj := e.project("p", []string{workHost})
+	id := e.parent(proj)
+
+	rec := e.do("GET", "/v1/items/"+id+"/mentionable", "", e.web)
+	var got struct {
+		Candidates []struct {
+			ID, Kind, Reason string
+			OK               bool
+		}
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); rec.Code != 200 || err != nil {
+		t.Fatalf("mentionable: %d %s", rec.Code, rec.Body)
+	}
+	reasons := map[string]string{}
+	for _, c := range got.Candidates {
+		reasons[c.ID] = c.Reason
+		if c.OK {
+			t.Errorf("%s: nothing is startable here, got ok", c.ID)
+		}
+	}
+	if got.Candidates[0].Kind != "main" || reasons[domain.MentionMain] != "main_not_set" ||
+		reasons[workHost] != kdel.BlockNotStarted || reasons[otherHost] != kdel.BlockNotAllowed {
+		t.Fatalf("candidates: %+v", got.Candidates)
+	}
+
+	if rec := e.do("POST", "/v1/items/"+id+"/comments", `{"text":"看一下","mentions":["`+otherHost+`"]}`, e.web); rec.Code != 403 {
+		t.Fatalf("executor outside the project: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/items/"+id+"/comments", `{"text":"看一下","mentions":["`+workHost+`"]}`, e.web); rec.Code != 409 || !strings.Contains(rec.Body.String(), kdel.BlockNotStarted) {
+		t.Fatalf("executor APA cannot start: %d %s", rec.Code, rec.Body)
+	}
+	if it := e.item(id); it.Phase != domain.PhaseOpen {
+		t.Fatalf("refused mentions write nothing: %s", it.Phase)
+	}
+	if rec := e.do("POST", "/v1/items/"+id+"/comments", `{"text":"只是留言","mentions":[]}`, e.web); rec.Code != 201 || !strings.Contains(rec.Body.String(), "只是留言") {
+		t.Fatalf("empty mentions is a plain comment: %d %s", rec.Code, rec.Body)
+	}
+}

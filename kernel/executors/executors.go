@@ -891,3 +891,8 @@ func activate(tx *store.Tx, d Declaration) error {
 	}
 	return nil
 }
+
+// Remote 报告执行者是否不在 APA 主机 host 上：自报了主机且不是本机（短名也算本机）。这样的运行不发运行凭据（§13.6）。
+func Remote(e Entry, host string) bool {
+	return e.Host != "" && !strings.EqualFold(e.Host, host) && !strings.EqualFold(e.Host, strings.Split(host, ".")[0])
+}

@@ -313,6 +313,8 @@ def stdin_text(tmp):
      ["attach", "p1", "--to", "i9", "--reason", "same topic"]),
     ("apa_item_comment", {"id": "i1", "text": "done A", "reply_to": "i1.p000001", "on": "2026-11-01", "grant": "g1"},
      ["item", "comment", "i1", "--text", "done A", "--reply-to", "i1.p000001", "--on", "2026-11-01"]),
+    ("apa_item_comment", {"id": "i1", "text": "看一下", "mention": "arch, session:main"},
+     ["item", "comment", "i1", "--text", "看一下", "--mention", "arch", "--mention", "session:main"]),
     ("apa_proposals_apply", {"recommended": True, "source": "s1", "project": "p1", "evidence": "都按建议"},
      ["proposals", "apply", "--recommended", "--source", "s1", "--project", "p1"]),
 ])

@@ -417,7 +417,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		conns.Register(x),
 		kprojects.Register(x),
 		executors.Register(x, executors.Options{Owner: owner, Project: kprojects.Get}),
-		delegation.Register(x, delegation.Options{Owner: owner, OnError: func(c command.Commit, err error) {
+		delegation.Register(x, delegation.Options{Owner: owner, Host: host, OnError: func(c command.Commit, err error) {
 			slog.Error("delegation settle", "object", c.Object, "err", err)
 		}}),
 		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l, Declared: storedName}),

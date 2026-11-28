@@ -424,11 +424,15 @@ func (q *Queue) ConfirmAnswered(tx *store.Tx, item string) (bool, error) {
 // ResultPrefix 是委派结果通知的投递 id 前缀（§13.6）：一次回执一条，事项之后的变化不作废它（结果已经发生）。
 const ResultPrefix = "delegation:"
 
+// MentionPrefix 是讨论里 @ 主会话的唤醒投递 id 前缀（§6.3）：一次 @ 一条，同样不随事项之后的变化作废。
+const MentionPrefix = "mention:"
+
 // Supersede 作废该事项中版本小于 below 的未终结投递（含退回 Web 未读的：已变化的事项不再展示旧提醒；事项变化的命令在同一事务调用）。
-// 委派结果通知（ResultPrefix）不作废。
+// 委派结果通知（ResultPrefix）与 @ 的唤醒（MentionPrefix）不作废。
 func (q *Queue) Supersede(tx *store.Tx, item string, below int64) (int64, error) {
 	return tx.Exec(`UPDATE delivery_delivery SET state = 'superseded', lease_until = 0
-		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered', 'fallback_web') AND id NOT LIKE ?`, item, below, ResultPrefix+"%")
+		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered', 'fallback_web') AND id NOT LIKE ? AND id NOT LIKE ?`,
+		item, below, ResultPrefix+"%", MentionPrefix+"%")
 }
 
 // Sweep 把可领已超过 UnclaimedAfter 仍无人领取的投递转 fallback_web，返回条数：
@@ -495,4 +499,18 @@ func (q *Queue) Withdraw(tx *store.Tx, id string) (int64, error) {
 // 不属于单个事项的合并投递在成员变化时由触达调用。
 func (q *Queue) SupersedeID(tx *store.Tx, id string) (int64, error) {
 	return tx.Exec(`UPDATE delivery_delivery SET state = 'superseded', lease_until = 0 WHERE id = ? AND state = 'pending'`, id)
+}
+
+// StateOf 读一条投递的状态；没有这条时 ok 为假。只读，供讨论流标出 @ 的去向。
+func StateOf(tx *store.Tx, id string) (state string, ok bool, err error) {
+	r, err := tx.Query(`SELECT state FROM delivery_delivery WHERE id = ?`, id)
+	if err != nil {
+		return "", false, err
+	}
+	defer r.Close()
+	if r.Next() {
+		err = r.Scan(&state)
+		return state, err == nil, err
+	}
+	return "", false, r.Err()
 }

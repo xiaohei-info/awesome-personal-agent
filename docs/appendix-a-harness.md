@@ -218,7 +218,7 @@ Hermes 结构化输出的末行是 `result` 事件，只带 `session_id` 和 `ex
 |---|---|---|
 | `apa_attach` | `apa attach <建议> --to <事项>` | 把一条建议补到已有事项 |
 | `apa_proposals_apply` | `apa proposals apply --recommended`，或 `--file -` 经标准输入给处置清单 | 按推荐批量处理，或按清单逐条处理（"第 3 条忽略，其余按建议"）；可按来源、项目收窄。输出逐条结果，模型据此向本人复述 |
-| `apa_item_comment` | `apa item comment <事项> --text … [--reply-to <发言>] [--on <日期>]` | 在事项的讨论区发言：记进展、补信息，或回复同一事项里的某一条（一档） |
+| `apa_item_comment` | `apa item comment <事项> --text … [--reply-to <发言>] [--mention <执行者>]... [--on <日期>]` | 在事项的讨论区发言：记进展、补信息，或回复同一事项里的某一条；`mention`（逗号分隔，至多 3 个，`session:main` 为主会话）叫执行者接手，回报作为回复回来，任一叫不动整条不生效（一档） |
 | `apa_item_list`、`apa_item_show` | `apa item list [--q --phase --project --kind --sort --planned-for --tag --from --to --limit --cursor]`、`apa item show <事项> [--part --offset]` | 查事项列表与详情（查看组，只读工具档下也可用）；都有上限，按输出里的 `next` 续读 |
 | `apa_item_thread` | `apa item thread <事项> [--before <游标> --limit <条数>]` | 读事项的讨论流：发言与回复关系、决定、派活与回报、后续消息，最新的在后，一页不超过读取上限（查看组，只读工具档下也可用） |
 | `apa_project_list`、`apa_project_show` | `apa project list`、`apa project show <项目>` | 查项目 |

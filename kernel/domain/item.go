@@ -412,15 +412,20 @@ func CheckEntry(it Item, to Phase, reason string, hasEvidence bool) *Error {
 	return nil
 }
 
+// MentionMain 是 @ 的保留目标：常驻主会话（发唤醒，不建子事项）。它不是另一种选人方式：怎么找到主会话沿用触达送主会话的
+// 同一处判定（kernel/attention.MainRoute）。冒号不会出现在执行者 id 里。
+const MentionMain = "session:main"
+
 // Progress 是事项上一条追加不改的进展（§6.3），也是讨论区里的一条发言：文字、所指日期（可空，不晚于记录当天）、记录时刻、操作者，
-// 以及可选的 ReplyTo（回复同一事项的哪一条进展）。
+// 以及可选的 ReplyTo（回复同一事项的哪一条进展）与 Mentions（这条发言 @ 了谁：执行者 id 或 MentionMain，由入口结构化给出，§6.3）。
 type Progress struct {
-	ID      string    `json:"id"`
-	Text    string    `json:"text"`
-	On      string    `json:"on,omitempty"`
-	ReplyTo string    `json:"reply_to,omitempty"`
-	Actor   string    `json:"actor"`
-	At      time.Time `json:"at"`
+	ID       string    `json:"id"`
+	Text     string    `json:"text"`
+	On       string    `json:"on,omitempty"`
+	ReplyTo  string    `json:"reply_to,omitempty"`
+	Mentions []string  `json:"mentions,omitempty"`
+	Actor    string    `json:"actor"`
+	At       time.Time `json:"at"`
 	// Precision 为 day 表示只知道日期（导入时给了当天的一个时刻），界面只显示到日（§7.1）；空为精确时刻。
 	Precision string `json:"precision,omitempty"`
 }

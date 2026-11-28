@@ -108,6 +108,10 @@ CREATE TABLE item_import_map (
 	// 账本结构版本 16（讨论区，§6.3）：进展可回复同一事项的另一条进展；空串即不是回复，已有行不变。
 	Version: 6, Ledger: 16, Name: "ledger-v16-progress-reply-to",
 	SQL: `ALTER TABLE item_progress ADD COLUMN reply_to TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 17（讨论区的 @，§6.3）：这条发言 @ 了谁（执行者 id 或主会话，逗号分隔）；空串即没有 @，已有行不变。
+	Version: 7, Ledger: 17, Name: "ledger-v17-progress-mentions",
+	SQL: `ALTER TABLE item_progress ADD COLUMN mentions TEXT NOT NULL DEFAULT '';`,
 }}}
 
 func invalid(why string) error {

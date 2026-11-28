@@ -7,6 +7,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -640,6 +641,17 @@ func TestItemThread(t *testing.T) {
 	}
 	if strings.Join(said, "|") != "旧进展|第一条发言|回复第一条" || replyOf != first || !kinds["decision"] {
 		t.Fatalf("thread = %v, reply_to = %q, kinds = %v", said, replyOf, kinds)
+	}
+	// --format tree：回复缩进在被回复的那条下面。
+	tree := k.ok(auth.Observer, "item", "thread", id, "--format", "tree").out
+	if !strings.Contains(tree, "["+first+"]") || !regexp.MustCompile(`(?m)^  └ \[\S+\] .*回复第一条$`).MatchString(tree) || !strings.Contains(tree, "· ") {
+		t.Fatalf("tree:\n%s", tree)
+	}
+	// 覆盖参数只在恰好 @ 一个执行者时可用：命令行先拦下。
+	for _, args := range [][]string{{"--model", "m1"}, {"--mention", "a", "--mention", "b", "--thinking", "high"}, {"--mention", "session:main", "--model", "m1"}} {
+		if r := k.apa(auth.Delegate, append([]string{"item", "comment", id, "--text", "x"}, args...)...); r.code != 2 {
+			t.Fatalf("%v: exit %d %s", args, r.code, r.errOut)
+		}
 	}
 
 	long := strings.Repeat("长", 1500)
