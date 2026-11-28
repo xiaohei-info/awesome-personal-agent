@@ -59,7 +59,7 @@ event_rules:
   - id: ro-edit
     mode: observe
     when: {event: item.created, kind: task, tag_any: [acc-ro]}
-    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: edit, harness: acc-read-only, cwd: run_dir}]
+    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: edit, executor: acc-read-only, cwd: run_dir}]
   - id: reread
     mode: observe
     when: {event: item.updated, kind: task, tag_any: [acc-reread]}
@@ -79,7 +79,7 @@ event_rules:
   - id: bgm-explicit
     mode: observe
     when: {event: item.created, kind: task, tag_any: [acc-explicit]}
-    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: read, harness: acc-bg-noresume, cwd: run_dir}]
+    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: read, executor: acc-bg-noresume, cwd: run_dir}]
   - id: main-again
     mode: observe
     when: {event: delegation.reported, kind: task, tag_any: [acc-chain]}
@@ -193,7 +193,16 @@ func (f *fx) declare(name, wrapper, arg string, resume bool) {
 
 func (f *fx) declareRaw(name string, h map[string]any) {
 	f.t.Helper()
-	b, _ := json.Marshal(map[string]any{"harness": name, "headless": h})
+	d := map[string]any{"harness": name, "headless": h}
+	if name == harness { // runner=task 规则派给 work-host.cli：选人只选执行者，它要由声明登记才拉得起（§13.6）
+		for _, x := range []string{"work-host.cli", "other-host.cli"} {
+			if r := f.Web("DELETE", "/v1/executors/"+x, ""); r.Code != 200 && r.Code != 404 {
+				f.t.Fatalf("移除本人维护的 %s: HTTP %d %s", x, r.Code, r.Body)
+			}
+		}
+		d["executors"] = []map[string]any{{"id": name, "kind": "external-cli"}, {"id": "work-host.cli", "kind": "external-cli"}, {"id": "other-host.cli", "kind": "external-cli"}}
+	}
+	b, _ := json.Marshal(d)
 	if r := f.Apa(f.DEL, string(b), "declare", "-"); r.Code != 0 {
 		f.t.Fatalf("apa declare %s: %d %s%s", name, r.Code, r.Stdout, r.Stderr)
 	}

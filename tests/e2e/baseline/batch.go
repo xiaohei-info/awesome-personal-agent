@@ -47,7 +47,7 @@ echo '{"session_id":"batch-'"$APA_RUN"'","text":"本批已处理"}'
 		e.fatal("apa declare %s 退出码 %d: %s%s", BatchHarness, r.Code, r.Stdout, r.Stderr)
 	}
 	e.webOK("POST", "/v1/settings/declarations/"+BatchHarness+"/1/confirm", "", 200)
-	e.webOK("PUT", "/v1/settings/source-pipeline", `{"source_pipeline":{"agent":"legacy:`+BatchHarness+`","batch_size":1,"max_batch":100}}`, 200)
+	e.webOK("PUT", "/v1/settings/source-pipeline", `{"source_pipeline":{"executor":"`+BatchHarness+`","batch_size":1,"max_batch":100}}`, 200)
 }
 
 // BatchPrompts 返回批处理替身收到过的全部提示词。

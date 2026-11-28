@@ -34,15 +34,15 @@ event_rules:
   - id: wake-headless
     mode: observe
     when: {event: item.created, kind: task, tag_any: [acc-wake-headless]}
-    do: [{action: start_background_run, runner: main_session, harness: acc-stub, prompt: handle-item, access: read, cwd: run_dir}]
+    do: [{action: start_background_run, runner: main_session, executor: acc-stub, prompt: handle-item, access: read, cwd: run_dir}]
   - id: wake-main
     mode: observe
     when: {event: item.created, kind: task, tag_any: [acc-wake]}
-    do: [{action: start_background_run, runner: main_session, harness: acc-stub-wake, prompt: handle-item, access: read, cwd: run_dir}]
+    do: [{action: start_background_run, runner: main_session, executor: acc-stub-wake, prompt: handle-item, access: read, cwd: run_dir}]
   - id: wake-short
     mode: observe
     when: {event: item.created, kind: task, tag_any: [acc-wake-short]}
-    do: [{action: start_background_run, runner: main_session, harness: acc-stub-wake, prompt: handle-short, access: read, cwd: run_dir}]
+    do: [{action: start_background_run, runner: main_session, executor: acc-stub-wake, prompt: handle-short, access: read, cwd: run_dir}]
 `,
 	"prompts/handle-item.md":  "---\nrun_as: main_session\ntimeout: 10m\n---\nSTUB_MODE=no-receipt ACCWAKE 你在处理事项 {item_id}，本人不在场。\n",
 	"prompts/handle-short.md": "---\nrun_as: main_session\ntimeout: 1m\n---\nACCWAKE 你在处理事项 {item_id}，本人不在场。\n",

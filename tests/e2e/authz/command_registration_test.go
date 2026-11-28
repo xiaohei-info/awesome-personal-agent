@@ -14,7 +14,7 @@ import (
 )
 
 // accRun 是 ACT-CMD-02/03 的用户能力包：带 acc-run 标签的事项进入 open 时调用任务型 agent（只有枚举动作，不含命令）。
-// 任务型用哪个 harness 由 Web 设置的 default_harness 决定，所以"声明有没有被本人确认"直接决定运行能否被拉起。
+// 任务型用哪个 harness 由分工里的日常执行者（default_executor）决定，所以"声明有没有被本人确认"直接决定运行能否被拉起。
 const accRun = `name: acc-run
 version: 1.0.0
 description: 验收用规则包：事项进入 open 时调用任务型 agent
@@ -127,7 +127,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 		k.webOK("PATCH", "/v1/rules/"+url.PathEscape(runRule)+"/mode", `{"mode":"auto"}`, 200)
 
 		k.triggerRun()
-		const why = "没有已确认的无头运行声明"
+		const why = "不在执行者名录里" // 声明确认之前它下面还没有执行者（确认后内核建同名执行者）
 		// 2026-11-20 改写：原等待恰一件事项转 needs_input 且理由含 why；没拉起是事件：诊断页恰一条 task_refused 通知、原因含 why。
 		k.waitFor("任务型因声明未确认没有被拉起", 15*time.Second, func() bool { return k.NoticeWith("task_refused", why) == 1 })
 		time.Sleep(time.Second) // 给错误地拉起留出时间

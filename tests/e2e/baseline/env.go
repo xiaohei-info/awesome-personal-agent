@@ -219,10 +219,10 @@ func Setup(t testing.TB) *Env {
 	return e
 }
 
-// AgentHarness 是 DEL 所属 Agent 卡片的宿主：只为建卡片声明，只读一档，不是任何流程的默认宿主。
+// AgentHarness 是 DEL 所属的 Agent（声明）：只为它的权限卡声明，只读一档，不是任何流程的默认宿主。
 const AgentHarness = "acc-agent"
 
-// OpenDelegateTier 声明并确认 acc-agent 宿主，建一张它的 Agent 卡片，签一把归属它的 delegate 钥匙作为 DEL，
+// OpenDelegateTier 声明并确认 acc-agent，签一把归属它的 delegate 钥匙作为 DEL（钥匙按所属程序的声明取权限卡，§14.5），
 // 并在 Web 把它的档位设为 tier；原来那把未归属的 delegate 钥匙留作 DELO（只整理）。
 func (e *Env) OpenDelegateTier(tier string) {
 	e.T.Helper()
@@ -233,20 +233,14 @@ func (e *Env) OpenDelegateTier(tier string) {
 		e.fatal("apa declare %s 退出码 %d: %s%s", AgentHarness, r.Code, r.Stdout, r.Stderr)
 	}
 	e.webOK("POST", "/v1/settings/declarations/"+AgentHarness+"/1/confirm", "", 200)
-	var card struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(e.webOK("POST", "/v1/settings/agents", `{"harness":"`+AgentHarness+`","name":"acc-agent","enabled":true}`, 200)), &card); err != nil || card.ID == "" {
-		e.fatal("建 Agent 卡片: %v", err)
-	}
 	var out struct {
 		Secret string `json:"secret"`
 	}
-	if err := json.Unmarshal([]byte(e.webOK("POST", "/v1/settings/tokens", `{"kind":"delegate","audience":"internal","label":"DEL-agent","harness":"`+AgentHarness+`","agent_id":"`+card.ID+`"}`, 201)), &out); err != nil || out.Secret == "" {
+	if err := json.Unmarshal([]byte(e.webOK("POST", "/v1/settings/tokens", `{"kind":"delegate","audience":"internal","label":"DEL-agent","harness":"`+AgentHarness+`"}`, 201)), &out); err != nil || out.Secret == "" {
 		e.fatal("签发归属 Agent 的 delegate 钥匙: %v", err)
 	}
-	e.SetTier(card.ID, tier)
-	e.AgentID, e.DELO, e.DEL = card.ID, e.DEL, out.Secret
+	e.SetTier(AgentHarness, tier)
+	e.AgentID, e.DELO, e.DEL = AgentHarness, e.DEL, out.Secret
 }
 
 // SetTier 在 Web 按旧档位的说法设一个 Agent 的权限卡（§16.5 映射表）：organize 只开前三组，decide 再开替我拍板，
@@ -546,7 +540,8 @@ func (e *Env) webOK(method, path, body string, want int) string {
 	return r.Body
 }
 
-// IssueCredentials 在设置里签发 OBS、WRK、WRK2、DEL、CHAN，并维护执行者清单 work-host.cli、other-host.cli。
+// IssueCredentials 在设置里签发 OBS、WRK、WRK2、DEL、CHAN，并维护执行者清单 work-host.cli、other-host.cli
+// （本人维护的条目；DeclareStubHarness 把它们改由 acc-stub 的声明登记，好让规则 runner=task 能拉起它们，§13.6）。
 func (e *Env) IssueCredentials() {
 	e.T.Helper()
 	for _, x := range []string{"work-host.cli", "other-host.cli"} {
@@ -634,8 +629,18 @@ func (e *Env) DeclareStubHarness() {
 		if resume {
 			h["resume"] = []string{bin, "--resume", "{prompt}"}
 		}
-		b, _ := json.Marshal(map[string]any{"harness": harness, "headless": h})
+		d := map[string]any{"harness": harness, "headless": h}
+		if harness == "acc-stub" {
+			d["executors"] = []map[string]any{{"id": "acc-stub", "kind": "external-cli"}, {"id": "work-host.cli", "kind": "external-cli"},
+				{"id": "other-host.cli", "kind": "external-cli"}}
+		}
+		b, _ := json.Marshal(d)
 		return string(b)
+	}
+	for _, x := range []string{"work-host.cli", "other-host.cli"} { // 改由 acc-stub 的声明登记（同 id，名单与钥匙照旧）
+		if r := e.Web("DELETE", "/v1/executors/"+x, ""); r.Code != 200 && r.Code != 404 {
+			e.fatal("移除本人维护的 %s: HTTP %d %s", x, r.Code, r.Body)
+		}
 	}
 	for harness, resume := range map[string]bool{"acc-stub": true, "acc-stub-noresume": false} {
 		if r := e.Apa(e.DEL, decl(harness, resume), "declare", "-"); r.Code != 0 {
