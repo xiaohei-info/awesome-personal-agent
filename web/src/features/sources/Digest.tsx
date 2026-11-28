@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Skeleton } from "../../app/ui";
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
@@ -98,7 +99,7 @@ export function Digest({ source }: { source: string }) {
       <h4>{t.digest}</h4>
       {error !== null && <ErrorNote error={error} />}
       {items === null ? (
-        error === null && <p role="status">{t.loading}</p>
+        error === null && <Skeleton label={t.loading} />
       ) : items.length === 0 ? (
         <p className="sub">{t.noDigest}</p>
       ) : (

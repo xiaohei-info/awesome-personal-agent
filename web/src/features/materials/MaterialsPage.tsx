@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EmptyState } from "../../app/ui";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -205,11 +206,11 @@ export function MaterialsPage() {
               {h.snippet && <p className="sub">{h.snippet}</p>}
             </li>
           ))}
-          {!hits.length && <p className="empty">{t.noHits}</p>}
+          {!hits.length && <EmptyState title={t.noHits} />}
         </ul>
       ) : (
         <>
-          {materials && !shown?.length && !error && <p className="empty">{t.none}</p>}
+          {materials && !shown?.length && !error && <EmptyState title={t.none} />}
           {!!shown?.length && (
             <ul className="rows">
               {shown.map((m) => (

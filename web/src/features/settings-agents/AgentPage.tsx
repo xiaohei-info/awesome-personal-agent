@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { EmptyState } from "../../app/ui";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
@@ -29,14 +30,14 @@ export function AgentPage() {
   if (data && pol && !e)
     return (
       <main>
-        <p className="eyebrow"><Link to="/settings/agents">{t.back}</Link></p>
-        <p className="empty">{t.notFound}</p>
+        <p className="backbar"><Link to="/settings/agents">{t.back}</Link></p>
+        <EmptyState title={t.notFound} />
       </main>
     );
   const name = e ? nameOf(e) : t.agent;
   return (
     <PolicyPage title={name} error={polError ?? (data ? null : error)} ready={!!pol && !!data && !!e} onRetry={() => { void loadPol(); void load(); }}>
-      <p className="eyebrow"><Link to="/settings/agents">{t.back}</Link></p>
+      <p className="backbar"><Link to="/settings/agents">{t.back}</Link></p>
       {error && data && <div role="alert">{error}</div>}
       {e && pol && (
         <div className="stack">

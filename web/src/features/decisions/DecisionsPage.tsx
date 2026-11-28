@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EmptyState, ErrorBoundary, Skeleton } from "../../app/ui";
 import { Link } from "react-router-dom";
 import { Go, PageHead } from "../../app/page";
 import { useSession } from "../../app/session";
@@ -296,9 +297,9 @@ export function DecisionsPage() {
         </div>
       )}
       {items === null ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton shape="card" label={t.loading} />
       ) : n === 0 && !receipts.length ? (
-        <p className="empty">{t.empty}</p>
+        <EmptyState title={t.empty} />
       ) : (
         <>
           {receipts.length > 0 && (
@@ -312,7 +313,7 @@ export function DecisionsPage() {
             <section aria-label={t.questions}>
               <div ref={list}>
                 {items.map((i, k) => (
-                  <QuestionCard key={i.id} item={i} focused={k === at} onFocus={() => setCur(k)} rejection={rejections[i.id]} onAnswer={answer} />
+                  <ErrorBoundary key={i.id}><QuestionCard item={i} focused={k === at} onFocus={() => setCur(k)} rejection={rejections[i.id]} onAnswer={answer} /></ErrorBoundary>
                 ))}
               </div>
             </section>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ApiClient } from "../../app/api";
 import { ErrorNote } from "../../app/errors";
@@ -118,10 +119,10 @@ export function DonePage() {
       )}
       {error != null && <ErrorNote error={error} />}
       {!done || moved?.week !== week ? (
-        error == null && <p role="status">{t.loading}</p>
+        error == null && <Skeleton label={t.loading} />
       ) : !rows.size ? (
         <>
-          <p className="empty">{week === thisWeek ? t.emptyThis : t.emptyPast}</p>
+          <EmptyState title={week === thisWeek ? t.emptyThis : t.emptyPast} />
           {week === thisWeek && <p><button type="button" className="link" onClick={() => go(addDays(week, -7))}>{t.seeLast}</button></p>}
         </>
       ) : (

@@ -39,8 +39,8 @@ export function DoneCircle({ item, onDone, busy }: { item: Item; onDone: () => v
   );
 }
 
-/** compact：今天页的扁平行——完成由行首圆圈做（DoneCircle），这里不再放「完成」；窄屏全部收进「更多」。 */
-export function RowActions({ item, where, onChange, compact }: { item: Item; where: string; onChange: (it: Item, what: RowAct) => void; compact?: boolean }) {
+/** 行上的其余操作（完成由行首圆圈做，见 DoneCircle）：宽屏悬停才浮出；窄屏全部收进「更多」。 */
+export function RowActions({ item, where, onChange }: { item: Item; where: string; onChange: (it: Item, what: RowAct) => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const narrow = useNarrow();
@@ -86,9 +86,9 @@ export function RowActions({ item, where, onChange, compact }: { item: Item; whe
 
   return (
     <>
-      {/* data-row-actions：桌面上悬停或聚焦到这一行才显出次要操作；data-keep 的「完成」常显（交互样式规格 §5.2）。 */}
+      {/* data-row-actions：桌面上悬停或聚焦到这一行才浮出（交互样式规格 §5.2）。 */}
       <span className="actions" role="group" aria-label={t.rowActions(item.title)} data-row-actions>
-        {!(compact && narrow) && <button type="button" aria-expanded={open === "plan"} onClick={() => setOpen(open === "plan" ? null : "plan")}>{t.rowPlan}</button>}
+        {!narrow && <button type="button" aria-expanded={open === "plan"} onClick={() => setOpen(open === "plan" ? null : "plan")}>{t.rowPlan}</button>}
         {/* 交给 Agent 只对任务（交给 Agent 的规则只认任务，§13.6）。 */}
         {!narrow && item.kind === "task" && <button type="button" aria-expanded={open === "agent"} disabled={busy} onClick={() => void handoff()}>{handed ? t.rowAgent : t.rowHandoff}</button>}
         {!narrow && <button type="button" aria-expanded={open === "progress"} onClick={() => setOpen(open === "progress" ? null : "progress")}>{t.rowProgress}</button>}
@@ -96,14 +96,12 @@ export function RowActions({ item, where, onChange, compact }: { item: Item; whe
           <button type="button" aria-expanded={open === "more"} onClick={() => setOpen(open === "more" ? null : "more")}>{t.rowMore}</button>
         ) : (
           <Menu trigger={t.rowMore} label={t.rowMoreFor(item.title)} items={[
-            ...(compact ? [{ label: t.rowPlan, onSelect: () => setOpen(open === "plan" ? null : "plan") }] : []),
+            { label: t.rowPlan, onSelect: () => setOpen(open === "plan" ? null : "plan") },
             ...(item.kind === "task" ? [{ label: handed ? t.rowAgent : t.rowHandoff, disabled: busy, onSelect: () => { focusAgentRef.current = true; void handoff(); } }] : []),
             { label: t.rowProgress, onSelect: () => setOpen(open === "progress" ? null : "progress") },
             { label: t.del, disabled: busy, onSelect: () => setOpen(open === "delete" ? null : "delete") },
           ]} />
         )}
-        {/* 委派完成要带证据（§6.14），去详情填；其余一键完成。放在最后：次要操作隐藏时仍占位，常显的「完成」贴在行尾。 */}
-        {!compact && item.kind !== "delegation" && <button type="button" data-keep disabled={busy} onClick={() => void write(() => api.post(path + "/transition", { to: "done", reason: t.rowDoneReason(where) }, ifMatch), "done")}>{t.done}</button>}
       </span>
       {err != null && <div className="row-panel"><ErrorNote error={err} /></div>}
       {open === "more" && (

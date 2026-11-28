@@ -11,7 +11,8 @@ import { useItemTitle, useNamed } from "../../app/names";
 import { loadDone, loadProgress } from "../done/DonePage";
 import { monday } from "../calendar/layout";
 import { hostClock, hostParts, useHostClock } from "../items/schedule";
-import { DoneCircle, RowActions, type RowAct } from "../items/RowActions";
+import { type RowAct } from "../items/RowActions";
+import { ItemRow } from "../items/ItemRow";
 import { Val, useLabel } from "../../app/values";
 import { ItemDetail } from "../items/ItemsPage";
 import { Disclosure, EmptyState, ErrorBoundary, Icon, LIST_KEYS, PeekPanel, Skeleton, collapse, rowEl, toast, toastError, undoToast, useListKeys, usePageKeys, usePeek } from "../../app/ui";
@@ -193,13 +194,13 @@ export function TodayPage() {
   const empty = !!data && !top.length && !back.length && !todays.length && !reminders.length && !data.stale.length;
 
   return (
-    <main className="wide today">
-      <PageHead compact>{t.title}</PageHead>
+    <main className="today">
+      <PageHead>{t.title}</PageHead>
       {error != null && <ErrorNote error={error} reveal />}
       {top.length > 0 && (
         <section aria-label={t.blocks.top}>
           <h2>{t.blocks.top}</h2>
-          <ul className="rows flat">
+          <ul className="rows">
             {top.map((x) => (
               <li key={x.key} className="act-row">
                 <div><span>{x.red ? <strong>{x.text}</strong> : x.text}</span></div>
@@ -212,7 +213,7 @@ export function TodayPage() {
       {back.length > 0 && (
         <section aria-label={t.blocks.back}>
           <h2>{t.blocks.back}</h2>
-          <ErrorBoundary><ul className="rows flat">{back.map((r) => <BackRow key={r.id} run={r} />)}</ul></ErrorBoundary>
+          <ErrorBoundary><ul className="rows">{back.map((r) => <BackRow key={r.id} run={r} />)}</ul></ErrorBoundary>
         </section>
       )}
       {!data ? (
@@ -230,7 +231,7 @@ export function TodayPage() {
                   <section aria-label={name} className="today-group">
                     <Disclosure head defaultOpen persistKey={"today.group." + (pid || "-")}
                       summary={<h3>{pid ? <Link to={"/projects/" + encodeURIComponent(pid)}>{name}</Link> : name}{" "}<span className="count-n">{es.length}</span></h3>}>
-                      <ul className="rows flat">
+                      <ul className="rows">
                         {es.map((e) => (
                           <TodayRow key={e.item.id} entry={e} cursor={cursor === e.item.id} peeked={peek.id === e.item.id} entering={entering === e.item.id}
                             onPeek={peek.enabled ? () => peek.open(e.item.id) : undefined} onChange={(it, what) => void replace(it, what, e.item)} onDone={() => void doneById(e.item.id)} />
@@ -335,25 +336,12 @@ function TodayRow({ entry, onChange, onDone, cursor, peeked, entering, onPeek }:
   if (why.includes("overdue") && due) marks.push({ cls: "badge bad", text: t.why.overdue(md(due.date)) });
   if (why.includes("due") && due) marks.push({ cls: "badge warn", text: due.time === "23:59:59" ? t.why.dueToday : t.why.dueAt(due.time.slice(0, 5)) });
   if (why.includes("planned") && item.planned_for) marks.push({ cls: "badge plain", text: item.planned_for < today ? t.why.plannedPast(md(item.planned_for)) : t.why.plannedToday });
-  const prio = item.priority === "urgent" || item.priority === "high" ? item.priority : null;
   return (
-    <li data-item={item.id} data-cursor={cursor || undefined} data-peeked={peeked || undefined} className={["trow", entering && "row-enter"].filter(Boolean).join(" ")}>
-      <div className="act-row trow-line">
-        <DoneCircle item={item} onDone={onDone} />
-        {prio && (
-          <span className="prio" data-prio={prio}>
-            {prio === "urgent" ? <Icon.PrioUrgent /> : <Icon.PrioHigh />}
-            <span className="sr-only">{prio === "urgent" ? t.why.urgent : t.why.high}</span>
-          </span>
-        )}
-        <Link className="trow-title" to={itemPath(item)} onClick={(e) => { if (e.shiftKey && onPeek) { e.preventDefault(); onPeek(); } }}>{item.title}</Link>
-        <span className="sub reasons">
-          {item.planned_slot && <span className="slot">{item.planned_slot}</span>}
-          {marks.map((m) => <span key={m.text} className={m.cls}>{m.text}</span>)}
-        </span>
-        <RowActions compact item={item} where={t.where} onChange={onChange} />
-      </div>
-    </li>
+    <ItemRow item={item} where={t.where} to={itemPath(item)} onChange={onChange} onDone={onDone} onPeek={onPeek} cursor={cursor} peeked={peeked} entering={entering}
+      meta={<>
+        {item.planned_slot && <span className="slot">{item.planned_slot}</span>}
+        {marks.map((m) => <span key={m.text} className={m.cls}>{m.text}</span>)}
+      </>} />
   );
 }
 
@@ -382,7 +370,7 @@ function Reminders({ list }: { list: Reminder[] }) {
     <section aria-label={t.blocks.reminders} id="reminders">
       <h2>{t.count(t.blocks.reminders, shown.length)}</h2>
       {error != null && <ErrorNote error={error} reveal />}
-      <ul className="rows flat">
+      <ul className="rows">
         {shown.map((d) => (
           <li key={d.id} className="act-row" aria-label={d.content.title} data-delivery={d.id}>
             <div>
@@ -434,7 +422,7 @@ function Stale({ items, act }: { items: Item[]; act: (fn: () => Promise<unknown>
 
   return (
     <Disclosure aria-label={t.groups.stale} persistKey="today.stale" summary={<h2>{t.count(t.groups.stale, items.length)}</h2>}>
-      <ul className="rows flat">
+      <ul className="rows">
         {items.map((it) => (
           <li key={it.id}>
             <label><input type="checkbox" checked={picked.has(it.id)} onChange={() => toggle(it.id)} aria-label={t.select(it.title)} /> </label>

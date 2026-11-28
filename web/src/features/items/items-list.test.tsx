@@ -42,6 +42,8 @@ function mount(f: typeof fetch, path = "/items") {
   return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={withSession(f)} /><Where /></MemoryRouter>);
 }
 const writes = (s: ReturnType<typeof server>) => s.calls.filter((c) => c.method !== "GET");
+// 行上的按钮：行首圆圈没有文字，用它的无障碍名（完成）。
+const btns = (el: HTMLElement) => within(el).getAllByRole("button").map((b) => b.textContent || b.getAttribute("aria-label"));
 const titles = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => li.querySelector("a")!.textContent);
 beforeEach(() => sessionStorage.clear());
 
@@ -58,7 +60,7 @@ describe("事项列表（对齐工作台任务库）", () => {
       mk("n1", { title: "看牙" }),
     ]).impl);
     const list = await screen.findByRole("group", { name: "事项列表" });
-    await waitFor(() => expect(within(list).getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["工作（6）", "家务（1）", "未归项目（1）"]));
+    await waitFor(() => expect(within(list).getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["工作 6", "家务 1", "未归项目 1"]));
     expect(titles(within(list).getByRole("region", { name: "工作" }))).toEqual(["修线上问题", "整理书签", "选供应商", "等报价", "新建议", "已交的周报"]);
   });
 
@@ -88,7 +90,7 @@ describe("事项列表（对齐工作台任务库）", () => {
     mount(s.impl);
     const user = userEvent.setup();
     const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "交给 Agent", "记进展", "更多", "完成"]);
+    expect(btns(row)).toEqual(["完成", "排时间", "交给 Agent", "记进展", "更多"]);
     await user.click(within(row).getByRole("button", { name: "记进展" }));
     await user.type(within(within(row).getByRole("group", { name: "记进展：甲" })).getByLabelText("进展"), "联调通过");
     await user.click(within(row).getByRole("button", { name: "保存" }));
@@ -124,7 +126,8 @@ describe("事项列表（对齐工作台任务库）", () => {
     mount(conflict);
     const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
     await userEvent.click(within(row).getByRole("button", { name: "完成" }));
-    expect(await within(row).findByRole("alert")).toHaveTextContent("version moved");
+    // 圆圈完成失败走右下角的提示条（与今天页一致）；这一件照服务端重读，圆圈还在。
+    expect(await screen.findByText(/version moved/)).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "完成" })).toBeInTheDocument();
   });
 
@@ -185,10 +188,10 @@ describe("事项列表（对齐工作台任务库）", () => {
       mount(s.impl);
       const user = userEvent.setup();
       const row = (await screen.findByRole("link", { name: "甲" })).closest("li")!;
-      expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "更多", "完成"]);
+      expect(btns(row)).toEqual(["完成", "更多"]);
 
       const delegationRow = screen.getByRole("link", { name: "委派件" }).closest("li")!;
-      expect(within(delegationRow).getAllByRole("button").map((b) => b.textContent)).toEqual(["排时间", "更多"]);
+      expect(btns(delegationRow)).toEqual(["更多"]);
 
       const more = within(row).getByRole("button", { name: "更多" });
       expect(more).toHaveAttribute("aria-haspopup", "menu");
@@ -198,17 +201,17 @@ describe("事项列表（对齐工作台任务库）", () => {
       expect(more).toHaveAttribute("aria-expanded", "true");
       const menu = within(row).getByRole("menu", { name: "更多操作：甲" });
       const items = within(menu).getAllByRole("menuitem");
-      expect(items.map((x) => x.textContent)).toEqual(["交给 Agent", "记进展", "删除…"]);
+      expect(items.map((x) => x.textContent)).toEqual(["排时间", "交给 Agent", "记进展", "删除…"]);
       expect(items[0]).toHaveFocus();
 
       await user.keyboard("{ArrowDown}");
       expect(items[1]).toHaveFocus();
       await user.keyboard("{End}");
-      expect(items[2]).toHaveFocus();
+      expect(items[3]).toHaveFocus();
       await user.keyboard("{ArrowDown}");
       expect(items[0]).toHaveFocus();
       await user.keyboard("{ArrowUp}");
-      expect(items[2]).toHaveFocus();
+      expect(items[3]).toHaveFocus();
       await user.keyboard("{Home}");
       expect(items[0]).toHaveFocus();
 
@@ -219,9 +222,9 @@ describe("事项列表（对齐工作台任务库）", () => {
 
       await user.keyboard("{ArrowUp}");
       const menu2 = within(row).getByRole("menu", { name: "更多操作：甲" });
-      expect(within(menu2).getAllByRole("menuitem")[2]).toHaveFocus();
+      expect(within(menu2).getAllByRole("menuitem")[3]).toHaveFocus();
 
-      await user.click(screen.getByRole("heading", { name: "工作（2）" }));
+      await user.click(screen.getByRole("heading", { level: 1 }));
       expect(within(row).queryByRole("menu")).toBeNull();
 
       await user.click(more);

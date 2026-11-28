@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { EmptyState, Skeleton } from "../../app/ui";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -187,9 +188,9 @@ export function DelegationPage() {
         </div>
       )}
       {items === null ? (
-        !error && <p role="status">{t.loading}</p>
+        !error && <Skeleton label={t.loading} />
       ) : items.length === 0 ? (
-        <p className="empty">{t.empty}</p>
+        <EmptyState title={t.empty} />
       ) : (
         items.map((c) => <Row key={c.id} c={c} report={reports.get(c.id)} kinds={kinds} stalled={stalled.has(c.id)} onDone={load} />)
       )}

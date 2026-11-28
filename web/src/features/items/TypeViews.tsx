@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { EmptyState } from "../../app/ui";
 import { Link } from "react-router-dom";
 import type { ApiClient } from "../../app/api";
 import { lang, locale, useT } from "../../app/i18n";
@@ -77,7 +78,7 @@ export function ViewTable({ view, items: list }: { view: TypeView; items: { id: 
           })}
         </div>
       )}
-      {!shown.length && <p className="empty">{t.noMatch}</p>}
+      {!shown.length && <EmptyState title={t.noMatch} />}
       {!!shown.length && (
         <div className="panel flush">
           <table aria-label={t.viewTable(label("itemKind", v.kind))}>

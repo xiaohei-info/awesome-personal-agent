@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
@@ -48,7 +49,7 @@ export function EndpointSources() {
       <p className="sub">{t.endpointSourcesHint}</p>
       {error !== null && <ErrorNote error={error} />}
       {sources === null ? (
-        error === null && <p role="status">{t.loading}</p>
+        error === null && <Skeleton shape="card" label={t.loading} />
       ) : (
         <>
           <ul className="rows">

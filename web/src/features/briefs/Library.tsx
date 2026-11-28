@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Skeleton } from "../../app/ui";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { Go, PageHead } from "../../app/page";
@@ -35,7 +36,7 @@ export function Library() {
     }, setError);
   }, [api]);
 
-  if (!briefs) return <main>{error != null ? <ErrorNote error={error} /> : <p role="status">{t.loading}</p>}</main>;
+  if (!briefs) return <main>{error != null ? <ErrorNote error={error} /> : <Skeleton label={t.loading} />}</main>;
   // 早、晚等不同安排各自的简报：来源实例的包名 + 定时。
   const origin = (b: Brief) => {
     const i = instances.find((x) => b.origin?.source === `instance:${x.id}`);

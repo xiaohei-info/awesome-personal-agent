@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BackBar, COUNTS_EVENT, SectionContext } from "./page";
+import { BackBar, COUNTS_EVENT } from "./page";
 import { AttentionProvider, useAttention } from "./attention";
 import { DIAG, MOBILE, SETTINGS, SETTINGS_HOME, buildNav, featureAt, settingsGroups, type Entry, type Feature, type NavModel } from "./registry";
 import { SettingsHome } from "./SettingsHome";
@@ -10,7 +10,7 @@ import { useSession } from "./session";
 import { toggleTheme } from "./theme";
 import type { Status } from "./status";
 import { useLeaveGuard } from "./leave";
-import { ErrorBoundary, ShortcutSheet, Toaster, typing } from "./ui";
+import { EmptyState, ErrorBoundary, ShortcutSheet, Toaster, typing } from "./ui";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
@@ -222,7 +222,7 @@ function AppRoutes({ all, nav, entryOf, noPages }: { all: Feature[]; nav: NavMod
         <Routes>
           {nav.settings && <Route path={SETTINGS_HOME + "/*"} element={<SettingsHome entry={nav.settings} />} />}
           {all.map((f) => (
-            <Route key={f.id} path={f.path + "/*"} element={<SectionContext.Provider value={entryOf.get(f.id)?.title}>{f.element}</SectionContext.Provider>} />
+            <Route key={f.id} path={f.path + "/*"} element={f.element} />
           ))}
           {all.flatMap((f) => (f.aliases ?? []).map((a) => <Route key={f.id + ":" + a} path={a + "/*"} element={<Alias to={f.path} />} />))}
           <Route
@@ -232,7 +232,7 @@ function AppRoutes({ all, nav, entryOf, noPages }: { all: Feature[]; nav: NavMod
                 <Navigate to={"/" + nav.entries[0].features[0].path} replace />
               ) : (
                 <main>
-                  <p className="empty">{noPages}</p>
+                  <EmptyState title={noPages} />
                 </main>
               )
             }
