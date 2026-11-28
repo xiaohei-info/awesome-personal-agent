@@ -104,6 +104,10 @@ CREATE TABLE item_import_map (
 	// 导入的进展只知道日期时带 precision（§7.1）；空串即精确时刻，已有行不变。
 	Version: 5, Ledger: 8, Name: "ledger-v8-progress-precision",
 	SQL: `ALTER TABLE item_progress ADD COLUMN precision TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 16（讨论区，§6.3）：进展可回复同一事项的另一条进展；空串即不是回复，已有行不变。
+	Version: 6, Ledger: 16, Name: "ledger-v16-progress-reply-to",
+	SQL: `ALTER TABLE item_progress ADD COLUMN reply_to TEXT NOT NULL DEFAULT '';`,
 }}}
 
 func invalid(why string) error {

@@ -35,6 +35,10 @@ import (
 // 常驻指令（`apa guide`）的内容变化时递增。
 const InstructionVersion = 3
 
+// InjectBudget 是一次注入的字数上限（按字符计）：内核自己守住，不靠宿主截断。讨论区的一页读取（apa item thread）用同一个上限。
+// shortcut: 与工作台闭环分支在 workbench.go 里的同名常量同值同义，那边合入主干后删掉这里的定义。
+const InjectBudget = 4000
+
 // Module 登记会话游标表。游标是事件序号，只属于本模块。
 var Module = store.Module{Name: "context", Migrations: []store.Migration{{
 	Version: 1, Name: "create-context-cursor",

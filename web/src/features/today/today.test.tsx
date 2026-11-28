@@ -7,7 +7,7 @@ import { App } from "../../app/App";
 import { feature } from "./index";
 import { feature as items } from "../items";
 
-// 测试边界替身：按 api/items 的契约应答 GET /today、PATCH /items/{id}、POST /items/{id}/progress|transition。
+// 测试边界替身：按 api/items 的契约应答 GET /today、PATCH /items/{id}、POST /items/{id}/comments|transition。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const mk = (id: string, over: object = {}) => ({ id, phase: "open", version: 1, kind: "task", title: "事项 " + id, ...over });
 
@@ -83,12 +83,12 @@ describe("今天页（flow-web-workbench）", () => {
       if (url === "/v1/rules") return json(200, { rules: [{ key: "background-run/event_rules/handle-labelled", mode: "auto" }] });
       if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: { agent_id: "legacy:hx", agent_name: "主 Agent" }, reason: "" });
       if (url.startsWith("/v1/runs?target=")) return json(200, { runs: [] });
-      const m = /^\/v1\/items\/([^/]+)(\/transition|\/progress|\/start)?$/.exec(url);
+      const m = /^\/v1\/items\/([^/]+)(\/transition|\/comments|\/start)?$/.exec(url);
       const it = m && items.get(m[1]);
       if (!it) return json(404, { code: "not_found", why: "no route", next: "x" });
       if (method === "GET") return json(200, { item: it, relations: [] });
       if (m![2] === "/start") return json(202, { id: it.id });
-      if (m![2] === "/progress") {
+      if (m![2] === "/comments") {
         (progress[it.id] ??= []).push({ id: it.id + ".p" + (progress[it.id]?.length ?? 0), text: body.text, at: new Date().toISOString() });
         return json(201, { id: it.id });
       }
@@ -175,7 +175,7 @@ describe("今天页（flow-web-workbench）", () => {
     const box = within(row).getByRole("group", { name: "记进展：事项 WB-B" });
     await user.type(within(box).getByLabelText("进展"), "已订酒店");
     await user.click(within(box).getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(writes(s)).toEqual([expect.objectContaining({ method: "POST", path: "/v1/items/WB-B/progress", body: { text: "已订酒店" } })]));
+    await waitFor(() => expect(writes(s)).toEqual([expect.objectContaining({ method: "POST", path: "/v1/items/WB-B/comments", body: { text: "已订酒店" } })]));
     await waitFor(() => expect(within(row).queryByRole("group", { name: "记进展：事项 WB-B" })).toBeNull()); // 存好后收起，行还在原处
     expect(screen.getByRole("link", { name: "事项 WB-B" }).closest("li")).toBe(row);
     expect(await screen.findByText(/本周进展 1 条/)).toBeInTheDocument();
@@ -215,14 +215,14 @@ describe("今天页（flow-web-workbench）", () => {
   });
 
   it("久未推进：批量选继续、改期、放弃，逐条走既有接口；单条失败不影响其余", async () => {
-    const s = server({ planned: [], due: [], pending: [], stale: [mk("S1"), mk("S2")] }, (p) => p === "/v1/items/S2/progress");
+    const s = server({ planned: [], due: [], pending: [], stale: [mk("S1"), mk("S2")] }, (p) => p === "/v1/items/S2/comments");
     mount(s.impl);
     const user = userEvent.setup();
     await user.click(await screen.findByLabelText("选择 事项 S1"));
     await user.click(screen.getByLabelText("选择 事项 S2"));
     await user.click(screen.getByRole("button", { name: /应用到所选/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("事项 S2：内容已被改动（version moved）");
-    expect(writes(s).map((c) => c.path)).toEqual(["/v1/items/S1/progress", "/v1/items/S2/progress"]);
+    expect(writes(s).map((c) => c.path)).toEqual(["/v1/items/S1/comments", "/v1/items/S2/comments"]);
 
     await user.click(screen.getByLabelText("选择 事项 S1"));
     await user.selectOptions(screen.getByLabelText("处理方式"), "reschedule");

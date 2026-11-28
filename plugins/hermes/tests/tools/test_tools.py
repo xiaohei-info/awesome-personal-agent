@@ -54,8 +54,8 @@ def tools():
 
 def test_registers_the_apa_tools(tools):
     assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
-                          "apa_report", "apa_dispatch", "apa_item_history", "apa_attach", "apa_proposals_apply", "apa_item_progress",
-                          "apa_item_list", "apa_item_show", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search", "apa_source_propose", "apa_source_ignore", "apa_source_attach", "apa_source_remind"}
+                          "apa_report", "apa_dispatch", "apa_item_history", "apa_attach", "apa_proposals_apply", "apa_item_comment",
+                          "apa_item_list", "apa_item_show", "apa_item_thread", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search", "apa_source_propose", "apa_source_ignore", "apa_source_attach", "apa_source_remind"}
 
 
 def test_query_tools_map_to_read_commands(tools, apa):
@@ -302,8 +302,8 @@ def stdin_text(tmp):
 @pytest.mark.parametrize("tool,args,argv", [
     ("apa_attach", {"id": "p1", "to": "i9", "reason": "same topic", "evidence": "补到 i9"},
      ["attach", "p1", "--to", "i9", "--reason", "same topic"]),
-    ("apa_item_progress", {"id": "i1", "text": "done A", "on": "2026-11-01", "grant": "g1"},
-     ["item", "progress", "i1", "--text", "done A", "--on", "2026-11-01"]),
+    ("apa_item_comment", {"id": "i1", "text": "done A", "reply_to": "i1.p000001", "on": "2026-11-01", "grant": "g1"},
+     ["item", "comment", "i1", "--text", "done A", "--reply-to", "i1.p000001", "--on", "2026-11-01"]),
     ("apa_proposals_apply", {"recommended": True, "source": "s1", "project": "p1", "evidence": "都按建议"},
      ["proposals", "apply", "--recommended", "--source", "s1", "--project", "p1"]),
 ])
