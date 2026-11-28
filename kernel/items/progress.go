@@ -41,9 +41,30 @@ type progressIn struct {
 }
 
 func insertProgress(tx *store.Tx, item string, p domain.Progress) error {
-	_, err := tx.Exec(`INSERT INTO item_progress (id, item, text, on_date, actor, at, precision, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, item, p.Text, p.On, p.Actor, p.At.UnixNano(), p.Precision, p.ReplyTo)
+	_, err := tx.Exec(`INSERT INTO item_progress (id, item, text, on_date, actor, at, precision, reply_to, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, item, p.Text, p.On, p.Actor, p.At.UnixNano(), p.Precision, p.ReplyTo, strings.Join(p.Mentions, ","))
 	return err
+}
+
+func splitMentions(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
+}
+
+// CheckComment 是一条发言的输入校验（item.progress 与带 @ 的发言共用）：正文非空、所指日期合法、回复的是同一事项的一条进展。
+// "不晚于今天"要用命令时刻，由 AppendComment 判。
+func CheckComment(tx *store.Tx, item, text string, on *string, reply string) error {
+	if blank(text) {
+		return invalid("text is required")
+	}
+	if on != nil {
+		if err := checkDate("on", *on); err != nil {
+			return err
+		}
+	}
+	return CheckReplyTo(tx, item, reply)
 }
 
 // CheckReplyTo 要求 reply 是事项 item 上已有的一条进展（讨论区的回复只挂在同一事项内，§6.3）；空串表示不是回复。
@@ -68,7 +89,7 @@ func CheckReplyTo(tx *store.Tx, item, reply string) error {
 
 // Progress 按记录先后返回事项的进展；没有时返回 nil。
 func Progress(tx *store.Tx, item string) ([]domain.Progress, error) {
-	r, err := tx.Query(`SELECT id, text, on_date, actor, at, precision, reply_to FROM item_progress WHERE item = ? ORDER BY at, id`, item)
+	r, err := tx.Query(`SELECT id, text, on_date, actor, at, precision, reply_to, mentions FROM item_progress WHERE item = ? ORDER BY at, id`, item)
 	if err != nil {
 		return nil, err
 	}
@@ -77,10 +98,11 @@ func Progress(tx *store.Tx, item string) ([]domain.Progress, error) {
 	for r.Next() {
 		var p domain.Progress
 		var at int64
-		if err := r.Scan(&p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision, &p.ReplyTo); err != nil {
+		var mentions string
+		if err := r.Scan(&p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision, &p.ReplyTo, &mentions); err != nil {
 			return nil, err
 		}
-		p.At = time.Unix(0, at).UTC()
+		p.At, p.Mentions = time.Unix(0, at).UTC(), splitMentions(mentions)
 		out = append(out, p)
 	}
 	return out, r.Err()
@@ -97,7 +119,7 @@ func ProgressIn(tx *store.Tx, from, to string) (map[string][]domain.Progress, er
 	if err != nil {
 		return nil, err
 	}
-	r, err := tx.Query(`SELECT item, id, text, on_date, actor, at, precision, reply_to FROM item_progress
+	r, err := tx.Query(`SELECT item, id, text, on_date, actor, at, precision, reply_to, mentions FROM item_progress
 		WHERE (on_date <> '' AND on_date BETWEEN ? AND ?) OR (on_date = '' AND at >= ? AND at < ?) ORDER BY at, id`,
 		from, to, f.UnixNano(), t.AddDate(0, 0, 1).UnixNano())
 	if err != nil {
@@ -106,13 +128,13 @@ func ProgressIn(tx *store.Tx, from, to string) (map[string][]domain.Progress, er
 	defer r.Close()
 	out := map[string][]domain.Progress{}
 	for r.Next() {
-		var item string
+		var item, mentions string
 		var p domain.Progress
 		var at int64
-		if err := r.Scan(&item, &p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision, &p.ReplyTo); err != nil {
+		if err := r.Scan(&item, &p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision, &p.ReplyTo, &mentions); err != nil {
 			return nil, err
 		}
-		p.At = time.Unix(0, at).UTC()
+		p.At, p.Mentions = time.Unix(0, at).UTC(), splitMentions(mentions)
 		out[item] = append(out[item], p)
 	}
 	return out, r.Err()
@@ -140,42 +162,20 @@ func (s *svc) progress() command.Spec {
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
-			if blank(v.Text) {
-				return invalid("text is required")
-			}
-			if v.On != nil {
-				if err := checkDate("on", *v.On); err != nil {
-					return err
-				}
-			}
-			return CheckReplyTo(tx, v.ID, v.ReplyTo)
+			return CheckComment(tx, v.ID, v.Text, v.On, v.ReplyTo)
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
-			if v.On != nil && *v.On > Today(c.Now()) { // 时钟只在命令里，所以"不晚于今天"在这里判
-				return nil, invalid("on cannot be later than today")
-			}
-			cur, err := Get(c.Tx, v.ID)
-			if err != nil {
-				return nil, err
-			}
-			prev, err := Progress(c.Tx, cur.ID)
-			if err != nil {
-				return nil, err
-			}
-			// id 随条数递增：同一时刻追加的几条仍按写入先后排序。
-			p := domain.Progress{ID: fmt.Sprintf("%s.p%06d", cur.ID, len(prev)+1), Text: v.Text, ReplyTo: v.ReplyTo, Actor: c.Caller.Actor.Principal, At: c.Now().UTC()}
+			p := domain.Progress{Text: v.Text, ReplyTo: v.ReplyTo, Actor: c.Caller.Actor.Principal}
 			if v.On != nil {
 				p.On = *v.On
 			}
-			if err := insertProgress(c.Tx, cur.ID, p); err != nil {
+			w, err := AppendComment(c.Tx, v.ID, p, c.Now())
+			if err != nil {
 				return nil, err
 			}
-			cur = stamped(cur, c.Now())
-			if err := save(c.Tx, cur); err != nil {
-				return nil, err
-			}
-			return ref{cur.ID}, emit(c, domain.EvItemProgressAdded, "", "", payload{Op: "progress", Item: cur, Progress: &p})
+			_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload})
+			return ref{v.ID}, err
 		}}
 }
 
