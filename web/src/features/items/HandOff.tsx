@@ -6,7 +6,7 @@ import { HANDOFF_RULE, HANDOFF_TAG } from "../../app/ids";
 import { Prereqs, type Prereq } from "../../app/Prereqs";
 import { ErrorNote } from "../../app/errors";
 import { useLabel } from "../../app/values";
-import { AgentPick, type AgentView } from "../settings-agents/AgentPick";
+import { ExecutorPick, executorName, type ExecutorView } from "../executors/ExecutorPick";
 import { strings } from "./strings";
 import type { Item } from "./ItemsPage";
 
@@ -15,35 +15,36 @@ export const tagName = (tag: string, handoff: string) => (tag === HANDOFF_TAG ? 
 
 const RULE_AT = "/settings/agents#rule-" + encodeURIComponent(HANDOFF_RULE);
 
-/** 交给 Agent 的前提（读 GET /rules 与 GET /agents 的选择预览，判定都在服务端）：规则模式、会用哪个 Agent、它能不能在后台运行。 */
-export function useHandoff(itemAgent?: string, on = true) {
+/** 交给 Agent 的前提（读 GET /rules 与 GET /executors 的选择预览，判定都在服务端）：规则模式、会用哪个执行者、它现在能不能用。 */
+export function useHandoff(itemExecutor?: string, on = true) {
   const { api } = useSession();
   const [mode, setMode] = useState<string | null>(null);
-  const [preview, setPreview] = useState<AgentView | null>(null);
+  const [preview, setPreview] = useState<ExecutorView | null>(null);
   useEffect(() => {
     if (!on) return;
     let live = true;
     api.get<{ rules: { key: string; mode: string }[] }>("/rules").then((r) => live && setMode(r.rules.find((x) => x.key === HANDOFF_RULE)?.mode ?? "off"), () => live && setMode(null));
-    const query = new URLSearchParams({ runner: "main_session", rule: HANDOFF_RULE, item_agent: itemAgent ?? "" });
-    api.get<AgentView>("/agents?" + query).then((v) => live && setPreview(v), () => live && setPreview(null));
+    const query = new URLSearchParams({ runner: "main_session", rule: HANDOFF_RULE, item: itemExecutor ?? "" });
+    api.get<ExecutorView>("/executors?" + query).then((v) => live && setPreview(v), () => live && setPreview(null));
     return () => { live = false; };
-  }, [api, on, itemAgent]);
+  }, [api, on, itemExecutor]);
   return { mode, preview };
 }
 
 /**
  * 前提清单的几步。auto 为真时（接受建议时一并交出，靠「进入进行中」触发规则）要求规则已打开；
- * 本人点「现在开始」不看规则模式（§13.6），只要求有能在后台运行的 Agent。
+ * 本人点「现在开始」不看规则模式（§13.6），只要求选出的执行者现在能用；去改落到它所属 Agent 的接入清单，没选时去执行者页的分工。
  */
-export function handoffPrereqs(t: (typeof strings)["zh"], h: { mode: string | null; preview: AgentView | null }, auto: boolean): Prereq[] {
-  const agent = h.preview?.selected?.agent_id;
-  const ready = !!h.preview && !h.preview.reason;
+export function handoffPrereqs(t: (typeof strings)["zh"], h: { mode: string | null; preview: ExecutorView | null }, auto: boolean): Prereq[] {
+  const id = h.preview?.selected?.executor;
+  const ex = h.preview?.executors.find((e) => e.id === id);
+  const ready = !!h.preview && !!id && !h.preview.selected?.reason;
   return [
     ...(auto && h.mode !== null ? [{ ok: h.mode === "auto", text: h.mode === "observe" ? t.preTrial : t.preOff, action: { label: t.preTurnOn, to: RULE_AT } }] : []),
     ...(h.preview ? [{
       ok: ready,
-      text: agent ? t.preAgent(h.preview.selected.agent_name || agent) : t.preNoAgent,
-      action: agent ? { label: t.preAllow, to: "/settings/agents/" + encodeURIComponent(agent) + "#connect" } : { label: t.preChoose, to: "/settings/agents#roles" },
+      text: id ? t.preAgent(ex ? executorName(ex) : id) : t.preNoAgent,
+      action: ex?.harness ? { label: t.preAllow, to: "/settings/agents/" + encodeURIComponent(ex.harness) + "#connect" } : { label: t.preChoose, to: "/executors#roles" },
     }] : []),
   ];
 }
@@ -61,7 +62,7 @@ export function AgentBlock({ item, onSave, onAgent }: { item: Item; onSave: (tag
   const label = useLabel();
   const { api } = useSession();
   const on = !!item.tags?.includes(HANDOFF_TAG);
-  const h = useHandoff(item.preferred_agent_id, on);
+  const h = useHandoff(item.preferred_executor, on);
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -95,7 +96,7 @@ export function AgentBlock({ item, onSave, onAgent }: { item: Item; onSave: (tag
     <section aria-label={t.agentBlock} id="agent" className="panel stack">
       <h2>{t.agentBlock}</h2>
       {!ended && <label><input type="checkbox" checked={on} onChange={() => onSave(next)} /> {t.handoff}</label>}
-      {on && !ended && <AgentPick item main rule={HANDOFF_RULE} value={item.preferred_agent_id ?? ""} onChange={onAgent} />}
+      {on && !ended && <ExecutorPick item runner="main_session" rule={HANDOFF_RULE} value={item.preferred_executor ?? ""} onChange={onAgent} />}
       {last && (
         <p className="sub">
           {[last.agent_name, label("runState", last.state), when(last.finished_at ?? last.started_at)].filter(Boolean).join(" · ")}{" "}

@@ -182,11 +182,23 @@ var (
 			}},
 		sect("channels", rules, "/settings/channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
 		sect("limits", rules, "/settings/agents", func(p *kpolicy.Policy) *kpolicy.Limits { return &p.Limits }),
-		sect("default_agent_id", agents, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.DefaultAgentID }),
-		sect("main_agent_id", agents, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.MainAgentID }),
-		sect("rule_agent", agents, "/settings/agents", func(p *kpolicy.Policy) *map[string]string { return &p.RuleAgent }),
-		sect("default_harness", agents, "/settings/agents", func(p *kpolicy.Policy) *string { return &p.DefaultHarness }),
-		sect("main_session_launch", agents, "/settings/agents", func(p *kpolicy.Policy) *kpolicy.MainSessionLaunch { return &p.MainSessionLaunch }),
+		// 分工与规则固定的执行者（§13.6）：取值是执行者 id，空串表示不选；不在名录里的到拉起时按拉不起报原因。
+		sect("default_executor", agents, "/executors", func(p *kpolicy.Policy) *string { return &p.DefaultExecutor }),
+		sect("main_executor", agents, "/executors", func(p *kpolicy.Policy) *string { return &p.MainExecutor }),
+		sect("rule_executor", agents, "/executors", func(p *kpolicy.Policy) *map[string]string { return &p.RuleExecutor }),
+		{key: "main_session_launch", group: agents, page: "/settings/agents",
+			get: func(p *kpolicy.Policy) any { return p.MainSessionLaunch },
+			set: func(p *kpolicy.Policy, raw json.RawMessage) error {
+				var v kpolicy.MainSessionLaunch
+				if err := strictDecode(raw, &v); err != nil {
+					return err
+				}
+				if len(v.ByAgent) > 0 {
+					return retired("main_session_launch.by_agent", "main_session_launch.by_harness (keyed by the Agent)")
+				}
+				p.MainSessionLaunch = v
+				return nil
+			}},
 	}
 	allowlistSections = []section{
 		sect("forward_allowlist", rules, "/sources", func(p *kpolicy.Policy) *map[string][]string { return &p.ForwardAllowlist }),
@@ -224,13 +236,25 @@ var sourcePipelineSections = []section{
 			if err := strictDecode(raw, &v); err != nil {
 				return err
 			}
-			v.Agent = strings.TrimSpace(v.Agent)
+			if strings.TrimSpace(v.Agent) != "" {
+				return retired("source_pipeline.agent", "source_pipeline.executor")
+			}
+			v.Executor = strings.TrimSpace(v.Executor)
 			v.JudgePrompt = strings.TrimSpace(v.JudgePrompt)
 			v.OwnerIdentity = strings.TrimSpace(v.OwnerIdentity)
 			v.BatchPrompt = strings.TrimSpace(v.BatchPrompt)
 			p.SourcePipeline = v
 			return nil
 		}},
+}
+
+// retiredSections 是按 Agent 卡选人的旧段（已取消，2026-11-28）：写入返回 400 并指向新段；读取不再给出。
+var retiredSections = map[string]string{"default_agent_id": "default_executor", "main_agent_id": "main_executor",
+	"rule_agent": "rule_executor", "default_harness": "default_executor"}
+
+func retired(old, now string) error {
+	return domain.NewError(domain.CodeInvalidRequest, old+" was retired with Agent cards (2026-11-28); use "+now+" with an executor id",
+		"list executors with apa executors, then send "+now)
 }
 
 // legacyKey 是 v0.1 的 PUT 体里的段名；它没有 get，不会出现在响应里。
@@ -477,7 +501,7 @@ func agentCard(st *store.Store) core.Handler {
 		if err := strictDecode(raw, &in); err != nil {
 			return err
 		}
-		agent := r.PathValue("agent")
+		agent := kpolicy.AgentKey(r.PathValue("agent"))
 		var (
 			v   int
 			pol kpolicy.Policy
@@ -494,7 +518,7 @@ func agentCard(st *store.Store) core.Handler {
 				if np.AgentCards == nil {
 					np.AgentCards = map[string]kpolicy.Card{}
 				}
-				np.AgentCards[agent] = in.Card
+				np.AgentCards[agent] = in.Card // agent 已按 AgentKey 规整：旧链接里的 legacy:<程序> 就是声明 <程序>
 				return nil
 			}); err != nil {
 				return err
@@ -666,9 +690,10 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 		}
 		version := body["version"]
 		delete(body, "version")
-		roles := body["default_agent_id"] != nil || body["main_agent_id"] != nil
-		if roles && (version == nil || body["default_agent_id"] == nil || body["main_agent_id"] == nil || string(body["default_agent_id"]) == "null" || string(body["main_agent_id"]) == "null" || body["default_harness"] != nil) {
-			return domain.NewError(domain.CodeInvalidRequest, "请同时保存两种角色及策略版本", "重新载入设置")
+		for old, now := range retiredSections {
+			if body[old] != nil {
+				return retired(old, now)
+			}
 		}
 		known := map[string]section{}
 		for _, s := range secs {
@@ -711,16 +736,7 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 				}
 			}
 			v, err := kpolicy.UpdateWith(tx, p.Caller.Actor, basis, "settings: PUT "+path, func(np *kpolicy.Policy) error {
-				if np.DefaultAgentID != nil && body["default_harness"] != nil {
-					return domain.NewError(domain.CodeConflict, "已启用 Agent 角色设置", "请用新的角色入口")
-				}
 				for k, raw := range body {
-					if k == "main_session_launch" && len(np.MainSessionLaunch.ByAgent) > 0 {
-						var fields map[string]json.RawMessage
-						if json.Unmarshal(raw, &fields) == nil && fields["by_agent"] == nil {
-							return domain.NewError(domain.CodeConflict, "请重新载入 Agent 设置以保留实例策略", "reload Agent settings")
-						}
-					}
 					set := known[k].set
 					if st := known[k].setTx; st != nil {
 						set = func(p *kpolicy.Policy, raw json.RawMessage) error { return st(tx, p, raw) }

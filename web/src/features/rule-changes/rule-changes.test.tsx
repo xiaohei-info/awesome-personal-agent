@@ -21,7 +21,8 @@ function server() {
     const method = init.method ?? "GET";
     if (method !== "GET") calls.push({ method, url, body: init.body ? JSON.parse(init.body as string) : undefined });
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url === "/v1/agents") return json(200, { agents: [{ id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1 }], selected: {}, reason: "" });
+    if (url === "/v1/settings/commands") return json(200, { declarations: [{ harness: "agent_1", rev: 1, state: "active", declaration: { harness: "agent_1", base: "hermes", name: { zh: "日常", en: "Daily" } } }] });
+    if (url === "/v1/settings/declarations") return json(200, { declarations: [] });
     if (url.startsWith("/v1/audit/rule-changes?")) {
       const a = new URL(url, "http://x").searchParams.get("agent");
       return json(200, { changes: list.filter((c) => !a || c.agent === a) });

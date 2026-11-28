@@ -179,7 +179,8 @@ func TestSettingsRejectNonWebCallers(t *testing.T) {
 	}
 }
 
-func TestRoleSwitchDoesNotReviveOldDefault(t *testing.T) {
+// 分工与规则固定的执行者存执行者 id；按 Agent 卡选人的旧段已取消，写入为 400 并指向新段，不写版本。
+func TestExecutorRolesAndRetiredAgentSections(t *testing.T) {
 	e := setup(t)
 	put := func(body string, status int) {
 		t.Helper()
@@ -188,14 +189,19 @@ func TestRoleSwitchDoesNotReviveOldDefault(t *testing.T) {
 			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
 		}
 	}
-	put(`{"default_harness":"host"}`, 200)
-	put(`{"version":0,"default_agent_id":"legacy:host","main_agent_id":"legacy:host"}`, 409)
-	put(`{"version":1,"default_agent_id":"legacy:host","main_agent_id":"legacy:host"}`, 200)
-	put(`{"version":2,"default_agent_id":"","main_agent_id":""}`, 200)
-	put(`{"default_harness":"host"}`, 409)
+	for _, old := range []string{`{"default_harness":"host"}`, `{"default_agent_id":"legacy:host"}`, `{"main_agent_id":"a"}`, `{"rule_agent":{"r":"a"}}`,
+		`{"main_session_launch":{"by_agent":{"a":"wake"},"by_harness":{},"by_rule":{}}}`} {
+		put(old, 400)
+	}
+	put(`{"version":0,"default_executor":"host","main_executor":"host.main","rule_executor":{"p/event_rules/r":"host"}}`, 200)
+	put(`{"version":0,"default_executor":"other"}`, 409)
 	version, pol := e.current()
-	if version != 3 || pol.DefaultAgentID == nil || *pol.DefaultAgentID != "" || pol.MainAgentID == nil || *pol.MainAgentID != "" {
-		t.Fatalf("role switch lost: %+v", pol.DefaultAgentID)
+	if version != 1 || pol.DefaultExecutor != "host" || pol.MainExecutor != "host.main" || pol.RuleExecutor["p/event_rules/r"] != "host" {
+		t.Fatalf("v%d %+v", version, pol)
+	}
+	put(`{"default_executor":"","rule_executor":{}}`, 200) // 清空也是改动（带 omitempty 的段清空后不在新文档里）
+	if version, pol = e.current(); version != 2 || pol.DefaultExecutor != "" || len(pol.RuleExecutor) != 0 {
+		t.Fatalf("clear: v%d %+v", version, pol)
 	}
 }
 
@@ -240,11 +246,11 @@ func TestWebWritesNewPolicyVersionAndEvent(t *testing.T) {
 // 未出现的段不动；写入后可读回。
 func TestPartialPutKeepsOtherSections(t *testing.T) {
 	e := setup(t)
-	e.do("PUT", routes[0], `{"default_harness":"host"}`, e.web)
+	e.do("PUT", routes[0], `{"default_executor":"host"}`, e.web)
 	if rec := e.do("PUT", routes[0], `{"background_run_timeout_sec":1800}`, e.web); rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	if v, p := e.current(); v != 2 || p.BackgroundRunTimeoutSec != 1800 || p.DefaultHarness != "host" {
+	if v, p := e.current(); v != 2 || p.BackgroundRunTimeoutSec != 1800 || p.DefaultExecutor != "host" {
 		t.Fatalf("v%d %+v", v, p)
 	}
 }

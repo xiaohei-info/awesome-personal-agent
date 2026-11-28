@@ -265,18 +265,26 @@ type Run struct {
 	Fault *Fault `json:"fault,omitempty"`
 }
 
+// InstanceID 是唤醒路由与网关钥匙绑定用的 Agent：运行所属声明是隔离另写的（声明键不是程序名）时为声明键，
+// 否则为空（钥匙不绑声明，裸路由 wake）。执行者统一切换前的兼容卡 legacy:<程序> 按 <程序> 认（§16.5）。
 func (r Run) InstanceID() string {
-	if r.AgentSnapshot == nil || r.ConfigRev == 0 {
+	if r.AgentSnapshot == nil {
 		return ""
 	}
-	return r.AgentID
+	if id := strings.TrimPrefix(r.AgentID, "legacy:"); id != r.Harness {
+		return id
+	}
+	return ""
 }
 
+// AgentSnapshot 是拉起时定下的执行者与所属 Agent（声明）：AgentID 是声明（权限卡的键），Executor 是执行者条目，
+// AgentName 是执行者的显示名。ConfigRev 是旧 Agent 卡的修订，已取消（2026-11-28），只读、不再写。
 type AgentSnapshot struct {
 	AgentID         string `json:"agent_id"`
 	AgentName       string `json:"agent_name"`
+	Executor        string `json:"executor,omitempty"`
 	DeclarationRev  int64  `json:"declaration_rev"`
-	ConfigRev       int64  `json:"config_rev"`
+	ConfigRev       int64  `json:"config_rev,omitempty"`
 	SelectionSource string `json:"selection_source"`
 	PermissionCap   string `json:"permission_cap"`
 	ConfiguredModel string `json:"configured_model,omitempty"`

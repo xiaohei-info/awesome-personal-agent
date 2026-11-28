@@ -141,6 +141,9 @@ func RunPreview(ctx context.Context, home string, days int, now time.Time) (Prev
 			if c, ok := pv.Plan.Cards[agent]; ok {
 				return c
 			}
+			if c, ok := pv.Plan.Cards["legacy:"+agent]; ok { // 换算出的兼容卡键；没绑声明的钥匙现在按程序名归属
+				return c
+			}
 			return pol.Card(agent)
 		}
 		owners, err := keyOwners(tx)
@@ -305,7 +308,7 @@ func keyOwners(tx *store.Tx) (map[string]string, error) {
 const ambiguousOwner = "\x00ambiguous"
 
 func inventory(tx *store.Tx, pv *Preview, card func(string) policy.Card) error {
-	cards, err := executors.Cards(tx)
+	cards, err := executors.LegacyCards(tx)
 	if err != nil {
 		return err
 	}
@@ -329,7 +332,7 @@ func inventory(tx *store.Tx, pv *Preview, card func(string) policy.Card) error {
 		case !k.RevokedAt.IsZero():
 			after = "revoked; stays revoked"
 		case (k.Kind == auth.Delegate || k.Kind == auth.Worker) && k.AgentID == "" && k.Harness != "":
-			after = "follows the compatibility card legacy:" + k.Harness
+			after = "follows the permission card of Agent " + k.Harness
 		case (k.Kind == auth.Delegate || k.Kind == auth.Worker) && k.AgentID == "":
 			after = "not bound to an Agent: default card (view, organize items, handle source events)"
 		case k.Kind == auth.Delegate || k.Kind == auth.Worker:

@@ -19,6 +19,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -385,4 +386,32 @@ func DoneAt(tx *store.Tx) (known map[string]time.Time, unknown map[string]bool, 
 		}
 	}
 	return known, unknown, r.Err()
+}
+
+// RemapPreferred 是执行者统一切换的一步（§16.5）：把事项上旧的 preferred_agent_id 换成 preferred_executor
+// （m 里没有对应执行者的清空），每条记一次 item.updated。只由切换调用；返回改过的事项 id。
+func RemapPreferred(tx *store.Tx, m map[string]string, actor domain.Actor, at time.Time) ([]string, error) {
+	its, err := query(tx, "WHERE json_extract(data, '$.preferred_agent_id') <> ''")
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, cur := range its {
+		next := cur
+		next.PreferredExecutor, next.PreferredAgentID = m[cur.PreferredAgentID], ""
+		next = stamped(next, at)
+		if err := save(tx, next); err != nil {
+			return nil, err
+		}
+		b, err := marshalPayload(payload{Op: "update", Before: &cur, Item: next})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemUpdated, Object: next.ID, Actor: actor,
+			Reason: "executor switch: preferred agent card → executor", Payload: b, At: at}); err != nil {
+			return nil, err
+		}
+		ids = append(ids, next.ID)
+	}
+	return ids, nil
 }

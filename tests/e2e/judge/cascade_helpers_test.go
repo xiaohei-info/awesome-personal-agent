@@ -120,7 +120,7 @@ exec %q "$@"
 		f.t.Fatalf("apa declare: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	f.webOK("POST", "/settings/declarations/"+harnessName+"/1/confirm", "", 200)
-	f.webOK("PUT", "/settings/policy", `{"default_harness":"`+harnessName+`"}`, 200)
+	f.webOK("PUT", "/settings/policy", `{"default_executor":"`+harnessName+`","main_executor":"`+harnessName+`"}`, 200)
 	for _, r := range []string{"relay", "relay-open", "sum", "ss", "auto-accept-note"} {
 		f.webOK("PATCH", "/rules/"+url.PathEscape(relayRule+r)+"/mode", `{"mode":"auto"}`, 200)
 	}

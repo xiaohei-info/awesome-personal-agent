@@ -84,7 +84,7 @@ func newKernel(t *testing.T) *kernel {
 		}
 	}
 	au := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apipacks.Routes(st, x, ld)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apipacks.Routes(st, x, ld, "")}})
 	if err != nil {
 		t.Fatal(err)
 	}

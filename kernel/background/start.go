@@ -33,7 +33,6 @@ const (
 	startPack           = "background-run"
 	startPrompt         = "run-task"
 	startPromptRemote   = "run-task-remote"
-	reportSchemaFile    = "report-schema.json"
 	refusedStartPrefix  = "不能由 APA 拉起："
 	startReasonDelegate = "delegate --start"
 )
@@ -76,11 +75,6 @@ func refused(why string) error {
 	return domain.NewError(domain.CodeConflict, refusedStartPrefix+why, "fix it in Web (Settings › Agent, the executor list), or delegate without --start and hand the work over yourself")
 }
 
-// Remote 报告执行者是否不在 APA 主机上：自报了主机且不是本机。这样的运行不发运行凭据（§13.6）。
-func (s *Service) Remote(e executors.Entry) bool {
-	return e.Host != "" && !strings.EqualFold(e.Host, s.o.Host) && !strings.EqualFold(e.Host, strings.Split(s.o.Host, ".")[0])
-}
-
 func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string) error {
 	tx := c.Tx
 	child, err := items.Get(tx, childID)
@@ -91,29 +85,21 @@ func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string
 	if err != nil {
 		return err
 	}
-	entry, ok, err := executors.Get(tx, child.Assignee)
-	if err != nil {
-		return err
-	}
-	if !ok || entry.Harness == "" {
-		return refused("执行者 " + child.Assignee + " 不是由已确认的声明登记的，APA 不知道怎么拉起它")
-	}
 	pv, pol, err := policy.Current(tx)
 	if err != nil {
 		return err
 	}
-	// 权限卡挂在声明上：同一声明下的执行者共用 legacy:<harness> 这张卡（§14.5）。
-	sel, err := executors.Resolve(tx, pol, executors.Selection{Harness: entry.Harness, Runner: "task"})
+	// 权限卡挂在执行者所属的声明上：同一声明下的执行者共用一张卡（§14.5）。
+	t, err := executors.Resolve(tx, pol, executors.Want{Executor: child.Assignee, Source: executors.SourceExplicit, Runner: executors.RunnerTask,
+		Host: s.o.Host, Delegated: true})
 	if err != nil {
 		return err
 	}
-	access := sel.Snapshot.PermissionCap
-	if why := sel.AccessReason(access); why != "" {
-		return refused(why)
+	if t.Reason != "" {
+		return refused(t.Reason)
 	}
-	decl := sel.Record.Declaration
-	l, err := decl.LaunchFor(entry, once)
-	if err != nil {
+	entry, access := t.Entry, t.Access
+	if err := t.Record.Declaration.CheckOverrides(once); err != nil {
 		return err
 	}
 	depth := chain.Next(c.ChainDepth)
@@ -131,7 +117,7 @@ func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string
 		}
 		project = &p
 	}
-	remote := s.Remote(entry)
+	remote := t.Remote
 	runID, err := newRunID()
 	if err != nil {
 		return err
@@ -157,39 +143,20 @@ func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return err
 	}
-	for name, body := range map[string][]byte{"prompt.md": []byte(prompt), reportSchemaFile: reportSchema} {
+	for name, body := range map[string][]byte{"prompt.md": []byte(prompt), executors.ReportSchemaFile: reportSchema} {
 		if err := os.WriteFile(filepath.Join(runDir, name), body, 0o600); err != nil {
 			return err
 		}
 	}
-	runContext := ""
-	if !remote && s.o.ContextDir != "" {
-		runContext = filepath.Join(s.o.ContextDir, runID)
+	built, err := t.Build(pol, executors.Spec{RunID: runID, RunDir: runDir, Prompt: prompt, ContextDir: s.o.ContextDir, Once: once, ReportSchema: true})
+	if err != nil {
+		return err
 	}
-	hl := *decl.Headless
-	vals := map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_context}": runContext, "{run_id}": runID,
-		"{report_schema}": filepath.Join(runDir, reportSchemaFile)}
-	argv := executors.Expand(hl.Command, vals, l.Args)
-	argv = append(argv, sel.Args...)
-	argv = append(argv, hl.Output...)
-	argv = append(argv, hl.Access[access]...)
-	if remote {
-		argv = append(argv, executors.Expand(hl.RemoteArgs, vals, nil)...)
-	}
-	snap := sel.Snapshot
-	if l.Model != "" {
-		snap.ConfiguredModel = l.Model
-	}
-	snap.ConfiguredThinking = l.Thinking
-	run := domain.Run{AgentSnapshot: &snap, ID: runID, Category: domain.RunBackground, Runner: "task", Launch: "headless", Target: child.ID,
-		Harness: entry.Harness, Access: access, Basis: &domain.Basis{PolicyVersion: pv}, ChainDepth: depth,
+	snap := built.Snapshot
+	run := domain.Run{AgentSnapshot: &snap, ID: runID, Category: domain.RunBackground, Runner: executors.RunnerTask, Launch: "headless", Target: child.ID,
+		Harness: t.Program(), Access: access, Basis: &domain.Basis{PolicyVersion: pv, RuleID: ruleOf(c.Basis)}, ChainDepth: depth, SessionID: built.SessionID,
 		TimeoutSec: int(pol.BackgroundRunTimeout() / time.Second)}
-	if len(hl.Session.Assign) > 0 {
-		run.SessionID = runID
-		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)
-	}
-	spec := proc.Spec{OptionEnv: sel.Env, Command: argv, Dir: dir, RunDir: runDir, Cancel: hl.CancelArgv(decl, entry, runID, run.SessionID),
-		Await: hl.AwaitArgv(decl, entry, runID, run.SessionID)}
+	spec := proc.Spec{Command: built.Command, Dir: dir, RunDir: runDir, Cancel: built.Cancel, Await: built.Await}
 	if err := executors.CheckRun(tx, run); err != nil {
 		return err
 	}
@@ -201,7 +168,7 @@ func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string
 	}
 	// 一次派出一条委派记录，不论谁发起（§6.17）：APA 拉起的这条 run 非空、harness 取声明、句柄取执行者条目。
 	d := delegation.Dispatch{Item: child.ID, Executor: entry.ID, Harness: entry.Harness, Session: run.SessionID,
-		Resumable: run.SessionID != "" && len(hl.Resume) > 0, Handle: entry.Handle, State: delegation.DispatchRunning,
+		Resumable: run.SessionID != "" && len(t.Record.Declaration.Headless.Resume) > 0, Handle: entry.Handle, State: delegation.DispatchRunning,
 		Unattended: child.Unattended, Run: runID, Origin: c.Caller.Actor.Session}
 	if !remote {
 		d.Cwd = dir
@@ -210,7 +177,7 @@ func (s *Service) startIn(c *command.Ctx, childID string, once map[string]string
 		return err
 	}
 	body, _ := json.Marshal(map[string]any{"agent": run.AgentSnapshot, "run_id": runID, "runner": run.Runner, "launch": run.Launch,
-		"harness": run.Harness, "access": access, "target": child.ID, "executor": entry.ID, "overrides": l.Effective, "remote": remote})
+		"harness": run.Harness, "access": access, "target": child.ID, "executor": entry.ID, "overrides": built.Effective, "remote": remote})
 	if _, err := c.Emit(domain.Event{Type: EvLaunched, Object: parentID, Reason: startReasonDelegate + ": background run on " + entry.ID, Payload: body}); err != nil {
 		return err
 	}
@@ -235,6 +202,14 @@ func startMaterials(tx *store.Tx, child domain.Item, parentID string, remote boo
 		}
 	}
 	return b.String()
+}
+
+// ruleOf 是发起这条委派的规则（规则 runner=task 经 delegate.create 即开工时有），续接据它复核规则模式。
+func ruleOf(b *domain.Basis) string {
+	if b == nil {
+		return ""
+	}
+	return b.RuleID
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

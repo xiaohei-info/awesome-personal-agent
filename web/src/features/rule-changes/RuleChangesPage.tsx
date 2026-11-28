@@ -6,7 +6,7 @@ import { locale, useT } from "../../app/i18n";
 import { PageHead } from "../../app/page";
 import { useSession } from "../../app/session";
 import { Val } from "../../app/values";
-import type { AgentView } from "../settings-agents/AgentPick";
+import { useNamed } from "../../app/names";
 import { strings } from "./strings";
 
 // 形状对应 GET /v1/audit/rule-changes（kernel/why.RuleChange）。能否撤回、为什么撤不回都由服务端判定，页面只显示。
@@ -58,16 +58,12 @@ export function RuleChangesPage() {
   const { api } = useSession();
   const [params] = useSearchParams();
   const [agent, setAgent] = useState(params.get("agent") ?? ""); // Agent 页「它做过什么」带 ?agent= 进来
-  const [agents, setAgents] = useState<AgentView["agents"]>([]);
+  const agents = useNamed("agent");
   const [list, setList] = useState<Change[] | null>(null);
   const [more, setMore] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [asking, setAsking] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.get<AgentView>("/agents").then((v) => setAgents(v.agents), () => setAgents([]));
-  }, [api]);
 
   const query = (before = 0) => "/audit/rule-changes?" + new URLSearchParams({ limit: String(PAGE), ...(agent ? { agent } : {}), ...(before ? { before: String(before) } : {}) });
   const load = useCallback(async () => {

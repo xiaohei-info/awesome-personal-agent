@@ -113,7 +113,7 @@ func newEnvWith(t *testing.T, adjust func(*Options)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.opt = Options{Store: st, Drafter: ts, Host: host, Harness: "local-h", Executor: "wk.cli"}
+	e.opt = Options{Store: st, Drafter: ts, Host: host, Executor: "wk.cli"}
 	if adjust != nil {
 		adjust(&e.opt)
 	}
@@ -140,7 +140,25 @@ func newEnvWith(t *testing.T, adjust func(*Options)) *env {
 		"command": []string{"sh", script, "{prompt}", "{run_dir}"}, "session": map[string]any{"extract": "$.session_id"},
 		"access": map[string]any{"read": []string{}}}})
 	e.must("rule.set_mode", map[string]string{"rule": ruleKey, "mode": rules.ModeAuto})
+	e.ruleExecutor("local-h") // 本机起草用这条规则固定的执行者
 	return e
+}
+
+// ruleExecutor 设这条规则固定用的执行者（空为不固定，按分工）。
+func (e *env) ruleExecutor(id string) {
+	e.t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "rule executor", func(p *policy.Policy) error {
+			p.RuleExecutor = map[string]string{}
+			if id != "" {
+				p.RuleExecutor[ruleKey] = id
+			}
+			return nil
+		})
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 func (e *env) must(cmd string, in any) json.RawMessage {
@@ -335,7 +353,8 @@ func TestDisallowedExecutorFailsLoudlyAndOthersContinue(t *testing.T) {
 // 2026-11-20 改写：原断言"恰有一个 needs_input 事项、没有运行"；没拉起是事件不是问题：不建事项、没有运行，
 // 每轮检测记一条带 task_refused 类别码的告警（同"起草入口失败"，下一轮仍会重试）。
 func TestUnusableHarnessHandsOffToOwnerOnce(t *testing.T) {
-	e := newEnvWith(t, func(o *Options) { o.Harness = "undeclared" })
+	e := newEnv(t)
+	e.ruleExecutor("undeclared")
 	p := e.project("alpha", "git.example/alpha", true)
 	e.tick()
 	e.tick()
@@ -380,8 +399,8 @@ func TestDrafterFailureIsReportedAndRetried(t *testing.T) {
 
 func TestHandlerValidation(t *testing.T) {
 	e := newEnv(t)
-	for name, o := range map[string]Options{"no store": {Drafter: e.opt.Drafter, Host: "h", Harness: "x", Executor: "e"},
-		"no host":    {Store: e.st, Drafter: e.opt.Drafter, Harness: "x", Executor: "e"},
+	for name, o := range map[string]Options{"no store": {Drafter: e.opt.Drafter, Host: "h", Executor: "e"},
+		"no host":    {Store: e.st, Drafter: e.opt.Drafter, Executor: "e"},
 		"no drafter": {Store: e.st, Host: "h"}} {
 		if _, err := Handler(o); err == nil {
 			t.Errorf("%s: want error", name)
@@ -410,11 +429,12 @@ func TestNoExecutorConfiguredHandsOffToOwner(t *testing.T) {
 	}
 }
 
-// 未指定 harness：本机起草用 Web 设置的默认 harness。
-func TestEmptyHarnessUsesWebDefault(t *testing.T) {
-	e := newEnvWith(t, func(o *Options) { o.Harness = "" })
+// 规则没固定执行者：本机起草用分工里的日常执行者。
+func TestNoRuleExecutorUsesDailyExecutor(t *testing.T) {
+	e := newEnv(t)
+	e.ruleExecutor("")
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "harness", func(p *policy.Policy) error { p.DefaultHarness = "local-h"; return nil })
+		_, err := policy.Update(tx, owner.Actor, "harness", func(p *policy.Policy) error { p.DefaultExecutor = "local-h"; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)

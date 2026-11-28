@@ -54,7 +54,7 @@ export async function loadConfirms(api: ApiClient, lang: "zh" | "en"): Promise<C
     api.get<{ pending: PendingRevision[] }>("/revisions/pending").then((r) => r.pending ?? []).catch(() => [] as PendingRevision[]),
   ]);
   return [
-    ...decls.map((d): Confirm => ({ kind: "launch", id: d.harness, name: d.declaration.name?.[lang] || d.harness, to: "/settings/agents/" + encodeURIComponent("legacy:" + d.harness) + "#connect" })),
+    ...decls.map((d): Confirm => ({ kind: "launch", id: d.harness, name: d.declaration.name?.[lang] || d.harness, to: "/settings/agents/" + encodeURIComponent(d.harness) + "#connect" })),
     ...revs.map((p): Confirm => ({ kind: "revision", id: p.revision.id, name: p.material.title, to: "/materials?id=" + encodeURIComponent(p.material.id) })),
   ];
 }

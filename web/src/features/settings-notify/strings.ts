@@ -73,7 +73,7 @@ const zh = {
   previewNone: "按当前数据，接下来 24 小时没有要提醒的",
   toMain: "送到你和 Agent 的对话里",
   blocked: {
-    main_not_set: "还没选和你对话的 Agent（设置 › Agent），先放在今天页",
+    main_not_set: "还没选主执行者（执行者 › 分工），先放在今天页",
     main_unavailable: "和你对话的 Agent 现在用不了，先放在今天页",
     main_cannot_wake: "和你对话的 Agent 不能在对话里接收，先放在今天页",
   } as Record<string, string>,
@@ -175,7 +175,7 @@ const en: typeof zh = {
   previewNone: "Nothing due in the next 24 hours",
   toMain: "Sent to your chat with the Agent",
   blocked: {
-    main_not_set: "No main Agent yet; kept in unread",
+    main_not_set: "No main executor yet (Executors › Roles); kept in unread",
     main_unavailable: "Main Agent unavailable; kept in unread",
     main_cannot_wake: "Main Agent cannot receive in chat; kept in unread",
   },

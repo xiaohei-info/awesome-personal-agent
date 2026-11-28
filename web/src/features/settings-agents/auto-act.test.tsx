@@ -17,8 +17,8 @@ const K4 = "background-run/event_rules/handle"; // 以 Agent 本人身份运行
 const N1 = "周期简报", N2 = "14 天没动静的事项问我一声";
 
 
-function server(opts: { denied?: boolean; auditFails?: boolean; agents?: Record<string, unknown>[] } = {}) {
-  const base = policyServer({ agents: opts.agents });
+function server(opts: { denied?: boolean; auditFails?: boolean; cards?: Record<string, unknown> } = {}) {
+  const base = policyServer({ cards: opts.cards, executors: [{ id: "hermes", kind: "external-cli", harness: "hermes", agent: "Hermes" }, { id: "daily", kind: "external-cli", harness: "agent_1", label: "日常" }] });
   base.doc.main_session_launch = { by_harness: { hermes: "wake" }, by_rule: {} };
   const rules = [
     { key: K1, pack: "brief", group: "event_rules", id: "tag-hit", mode: "observe", hash: "h1", class: "action" },
@@ -37,7 +37,11 @@ function server(opts: { denied?: boolean; auditFails?: boolean; agents?: Record<
   const audits: URLSearchParams[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
-    if (url === "/v1/settings/declarations" || url === "/v1/settings/commands") return json(200, { declarations: [] });
+    if (url === "/v1/settings/declarations") return json(200, { declarations: [] });
+    if (url === "/v1/settings/commands") return json(200, { declarations: [
+      { harness: "hermes", rev: 1, state: "active", declaration: { harness: "hermes", name: { zh: "Hermes", en: "Hermes" } } },
+      { harness: "agent_1", rev: 1, state: "active", declaration: { harness: "agent_1", base: "hermes", name: { zh: "日常", en: "Daily" } } },
+    ] });
     if (url === "/v1/settings/tokens") return json(200, { credentials: [] });
     if (url === "/v1/packs") return json(200, { packs: [{ name: "brief", description: N1 }, { name: "follow-up", description: "跟进" }] });
     if (url === "/v1/items/itm_a") return json(200, { item: { id: "itm_a", title: "续保材料确认" } });
@@ -79,12 +83,11 @@ beforeEach(() => sessionStorage.clear());
 
 describe("设置 › Agent › 权限总览与替我动手", () => {
   it("权限总览：每个 Agent 一列、十组一行，读判定的那份；只看，名字链到它自己的页面；写明只有本人能做的事", async () => {
-    mount(server({ agents: [
-      { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1, permission: { groups: { view: {}, organize: {}, source_events: {}, decide: {}, purge: { until: "2099-01-01T00:00:00Z" } }, tool: "edit" } },
-      { id: "legacy:hermes", harness: "hermes", name: "", enabled: true, rev: 0, permission: { groups: { view: {}, organize: {}, source_events: {} }, tool: "read" } },
-    ] }).impl);
+    // 每份声明一列（隔离另写的与所属程序各一列）；没设过卡的是默认卡
+    mount(server({ cards: { agent_1: { groups: { view: {}, organize: {}, source_events: {}, decide: {}, purge: { until: "2099-01-01T00:00:00Z" } }, tool: "edit" } } }).impl);
     const o = within(await screen.findByRole("region", { name: "权限总览" }));
     expect(o.getByRole("link", { name: "日常" })).toHaveAttribute("href", "/settings/agents/agent_1#permissions");
+    expect(o.getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["", "日常", "Hermes"]);
     expect(within(o.getByRole("row", { name: /替我拍板/ })).getAllByRole("cell").map((c) => c.textContent)).toEqual(["允许", "不允许"]);
     expect(within(o.getByRole("row", { name: /物理删除/ })).getAllByRole("cell")[0]).toHaveTextContent("允许到");
     expect(o.queryByRole("radio")).toBeNull();
@@ -145,6 +148,21 @@ describe("设置 › Agent › 权限总览与替我动手", () => {
     await screen.findByRole("region", { name: "替我动手" });
     await waitFor(() => expect(s.audits.length).toBe(1));
     expect(s.audits.map((a) => a.get("actor"))).toEqual(["rule:" + K1]);
+  });
+
+  it("规则用哪个执行者：收成一行「由某某处理」，展开后选执行者只写这条规则的 rule_executor；选「跟随」即删掉", async () => {
+    const s = server();
+    mount(s.impl);
+    const rule = (await screen.findByText("x", { selector: "strong" })).closest("li")!;
+    expect(rule.querySelector("select")).toBeNull(); // 没有 runner 的规则没有选择器
+    const row = document.getElementById("rule-" + K4)!;
+    await userEvent.click(await within(row).findByRole("button", { name: "改" }));
+    const pick = within(row).getByRole("combobox", { name: "用哪个执行者" });
+    expect(within(pick).getAllByRole("option").map((o) => o.textContent)).toEqual(["跟随主执行者（还没选）", "Hermes", "日常"]);
+    await userEvent.selectOptions(pick, "daily");
+    await waitFor(() => expect(s.puts.at(-1)?.body).toEqual({ rule_executor: { [K4]: "daily" }, version: 1 }));
+    await userEvent.selectOptions(within(row).getByRole("combobox", { name: "用哪个执行者" }), "");
+    await waitFor(() => expect(s.puts.at(-1)?.body).toMatchObject({ rule_executor: {} }));
   });
 
   it("以 Agent 本人身份运行的规则可覆盖在哪里做：默认跟随默认；改选只写这条规则，Agent 的设置原样带回；改回跟随即删掉覆盖", async () => {

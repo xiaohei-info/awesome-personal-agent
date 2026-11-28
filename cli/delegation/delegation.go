@@ -51,8 +51,11 @@ func idem(key string) map[string]string {
 }
 
 const (
-	executorsUsage = "usage: apa executors [--project <id>] | set <executor> [--model <m>] [--thinking <t>] [--override <key=value>]..."
-	setUsage       = "usage: apa executors set <executor> [--model <m>] [--thinking <t>] [--override <key=value>]...; " +
+	executorsUsage = "usage: apa executors [--project <id>] [--runner task|main_session|source_batch [--rule <rule>] [--schedule <executor>] [--item <executor>] [--delegated]]" +
+		" | set <executor> [--model <m>] [--thinking <t>] [--override <key=value>]... | use <executor> --as daily|main|source | use <executor> --rule <rule>"
+	useUsage = "usage: apa executors use <executor> --as daily|main|source | apa executors use <executor> --rule <rule key>; " +
+		"an empty executor (\"\") clears the choice; daily is for background runs without a chosen executor, main for runs as the owner's own Agent, source for source processing"
+	setUsage = "usage: apa executors set <executor> [--model <m>] [--thinking <t>] [--override <key=value>]...; " +
 		"changes only the keys given, an empty value clears one (the declaration's own default applies); values must be ones apa executors lists under overridable"
 )
 
@@ -60,16 +63,77 @@ func executors(c *client.Ctx, args []string) error {
 	if len(args) > 0 && args[0] == "set" {
 		return setExecutor(c, args[1:])
 	}
+	if len(args) > 0 && args[0] == "use" {
+		return useExecutor(c, args[1:])
+	}
 	fs := flags("executors")
-	project := fs.String("project", "", "")
+	q := url.Values{}
+	for _, n := range []string{"project", "runner", "rule", "schedule", "item"} {
+		fs.Func(n, "", func(v string) error { q.Set(n, v); return nil })
+	}
+	delegated := fs.Bool("delegated", false, "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return usage("invalid arguments for executors", executorsUsage)
 	}
+	if *delegated {
+		q.Set("delegated", "true")
+	}
+	if q.Get("runner") == "" && (q.Has("rule") || q.Has("schedule") || q.Has("item") || *delegated) {
+		return usage("--rule, --schedule, --item and --delegated preview a selection; give --runner too", executorsUsage)
+	}
 	path := "/executors"
-	if *project != "" {
-		path += "?project=" + url.QueryEscape(*project)
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 	return send(c, nil, "GET", path, nil)
+}
+
+// useExecutor 选执行者（§13.6）：分工的日常、主执行者改 PUT /settings/policy，来源处理改 PUT /settings/source-pipeline，
+// 规则固定的执行者改 rule_executor。先读现值再整段写回（带读到的策略版本，期间别处改过则冲突）；能不能改由内核按权限卡判定。
+func useExecutor(c *client.Ctx, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return usage("an executor id is required first", useUsage)
+	}
+	id, args := args[0], args[1:]
+	fs := flags("executors use")
+	as := fs.String("as", "", "")
+	rule := fs.String("rule", "", "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*as == "") == (*rule == "") {
+		return usage("give exactly one of --as and --rule", useUsage)
+	}
+	ctx := context.Background()
+	route := "/settings/policy"
+	if *as == "source" {
+		route = "/settings/source-pipeline"
+	}
+	var cur map[string]json.RawMessage
+	if err := c.Do(ctx, "GET", route, nil, &cur); err != nil {
+		return err
+	}
+	body := map[string]any{"version": cur["version"]}
+	switch {
+	case *rule != "":
+		m := map[string]string{}
+		_ = json.Unmarshal(cur["rule_executor"], &m)
+		if id == "" {
+			delete(m, *rule)
+		} else {
+			m[*rule] = id
+		}
+		body["rule_executor"] = m
+	case *as == "daily":
+		body["default_executor"] = id
+	case *as == "main":
+		body["main_executor"] = id
+	case *as == "source":
+		sp := map[string]any{}
+		_ = json.Unmarshal(cur["source_pipeline"], &sp)
+		sp["executor"] = id
+		body["source_pipeline"] = sp
+	default:
+		return usage("--as takes daily, main or source", useUsage)
+	}
+	return send(c, nil, "PUT", route, body)
 }
 
 // setExecutor 改执行者的可覆盖参数默认值（PUT /executors/{id}/overrides 整份替换）：先读现值，只改命令行给出的键。

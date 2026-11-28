@@ -3,8 +3,8 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  mainRole:"主 Agent", taskRole:"日常 Agent", wake:"在对话里接着做", headless:"单独在后台做", cap:(v:string)=>`权限上限 ${v}`, configuredModel:(v:string)=>`配置模型 ${v}`, configuredThinking:(v:string)=>`思考档 ${v}`,
-  sources:{item:"事项选择",schedule:"安排选择",rule:"规则选择",main:"跟随主 Agent",default:"跟随日常 Agent",resume:"续接原卡"},
+  mainRole:"主执行者", taskRole:"后台任务", wake:"在对话里接着做", headless:"单独在后台做", cap:(v:string)=>`权限上限 ${v}`, configuredModel:(v:string)=>`配置模型 ${v}`, configuredThinking:(v:string)=>`思考档 ${v}`,
+  sources:{explicit:"这次指定",item:"事项选择",schedule:"安排选择",rule:"规则选择",main:"跟随主执行者",default:"跟随日常执行者",pipeline:"来源处理选择",resume:"续接原执行者"},
   title: "运行记录",
   lede: "APA 每次启动外部程序的记录。",
   log: "运行记录",
@@ -36,7 +36,7 @@ const zh = {
 const en: typeof zh = {
   ...common.en,
   mainRole:"Main role", taskRole:"Task", wake:"Existing conversation", headless:"Independent session", cap:v=>`Permission cap ${v}`, configuredModel:v=>`Configured model ${v}`, configuredThinking:v=>`Thinking ${v}`,
-  sources:{item:"Item",schedule:"Schedule",rule:"Rule",main:"Main role default",default:"Daily default",resume:"Original Agent"},
+  sources:{explicit:"Chosen for this run",item:"Item",schedule:"Schedule",rule:"Rule",main:"Main executor",default:"Daily executor",pipeline:"Source handling",resume:"Original executor"},
   title: "Run log",
   lede: "Every time APA launched an outside program.",
   log: "Run log",

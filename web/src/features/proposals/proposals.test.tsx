@@ -326,7 +326,7 @@ describe("接受并交给 Agent", () => {
     const impl = (async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? "GET";
       if (url === "/v1/rules") return json(200, { rules: [{ key: RULE, mode }] });
-      if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: ready ? { agent_id: "agt_1", agent_name: "小黑" } : {}, reason: ready ? "" : "还没选主 Agent" });
+      if (url.startsWith("/v1/executors?")) return json(200, { executors: [{ id: "agt_1", kind: "external-cli", harness: "hx", label: "小黑" }], selected: ready ? { executor: "agt_1", source: "main" } : { executor: "", source: "main", reason: "还没选主执行者" } });
       if (method !== "GET") order.push(method + " " + url + (init.body ? " " + init.body : "") + ((init.headers as Record<string, string>)?.["If-Match"] ? " If-Match:" + (init.headers as Record<string, string>)["If-Match"] : ""));
       if (method === "PATCH") return json(200, { id: "a", version: 5 });
       return s.impl(url, init);

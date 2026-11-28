@@ -88,7 +88,7 @@ func TestScheduleDaysDefaultsAndBounds(t *testing.T) {
 func TestBriefMaterialsCarryLedgerSectionsAndWindow(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		if _, err := tx.Exec(`INSERT INTO sources_registry_source
 			(id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats)
@@ -200,7 +200,7 @@ func materialsOf(e *env, run string) map[string]string {
 func TestBriefWindowSurvivesAgentWriteBackAndSeedsNextBrief(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "noOutcome")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	run := func(id string) {
 		if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("write-brief", id)); err != nil {
 			t.Fatal(err)
@@ -241,7 +241,7 @@ func TestBriefWindowSurvivesAgentWriteBackAndSeedsNextBrief(t *testing.T) {
 func TestActivityByBusinessDateAndProposalsOrder(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	var it struct{ ID string }
 	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": "有进展的事", "phase": "open"}).Value, &it)
 	yesterday, today := items.Today(t0.Add(-24*time.Hour)), items.Today(t0)

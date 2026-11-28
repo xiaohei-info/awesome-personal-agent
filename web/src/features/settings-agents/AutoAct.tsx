@@ -8,16 +8,16 @@ import type { Doc, Save } from "../../app/policy-cards";
 import { useRaw } from "../../app/raw";
 import { entryOf } from "../../app/values";
 import { RULE_MODE } from "../../app/ids";
-import { AgentPick } from "./AgentPick";
+import { ExecutorPick, type Runner } from "../executors/ExecutorPick";
 import { autoAct as strings } from "./strings";
 
-// 设置 › Agent ›「替我动手」（界面设计 §6.1）：动作类与其他规则，只切模式、选 Agent，不编辑规则内容。
+// 设置 › Agent ›「替我动手」（界面设计 §6.1）：动作类与其他规则，只切模式、选执行者，不编辑规则内容。
 // 提醒类规则（class: reminder）的模式由提醒与推送 › 自动规则的单选写（不提醒即关），不在这里重复。
-// 模式、用哪个 Agent、在哪里做都是即改即存，旁边写「已保存」；用哪个 Agent 默认收起成一行。
+// 模式、用哪个执行者（rule_executor）、在哪里做都是即改即存，旁边写「已保存」；用哪个执行者默认收起成一行。
 // 形状对应 GET /v1/rules（含 class）、PATCH /v1/rules/{id}/mode（附录 B.2）、GET /v1/packs 与 GET /v1/audit/events（§14.8）。
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；被拒绝时模式保持原值。
-// 以 Agent 本人身份运行的规则（runner=main_session）另可覆盖 Agent 在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
-// 按 Agent 的设置原样带回；没覆盖就沿用 Agent 设置（§13.6）。策略文档与本页其他卡片共用（pol、save），版本号不各记一份。
+// 以你的身份运行的规则（runner=main_session）另可覆盖在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
+// by_harness 原样带回；没覆盖就沿用执行者所属 Agent 的设置（§13.6）。策略文档与本页其他卡片共用（pol、save），版本号不各记一份。
 
 interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action"; runner?: string }
 interface Launch { by_harness?: Record<string, string>; by_rule?: Record<string, string> }
@@ -99,7 +99,7 @@ export function AutoAct({ pol, save }: { pol: Doc; save: Save }) {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [saved, setSaved] = useState<string | null>(null); // 即改即存：刚存好的那条规则旁短暂写「已保存」
-  const ruleAgents = (pol.rule_agent ?? {}) as Record<string, string>;
+  const ruleExecutors = (pol.rule_executor ?? {}) as Record<string, string>;
   const launch = pol.main_session_launch as Launch | undefined;
 
   const load = useCallback(async () => {
@@ -123,17 +123,17 @@ export function AutoAct({ pol, save }: { pol: Doc; save: Save }) {
       setError(e); // 选择框的值仍是服务端未改动的原值
     }
   }
-  function setAgent(key: string, id: string) {
-    const next = { ...ruleAgents };
+  function setExecutor(key: string, id: string) {
+    const next = { ...ruleExecutors };
     if (id) next[key] = id;
     else delete next[key];
-    return write(key, { rule_agent: next, version: pol.version });
+    return write(key, { rule_executor: next, version: pol.version });
   }
   function setRuleLaunch(r: Rule, v: string) {
     const by_rule = { ...(launch?.by_rule ?? {}) };
     if (v) by_rule[r.key] = v;
     else delete by_rule[r.key];
-    return write(r.key, { main_session_launch: { ...launch, by_harness: launch?.by_harness ?? {}, by_rule } });
+    return write(r.key, { main_session_launch: { by_harness: launch?.by_harness ?? {}, by_rule } });
   }
 
   async function setMode(r: Rule, mode: string) {
@@ -173,7 +173,7 @@ export function AutoAct({ pol, save }: { pol: Doc; save: Save }) {
                       {raw && <code className="raw-id">{r.key}</code>}
                     </p>
                     {r.mode === "observe" && <Trial rule={r} name={name} />}
-                    {r.runner && <AgentPick collapsed inheritRule={false} main={r.runner === "main_session"} value={ruleAgents[r.key] ?? ""} onChange={id => void setAgent(r.key,id)} />}
+                    {r.runner && <ExecutorPick collapsed runner={r.runner as Runner} value={ruleExecutors[r.key] ?? ""} onChange={(id) => void setExecutor(r.key, id)} />}
                     {r.runner === "main_session" && <LaunchPick name={name} value={launch?.by_rule?.[r.key] ?? ""} onChange={(v) => void setRuleLaunch(r, v)} />}
                   </div>
                   <div>

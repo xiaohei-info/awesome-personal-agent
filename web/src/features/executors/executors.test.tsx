@@ -7,17 +7,19 @@ import { App } from "../../app/App";
 import { feature } from "./index";
 
 // 测试边界替身：按 api/delegation（GET /executors、DELETE /executors/{id}、GET /dispatches）、api/items（GET /items）、
-// api/why（GET /audit/events）的契约应答。
+// api/why（GET /audit/events）、api/settings/policy（GET/PUT /settings/policy 的分工两段）的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 function server(evidence: object = { pr: "https://x/pull/42" }) {
   let execs = [
-    { id: "hermes.paseo.mbp.quick", kind: "remote-agent", host: "mbp", harness: "hermes", label: "Paseo · quick @ mbp" },
+    { id: "hermes.paseo.mbp.quick", kind: "remote-agent", host: "mbp", harness: "hermes", label: "Paseo · quick @ mbp", agent: "Hermes", remote: true },
     { id: "hermes.delegate_task.apa", kind: "native-subagent", host: "apa", harness: "hermes", label: "Hermes 子 agent @ apa" },
     { id: "auto-runner", kind: "external-cli", harness: "paseo", label: "自动化", startable: true, overrides: {} as Record<string, string>,
       overridable: { model: { label: { zh: "模型", en: "Model" }, choices: ["provider/model-a", "provider/model-b"] } } },
   ];
   const puts: unknown[] = [];
+  let policy = { version: 3, default_executor: "auto-runner", main_executor: "" };
+  const policyPuts: unknown[] = [];
   const items = [
     { id: "c1", phase: "open", title: "修登录超时", assignee: "hermes.paseo.mbp.quick" },
     { id: "c2", phase: "done", title: "写周报", assignee: "hermes.paseo.mbp.quick" },
@@ -34,6 +36,14 @@ function server(evidence: object = { pr: "https://x/pull/42" }) {
     calls.push({ method, path: url });
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/executors" && method === "GET") return json(200, { executors: execs });
+    if (url === "/v1/settings/policy" && method === "GET") return json(200, policy);
+    if (url === "/v1/settings/policy" && method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      policyPuts.push(body);
+      if (body.version !== policy.version) return json(409, { code: "conflict", why: "settings changed", next: "reload" });
+      policy = { ...policy, ...body, version: policy.version + 1 };
+      return json(200, policy);
+    }
     if (url === "/v1/items?kind=delegation") return json(200, { items });
     if (url === "/v1/dispatches?resumable=true&limit=200") return json(200, { dispatches });
     if (url.startsWith("/v1/audit/events?type=delegation.reported&after=")) return json(200, { events });
@@ -51,7 +61,7 @@ function server(evidence: object = { pr: "https://x/pull/42" }) {
     }
     return json(404, { code: "not_found", why: "no such route", next: "" });
   }) as unknown as typeof fetch;
-  return { impl, calls, puts };
+  return { impl, calls, puts, policyPuts };
 }
 
 function mount(fetchImpl: typeof fetch) {
@@ -75,9 +85,26 @@ describe("谁在替你干活（§6.17）", () => {
     expect(within(paseo).getByText("agt_1")).toBeInTheDocument();
     expect(within(paseo).queryByText("agt_0")).not.toBeInTheDocument(); // 失效的会话不列
     expect(within(paseo).queryByRole("button", { name: "移除" })).not.toBeInTheDocument(); // 手上有事不能移除
+    expect(paseo).toHaveTextContent("属于 Hermes · 不在本机（在 mbp 上）");
     const lawyer = screen.getByRole("article", { name: "lawyer" });
     expect(within(lawyer).getByText("问律师")).toBeInTheDocument();
     expect(within(lawyer).getByText(/未登记/)).toBeInTheDocument();
+  });
+
+  it("分工：日常执行者、主执行者选了就存（带版本号，只写这一段）；卡上标出谁是日常；不在本机的不能担任", async () => {
+    const s = server();
+    mount(s.impl);
+    const roles = within(await screen.findByRole("region", { name: "分工" }));
+    const daily = roles.getByRole("combobox", { name: "日常执行者" });
+    expect(daily).toHaveValue("auto-runner");
+    expect(within(await screen.findByRole("article", { name: "自动化" })).getByText("日常")).toBeInTheDocument();
+    const main = roles.getByRole("combobox", { name: "主执行者" });
+    expect(main).toHaveValue("");
+    expect(within(main).getByRole("option", { name: /Paseo · quick @ mbp/ })).toBeDisabled();
+    await userEvent.selectOptions(main, "hermes.delegate_task.apa");
+    expect(await roles.findByText("已保存")).toBeInTheDocument();
+    expect(s.policyPuts).toEqual([{ main_executor: "hermes.delegate_task.apa", version: 3 }]);
+    expect(within(screen.getByRole("article", { name: "Hermes 子 agent @ apa" })).getByText("主")).toBeInTheDocument();
   });
 
   it("APA 能直接派活的执行者标出来，本人可给它定默认模型 → PUT /executors/{id}/overrides，只能选声明列出的值", async () => {

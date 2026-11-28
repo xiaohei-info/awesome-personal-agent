@@ -84,7 +84,7 @@ func (e *Env) StubRun(mode string) (item, runDir string, env map[string]string) 
 	if mode == "receipt" {
 		harness = receiptHN
 	}
-	e.webOK("PUT", "/v1/settings/policy", `{"default_harness":"`+harness+`"}`, 200)
+	e.webOK("PUT", "/v1/settings/policy", `{"default_executor":"`+harness+`","main_executor":"`+harness+`"}`, 200)
 	seen := map[string]bool{}
 	old, _ := filepath.Glob(filepath.Join(e.Home, "runs", "*", "stub-harness-env.json"))
 	for _, f := range old {

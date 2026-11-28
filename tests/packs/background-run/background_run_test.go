@@ -115,18 +115,18 @@ func newEnv(t *testing.T, taskExecutor string) *env {
 		t.Fatal(err)
 	}
 	e.eng = eng
-	// harness：Web 默认 harness，权限上限 edit。
-	e.must(owner, "executor.put", map[string]any{"id": "work-host.cli", "kind": "external-cli"})
+	// 声明 hx 下两个执行者：日常与主执行者 hx，runner=task 规则用的 work-host.cli；权限上限 edit。
 	sh := filepath.Join(t.TempDir(), "h.sh")
 	if err := os.WriteFile(sh, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	e.must(owner, "executor.register", map[string]any{"harness": "hx", "headless": map[string]any{
+	e.must(owner, "executor.register", map[string]any{"harness": "hx", "executors": []map[string]any{
+		{"id": "hx", "kind": "external-cli"}, {"id": "work-host.cli", "kind": "external-cli"}}, "headless": map[string]any{
 		"command": []string{"sh", sh, "{prompt}", "{run_dir}"}, "session": map[string]any{"extract": "$.session_id"},
 		"access": map[string][]string{"read": {}, "edit": {}}}})
 	if err := st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "t", func(p *policy.Policy) error {
-			p.AgentCards["legacy:hx"], p.DefaultHarness = policy.DefaultCard().WithTool(policy.PermEdit), "hx"
+			p.AgentCards["hx"], p.DefaultExecutor, p.MainExecutor = policy.DefaultCard().WithTool(policy.PermEdit), "hx", "hx"
 			return nil
 		})
 		return err
@@ -288,7 +288,7 @@ func TestPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("rule: %+v", r)
 	}
 	if _, set := r.Do[0]["harness"]; set {
-		t.Fatal("sample rule pins a harness; it must use the Web default")
+		t.Fatal("sample rule pins a harness; it must use the chosen executor")
 	}
 	h := p.Prompts["handle-item"]
 	if h.Meta.RunAs != "main_session" || h.Meta.EscalateTo != "" || !strings.Contains(h.Body, "{item_id}") ||

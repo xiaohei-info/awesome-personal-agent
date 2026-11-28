@@ -17,14 +17,14 @@ function server(sp: Record<string, unknown> = {}) {
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url.startsWith("/v1/agents")) {
+    if (url === "/v1/executors?runner=source_batch") {
       return json(200, {
-        agents: [
-          { id: "agent_main", harness: "hermes", name: "小黑", enabled: true, rev: 1 },
-          { id: "agent_ops", harness: "hermes", name: "值班助手", enabled: true, rev: 1 },
+        executors: [
+          { id: "agent_main", kind: "external-cli", harness: "hermes", label: "小黑", agent: "Hermes" },
+          { id: "ops", kind: "external-cli", harness: "hermes", label: "值班助手", agent: "Hermes" },
+          { id: "far", kind: "remote-agent", host: "mbp", harness: "paseo", label: "笔记本上的助手", remote: true, reason: "不在 APA 主机上" },
         ],
-        selected: { agent_id: "agent_main", agent_name: "小黑", selection_source: "main" },
-        reason: "",
+        selected: { executor: "agent_main", source: "default" },
       });
     }
     if (url === "/v1/packs/inbound-triage/prompts/triage-screen") return json(200, { body: "题面", criteria: "内置判断标准\n" });
@@ -98,6 +98,20 @@ describe("设置 › 来源处理", () => {
     await waitFor(() =>
       expect(s.puts.at(-1)?.body.source_pipeline.judge_prompt).toBe("内置判断标准  报销和合同都算紧急"),
     );
+  });
+
+  it("谁来处理：选执行者（不指定时跟随日常执行者），不在本机、现在用不了的列出但置灰；保存写 source_pipeline.executor", async () => {
+    const s = server({ batch_size: 10 });
+    open(s.impl);
+    const card = await screen.findByRole("region", { name: "谁来处理" });
+    const pick = await within(card).findByRole("combobox", { name: "处理的执行者" });
+    const options = within(pick).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["跟随日常执行者（现在是 小黑）", "小黑", "值班助手", "笔记本上的助手 · 在 mbp 上 · 现在用不了"]);
+    expect(options[3]).toBeDisabled();
+    await userEvent.selectOptions(pick, "ops");
+    expect(within(card).getByRole("link", { name: "去看这个执行者" })).toHaveAttribute("href", "/executors#executor-ops");
+    await userEvent.click(within(card).getByRole("button", { name: /^保存/ }));
+    await waitFor(() => expect(s.puts.at(-1)?.body).toEqual({ source_pipeline: { batch_size: 10, executor: "ops" } }));
   });
 
   it("本人身份单独保存，不混进判断标准", async () => {

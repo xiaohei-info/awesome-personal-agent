@@ -96,7 +96,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := guideline.Handler(guideline.Options{Store: st, Drafter: ts, Host: host, Harness: "local-h", Executor: "wk.cli"})
+	h, err := guideline.Handler(guideline.Options{Store: st, Drafter: ts, Host: host, Executor: "wk.cli"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +117,12 @@ func newEnv(t *testing.T) *env {
 	e.must("executor.register", map[string]any{"harness": "local-h", "headless": map[string]any{
 		"command": []string{"sh", script, "{prompt}", "{run_dir}"}, "session": map[string]any{"extract": "$.session_id"},
 		"access": map[string]any{"read": []string{}}}})
+	if err := st.Update(bg, func(tx *store.Tx) error { // 本机起草用分工里的日常执行者（与声明同名，§13.6）
+		_, err := policy.Update(tx, owner.Actor, "daily executor", func(p *policy.Policy) error { p.DefaultExecutor = "local-h"; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return e
 }
 

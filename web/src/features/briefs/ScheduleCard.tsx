@@ -7,7 +7,7 @@ import { useNamed } from "../../app/names";
 import { useLabel } from "../../app/values";
 import { useRaw } from "../../app/raw";
 import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
-import { AgentPick } from "../settings-agents/AgentPick";
+import { ExecutorPick } from "../executors/ExecutorPick";
 import { InstanceReminders } from "../settings-notify/Reminder";
 import { strings } from "./strings";
 import type { Instance } from "./Routine";
@@ -33,7 +33,7 @@ export function ScheduleCard({ i, fallback, agentReady, last, open, onChange }: 
   const label = useLabel();
   const allProjects = useNamed("project");
   const parsed = i.params.schedule ? parseCron(i.params.schedule) : null;
-  const [agent,setAgent] = useState(i.params.agent_id ?? "");
+  const [agent, setAgent] = useState(i.params.executor ?? "");
   const [days, setDays] = useState<Days>(parsed?.days ?? "1-5");
   const [time, setTime] = useState(parsed?.time ?? "08:30");
   const [raw, setRaw] = useState(parsed ? "" : i.params.schedule ?? "");
@@ -46,16 +46,16 @@ export function ScheduleCard({ i, fallback, agentReady, last, open, onChange }: 
   // 没改哪几天与几点就原样带回；改了沿用原来的时区（开箱默认不带时区，即 APA 主机时区）。
   const same = parsed && days === parsed.days && time === parsed.time;
   const schedule = raw.trim() || (same ? i.params.schedule! : time ? toCron(days, time, parsed ? parsed.zone : browserZone()) : "");
-  const dirty = agent !== (i.params.agent_id ?? "") || schedule !== (i.params.schedule ?? "") || [...projects].sort().join() !== [...(i.params.projects ?? [])].sort().join() ||
+  const dirty = agent !== (i.params.executor ?? "") || schedule !== (i.params.schedule ?? "") || [...projects].sort().join() !== [...(i.params.projects ?? [])].sort().join() ||
     (custom ? text.trim() : "") !== (i.params.instruction ?? "").trim();
 
   async function save(e: FormEvent) {
     e.preventDefault();
     if (!schedule) return setError(new Error(t.needSchedule));
-    const { projects: _p, instruction: _i, agent_id: _agent, ...rest } = i.params;
+    const { projects: _p, instruction: _i, executor: _executor, ...rest } = i.params;
     try {
       onChange(await api.patch<Instance>(`/instances/${encodeURIComponent(i.id)}`, {
-        params: { ...rest, schedule, ...(agent ? {agent_id:agent} : {}), ...(projects.length ? { projects } : {}), ...(custom ? { instruction: text.trim() } : {}) },
+        params: { ...rest, schedule, ...(agent ? { executor: agent } : {}), ...(projects.length ? { projects } : {}), ...(custom ? { instruction: text.trim() } : {}) },
       }));
       setNote(t.saved);
       setError(null);
@@ -85,11 +85,11 @@ export function ScheduleCard({ i, fallback, agentReady, last, open, onChange }: 
     <details className="panel" aria-label={name} open={open || undefined}>
       <summary>
         <strong>{name}</strong> <When schedule={i.params.schedule} /> · {i.enabled ? t.on : t.off}
-        {!(i.agent_ready ?? agentReady) && i.enabled && <> · <span className="sub">{i.agent_reason || t.waitingAgent}</span> <Link to="/settings/agents">{t.setHost}</Link></>}
+        {!(i.agent_ready ?? agentReady) && i.enabled && <> · <span className="sub">{i.agent_reason || t.waitingAgent}</span> <Link to="/executors#roles">{t.setHost}</Link></>}
       </summary>
       {error != null && <ErrorNote error={error} />}
       <form aria-label={t.scheduleOf(name)} onSubmit={(e) => void save(e)}>
-        <AgentPick value={agent} onChange={setAgent} rule={`${i.pack}/clock_rules/scheduled-${i.pack}`} />
+        <ExecutorPick runner="task" value={agent} onChange={setAgent} rule={`${i.pack}/clock_rules/scheduled-${i.pack}`} />
         <fieldset disabled={!!raw.trim()}>
           <legend>{t.schedule}</legend>
           <select aria-label={t.whichDays} value={days} onChange={(e) => setDays(e.target.value as Days)}>

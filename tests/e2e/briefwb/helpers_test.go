@@ -169,7 +169,7 @@ func (f *fx) declareBriefHarness() {
 		f.t.Fatalf("apa declare: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	f.web("POST", "/v1/settings/declarations/"+briefHarness+"/1/confirm", "", 200)
-	f.web("PUT", "/v1/settings/policy", `{"default_harness":"`+briefHarness+`"}`, 200)
+	f.web("PUT", "/v1/settings/policy", `{"default_executor":"`+briefHarness+`","main_executor":"`+briefHarness+`"}`, 200)
 }
 
 func (f *fx) setMode(m string) {

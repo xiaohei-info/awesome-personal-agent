@@ -7,7 +7,7 @@ import { PERM } from "../../app/ids";
 import { Pick, useLabel } from "../../app/values";
 import { Go } from "../../app/page";
 import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
-import { AgentPick, type AgentView } from "../settings-agents/AgentPick";
+import { ExecutorPick, executorName, type ExecutorView } from "../executors/ExecutorPick";
 import { strings } from "./strings";
 
 // 例行任务实例（routine 包，§13.5）：POST /v1/instances {pack:"routine", project?, params}；修改走 PATCH /v1/instances/{id} {project, params}
@@ -19,20 +19,26 @@ export const OUTPUTS = ["item", "item_and_material"] as const;
 type Mode = (typeof MODES)[number];
 type Output = (typeof OUTPUTS)[number];
 
-export interface Instance { id: string; pack: string; agent_ready?: boolean; agent_reason?: string; project?: string; params: { agent_id?: string; schedule?: string; projects?: string[]; mode?: string; title?: string; instruction?: string; access?: string; output?: string }; enabled: boolean }
+export interface Instance { id: string; pack: string; agent_ready?: boolean; agent_reason?: string; project?: string; params: { executor?: string; schedule?: string; projects?: string[]; mode?: string; title?: string; instruction?: string; access?: string; output?: string }; enabled: boolean }
 
-function useHostCap(agent: string): { host: string; id: string; cap: string } | null {
+const ROUTINE_RULE = "routine/clock_rules/scheduled-routine";
+
+/** 到点会用哪个执行者（与拉起同一口径的预览），以及它所属 Agent 权限卡上的工具档（GET /agents/{agent}/limits）。id 是所属 Agent。 */
+function useHostCap(executor: string): { host: string; id: string; cap: string } | null {
   const { api } = useSession();
   const [v, setV] = useState<{ host: string; id: string; cap: string } | null>(null);
   useEffect(() => {
     let active = true;
     setV(null);
-    api.get<AgentView>("/agents?rule=routine%2Fclock_rules%2Fscheduled-routine&schedule=" + encodeURIComponent(agent)).then(
-      view => { if (active) setV({ host: view.selected.agent_name ?? "", id: view.selected.agent_id ?? "", cap: view.selected.permission_cap ?? "read" }); },
-      () => {},
-    );
+    const q = new URLSearchParams({ runner: "task", rule: ROUTINE_RULE, schedule: executor });
+    api.get<ExecutorView>("/executors?" + q).then(async (view) => {
+      const e = view.executors.find((x) => x.id === view.selected?.executor);
+      const id = e?.harness ?? "";
+      const cap = id ? await api.get<{ card: { tool: string } }>("/agents/" + encodeURIComponent(id) + "/limits").then((l) => l.card.tool, () => "read") : "read";
+      if (active) setV({ host: e ? executorName(e) : view.selected?.executor ?? "", id, cap });
+    }, () => {});
     return () => { active = false; };
-  }, [api, agent]);
+  }, [api, executor]);
   return v;
 }
 
@@ -41,7 +47,7 @@ export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDon
   const t = useT(strings);
   const label = useLabel();
   const { api } = useSession();
-  const [agent,setAgent] = useState(edit?.params.agent_id ?? "");
+  const [agent, setAgent] = useState(edit?.params.executor ?? "");
   const host = useHostCap(agent);
   const p = edit?.params ?? {};
   const cron = p.schedule ? parseCron(p.schedule) : null;
@@ -68,7 +74,7 @@ export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDon
         schedule: edit?.params.schedule && !timed ? edit.params.schedule : toCron(days, time, cron?.zone ?? browserZone()),
         mode,
         ...(title.trim() ? { title: title.trim() } : {}),
-        ...(run && agent ? {agent_id: agent} : {}),
+        ...(run && agent ? { executor: agent } : {}),
         ...(run ? { instruction: instruction.trim(), access, output } : {}),
       };
       if (edit) return onDone(await api.patch<Instance>(`/instances/${encodeURIComponent(edit.id)}`, { project, params }));
@@ -104,11 +110,11 @@ export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDon
       <label>{t.routineProject}<EntityPick kind="project" value={project} onChange={setProject} empty={t.noProject} /></label>
       {run && (
         <>
-          <AgentPick value={agent} onChange={setAgent} rule="routine/clock_rules/scheduled-routine" />
+          <ExecutorPick runner="task" value={agent} onChange={setAgent} rule={ROUTINE_RULE} />
           <label>{t.access}<Pick k="perm" value={access} onChange={setAccess} ids={[...PERM]} /></label>
-          {/* 权限上限只在该 Agent 页的后台权限里改（界面设计 §4）；这里只读，超出时说清楚并给去改的落点。 */}
+          {/* 权限上限只在执行者所属 Agent 的权限卡里改（界面设计 §4）；这里只读，超出时说清楚并给去改的落点。 */}
           {host?.host && <p className="sub">{t.capOf(host.host, label("perm", host.cap))}</p>}
-          {host && !host.host && <p className="sub">{t.noHost} <Go to="/settings/agents#roles">{t.setHost}</Go></p>}
+          {host && !host.host && <p className="sub">{t.noHost} <Go to="/executors#roles">{t.setHost}</Go></p>}
           {over && host && <p className="sub">{t.overCapOf(host.host, label("perm", host.cap))} <Go to={"/settings/agents/" + encodeURIComponent(host.id)}>{t.raiseCap}</Go></p>}
           <label>{t.output}
             <select value={output} onChange={(e) => setOutput(e.target.value as Output)}>

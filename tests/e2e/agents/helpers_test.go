@@ -105,7 +105,7 @@ func setup(t *testing.T, cfg string) *fx {
 	e.CreateProjects()
 	e.StartModelStub()
 	f.declareHarness()
-	f.webOK("PUT", "/settings/policy", `{"default_harness":"`+harness+`"}`, 200)
+	f.webOK("PUT", "/settings/policy", `{"default_executor":"`+harness+`","main_executor":"`+harness+`"}`, 200)
 	return f
 }
 

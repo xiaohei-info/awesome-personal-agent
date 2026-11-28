@@ -213,7 +213,7 @@ func (f *fx) buildLedger() fixtureIDs {
 	work, open := f.Projects["acc-work"], f.Projects["acc-open"]
 	f.WireEndpoints() // 分类端点 CLS_STUB 与生成端点 MODEL_STUB，初筛、起草与 web_only 初筛都走它们
 	f.writePack("acc-wb", accPack)
-	f.web("PUT", "/v1/settings/policy", `{"default_harness":"`+briefHarness+`"}`, 200)
+	f.web("PUT", "/v1/settings/policy", `{"default_executor":"`+briefHarness+`","main_executor":"`+briefHarness+`"}`, 200)
 
 	// 15 天前就在的两件事：一件没有任何进展（久未推进），一件在等外部回复（跟进提醒到期）。
 	ids.staleItem = f.addItem("--title", "久未推进的事项", "--phase", "open", "--project", work)

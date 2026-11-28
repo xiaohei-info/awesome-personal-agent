@@ -45,12 +45,12 @@ func TestDigestConsumedOnlyAfterSuccessfulBrief(t *testing.T) {
 	e.digest(ids...)
 
 	e.harness("hx", "exit1") // 运行失败
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	if id, m := e.runCall("brief"); !strings.Contains(m["digest"], "资讯一") || e.item(id).Phase != domain.PhaseOpen || e.pendingDigest() != 1 {
 		t.Fatalf("a failed run must not consume digest: %s pending=%d", e.item(id).Phase, e.pendingDigest())
 	}
 	e.harness("hs", "summary") // 报 done 但没写声明的字段：写回不全
-	e.setDefaultHarness("hs")
+	e.setDailyExecutor("hs")
 	if id, _ := e.runCall("write-brief"); e.item(id).Phase != domain.PhaseNeedsInput || e.pendingDigest() != 1 {
 		t.Fatalf("an incomplete write-back must not consume digest: %s pending=%d", e.item(id).Phase, e.pendingDigest())
 	}
@@ -68,7 +68,7 @@ func TestReviewNeitherQueriesNorConsumesDigest(t *testing.T) {
 	ids := e.rawSource("src_news", "full", domain.SourceEvent{ID: "n1", Type: "news", Subject: "资讯一", OccurredAt: t0})
 	e.digest(ids...)
 	e.harness("hx", "noOutcome")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	id := e.openItemWithOrigin("instance:ins_1")
 	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("write-review", id)); err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestProposalFollowedByLaterEventsOfSameObject(t *testing.T) {
 			"proposal": map[string]any{"recommend": "accept", "reason": "r", "sources": []string{src}}})
 	}
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	_, m := e.runCall("write-brief")
 	var pr struct {
 		Proposals []struct {
@@ -195,7 +195,7 @@ func TestContextCoverageScopeAndOpenItems(t *testing.T) {
 	}
 
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	id := e.openItemWithOrigin("instance:ins_1")
 	c := e.call("write-review", id)
 	c.Instance.Params = json.RawMessage(`{"schedule":"CRON_TZ=Asia/Shanghai 0 8 * * *","projects":["` + p1.ID + `"]}`)
@@ -266,9 +266,9 @@ func TestOnlyAValidBriefConsumesDigestAndSeedsNext(t *testing.T) {
 	e.harness("hx", "noOutcome")
 	e.harness("hf", "exit1")
 	run := func(at time.Time, act func(agent runidentity.Identity, id string)) (string, map[string]string) {
-		e.setDefaultHarness("hx")
+		e.setDailyExecutor("hx")
 		if act == nil {
-			e.setDefaultHarness("hf")
+			e.setDailyExecutor("hf")
 		}
 		e.svc.o.Now = func() time.Time { return at }
 		id := e.openItemWithOrigin("instance:ins_1")
@@ -331,7 +331,7 @@ func TestDigestEntriesCarryOccurredAtInReportZone(t *testing.T) {
 	at := time.Date(2026, 2, 28, 13, 14, 43, 0, time.UTC)
 	e.digest(e.rawSource("src_bank", "meta", domain.SourceEvent{ID: "b1", Type: "notice", Subject: "入账", OccurredAt: at})...)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	id := e.openItemWithOrigin("instance:ins_1")
 	c := e.call("write-brief", id)
 	c.Instance.Params = json.RawMessage(`{"schedule":"CRON_TZ=America/New_York 0 8 * * *"}`)

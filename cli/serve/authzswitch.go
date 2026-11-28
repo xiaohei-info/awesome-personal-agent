@@ -72,13 +72,21 @@ func PlanCards(tx *store.Tx) (map[string]policy.Card, error) {
 	if err != nil {
 		return nil, err
 	}
-	agents, err := executors.Cards(tx)
+	// 权限卡切换早于执行者统一（§16.5）：那时的 Agent 是旧卡与每份生效声明的兼容卡 legacy:<程序>，执行者统一切换再把后者改键。
+	agents, err := executors.LegacyCards(tx)
 	if err != nil {
 		return nil, err
 	}
 	var ids []string
 	for _, c := range agents {
 		ids = append(ids, c.ID)
+	}
+	recs, err := executors.Records(tx, executors.StateActive)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range recs {
+		ids = append(ids, "legacy:"+r.Harness)
 	}
 	creds, err := auth.New(nil).List(tx)
 	if err != nil {
@@ -104,18 +112,7 @@ func PlanCards(tx *store.Tx) (map[string]policy.Card, error) {
 }
 
 // cardsSwitched 报告账本是否已切换到权限卡：有一条载荷 model 为 cards 的 authz.switched。
-func cardsSwitched(tx *store.Tx) (bool, error) {
-	es, err := eventlog.Query(tx, eventlog.Filter{Object: policy.SwitchObject, Type: domain.EvAuthzSwitched}, 0, 100)
-	for _, e := range es {
-		var p struct {
-			Model string `json:"model"`
-		}
-		if json.Unmarshal(e.Event.Payload, &p) == nil && p.Model == CardsModel {
-			return true, nil
-		}
-	}
-	return false, err
-}
+func cardsSwitched(tx *store.Tx) (bool, error) { return switchedTo(tx, CardsModel) }
 
 // switchAuthz 是权限模型的一次性切换（§16.5），启动时在迁移之后运行，幂等。还没做过第二版切换的账本先
 // 撤销全部有效授权单、清掉未答问题上的旧状态；然后按映射表为每个 Agent 写权限卡、去掉旧段，写一版策略，

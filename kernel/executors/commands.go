@@ -10,6 +10,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -29,6 +30,8 @@ type Options struct {
 	Owner string
 	// Project 按 id 读项目（项目模块的只读接口）；为空时 executor.list 不支持 project。
 	Project func(tx *store.Tx, id string) (domain.Project, error)
+	// Host 是 APA 主机名：executor.list 据它标出不在本机的执行者（§13.6）。
+	Host string
 }
 
 // Register 在命令模型上登记本模块的命令：
@@ -41,11 +44,10 @@ type Options struct {
 //	executor.put / executor.remove       本人维护清单项
 //	executor.override  本人给执行者定可覆盖参数的默认值（只能取声明列出的值）
 //
-// 登记、确认、维护与 Agent 卡片都是 3b（造新权力，§14.3）：只有 Web 上的本人、再输一次口令后可做；
+// 登记、确认、维护都是 3b（造新权力，§14.3）：只有 Web 上的本人、再输一次口令后可做；
 // delegate 得到退出码 20（硬线），其余钥匙得到退出码 4（范围外）。
 func Register(x *command.Executor, o Options) error {
 	for _, s := range []command.Spec{
-		{Name: "agent.configure", Action: authz.ActionChangeSettings, Group: authz.GroupAgents, Page: "/settings/agents", Object: noObject, Apply: saveCard},
 		{Name: "executor.list", Action: authz.ActionRead, Group: authz.GroupView, Object: noObject, Apply: o.list},
 		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Group: authz.GroupOrganize, Object: declObject, Apply: apply(declare)},
 		{Name: "executor.pending", Action: authz.ActionSubmitPlugin, Group: authz.GroupView, Object: noObject, Apply: pending},
@@ -404,18 +406,38 @@ func Enroll(c *command.Ctx, id string, in Enrollment) error {
 }
 
 // listed 是 executor.list 的一项；Allowed 只在带 project 时出现。Startable 表示 APA 能按生效的无头运行声明直接拉起它
-// （apa delegate --start），Overridable 是那份声明允许按次覆盖的参数与取值。
+// （apa delegate --start），Overridable 是那份声明允许按次覆盖的参数与取值。Agent 是所属声明给人看的名字（权限卡按它），
+// Remote 表示不在 APA 主机上；带 runner 查询时 Reason 是这个执行者现在为什么不能用于该运行者（空为可用）。
 type listed struct {
 	Entry
 	Allowed     *bool               `json:"allowed,omitempty"`
 	Startable   bool                `json:"startable,omitempty"`
 	Overridable map[string]Override `json:"overridable,omitempty"`
+	Agent       string              `json:"agent,omitempty"`
+	Remote      bool                `json:"remote,omitempty"`
+	Reason      string              `json:"reason,omitempty"`
+}
+
+// Picked 是选择预览：按拉起时同一口径（Pick）选出的执行者、来源与现在拉不起的原因。
+type Picked struct {
+	Executor string `json:"executor"`
+	Source   string `json:"source"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type listIn struct {
+	Project string `json:"project"`
+	// Runner 非空时给出选择预览（selected）并逐个标出不能用于这种运行的原因；Rule、Schedule、Item 是预览用的选择。
+	// Delegated 表示预览的是委派（可用不在本机的执行者）。
+	Runner    string `json:"runner"`
+	Rule      string `json:"rule"`
+	Schedule  string `json:"schedule"`
+	Item      string `json:"item"`
+	Delegated bool   `json:"delegated"`
 }
 
 func (o Options) list(c *command.Ctx) (any, error) {
-	var in struct {
-		Project string `json:"project"`
-	}
+	var in listIn
 	if len(bytes.TrimSpace(c.Input)) > 0 {
 		if err := decode(c.Input, &in); err != nil {
 			return nil, err
@@ -432,6 +454,10 @@ func (o Options) list(c *command.Ctx) (any, error) {
 		}
 		proj = &p
 	}
+	_, pol, err := policy.Current(c.Tx)
+	if err != nil {
+		return nil, err
+	}
 	es, err := List(c.Tx)
 	if err != nil {
 		return nil, err
@@ -439,17 +465,35 @@ func (o Options) list(c *command.Ctx) (any, error) {
 	out := make([]listed, len(es))
 	for i, e := range es {
 		out[i].Entry = e
+		out[i].Remote = Remote(e, o.Host)
 		if e.Harness != "" {
 			if rec, ok, err := record(c.Tx, e.Harness, 0, StateActive); err != nil {
 				return nil, err
 			} else if ok && rec.Declaration.Headless != nil {
 				out[i].Startable, out[i].Overridable = true, rec.Declaration.Overrides
+				out[i].Agent = rec.Declaration.DisplayName()
 			}
+		}
+		if in.Runner != "" {
+			t, err := Resolve(c.Tx, pol, Want{Executor: e.ID, Source: SourceExplicit, Runner: in.Runner, Host: o.Host, Delegated: in.Delegated})
+			if err != nil {
+				return nil, err
+			}
+			out[i].Reason = t.Reason
 		}
 		if proj != nil {
 			ok := proj.ExecutorAllowed(domain.ExecutorRef{ID: e.ID, Host: e.Host, Harness: e.Harness}, o.Owner)
 			out[i].Allowed = &ok
 		}
 	}
-	return map[string]any{"executors": out}, nil
+	res := map[string]any{"executors": out}
+	if in.Runner != "" {
+		id, source := Pick(pol, Selection{Item: in.Item, Schedule: in.Schedule, Rule: in.Rule, Runner: in.Runner})
+		t, err := Resolve(c.Tx, pol, Want{Executor: id, Source: source, Runner: in.Runner, Host: o.Host, Delegated: in.Delegated})
+		if err != nil {
+			return nil, err
+		}
+		res["selected"] = Picked{Executor: id, Source: source, Reason: t.Reason}
+	}
+	return res, nil
 }

@@ -39,7 +39,9 @@ function server(o: { delivery?: unknown; patchFail?: boolean; fail?: boolean; it
     }
     if (url === "/v1/settings/policy" && o.delivery) return json(200, { version: 3, disturb: { daily_cap: 20, mutes: [], delivery: o.delivery } });
     if (url === "/v1/packs") return json(200, { packs: o.routine ? [...packs, { name: "routine", instance_params: {} }] : packs });
-    if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: { agent_name: o.host, permission_cap: o.caps?.[o.host ?? ""] ?? "read" }, reason: "" });
+    if (url.startsWith("/v1/executors?")) return json(200, { executors: o.host ? [{ id: o.host, kind: "external-cli", harness: o.host, label: o.host }] : [], selected: { executor: o.host ?? "", source: "default", ...(o.host ? {} : { reason: "还没选日常执行者" }) } });
+    const lim = url.match(/^\/v1\/agents\/([^/]+)\/limits$/);
+    if (lim) return json(200, { card: { groups: {}, tool: o.caps?.[decodeURIComponent(lim[1])] ?? "read" } });
     const ip = url.match(/^\/v1\/instances\/([^/]+)$/);
     if (ip && init?.method === "PATCH") {
       const body = JSON.parse(init.body as string);
@@ -225,8 +227,8 @@ describe("简报页", () => {
   it("Agent 还不能后台运行时卡片写明等它接入并链到设置；「立即跑一次」不可点", async () => {
     mount(server());
     const card = within(await screen.findByRole("group", { name: "简报" }));
-    expect(card.getByText("等 Agent 接入后开始")).toBeInTheDocument();
-    expect(card.getByRole("link", { name: "去设置" })).toHaveAttribute("href", "/settings/agents");
+    expect(card.getByText("等选好执行者后开始")).toBeInTheDocument();
+    expect(card.getByRole("link", { name: "去设置" })).toHaveAttribute("href", "/executors#roles");
     expect(card.getByRole("button", { name: "立即跑一次" })).toBeDisabled();
   });
 
@@ -298,7 +300,7 @@ describe("简报页", () => {
     const calls: Calls = { posts: [], urls: [] };
     mount(server({ ready: true }, calls));
     const card = within(await screen.findByRole("group", { name: "简报" }));
-    expect(card.queryByText("等 Agent 接入后开始")).toBeNull();
+    expect(card.queryByText("等选好执行者后开始")).toBeNull();
     expect(card.getByRole("link", { name: /最近一次/ })).toHaveAttribute("href", "/briefs/b1");
     await userEvent.click(card.getByRole("button", { name: "立即跑一次" }));
     expect(calls.posts).toEqual([{ body: "/v1/instances/ins_1/run", csrf: "tok-1" }]);
@@ -401,7 +403,7 @@ describe("简报页", () => {
     // 上限只读、写明是谁的上限；超出时说后果并给「去改上限」，落到该 Agent 的页面（界面设计 §4）
     expect(form.getByText("hermes 的上限：可改文件")).toBeInTheDocument();
     expect(await form.findByText(/超出 hermes 的上限（可改文件），到点会停下来问你/)).toBeInTheDocument();
-    expect(form.getByRole("link", { name: "去改上限" })).toHaveAttribute("href", expect.stringMatching(/^\/settings\/agents\//));
+    expect(form.getByRole("link", { name: "去改上限" })).toHaveAttribute("href", "/settings/agents/hermes");
     await userEvent.selectOptions(form.getByLabelText("Agent 能用什么"), "edit");
     expect(form.queryByText(/超出 hermes 的上限/)).not.toBeInTheDocument();
     await userEvent.selectOptions(form.getByLabelText("结果写到哪"), "item_and_material");
@@ -413,8 +415,8 @@ describe("简报页", () => {
     mount(server({ routine: true }));
     const form = within(await screen.findByRole("form", { name: "新的例行任务" }));
     await userEvent.click(form.getByRole("radio", { name: "让 Agent 去做" }));
-    expect(await form.findByText(/还没设默认 Agent/)).toBeInTheDocument();
-    expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/settings/agents#roles");
+    expect(await form.findByText(/还没选日常执行者，到点会停下来告诉你/)).toBeInTheDocument();
+    expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/executors#roles");
   });
 
   it("修改例行任务：按实例预填；定时没动就原样带回，改了几点仍用原来的时区；PATCH 带 project 与整份 params", async () => {

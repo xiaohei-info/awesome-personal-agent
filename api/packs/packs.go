@@ -20,10 +20,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -38,14 +36,15 @@ type Packs interface {
 }
 
 type api struct {
-	st *store.Store
-	x  *command.Executor
-	ps Packs
+	st   *store.Store
+	x    *command.Executor
+	ps   Packs
+	host string // APA 主机名：实例预览判执行者在不在本机
 }
 
 // Routes 返回路由分组；x 须已登记 instances 与 rules 命令。经 core.Deps.Groups 挂载。
-func Routes(st *store.Store, x *command.Executor, ps Packs) core.RouteGroup {
-	a := &api{st, x, ps}
+func Routes(st *store.Store, x *command.Executor, ps Packs, host string) core.RouteGroup {
+	a := &api{st, x, ps, host}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/packs", Handler: readable(a.packs)})
 		r.Handle(core.Route{Method: "GET", Path: "/packs/{pack}/prompts/{name}", Handler: readable(a.prompt)})
@@ -198,8 +197,8 @@ type instanceView struct {
 func (a *api) preview(tx *store.Tx, in instances.Instance) (instanceView, error) {
 	v := instanceView{Instance: in}
 	var params struct {
-		Agent string `json:"agent_id"`
-		Mode  string
+		Executor string `json:"executor"`
+		Mode     string
 	}
 	if err := json.Unmarshal(in.Params, &params); err != nil {
 		return v, err
@@ -220,15 +219,10 @@ func (a *api) preview(tx *store.Tx, in instances.Instance) (instanceView, error)
 				if action["action"] != "call_agent" || pack.Prompts[prompt].Meta.Agent != "task" {
 					continue
 				}
-				harness, _ := action["harness"].(string)
-				_, pol, err := policy.Current(tx)
-				if err != nil {
-					return v, err
-				}
-				selected, err := executors.Resolve(tx, pol, executors.Selection{Schedule: params.Agent, Rule: pack.Name + "/clock_rules/" + rule.ID, Harness: harness})
-				ready := selected.Reason == ""
+				t, err := task.ReadyFor(tx, pack.Name+"/clock_rules/"+rule.ID, params.Executor, a.host)
+				ready := t.Reason == ""
 				v.Ready = &ready
-				v.Reason = selected.Reason
+				v.Reason = t.Reason
 				return v, err
 			}
 		}
@@ -261,7 +255,7 @@ func (a *api) listInstances(w http.ResponseWriter, r *http.Request, _ *core.Prin
 			}
 			out = append(out, v)
 		}
-		ready, err = task.AgentReady(tx)
+		ready, err = task.AgentReady(tx, a.host)
 		return err
 	}); err != nil {
 		return err

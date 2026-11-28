@@ -382,11 +382,11 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	k.rn.Attach(k.disp)
 	k.wh.Attach(k.disp)
-	k.in.AttachBatch(inbound.BatchOptions{RunsDir: l.Runs, APIURL: apiURL, Queue: k.disp,
+	k.in.AttachBatch(inbound.BatchOptions{RunsDir: l.Runs, APIURL: apiURL, Queue: k.disp, ContextDir: l.RunCredentials, Host: host,
 		Notify: func(ctx context.Context, run domain.Run, summary string) error {
 			return st.Update(ctx, func(tx *store.Tx) error { return att.SourceResult(tx, run.ID, summary) })
 		}})
-	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, WebBase: base,
+	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, WebBase: base, ContextDir: l.RunCredentials, Host: host,
 		OnError: func(run string, err error) { slog.Error("task run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
@@ -399,11 +399,11 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	wk := k.wk
 	wk.Attach(x, k.result, logErr("wake receipt"))
-	if bg, err = background.New(background.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, Owner: owner,
+	if bg, err = background.New(background.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, Owner: owner, Host: host,
 		ContextDir: l.RunCredentials, Wake: wk, MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("background run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
-	if k.rs, err = resume.New(resume.Options{Store: st, Packs: ld, Queue: k.disp, RunsDir: l.Runs, Owner: owner,
+	if k.rs, err = resume.New(resume.Options{Store: st, Packs: ld, Queue: k.disp, RunsDir: l.Runs, Owner: owner, Host: host, ContextDir: l.RunCredentials,
 		MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("resume run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
@@ -416,7 +416,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		kchannel.Register(x, kchannel.Options{Queue: q}),
 		conns.Register(x),
 		kprojects.Register(x),
-		executors.Register(x, executors.Options{Owner: owner, Project: kprojects.Get}),
+		executors.Register(x, executors.Options{Owner: owner, Project: kprojects.Get, Host: host}),
 		delegation.Register(x, delegation.Options{Owner: owner, OnError: func(c command.Commit, err error) {
 			slog.Error("delegation settle", "object", c.Object, "err", err)
 		}}),
@@ -486,7 +486,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Groups: []core.RouteGroup{
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), apipolicy.OverviewRoutes(st, ld, k.stale.After), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
-		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
+		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld, host), apiruns.Routes(st, wk), apievents.Routes(st, 0),
 		apiexec.Routes(st, x), apiexec.LimitsRoutes(st, apiexec.Fallback{Long: cfg.MaxSubprocesses, Short: cfg.MaxShortSubprocesses, Chain: x.MaxChainDepth}), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x, st, retention.Defaults(cfg.RunRetention, cfg.IngestRetention, cfg.JudgmentRetention)), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apisearch.Routes(st), apiagentsmd.Routes(x, k.agm), apiusage.Routes(st), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
@@ -531,6 +531,9 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 // 这里只做快操作；可能调模型的补处理放在后台循环，不挡服务启动。
 func (k *kernel) start(ctx context.Context) error {
 	if err := switchAuthz(ctx, k.st, clock.Now); err != nil { // 权限模型第二版的一次性切换，幂等（§16.5）
+		return err
+	}
+	if err := switchExecutors(ctx, k.st, clock.Now); err != nil { // "谁来干活"统一为执行者的一次性切换，幂等（§16.5）
 		return err
 	}
 	// 无法落成 Timer 的 schedule 是某个包的问题，规则状态已登记，不挡启动。

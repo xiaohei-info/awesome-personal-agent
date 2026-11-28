@@ -367,7 +367,7 @@ func TestFlowAgentCascade(t *testing.T) {
 	step("ACT-CAS-10 harness 不可用时账本照常", func(t *testing.T) {
 		insufficient()
 		f.mode("receipt")
-		f.webOK("PUT", "/settings/policy", `{"default_harness":""}`, 200) // 取消默认 harness
+		f.webOK("PUT", "/settings/policy", `{"default_executor":"","main_executor":""}`, 200) // 取消默认 harness
 		runsBefore := len(f.taskRuns())
 		trig := f.task("CAS10 harness 不可用", "acc-gen")
 		var target string
@@ -396,6 +396,6 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.When(titleMark, reply(`{"insufficient_info":false,"title":"CAS10 判断与生成照常","summary":"s"}`))
 		id := newProposal("CAS10 harness 不可用时的捕获", "s1")
 		eq(t, "判断型与生成型照常（生成的标题）", f.itemTitles()[id], "CAS10 判断与生成照常")
-		f.webOK("PUT", "/settings/policy", `{"default_harness":"`+harness+`"}`, 200)
+		f.webOK("PUT", "/settings/policy", `{"default_executor":"`+harness+`","main_executor":"`+harness+`"}`, 200)
 	})
 }

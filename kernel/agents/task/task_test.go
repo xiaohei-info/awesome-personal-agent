@@ -266,7 +266,7 @@ func (e *env) decl(name, script string, tiers ...string) map[string]any {
 }
 
 func (e *env) task(harness, tmpl string) Task {
-	return Task{Pack: "tk", Template: tmpl, Title: "周报简报", Harness: harness, Actor: ruleA,
+	return Task{Pack: "tk", Template: tmpl, Title: "周报简报", Selection: executors.Selection{Item: harness}, Actor: ruleA,
 		Materials: []Material{{Name: "source-event", Body: injection}}}
 }
 
@@ -840,7 +840,7 @@ func TestUnconfirmedDeclarationDoesNotRun(t *testing.T) {
 func TestMissingAccessTierDoesNotRun(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary", "read")
-	e.setCard("legacy:hx", policy.PermFull)
+	e.setCard("hx", policy.PermFull)
 	out, err := e.svc.Launch(bg, e.task("hx", "brief"))
 	notStarted(t, err, domain.NoticeTaskRefused)
 	if out.Run != "" || !strings.Contains(out.Reason, "full") {
@@ -973,7 +973,7 @@ func TestTemplateCheckoutCwd(t *testing.T) {
 		t.Fatalf("template without cwd ran in %q, want run dir %q", got, runDir)
 	}
 
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	var ref struct{ ID string }
 	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "brief", "title": "t", "phase": "open", "project": proj}).Value, &ref)
 	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("co", ref.ID)); err != nil {
@@ -1054,7 +1054,7 @@ func TestCommandFollowsDeclaration(t *testing.T) {
 	}
 }
 
-// 没有指定 harness、Web 也没设默认 harness：不拉起，交回带原因的 task_refused（§8.7、§13.6）。模板头部的 access 不再生效：
+// 没有指定执行者、分工里也没选日常执行者：不拉起，交回带原因的 task_refused（§8.7、§13.6）。模板头部的 access 不再生效：
 // 工具档位取权限卡（§14.5），模板写了 full 照样按卡上的只读拉起。
 func TestLaunchWithoutHarnessGoesToOwnerAndToolFollowsCard(t *testing.T) {
 	e := setup(t)
@@ -1063,11 +1063,11 @@ func TestLaunchWithoutHarnessGoesToOwnerAndToolFollowsCard(t *testing.T) {
 	}
 	out, err := e.svc.Launch(bg, e.task("", "brief"))
 	notStarted(t, err, domain.NoticeTaskRefused)
-	if out.Run != "" || !strings.Contains(out.Reason, "默认 harness") || out.Item != "" { // 2026-11-20 改写：原断言目标事项转 needs_input
+	if out.Run != "" || !strings.Contains(out.Reason, "还没选日常执行者") || out.Item != "" { // 2026-11-20 改写：原断言目标事项转 needs_input
 		t.Fatalf("no harness: %+v %v", out, err)
 	}
 	e.harness("hx", "summary", "read", "full")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	out, err = e.svc.Launch(bg, e.task("", "full"))
 	if err != nil || out.Run == "" {
 		t.Fatalf("template access is ignored: %+v %v", out, err)
@@ -1091,10 +1091,10 @@ func (e *env) setCard(agent, tool string) {
 	}
 }
 
-func (e *env) setDefaultHarness(h string) {
+func (e *env) setDailyExecutor(h string) {
 	e.t.Helper()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "harness", func(p *policy.Policy) error { p.DefaultHarness = h; return nil })
+		_, err := policy.Update(tx, owner.Actor, "harness", func(p *policy.Policy) error { p.DefaultExecutor = h; return nil })
 		return err
 	}); err != nil {
 		e.t.Fatal(err)
@@ -1121,7 +1121,7 @@ func (e *env) openItem() string {
 func TestCallAgentRunsTaskOnRuleItemOnce(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	h := e.svc.CallAgent(AgentOptions{})
 	id := e.openItem()
 	if err := h(bg, e.call("brief", id)); err != nil {
@@ -1250,7 +1250,7 @@ func TestRuleTaskLoopTripsAtThreshold(t *testing.T) {
 	e := setup(t)
 	e.x.MaxChainDepth = 4
 	e.harness("hx", "receipt")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	h := e.svc.CallAgent(AgentOptions{})
 	trigger := e.openItem()
 	seen := map[string]bool{}
@@ -1394,7 +1394,7 @@ func snapshotOf(t *testing.T, materials string) snapshotView {
 func TestTaskRunMaterialsCarryLedgerSnapshot(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	alpha, beta := e.snapshotEnv()
 	id := e.openItem()
 	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", id)); err != nil {
@@ -1472,7 +1472,7 @@ func (e *env) attach(item, id, sender string, verified bool) {
 func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "fwd", func(p *policy.Policy) error {
 			p.ForwardAllowlist = map[string][]string{"mail": {"boss@example.com"}}
@@ -1510,7 +1510,7 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 		_, err := policy.Update(tx, owner.Actor, "all messages", func(p *policy.Policy) error {
 			c := policy.DefaultCard()
 			c.RunsAllMessages = true
-			p.AgentCards["legacy:hx"] = c
+			p.AgentCards["hx"] = c
 			return nil
 		})
 		return err
@@ -1530,7 +1530,7 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 func TestBriefRunMaterialsCarrySpotCheckEntries(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		for i := 0; i < 7; i++ {
 			sid := fmt.Sprintf("low-%d", i)
@@ -1612,7 +1612,7 @@ func (e *env) briefMaterials() map[string]string {
 func TestBriefMaterialsCarryDigestOnceAndPlannedToday(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
+	e.setDailyExecutor("hx")
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		for _, n := range []string{"n1", "n2"} {
 			if err := runner.AppendInternal(tx, domain.Source{ID: "src_news"}, domain.SourceEvent{ID: n, Type: "news", Subject: "资讯 " + n, Link: "https://example.com/" + n, OccurredAt: t0}); err != nil {

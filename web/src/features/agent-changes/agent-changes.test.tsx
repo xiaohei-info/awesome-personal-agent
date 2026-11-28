@@ -23,7 +23,8 @@ function server(initial: Step[], revert?: (body: any) => Response | undefined) {
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url === "/v1/agents") return json(200, { agents: [{ id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1 }, { id: "agent_2", harness: "hermes", name: "编码", enabled: true, rev: 1 }], selected: {}, reason: "" });
+    if (url === "/v1/settings/commands") return json(200, { declarations: [{ harness: "agent_1", rev: 1, state: "active", declaration: { harness: "agent_1", base: "hermes", name: { zh: "日常", en: "Daily" } } }, { harness: "agent_2", rev: 1, state: "active", declaration: { harness: "agent_2", base: "hermes", name: { zh: "编码", en: "Coding" } } }] });
+    if (url === "/v1/settings/declarations") return json(200, { declarations: [] });
     if (url === "/v1/settings/tokens") return json(200, { credentials: [{ id: "DEL", kind: "delegate", harness: "hermes", agent_id: "agent_1" }, { id: "W2", kind: "worker", harness: "hermes", agent_id: "agent_2" }] });
     const q = url.match(/^\/v1\/audit\/events\?after=(\d+)&limit=500$/);
     if (q) return json(200, { events: events.filter((e) => e.seq > +q[1]).slice(0, 500) });
@@ -59,7 +60,7 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     const s = server([upd(1, "2030-01-01T00:00:00Z"), dec(2, "2030-01-01T00:01:00Z"), upd(3, "2030-01-01T00:02:00Z", { actor: owner, reason: "人改的" }), upd(4, "2030-01-01T00:03:00Z", { type: "command.rejected", reason: "被拒" })]);
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /新标题/ })).closest("article")!;
-    // 操作者显示 Agent 名；名字表（/settings/tokens + /agents）可能晚于事件列表到，等名字出现再断言，不依赖先后
+    // 操作者显示 Agent 名；名字表（/settings/tokens + 声明）可能晚于事件列表到，等名字出现再断言，不依赖先后
     expect(await within(a).findByText(/日常/)).toBeInTheDocument();
     expect(within(a).getByText("改标题")).toBeInTheDocument();
     const d = screen.getByRole("heading", { name: "Agent 替你答了「要不要上线」" }).closest("article")!;

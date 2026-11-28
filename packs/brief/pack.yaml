@@ -22,7 +22,7 @@ instance_params:
   type: object
   required: [schedule]
   properties:
-    agent_id: {type: string}
+    executor: {type: string}
     schedule: {type: string}
     projects: {type: array, items: {type: string}}
     instruction: {type: string}

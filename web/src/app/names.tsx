@@ -1,32 +1,43 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ApiClient } from "./api";
 import { useSession } from "./session";
-import { useLang, useT } from "./i18n";
+import { lang as currentLang, useLang, useT } from "./i18n";
 import { common } from "./strings";
 import { vocab } from "./vocab";
 
 // id → 显示名（设计 §4.2）：项目、来源、凭据、执行者按 id 显示名字，不让本人看 id、手打 id。
 // 每个 API 客户端各缓存一份，一个页面会话里只取一次；改名后调 forgetNames 让下次重取。
 // credential 显示的是它所属的 Agent 的名字（同一 Agent 的多把钥匙合并成同一个名字）；key 是钥匙自己的标签，只用在悬停与详情。
-export type NameKind = "project" | "source" | "credential" | "key" | "executor";
+// agent 是 Agent（程序的声明，id 是声明的标识）：取生效的与待确认的声明里给人看的名字。
+export type NameKind = "project" | "source" | "credential" | "key" | "executor" | "agent";
 export interface Named {
   id: string;
   name: string;
 }
 
-type Row = { id: string; name?: string; label?: string; agent_id?: string; harness?: string };
-const SOURCES: Record<NameKind, { path: string; key: string; name: (r: Row) => string }> = {
+type Row = { id: string; name?: string; label?: string; agent_id?: string; harness?: string; agent?: string };
+const SOURCES: Record<Exclude<NameKind, "agent">, { path: string; key: string; name: (r: Row) => string }> = {
   project: { path: "/projects", key: "projects", name: (r) => r.name || r.id },
   source: { path: "/sources", key: "sources", name: (r) => r.name || r.id }, // 内核保证有显示名（§9.1）；id 只在旧服务端时兜底
   credential: { path: "/settings/tokens", key: "credentials", name: (r) => r.label || r.id },
   key: { path: "/settings/tokens", key: "credentials", name: (r) => r.label || r.id },
-  executor: { path: "/executors", key: "executors", name: (r) => r.label || r.id },
+  // 与 Agent 同名的那个执行者（声明没列执行者时内核建的）没有标签，用 Agent 的名字（与 ExecutorPick 的 executorName 同一规则）。
+  executor: { path: "/executors", key: "executors", name: (r) => r.label || (r.id === r.harness && r.agent) || r.id },
 };
 
-/** 钥匙 → Agent 名：归属 Agent 的按卡名，旧设置迁移来的（只有程序标识）按 legacy:<程序> 的卡名；对不上返回 undefined，退回钥匙标签。 */
+type Decl = { harness: string; declaration: { name?: { zh: string; en: string } } };
+/** Agent 名单：生效的声明在前，待确认的补上；没写名字的用标识。 */
+async function agentList(api: ApiClient): Promise<Named[]> {
+  const recs = await Promise.all(["/settings/commands", "/settings/declarations"].map((p) => api.get<{ declarations: Decl[] }>(p).then((r) => r.declarations, () => [] as Decl[])));
+  const by = new Map<string, string>();
+  for (const r of recs.flat()) if (!by.has(r.harness)) by.set(r.harness, r.declaration.name?.[currentLang()] || r.harness);
+  return [...by].map(([id, name]) => ({ id, name }));
+}
+
+/** 钥匙 → Agent 名：绑了隔离另写的声明的按那份声明（agent_id），否则按所属程序的声明；对不上返回 undefined，退回钥匙标签。 */
 async function agentNames(api: ApiClient): Promise<(k: Row) => string | undefined> {
-  const cards = await api.get<{ agents: { id: string; name: string }[] }>("/agents").then((r) => new Map(r.agents.map((a) => [a.id, a.name])), () => new Map<string, string>());
-  return (k) => cards.get(k.agent_id || "legacy:" + k.harness);
+  const by = new Map((await agentList(api)).map((a) => [a.id, a.name]));
+  return (k) => by.get(k.agent_id || k.harness || "");
 }
 
 const cache = new WeakMap<ApiClient, Map<NameKind, Promise<Named[]>>>();
@@ -38,10 +49,11 @@ export function loadNames(api: ApiClient, kind: NameKind): Promise<Named[]> {
   if (!m) cache.set(api, (m = new Map()));
   let p = m.get(kind);
   if (!p) {
-    const s = SOURCES[kind];
+    const s = kind === "agent" ? undefined : SOURCES[kind];
     const agents = kind === "credential" ? agentNames(api) : Promise.resolve(() => undefined);
-    p = Promise.all([api.get<Record<string, Row[]>>(s.path), agents]).then(([r, agent]) => {
-      const list = (r[s.key] ?? []).map((x) => ({ id: x.id, name: agent(x) ?? s.name(x) }));
+    const rows: Promise<Row[]> = s ? api.get<Record<string, Row[]>>(s.path).then((r) => r[s.key] ?? []) : agentList(api);
+    p = Promise.all([rows, agents]).then(([r, agent]) => {
+      const list = r.map((x) => ({ id: x.id, name: agent(x) ?? (s ? s.name(x) : x.name ?? x.id) }));
       if (!resolved.has(api)) resolved.set(api, new Map());
       resolved.get(api)!.set(kind, list);
       return list;

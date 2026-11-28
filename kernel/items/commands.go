@@ -131,8 +131,10 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 	for k, raw := range patch {
 		var err error
 		switch k {
+		case "preferred_executor":
+			err = put(raw, &it.PreferredExecutor)
 		case "preferred_agent_id":
-			err = put(raw, &it.PreferredAgentID)
+			err = invalid("preferred_agent_id was replaced by preferred_executor (an executor id, see apa executors)")
 		case "title":
 			err = put(raw, &it.Title)
 		case "summary":
@@ -654,8 +656,8 @@ func (s *svc) update() command.Spec {
 	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn, Group: authz.GroupOrganize,
 		GroupFor: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Group, error) {
 			_, _, _, patch, err := plan(tx, in)
-			if _, chosen := patch["preferred_agent_id"]; chosen {
-				return authz.GroupRules, err // 指定由哪个 Agent 来做是改日常（§14.3）
+			if _, chosen := patch["preferred_executor"]; chosen {
+				return authz.GroupRules, err // 指定由哪个执行者来做是改日常（§14.3）
 			}
 			return authz.GroupOrganize, err
 		},

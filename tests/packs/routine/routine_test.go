@@ -175,7 +175,7 @@ func (e *env) instance(project string, params map[string]any) string {
 	return o.ID
 }
 
-// harness 登记 acc-stub 并设为默认 harness，声明 read、edit 两档；Web 的权限上限保持默认（read）。
+// harness 登记 acc-stub 并设为日常执行者，声明 read、edit 两档；Web 的权限上限保持默认（read）。
 func (e *env) harness(script string) {
 	e.t.Helper()
 	path := filepath.Join(e.dir, script+".sh")
@@ -186,7 +186,7 @@ func (e *env) harness(script string) {
 		"command": []string{"sh", path, "{prompt}", "{run_dir}"}, "session": map[string]any{"extract": "$.session_id"},
 		"access": map[string]any{"read": []string{}, "edit": []string{}}}})
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "harness", func(p *policy.Policy) error { p.DefaultHarness = "acc-stub"; return nil })
+		_, err := policy.Update(tx, owner.Actor, "harness", func(p *policy.Policy) error { p.DefaultExecutor = "acc-stub"; return nil })
 		return err
 	}); err != nil {
 		e.t.Fatal(err)

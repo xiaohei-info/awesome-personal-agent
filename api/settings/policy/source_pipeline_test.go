@@ -16,12 +16,12 @@ func TestSourcePipelineEndpoint(t *testing.T) {
 		t.Fatalf("GET = %d %s", rec.Code, rec.Body)
 	}
 	// 合法更新保存并去空白。
-	body := `{"source_pipeline":{"agent":"main","batch_size":5,"wait_minutes":15,"urgent_immediate":true,"max_batch":12,"max_retries":3,"daily_batch_limit":20,"judge_prompt":"  重要邮件优先  ","batch_prompt":"  保持简洁  "}}`
+	body := `{"source_pipeline":{"executor":"main","batch_size":5,"wait_minutes":15,"urgent_immediate":true,"max_batch":12,"max_retries":3,"daily_batch_limit":20,"judge_prompt":"  重要邮件优先  ","batch_prompt":"  保持简洁  "}}`
 	if rec := e.do("PUT", "/v1/settings/source-pipeline", body, e.web); rec.Code != 200 {
 		t.Fatalf("PUT valid = %d %s", rec.Code, rec.Body)
 	}
 	rec := e.do("GET", "/v1/settings/source-pipeline", "", e.web)
-	for _, want := range []string{`"agent":"main"`, `"batch_size":5`, `"wait_minutes":15`, `"urgent_immediate":true`, `"max_batch":12`, `"max_retries":3`, `"daily_batch_limit":20`, `"judge_prompt":"重要邮件优先"`, `"batch_prompt":"保持简洁"`} {
+	for _, want := range []string{`"executor":"main"`, `"batch_size":5`, `"wait_minutes":15`, `"urgent_immediate":true`, `"max_batch":12`, `"max_retries":3`, `"daily_batch_limit":20`, `"judge_prompt":"重要邮件优先"`, `"batch_prompt":"保持简洁"`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("GET missing %s: %s", want, rec.Body)
 		}

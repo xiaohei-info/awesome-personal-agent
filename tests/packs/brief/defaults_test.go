@@ -79,7 +79,7 @@ func (e *env) registerHost() {
 func (e *env) agentReady() {
 	e.registerHost()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.DefaultHarness = "hx"; return nil })
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.DefaultExecutor = "hx"; return nil })
 		return err
 	}); err != nil {
 		e.t.Fatal(err)
@@ -90,15 +90,7 @@ func TestBriefScheduleSelectsAgentWithoutDefault(t *testing.T) {
 	e := newEnv(t, "")
 	eng, _ := e.gated()
 	e.registerHost()
-	result, err := e.do("agent.configure", executors.Card{Name: "日报", Harness: "hx", Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var card executors.Card
-	if err := json.Unmarshal(result.Value, &card); err != nil {
-		t.Fatal(err)
-	}
-	instance, err := e.do("instance.create", map[string]any{"pack": "brief", "params": map[string]string{"schedule": "24h", "agent_id": card.ID}})
+	instance, err := e.do("instance.create", map[string]any{"pack": "brief", "params": map[string]string{"schedule": "24h", "executor": "hx"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +116,7 @@ func TestBriefScheduleSelectsAgentWithoutDefault(t *testing.T) {
 		}
 		for _, record := range runs {
 			run := record.Run
-			if run.AgentSnapshot == nil || run.AgentID != card.ID || run.SelectionSource != "schedule" || run.PermissionCap != "read" {
+			if run.AgentSnapshot == nil || run.Executor != "hx" || run.AgentID != "hx" || run.SelectionSource != "schedule" || run.PermissionCap != "read" {
 				t.Fatalf("unexpected agent snapshot: %+v", run.AgentSnapshot)
 			}
 		}

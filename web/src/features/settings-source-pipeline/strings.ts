@@ -10,8 +10,8 @@ const zh = {
     `攒够 ${batch} 条或等 ${wait} 分钟` + (urgent ? " · 紧急马上处理" : ""),
 
   agentTitle: "谁来处理",
-  agentHint: "它能做什么看它自己的权限。",
-  agentLabel: "处理的 Agent",
+  agentHint: "选一个执行者；它能做什么看它所属 Agent 的权限卡。",
+  agentLabel: "处理的执行者",
 
   scheduleTitle: "多久处理一次",
   scheduleHint: "新消息进队列后，满条数或到时间就会处理一批。",
@@ -110,8 +110,8 @@ const en: typeof zh = {
     `Every ${batch} messages or ${wait} min` + (urgent ? " · urgent right away" : ""),
 
   agentTitle: "Who handles them",
-  agentHint: "What it can do depends on its own permissions.",
-  agentLabel: "Handling Agent",
+  agentHint: "Pick an executor; what it can do follows its Agent's permission card.",
+  agentLabel: "Handling executor",
 
   scheduleTitle: "How often to run",
   scheduleHint: "Queued messages run as a batch when either count or wait time is reached.",

@@ -64,7 +64,7 @@ func TestBatchResultNotificationAndDeliveryRouting(t *testing.T) {
 	if deliveries[0].ID != attention.BatchResultID(r1.Run.ID) {
 		t.Fatalf("unexpected delivery id: %s", deliveries[0].ID)
 	}
-	// 主会话未配置 MainAgentID 时，MainRoute 返回 blocked，按 Else=next_chat 退到注入路由
+	// 主会话未配置主执行者时，MainRoute 返回 blocked，按 Else=next_chat 退到注入路由
 	if deliveries[0].Route != delivery.RouteInject && deliveries[0].Route != delivery.RouteWake {
 		t.Fatalf("expected delivery to agent route (inject or wake), got %q", deliveries[0].Route)
 	}

@@ -51,6 +51,8 @@ type BatchOptions struct {
 	RunsDir string
 	APIURL  string
 	Queue   BatchQueue
+	// ContextDir 是外呼调用器写运行上下文文件的目录（{run_context}，§7.7）；Host 是 APA 主机名（判执行者在不在本机）。
+	ContextDir, Host string
 	// Notify 在批处理成功结束后把最终输出交给触达（投递矩阵 source_result 行，B4）。可为空。
 	Notify func(ctx context.Context, run domain.Run, summary string) error
 }
@@ -59,6 +61,9 @@ type BatchOptions struct {
 func (s *Service) AttachBatch(o BatchOptions) {
 	s.batching.Lock()
 	defer s.batching.Unlock()
+	if o.Host == "" {
+		o.Host, _ = os.Hostname()
+	}
 	s.o.Batch = o
 }
 
@@ -207,7 +212,7 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 		st       runner.QueueStat
 		busy     bool
 		todayCnt int
-		selected executors.Selected
+		target   executors.Target
 	)
 	if err := s.o.Store.View(ctx, func(tx *store.Tx) error {
 		var err error
@@ -225,8 +230,9 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 				return err
 			}
 		}
-		// 没指定处理 Agent 时与其他后台运行同一口径：默认 Agent（default_agent_id），不借主会话的身份与权限（§9.3）。
-		selected, err = executors.Resolve(tx, pol, executors.Selection{Item: pol.SourcePipeline.Agent})
+		// 没指定处理的执行者时与其他后台运行同一口径：日常执行者（default_executor），不借主会话的身份与权限（§9.3）。
+		id, source := executors.Pipeline(pol)
+		target, err = executors.Resolve(tx, pol, executors.Want{Executor: id, Source: source, Runner: executors.RunnerSourceBatch, Host: s.o.Batch.Host})
 		return err
 	}); err != nil {
 		return err
@@ -249,18 +255,10 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("inbound: batch prompt template %s/%s not loaded", DefaultPack, BatchTemplate)
 	}
-	access := selected.Snapshot.PermissionCap // 工具档位取所属 Agent 权限卡上的值（§14.5）
-	why := selected.Reason
-	if why == "" && selected.Record.Declaration.Headless == nil {
-		why = "处理 Agent 没有可用的无头运行声明"
-	}
-	if why == "" {
-		why = selected.AccessReason(access)
-	}
-	if why != "" {
+	if why := target.Reason; why != "" {
 		return s.alertBatchBlocked(ctx, why, now)
 	}
-	hl := *selected.Record.Declaration.Headless
+	access := target.Access // 工具档位取执行者所属声明权限卡上的值（§14.5）
 	runID, err := newBatchRunID()
 	if err != nil {
 		return err
@@ -303,14 +301,9 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 		if err := os.WriteFile(filepath.Join(runDir, "prompt.txt"), []byte(prompt), 0o600); err != nil {
 			return err
 		}
-		argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
-		argv = append(argv, selected.Args...)
-		argv = append(argv, hl.Output...)
-		argv = append(argv, hl.Access[access]...)
-		sessionID := ""
-		if len(hl.Session.Assign) > 0 {
-			sessionID = runID
-			argv = append(argv, expandArgs(hl.Session.Assign, "{session_id}", sessionID)...)
+		built, err := target.Build(pol, executors.Spec{RunID: runID, RunDir: runDir, Prompt: prompt, ContextDir: s.o.Batch.ContextDir})
+		if err != nil {
+			return err
 		}
 		run := domain.Run{
 			ID:            runID,
@@ -318,18 +311,18 @@ func (s *Service) tickQueueLocked(ctx context.Context) error {
 			Runner:        BatchTarget,
 			Launch:        "headless",
 			Target:        BatchTarget,
-			Harness:       selected.Card.Harness,
-			SessionID:     sessionID,
+			Harness:       target.Program(),
+			SessionID:     built.SessionID,
 			Access:        access,
 			TimeoutSec:    int(pol.BackgroundRunTimeout() / time.Second),
-			AgentSnapshot: &selected.Snapshot,
+			AgentSnapshot: &built.Snapshot,
 		}
 		if err := executors.CheckRun(tx, run); err != nil {
 			return err
 		}
 		if _, err := proc.Enqueue(tx, proc.Request{
 			Run:  run,
-			Spec: proc.Spec{OptionEnv: selected.Env, Command: argv, Dir: runDir, RunDir: runDir},
+			Spec: proc.Spec{Command: built.Command, Dir: runDir, RunDir: runDir, Cancel: built.Cancel, Await: built.Await},
 		}, now); err != nil {
 			return err
 		}
@@ -419,9 +412,7 @@ func (s *Service) SettleBatch(ctx context.Context, res proc.Result) {
 		if err != nil {
 			return err
 		}
-		if res.Run.Harness != "" {
-			hl, hasHL, _ = executors.ActiveHeadless(tx, res.Run.Harness)
-		}
+		hl, hasHL, _ = executors.RunHeadless(tx, res.Run)
 		payload, _ := json.Marshal(map[string]any{
 			"run":      res.Run.ID,
 			"category": res.Run.Category,

@@ -7,7 +7,7 @@ import { App } from "../../app/App";
 import { policyServer } from "../../app/test-policy-server";
 import { feature } from "./index";
 
-const PAGE = "/settings/agents/legacy:hermes";
+const PAGE = "/settings/agents/hermes";
 
 // 测试边界替身：策略三条路由用 policyServer；声明、钥匙、档位按 api/settings/{exec,credentials,policy} 的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -30,10 +30,16 @@ function hermes(rev: number, state: string, access = ["read", "edit", "full"]) {
   };
 }
 
-interface Opts { pending?: any[]; live?: any[]; tokens?: any[]; cards?: any[] }
+/** 隔离另写的声明（由旧的日常卡迁来）：同一程序 hermes，单独一张权限卡。 */
+function daily() {
+  const r = hermes(4, "active");
+  return { ...r, harness: "agent_1", declaration: { ...r.declaration, harness: "agent_1", base: "hermes", name: L("日常", "Daily") } };
+}
+
+interface Opts { pending?: any[]; live?: any[]; tokens?: any[]; rules?: { key: string; mode: string }[] }
 function server(o: Opts = {}) {
-  const s = policyServer();
-  const st = { pending: o.pending ?? [], live: o.live ?? [], tokens: o.tokens ?? [], cards: o.cards ?? [], perm: {} as Record<string, any> };
+  const s = policyServer({ rules: o.rules, executors: [{ id: "hermes", kind: "external-cli", harness: "hermes", agent: "Hermes" }] });
+  const st = { pending: o.pending ?? [], live: o.live ?? [], tokens: o.tokens ?? [], perm: {} as Record<string, any> };
   const calls: { method: string; url: string; body?: any }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -55,7 +61,6 @@ function server(o: Opts = {}) {
       st.tokens = st.tokens.map((c) => (c.id === m![1] ? { ...c, harness: body.harness } : c));
       return json(200, { credential: st.tokens.find((c) => c.id === m![1]) });
     }
-    if (url === "/v1/agents") return json(200, { agents: st.cards, selected: {}, reason: "" });
     m = /^\/v1\/agents\/([^/]+)\/limits$/.exec(url);
     if (m) {
       const id = decodeURIComponent(m[1]);
@@ -71,7 +76,6 @@ function server(o: Opts = {}) {
       return json(200, { version: 2, card });
     }
     if (url.startsWith("/v1/audit/events")) return json(200, { events: [{ seq: 1, type: "item.phase_changed", object: "it_1", at: "2030-01-01T00:00:00Z" }] });
-    if (url === "/v1/executors") return json(200, { executors: [] });
     return s.impl(url, init);
   }) as unknown as typeof fetch;
   return { ...s, impl, st, calls };
@@ -132,7 +136,7 @@ describe("设置 › Agent", () => {
     await userEvent.click(perm.getByRole("button", { name: "保存权限" }));
     await waitFor(() => expect(writes(s, "/card")).toHaveLength(1));
     const put = writes(s, "/card")[0];
-    expect(put.url).toBe("/v1/settings/agents/legacy%3Ahermes/card");
+    expect(put.url).toBe("/v1/settings/agents/hermes/card");
     expect(put.body).toMatchObject({ tool: "edit", groups: { view: {}, organize: {}, source_events: {}, decide: {} }, version: 1 });
     expect(put.body.groups.purge.until).toBeTruthy();
   });
@@ -198,9 +202,31 @@ describe("设置 › Agent", () => {
     expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeChecked();
   });
 
+  it("隔离另写的声明：一行说明与哪个程序同一程序；钥匙用 agent_id 绑到它；权限卡、在哪里做按它自己的标识存", async () => {
+    const s = server({ live: [hermes(1, "active"), daily()], tokens: [{ id: "k9", kind: "delegate", harness: "hermes", agent_id: "agent_1", label: "daily-key" }] });
+    const v = mount(s.impl);
+    const row = await screen.findByRole("listitem", { name: "日常" });
+    expect(row).toHaveTextContent("与 Hermes 同一程序，单独一张权限卡");
+    expect(within(row).getByText("可用")).toBeInTheDocument(); // 绑到它的钥匙算它的
+    expect(within(await screen.findByRole("listitem", { name: "Hermes" })).getByText(/还差一步/)).toBeInTheDocument(); // 不算到程序头上
+    v.unmount();
+    mount(s.impl, "/settings/agents/agent_1");
+    const c = await card("日常");
+    expect(c.getByText(/与 Hermes 同一程序/)).toBeInTheDocument();
+    expect(c.getByRole("link", { name: "它的执行者与默认参数在执行者页" })).toHaveAttribute("href", "/executors");
+    const keys = within(c.getByRole("group", { name: "钥匙" }));
+    await userEvent.click(keys.getByRole("radio", { name: /APA 内部/ }));
+    await userEvent.click(keys.getByRole("button", { name: "生成钥匙" }));
+    await waitFor(() => expect(writes(s, "/settings/tokens")[0].body).toEqual({ kind: "delegate", harness: "hermes", agent_id: "agent_1", audience: "internal" }));
+  });
+
+  it("旧地址 /settings/agents/legacy:<程序> 落到这个 Agent 的页面", async () => {
+    mount(server({ live: [hermes(1, "active")] }).impl, "/settings/agents/legacy:hermes");
+    expect((await card()).getByRole("region", { name: "接入" })).toBeInTheDocument();
+  });
+
   it("限制清单列出权限卡之外影响它的设置、改不了的规则与最近被拦下的次数；「它做过什么」直达按这个 Agent 筛好的记录", async () => {
-    const card1 = { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1 };
-    mount(server({ live: [hermes(1, "active")], cards: [card1] }).impl, "/settings/agents/agent_1");
+    mount(server({ live: [hermes(1, "active"), daily()] }).impl, "/settings/agents/agent_1");
     const c = await card("日常");
     const others = within(await c.findByRole("region", { name: "还有这些设置会影响它" }));
     expect(others.getByText("各项目允许的执行者：3 个项目设了名单")).toBeInTheDocument();
@@ -260,10 +286,9 @@ describe("设置 › Agent", () => {
 });
 
 describe("设置 › Agent：接入其他 Agent", () => {
-  // 「添加 Agent」的第一步选「接入新的程序」（原「接入其他 Agent」并到这里，界面设计 §4）。
+  // 列表上的「接入新的程序」（一个 Agent 就是一份声明，界面设计 §4）。
   const open = async () => {
-    await userEvent.click(await screen.findByRole("button", { name: "添加 Agent" }));
-    await userEvent.selectOptions(screen.getByLabelText("用哪个程序"), "接入新的程序…");
+    await userEvent.click(await screen.findByRole("button", { name: "＋ 接入新的程序" }));
     return within(screen.getByRole("region", { name: "接入新的程序" }));
   };
 
@@ -420,15 +445,17 @@ describe("设置 › Agent：同页多处保存共用的策略版本号", () => 
     return impl;
   }
 
-  it("改了「Agent 运行失败」提醒之后，分工仍能保存", async () => {
-    mount(versioned({ live: [hermes(1, "active")] }));
+  it("改了「Agent 运行失败」提醒之后，规则用哪个执行者仍能保存", async () => {
+    const K = "background-run/event_rules/handle-labelled";
+    mount(versioned({ live: [hermes(1, "active")], rules: [{ key: K, pack: "background-run", group: "event_rules", id: "handle-labelled", mode: "auto", class: "action", runner: "main_session" } as any] }));
     const failed = within(await screen.findByRole("radiogroup", { name: "Agent 运行失败时" }));
     await userEvent.click(failed.getByRole("radio", { name: /不提醒/ }));
     await screen.findByText("已保存");
-    const roles = within(screen.getByRole("region", { name: "分工" }));
-    await userEvent.selectOptions(roles.getByRole("combobox", { name: /日常 Agent/ }), "legacy:hermes");
-    expect(await roles.findByText("已保存")).toBeInTheDocument();
-    expect(roles.queryByRole("alert")).toBeNull();
+    const rule = within(document.getElementById("rule-" + K)!);
+    await userEvent.click(await rule.findByRole("button", { name: "改" }));
+    await userEvent.selectOptions(rule.getByRole("combobox", { name: "用哪个执行者" }), "hermes");
+    expect(await rule.findByText("已保存")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("权限卡连着保存两次都成功", async () => {

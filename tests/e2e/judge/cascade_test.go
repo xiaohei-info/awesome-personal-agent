@@ -305,13 +305,13 @@ func TestFlowAgentCascade(t *testing.T) {
 
 	f.step(t, "ACT-CAS-10 harness 不可用时账本照常", func(t *testing.T) {
 		f.reset()
-		f.webOK("PUT", "/settings/policy", `{"default_harness":""}`, 200)
-		defer f.webOK("PUT", "/settings/policy", `{"default_harness":"`+harnessName+`"}`, 200)
+		f.webOK("PUT", "/settings/policy", `{"default_executor":"","main_executor":""}`, 200)
+		defer f.webOK("PUT", "/settings/policy", `{"default_executor":"`+harnessName+`","main_executor":"`+harnessName+`"}`, 200)
 		f.ModelStub.When("ACCRELAYGEN", reply(`{"insufficient_info":true}`))
 		id := relay("cas10")
 		_ = id
-		// 2026-11-20 改写：原等待接力终止于 needs_input；任务型没拉起是事件：诊断页有原因含 harness 的 task_refused 通知，事项不转 needs_input。
-		f.waitFor("接力终止于没拉起的通知", 20*time.Second, func() bool { return f.NoticeWith("task_refused", "harness") >= 1 })
+		// 2026-11-20 改写：原等待接力终止于 needs_input；任务型没拉起是事件：诊断页有原因为没选执行者的 task_refused 通知，事项不转 needs_input。
+		f.waitFor("接力终止于没拉起的通知", 20*time.Second, func() bool { return f.NoticeWith("task_refused", "还没选") >= 1 })
 		if f.hasPhase("cas10", "needs_input") {
 			t.Errorf("没拉起不应把事项转 needs_input")
 		}

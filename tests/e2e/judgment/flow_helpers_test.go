@@ -98,7 +98,7 @@ STUB_HARNESS_MODE=summary-only exec %[5]s "$@"
 		f.t.Fatalf("apa declare: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	f.webOK("POST", "/settings/declarations/acc-jrc-run/1/confirm", "", 200)
-	f.webOK("PUT", "/settings/policy", `{"default_harness":"acc-jrc-run"}`, 200)
+	f.webOK("PUT", "/settings/policy", `{"default_executor":"acc-jrc-run","main_executor":"acc-jrc-run"}`, 200)
 	pack := "name: " + runPack + "\nversion: 1.0.0\ndescription: 验收：来源事项进入 open 时在该事项上起后台运行\nevent_rules:\n" +
 		"  - id: run-on-item\n    mode: observe\n    when: {event: item.phase_changed, to_phase: open, source: " + f.srcID + "}\n" +
 		"    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: read, cwd: run_dir}]\n"
@@ -312,7 +312,7 @@ func (f *fx) briefSpotCheck(t *testing.T) {
 			t.Fatalf("%s 应被忽略: %+v", k, e)
 		}
 	}
-	f.webOK("PUT", "/settings/policy", `{"default_harness":"acc-stub"}`, 200)
+	f.webOK("PUT", "/settings/policy", `{"default_executor":"acc-stub","main_executor":"acc-stub"}`, 200)
 	f.webOK("POST", "/instances", `{"pack":"brief","params":{"schedule":"5m"}}`, 201)
 	f.TCAdvance(300)
 	var mat string

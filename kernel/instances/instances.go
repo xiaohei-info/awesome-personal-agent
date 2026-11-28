@@ -286,7 +286,7 @@ func existing(tx *store.Tx, id string) (authz.Object, error) {
 	return authz.Object{ID: id}, nil
 }
 
-// agentTier：安排的新建与修改是 3a（改日常）；改了参数里的 agent_id（后台由谁干）是 3b（§14.3）。
+// agentTier：安排的新建与修改是 3a（改日常）；改了参数里的 executor（后台由谁干）是 3b（§14.3）。
 func agentTier(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.RawMessage) (authz.Group, error) {
 	var change struct {
 		ID     string
@@ -298,10 +298,10 @@ func agentTier(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.RawMes
 	}
 	agent := func(params json.RawMessage) string {
 		var v struct {
-			Agent string `json:"agent_id"`
+			Executor string `json:"executor"`
 		}
 		_ = json.Unmarshal(params, &v)
-		return v.Agent
+		return v.Executor
 	}
 	old := ""
 	if change.ID != "" {
@@ -576,4 +576,42 @@ func HandleTimer(tx *store.Tx, c clock.Command) error {
 	_, err = eventlog.Append(tx, domain.Event{Type: EvFired, Object: in.ID, Actor: c.Actor,
 		Reason: "timer elapsed", Payload: b, ChainDepth: depth, At: c.Due})
 	return err
+}
+
+// RemapExecutor 是执行者统一切换的一步（§16.5）：把安排参数里旧的 agent_id（Agent 卡 id）换成 executor
+// （m 里没有对应执行者的去掉），每条记一次 instance.updated。只由切换调用；返回改过的安排 id。
+func RemapExecutor(tx *store.Tx, m map[string]string, actor domain.Actor, at time.Time) ([]string, error) {
+	all, err := List(tx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, in := range all {
+		var params map[string]json.RawMessage
+		if json.Unmarshal(in.Params, &params) != nil || params["agent_id"] == nil {
+			continue
+		}
+		var old string
+		_ = json.Unmarshal(params["agent_id"], &old)
+		delete(params, "agent_id")
+		if id := m[old]; id != "" {
+			params["executor"], _ = json.Marshal(id)
+		}
+		if in.Params, err = json.Marshal(params); err != nil {
+			return nil, err
+		}
+		if err := save(tx, in); err != nil {
+			return nil, err
+		}
+		b, err := json.Marshal(in)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := eventlog.Append(tx, domain.Event{Type: EvUpdated, Object: in.ID, Actor: actor,
+			Reason: "executor switch: agent card → executor", Payload: b, At: at}); err != nil {
+			return nil, err
+		}
+		ids = append(ids, in.ID)
+	}
+	return ids, nil
 }

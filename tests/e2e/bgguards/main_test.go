@@ -40,7 +40,7 @@ func TestFlowBgMainSession(t *testing.T) {
 	f := setup(t)
 	// ACT-BGM-01：权限上限 edit、默认 harness 为替身、work-host.cli 在名单内；规则初始 observe。
 	for _, h := range []string{harness, harnessNoResume} {
-		f.webOK("PUT", "/settings/agents/legacy:"+h+"/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"edit"}`, 200)
+		f.webOK("PUT", "/settings/agents/"+h+"/card", `{"groups":{"view":{},"organize":{},"source_events":{}},"tool":"edit"}`, 200)
 	}
 	for _, r := range []string{"bgm-created", "bgm-reopen", "bgm-explicit"} {
 		if !strings.Contains(f.webOK("GET", "/rules", "", 200), `"mode":"observe"`) {

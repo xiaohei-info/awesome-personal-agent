@@ -96,7 +96,9 @@ func TestFlowDataNotInstructions(t *testing.T) {
 	for _, r := range []string{"inj-task", "inj-follow", "inj-bg"} {
 		k.webOK("PATCH", "/v1/rules/"+url.PathEscape(injPack+"/event_rules/"+r)+"/mode", `{"mode":"auto"}`, 200)
 	}
-	harness := func(name string) { k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"`+name+`"}`, 200) }
+	harness := func(name string) {
+		k.webOK("PUT", "/v1/settings/policy", `{"default_executor":"`+name+`","main_executor":"`+name+`"}`, 200)
+	}
 	add := func(project, title, body, tags, assignee string) string {
 		args := []string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--project", k.Projects[project]}
 		if body != "" {
