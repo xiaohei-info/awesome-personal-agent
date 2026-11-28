@@ -639,6 +639,7 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		it       domain.Item
 		started  bool // 委派即开工的运行（有委派记录）
 		reported bool // 运行者自己用运行凭据回执过
+		resulted bool // 这次运行期间有过"完成"或"卡住"的回执
 		hl       executors.Headless
 	)
 	read := func(tx *store.Tx) (err error) {
@@ -650,7 +651,9 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		}
 		reps, err := delegation.Reports(tx, it.ID)
 		for _, r := range reps {
+			mine := r.Actor.Run == run.ID || run.StartedAt != nil && !r.At.Before(*run.StartedAt) // 运行期间经句柄或插件的回执也算
 			reported = reported || r.Actor.Run == run.ID
+			resulted = resulted || mine && (r.Outcome == delegation.OutcomeDone || r.Outcome == delegation.OutcomeBlocked)
 		}
 		if err == nil {
 			hl, _, err = executors.ActiveHeadless(tx, run.Harness)
@@ -678,8 +681,15 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 	case it.Phase == domain.PhaseOpen:
 		failure = "运行结束，事项仍是 open，没有回执"
 	}
+	switch {
+	case started: // 委派即开工：结局只经委派结果通知告诉发起方（delegation.Started），不另问本人
+		if failure != "" && !resulted && (it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting) {
+			if err := s.unreported(ctx, run, it.ID, failure); err != nil {
+				return err
+			}
+		}
 	// 运行故障是事件不是问题：记 run.finished（带类别码）并进健康视图，事项阶段不变；跑完了却没交回才问本人（§6.14 第 20 条）。
-	if failure != "" && !faulted && it.Phase != domain.PhaseNeedsInput && !it.Phase.Terminal() { // 运行者自己提了问题就保留它的问题
+	case failure != "" && !faulted && it.Phase != domain.PhaseNeedsInput && !it.Phase.Terminal(): // 运行者自己提了问题就保留它的问题
 		if err := s.needsInput(ctx, it.ID, failure); err != nil {
 			return err
 		}
@@ -691,24 +701,31 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 	return s.record(ctx, run, it.ID, sid, failure, started && len(hl.Resume) > 0)
 }
 
-// fallback 以内核身份把 stdout 里的回报结构写成回执：报 done 却没带结果证据时按进展记，内核不替执行者补证据。
+// fallback 以内核身份把 stdout 里的回报结构写成回执：没有证据时摘要就是完成依据（§6.14 第 3 条），内核不替执行者补证据。
 func (s *Service) fallback(ctx context.Context, run domain.Run, item string, r map[string]string) error {
 	ev := map[string]string{}
-	for _, k := range []string{"pr", "commit", "branch", "link"} {
+	for _, k := range []string{"pr", "commit", "branch", "link", "file"} {
 		if r[k] != "" {
 			ev[k] = r[k]
 		}
 	}
-	outcome := r["outcome"]
-	if outcome == delegation.OutcomeDone && len(ev) == 0 {
-		outcome = delegation.OutcomeProgress
-	}
-	b, _ := json.Marshal(map[string]any{"id": item, "outcome": outcome, "summary": r["summary"], "evidence": ev,
+	b, _ := json.Marshal(map[string]any{"id": item, "outcome": r["outcome"], "summary": r["summary"], "evidence": ev,
 		"reason": "run " + run.ID + " returned its report on stdout"})
 	a := system
 	a.OnBehalfOf, a.Run = s.o.Owner, run.ID
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate}, Command: "delegate.report",
 		Input: b, Owner: s.o.Owner, IdemKey: "background:fallback:" + run.ID})
+	return err
+}
+
+// unreported 以内核身份给没交回结果的委派运行记一条"卡住"回执：发起方经委派结果通知只收到这一条（§7.4）。
+func (s *Service) unreported(ctx context.Context, run domain.Run, item, failure string) error {
+	b, _ := json.Marshal(map[string]any{"id": item, "outcome": delegation.OutcomeBlocked, "summary": failure,
+		"reason": "run " + run.ID + " ended without a result"})
+	a := system
+	a.OnBehalfOf, a.Run = s.o.Owner, run.ID
+	_, err := s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate}, Command: "delegate.report",
+		Input: b, Owner: s.o.Owner, IdemKey: "background:unreported:" + run.ID})
 	return err
 }
 

@@ -406,8 +406,8 @@ func CheckEntry(it Item, to Phase, reason string, hasEvidence bool) *Error {
 		return NewError(CodeInvalidRequest, "waiting 阶段必须有 waiting_on", "先设置 waiting_on")
 	case to == PhaseNeedsInput && it.Ask == nil:
 		return NewError(CodeInvalidRequest, "needs_input 阶段必须有 ask", "先写入决策请求")
-	case to == PhaseDone && it.Kind == KindDelegation && !hasEvidence:
-		return NewError(CodeInvalidRequest, "delegation 进入 done 必须带证据", "随回执提交证据")
+	case to == PhaseDone && it.Kind == KindDelegation && !hasEvidence: // 回执另有依据（摘要），见 delegate.report
+		return NewError(CodeInvalidRequest, "delegation 转 done 必须写明完成依据", "用 apa report --outcome done 带摘要，或在 --evidence 写明结果")
 	}
 	return nil
 }

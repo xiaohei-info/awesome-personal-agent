@@ -75,7 +75,7 @@ func decode(in json.RawMessage, v any) error {
 
 func blank(s string) bool { return strings.TrimSpace(s) == "" }
 
-// Evidence 是回执证据。Link 是第一个链接（旧字段，含义不变）；给了链接时 Links 是全部链接（含第一个）。
+// Evidence 是回执证据。Link 是第一个链接（旧字段，含义不变）；给了链接时 Links 是全部链接（含第一个）。File 是执行者写下的报告文件路径。
 // 输入里的 link 可以是字符串或字符串数组（§7.5、附录 B.2）。
 type Evidence struct {
 	Commit string   `json:"commit,omitempty"`
@@ -83,6 +83,7 @@ type Evidence struct {
 	Branch string   `json:"branch,omitempty"`
 	Link   string   `json:"link,omitempty"`
 	Links  []string `json:"links,omitempty"`
+	File   string   `json:"file,omitempty"`
 }
 
 // UnmarshalJSON 接受 link 为字符串或数组；读回已存事件时 links 也照收。
@@ -93,6 +94,7 @@ func (e *Evidence) UnmarshalJSON(b []byte) error {
 		Branch string          `json:"branch"`
 		Link   json.RawMessage `json:"link"`
 		Links  []string        `json:"links"`
+		File   string          `json:"file"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -112,7 +114,7 @@ func (e *Evidence) UnmarshalJSON(b []byte) error {
 			return invalid("link must be a string or an array of strings")
 		}
 	}
-	*e = Evidence{Commit: raw.Commit, PR: raw.PR, Branch: raw.Branch}
+	*e = Evidence{Commit: raw.Commit, PR: raw.PR, Branch: raw.Branch, File: strings.TrimSpace(raw.File)}
 	for _, l := range links {
 		if l = strings.TrimSpace(l); l != "" {
 			e.Links = append(e.Links, l)
@@ -125,7 +127,7 @@ func (e *Evidence) UnmarshalJSON(b []byte) error {
 }
 
 func (e Evidence) empty() bool {
-	return blank(e.Commit) && blank(e.PR) && blank(e.Branch) && blank(e.Link)
+	return blank(e.Commit) && blank(e.PR) && blank(e.Branch) && blank(e.Link) && blank(e.File)
 }
 
 // Report 是一次回执的内容，随 delegation.reported 事件保存。
@@ -572,13 +574,10 @@ func checkReport(tx *store.Tx, child domain.Item, v reportIn) error {
 	default:
 		return conflict("the item is already "+string(child.Phase)+"; reports are only accepted on live items", "re-read the item")
 	}
-	if v.Outcome == OutcomeDone {
-		if e := domain.CheckEntry(child, domain.PhaseDone, "reported done", !v.Evidence.empty()); e != nil {
-			return e
-		}
-		if v.Evidence.empty() { // 任何 kind 报 done 都要结果证据（§6.14 第 3 条）；CheckEntry 只管 delegation 的进入约束
-			return domain.NewError(domain.CodeInvalidRequest, "reporting done needs result evidence (pr, commit, branch or link)", "report progress or blocked instead, or attach the result")
-		}
+	// 完成依据（§6.14 第 3 条）：委派子事项有 PR、commit、分支、链接或报告文件就作证据，没有时回执摘要本身就是结果（摘要必填）；
+	// 其他事项（任务型运行写回的目标）报 done 仍要结果证据，结果写在账本里的由内核代转（§8.4）。
+	if v.Outcome == OutcomeDone && child.Kind != domain.KindDelegation && v.Evidence.empty() {
+		return domain.NewError(domain.CodeInvalidRequest, "reporting done needs result evidence (pr, commit, branch, link or file)", "report progress or blocked instead, or attach the result")
 	}
 	if pr := strings.TrimSpace(v.Evidence.PR); pr != "" {
 		if owner, ok, err := Lookup(tx, pr); err != nil {

@@ -202,19 +202,20 @@ func TestFlowAuthzMatrix(t *testing.T) {
 			t.Errorf("变更应都记 Event，project.updated 只有 %d 条: %v", n, kinds)
 		}
 	})
-	// 2026-11-20 改写：把本人的事项标为完成不离开"建议"或"等你决定"，是一档；回执的 done 仍要结果证据。
-	k.step("ACT-AUTH-09 delegate 把本人的事项标为完成是一档，回执 done 仍要结果证据", func(t *testing.T) {
+	// 2026-11-20 改写：把本人的事项标为完成不离开"建议"或"等你决定"，是一档；回执的 done 要有完成依据（2026-11-28：委派以摘要为依据）。
+	k.step("ACT-AUTH-09 delegate 把本人的事项标为完成是一档，回执 done 要有完成依据", func(t *testing.T) {
 		own := k.ownItem("acc-open", "AUTH-I9")
 		k.expect("只整理的 delegate transition done", k.run(k.DELO, nil, "item", "transition", own, "--to", "done", "--reason", "x"), 0)
 		eq(t, "AUTH-I9 阶段", k.phase(own), "done")
-		// DEL 自己委派出去的子事项：回执标记完成缺结果证据，退出码 2。
+		// DEL 自己委派出去的子事项：摘要为空的 done 退出码 2；有摘要就是完成依据。
 		parent := k.addItem("acc-open", workHost)
 		child := k.idOf("delegate", k.delegate("--parent", parent, "--assignee", workHost))
 		before := k.version(child)
-		k.expect("缺结果证据的 done", k.run(k.DEL, nil, "report", child, "--outcome", "done", "--summary", "完成"), exitInvalid)
+		k.expect("没有摘要的 done", k.run(k.DEL, nil, "report", child, "--outcome", "done", "--summary", ""), exitInvalid)
 		if k.version(child) != before || k.phase(child) == "done" {
-			t.Error("缺结果证据的 done 不应被接受")
+			t.Error("没有摘要的 done 不应被接受")
 		}
+		k.expect("以摘要为依据的 done", k.run(k.DEL, nil, "report", child, "--outcome", "done", "--summary", "完成"), 0)
 	})
 
 	k.step("ACT-AUTH-10 二档看档位：只整理得 23，放开后生效", func(t *testing.T) {

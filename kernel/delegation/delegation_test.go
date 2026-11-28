@@ -312,8 +312,7 @@ func TestReportValidation(t *testing.T) {
 	child := e.delegate(t, e.as("DEL"), parent, workHost)
 	other := e.delegate(t, e.as("DEL"), parent, workHost)
 
-	// done 没有证据：拒绝，子事项不变。
-	e.wantExit(t, domain.ExitUsage, e.as("WRK"), "delegate.report", rep(child, "done", Evidence{}))
+	// 结局取值不对、摘要为空：拒绝，子事项不变（没有证据的 done 见 TestReportDoneBasis）。
 	e.wantExit(t, domain.ExitUsage, e.as("WRK"), "delegate.report", rep(child, "finished", Evidence{Link: "x"}))
 	bad := rep(child, "progress", Evidence{})
 	bad["summary"] = " "
@@ -617,21 +616,25 @@ func TestDelegateReceiptBindsToInitiatorOnly(t *testing.T) {
 	}
 }
 
-// §6.14 第 3 条：报 done 对任何 kind 都必须带结果证据，缺失为 2 且事项不变。
-func TestReportDoneNeedsResultEvidenceForAnyKind(t *testing.T) {
+// §6.14 第 3 条（2026-11-28 推广）：委派子事项报 done 时摘要就是完成依据，证据（含报告文件）有就附上；
+// 其他事项报 done 仍要结果证据，缺失为 2 且事项不变。
+func TestReportDoneBasis(t *testing.T) {
 	e := setup(t)
 	task := e.id(t, e.must(t, owner, "item.create", map[string]any{"kind": "task", "title": "t", "phase": "open", "assignee": workHost}))
-	for _, id := range []string{task, e.delegate(t, e.as("DEL"), e.parent(t, ""), workHost)} {
-		who := e.as("DEL")
-		e.wantExit(t, domain.ExitUsage, who, "delegate.report", rep(id, "done", Evidence{}))
-		e.wantExit(t, domain.ExitUsage, who, "delegate.report", rep(id, "done", Evidence{PR: "  "}))
-		if got := e.item(t, id); got.Phase != domain.PhaseOpen {
-			t.Fatalf("done without result moved the item: %+v", got)
-		}
+	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.report", rep(task, "done", Evidence{PR: "  "}))
+	if got := e.item(t, task); got.Phase != domain.PhaseOpen {
+		t.Fatalf("done without result moved the task: %+v", got)
 	}
-	e.must(t, e.as("DEL"), "delegate.report", rep(task, "done", Evidence{Branch: "fix/x"}))
+	e.must(t, e.as("DEL"), "delegate.report", rep(task, "done", Evidence{File: "reports/x.md"}))
 	if got := e.item(t, task); got.Phase != domain.PhaseDone {
-		t.Fatalf("task with result evidence: %+v", got)
+		t.Fatalf("task with a report file: %+v", got)
+	}
+	parent := e.parent(t, "")
+	child := e.delegate(t, e.as("DEL"), parent, workHost)
+	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.report", map[string]any{"id": child, "outcome": "done", "summary": "  "})
+	e.must(t, e.as("DEL"), "delegate.report", rep(child, "done", Evidence{}))
+	if got := e.item(t, child); got.Phase != domain.PhaseDone {
+		t.Fatalf("a delegated item is done on its summary: %+v", got)
 	}
 }
 
@@ -652,9 +655,9 @@ func TestRejectedReceiptTurnsChildToNeedsInputAndAlerts(t *testing.T) {
 		return
 	}
 
-	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.report", rep(child, "done", Evidence{}))
+	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.report", map[string]any{"id": child, "outcome": "done", "summary": ""})
 	if got := e.item(t, child); got.Phase != domain.PhaseOpen || len(alerts()) != 1 {
-		t.Fatalf("done without evidence: phase=%s alerts=%d", got.Phase, len(alerts()))
+		t.Fatalf("done without a summary: phase=%s alerts=%d", got.Phase, len(alerts()))
 	}
 
 	if _, err := e.doBare(e.as("WRK2"), "delegate.report", rep(child, "progress", Evidence{})); exitOf(err) != domain.ExitPermissionDenied {

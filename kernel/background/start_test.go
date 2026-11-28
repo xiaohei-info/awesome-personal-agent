@@ -157,3 +157,62 @@ func TestStartedDelegationResultNotifiesWhoStartedIt(t *testing.T) {
 		t.Fatalf("catching up again (after a restart) must not queue it twice: %+v", again)
 	}
 }
+
+// 一次卡住只通知一次（§7.4 delegation_result）：执行者报"卡住"、或运行结束没交回结果（内核代记"卡住"），发起方只收到一条委派结果通知；
+// 不另转"等你决定"问本人，也不再按运行失败推送。
+func TestStartedDelegationStuckNotifiesOnce(t *testing.T) {
+	for name, out := range map[string]string{
+		"executor reports blocked": `printf '{"outcome":"blocked","summary":"need creds"}\n'`,
+		"run returns nothing":      `exit 0`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t, 0)
+			e.svc.Attach(e.x)
+			e.declareStartable()
+			if err := os.WriteFile(filepath.Join(e.dir, "px.sh"), []byte(out+"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			parent := e.newItem("ship it", nil, nil)
+			e.open(parent)
+			var child struct{ ID string }
+			_ = json.Unmarshal(e.must(owner, "delegate.create", map[string]any{"parent": parent, "assignee": "px.quick", "title": "README", "start": true}).Value, &child)
+			e.waitResult()
+			if c := e.item(child.ID); c.Phase != domain.PhaseOpen || c.Ask != nil || !strings.HasPrefix(c.StatusLabel, "blocked: ") {
+				t.Fatalf("the child stays open with a blocked receipt, no question: %s %+v %q", c.Phase, c.Ask, c.StatusLabel)
+			}
+			a := attention.New(attention.Options{Queue: delivery.New(delivery.Options{Now: e.clock}), Now: e.clock})
+			if err := e.st.Update(bg, a.Sync); err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			if err := e.st.View(bg, func(tx *store.Tx) error {
+				all, err := delivery.Since(tx, t0.Add(-time.Hour))
+				for _, s := range all {
+					if s.Item == child.ID {
+						ids = append(ids, s.ID)
+					}
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(ids) != 1 || !strings.HasPrefix(ids[0], delivery.ResultPrefix) {
+				t.Fatalf("exactly one notice for the stuck child, the delegation result: %v", ids)
+			}
+			// 子事项放弃后，还没读的"卡住了"不再留在 Web 未读。
+			e.must(owner, "item.transition", map[string]any{"id": child.ID, "to": "dropped", "reason": "not needed"})
+			if err := e.st.Update(bg, a.Sync); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.st.View(bg, func(tx *store.Tx) error {
+				d, err := delivery.New(delivery.Options{}).Get(tx, ids[0])
+				if err == nil && d.State != domain.DeliverySuperseded {
+					t.Errorf("the unread stuck notice of a dropped child is withdrawn, state = %s", d.State)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

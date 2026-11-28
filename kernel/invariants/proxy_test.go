@@ -68,10 +68,16 @@ func getItem(t *testing.T, st *store.Store, id string) (it domain.Item) {
 	return
 }
 
-// 不变量 3（后半）：delegate.report 报 done 必带结果证据，任何 kind 都如此，第一档（绑定的事项）也一样；缺失为 2，事项不变。
+// 不变量 3（后半，2026-11-28 推广）：委派子事项报 done 以摘要为完成依据；其他事项报 done 必带结果证据，
+// 第一档（绑定的事项）也一样；缺失为 2，事项不变。
 func TestInv3ReportDoneNeedsResultEvidence(t *testing.T) {
 	st, x, _ := proxyKernel(t)
-	for _, kind := range []string{"task", "delegation"} {
+	id := idOf(mustDo(t, x, owner, "item.create", map[string]any{"title": "d", "kind": "delegation", "phase": "open", "assignee": "dlg"}))
+	if _, err := x.Do(bg, command.Request{Identity: delegate, Command: "delegate.report", Owner: "owner",
+		Input: jsonOf(t, map[string]any{"id": id, "outcome": "done", "summary": "s"})}); err != nil || getItem(t, st, id).Phase != domain.PhaseDone {
+		t.Errorf("delegation done on its summary: %v", err)
+	}
+	for _, kind := range []string{"task"} {
 		id := idOf(mustDo(t, x, owner, "item.create", map[string]any{"title": kind, "kind": kind, "phase": "open", "assignee": "dlg"}))
 		report := func(ev map[string]any) error {
 			// 对绑定的事项（assignee 即 dlg）回执是第一档：不带本人原话。

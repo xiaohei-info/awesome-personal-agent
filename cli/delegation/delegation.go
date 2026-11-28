@@ -131,7 +131,8 @@ type linkFlag []string
 func (l *linkFlag) String() string     { return strings.Join(*l, ",") }
 func (l *linkFlag) Set(v string) error { *l = append(*l, v); return nil }
 
-const reportUsage = "usage: apa report (<id> | --session <dispatch session handle>) --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link]... [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]"
+const reportUsage = "usage: apa report (<id> | --session <dispatch session handle>) --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link --file <report file>]... [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]; " +
+	"done on a delegated item needs no PR: the summary (required) is the result, evidence is attached when there is one"
 
 func report(c *client.Ctx, args []string) error {
 	id := ""
@@ -143,7 +144,7 @@ func report(c *client.Ctx, args []string) error {
 	outcome, summary := fs.String("outcome", "", ""), fs.String("summary", "", "")
 	cursor, reason, version, key := fs.String("ack-cursor", "", ""), fs.String("reason", "", ""), fs.String("version", "", ""), fs.String("idempotency-key", "", "")
 	ev := map[string]*string{}
-	for _, n := range []string{"pr", "commit", "branch"} {
+	for _, n := range []string{"pr", "commit", "branch", "file"} {
 		ev[n] = fs.String(n, "", "")
 	}
 	var links linkFlag // --link 可重复：库内链接在报 done 时由内核登记为产出（主文档 §7.5）

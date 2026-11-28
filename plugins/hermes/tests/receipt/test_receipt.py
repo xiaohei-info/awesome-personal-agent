@@ -206,9 +206,9 @@ def test_done_carries_the_extracted_result_evidence(apa, summary, flag_name, val
     assert flag(argv, "--outcome") == "done" and flag(argv, flag_name) == value
 
 
-def test_done_without_any_result_is_reported_as_progress(apa):
+def test_done_without_any_result_is_still_done(apa):  # the summary is the result on a delegated item
     argv = report_of(apa, "finished, everything looks good")
-    assert flag(argv, "--outcome") == "progress"
+    assert flag(argv, "--outcome") == "done"
     assert not {"--pr", "--commit", "--branch", "--link"} & set(argv)
 
 
@@ -288,8 +288,9 @@ def test_resend_gives_up_after_a_bounded_number_of_tries(apa, hooks):
     "the commit added nothing",
     "no PR yet",
 ])
-def test_prose_mentioning_branch_commit_or_pr_stays_progress(apa, prose):
-    assert flag(report_of(apa, prose), "--outcome") == "progress"
+def test_prose_mentioning_branch_commit_or_pr_carries_no_evidence(apa, prose):
+    argv = report_of(apa, prose)
+    assert flag(argv, "--outcome") == "done" and not {"--pr", "--commit", "--branch", "--link"} & set(argv)
 
 
 @pytest.mark.parametrize("prose,value", [
