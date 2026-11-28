@@ -20,7 +20,6 @@ export const Close = make("close", <path d="M6 6l12 12M18 6L6 18" />);
 export const Search = make("search", <><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></>);
 export const Undo = make("undo", <><path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 010 11H11" /></>);
 export const External = make("external", <><path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" /></>);
-export const Plus = make("plus", <path d="M12 5v14M5 12h14" />);
 export const Up = make("up", <path d="M6 15l6-6 6 6" />);
 export const Down = make("down", <path d="M6 9l6 6 6-6" />);
 export const Spinner = make("spinner", <path d="M12 3a9 9 0 109 9" />);

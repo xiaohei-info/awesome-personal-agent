@@ -64,10 +64,10 @@ details.disc::details-content {
 }
 details.disc[open]::details-content { block-size: auto; opacity: 1; }
 /* 没换成 Disclosure 的原生 details（页面里的「说明」「高级」等）：同一个箭头与摘要行的样子，没有高度动画 */
-details:not(.disc) > summary { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; list-style: none; cursor: pointer; }
+details:not(.disc) > summary { padding-block: 6px; list-style: none; cursor: pointer; }
 details:not(.disc) > summary::-webkit-details-marker { display: none; }
 details:not(.disc) > summary::before {
-  content: ""; flex: none; width: 6px; height: 6px; margin: 0 5px 0 3px; border-right: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3);
+  content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 2px 3px; vertical-align: middle; border-right: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3);
   transform: rotate(-45deg); transition: transform var(--dur-std) var(--ease-out);
 }
 details[open]:not(.disc) > summary::before { transform: rotate(45deg); }
