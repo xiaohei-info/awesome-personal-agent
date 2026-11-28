@@ -10,7 +10,7 @@ import { feature } from "./index";
 // api/why（GET /audit/events）的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-function server() {
+function server(evidence: object = { pr: "https://x/pull/42" }) {
   let execs = [
     { id: "hermes.paseo.mbp.quick", kind: "remote-agent", host: "mbp", harness: "hermes", label: "Paseo · quick @ mbp" },
     { id: "hermes.delegate_task.apa", kind: "native-subagent", host: "apa", harness: "hermes", label: "Hermes 子 agent @ apa" },
@@ -23,7 +23,7 @@ function server() {
     { id: "c2", phase: "done", title: "写周报", assignee: "hermes.paseo.mbp.quick" },
     { id: "c3", phase: "open", title: "问律师", assignee: "lawyer" },
   ];
-  const events = [{ seq: 7, object: "c2", at: "2030-01-01T00:00:00Z", payload: { report: { outcome: "done", summary: "周报已写", evidence: { pr: "https://x/pull/42" } } } }];
+  const events = [{ seq: 7, object: "c2", at: "2030-01-01T00:00:00Z", payload: { report: { outcome: "done", summary: "周报已写", evidence } } }];
   const dispatches = [
     { id: "dsp_1", item: "c1", executor: "hermes.paseo.mbp.quick", session: "agt_1", state: "ended", resumable: true },
     { id: "dsp_0", item: "c2", executor: "hermes.paseo.mbp.quick", session: "agt_0", state: "lost", resumable: false },
@@ -90,6 +90,13 @@ describe("谁在替你干活（§6.17）", () => {
     await userEvent.selectOptions(pick, "provider/model-a");
     expect(s.puts).toEqual([{ values: { model: "provider/model-a" } }]);
     expect(within(await screen.findByRole("article", { name: "自动化" })).getByRole("combobox", { name: /模型/ })).toHaveValue("provider/model-a");
+  });
+
+  it("回执带多个链接（link 与 links 数组并存）：页面照常渲染，每个链接都列出", async () => {
+    mount(server({ pr: "https://x/pull/1", link: "https://x/a", links: ["https://x/a", "https://x/b"] }).impl);
+    const paseo = await screen.findByRole("article", { name: "Paseo · quick @ mbp" });
+    expect(within(paseo).getAllByRole("link", { name: "link" }).map((a) => a.getAttribute("href"))).toEqual(["https://x/a", "https://x/b"]);
+    expect(within(paseo).getByRole("link", { name: "pr" })).toHaveAttribute("href", "https://x/pull/1");
   });
 
   it("手上没事的名录条目可以移除 → DELETE /executors/{id}", async () => {
