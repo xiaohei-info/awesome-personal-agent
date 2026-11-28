@@ -227,9 +227,9 @@ func TestFlowBootstrap(t *testing.T) {
 				t.Errorf("模板缺少声明 %q", want)
 			}
 		}
-		// 约 600 token：按 4 字符/token 估，上限 2400 字符。
-		if n := len(tmpl.Stdout); n > 2400 {
-			t.Errorf("模板 %d 字符，超过约 600 token", n)
+		// 约 1000 token（含按权限卡生成的工作台约定）：按 4 字符/token 估，上限 4000 字符。
+		if n := len(tmpl.Stdout); n > 4000 {
+			t.Errorf("模板 %d 字符，超过约 1000 token", n)
 		}
 		for name, out := range map[string]string{"guide": guide.Stdout, "template": tmpl.Stdout} {
 			if strings.Contains(out, marker) {
