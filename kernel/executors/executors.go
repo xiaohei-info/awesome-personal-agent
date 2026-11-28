@@ -45,16 +45,20 @@ type Executor struct {
 	Kind      string   `json:"kind"`
 	Scenarios []string `json:"scenarios,omitempty"`
 	Host      string   `json:"host,omitempty"`
+	// Label 与 Handle 是声明里给这个执行者的显示名与定位信息（与随委派登记的同义，§6.17）；
+	// 声明的 executor_args 从 Handle 取值拼到命令后（附录 A.2）。
+	Label  string          `json:"label,omitempty"`
+	Handle json.RawMessage `json:"handle,omitempty"`
 }
 
 // Entry 是名录里的一条：Harness 是登记者（为空是本人维护的旧条目），Label 与 Handle 由登记的插件给出，
 // CreatedAt 是首次登记的时间（旧条目没有）。
 type Entry struct {
 	Executor
-	Harness   string          `json:"harness,omitempty"`
-	Label     string          `json:"label,omitempty"`
-	Handle    json.RawMessage `json:"handle,omitempty"`
-	CreatedAt *time.Time      `json:"created_at,omitempty"`
+	Harness   string     `json:"harness,omitempty"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	// Overrides 是本人在设置页给这个执行者定的可覆盖参数默认值（如默认模型），只能取声明列出的值（附录 A.2）。
+	Overrides map[string]string `json:"overrides,omitempty"`
 }
 
 // Session 的 Assign 与 Extract 二选一。
@@ -75,8 +79,13 @@ type Headless struct {
 	// NoPersona 是本人没开"后台运行带人格和记忆"时追加的标志（附录 A.2）；未声明表示这个宿主不区分。
 	NoPersona []string `json:"no_persona,omitempty"`
 	// Effort 是带思考强度的标志，其中的 {effort} 换成设置里的"后台 Agent 运行"一项；未声明表示这个宿主不区分。
-	Effort     []string         `json:"effort,omitempty"`
-	Credential string           `json:"credential,omitempty"`
+	Effort     []string `json:"effort,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+	// Cancel 是停掉这次运行在执行者那边所起会话的命令（附录 A.2）：运行超时、失败或内核重启时没了进程，
+	// 外呼调用器各调一次；内核杀掉的只是本机的进程，执行者在别处起的会话要靠它停。
+	Cancel *Cancel `json:"cancel,omitempty"`
+	// RemoteArgs 只在执行者不在 APA 主机上时追加：那样的运行不发运行凭据，回报走结构化输出（§13.6）。
+	RemoteArgs []string         `json:"remote_args,omitempty"`
 	ExitCodes  map[string][]int `json:"exit_codes,omitempty"`
 	// ExitOutput 收窄 exit_codes 的同名语义：声明后，还要求 stdout 或 stderr 含其中任一片段（附录 A.2）。
 	ExitOutput map[string][]string `json:"exit_output,omitempty"`
@@ -272,6 +281,31 @@ func (h Headless) ExtractFinalText(stdout []byte) string {
 	return raw
 }
 
+// ExtractSession 按声明的 session.extract 从运行的 stdout 取会话 id：整段是一个 JSON 对象时从它取，否则从最后一个能取到的 JSON 行取。
+func ExtractSession(path string, stdout []byte) string {
+	if path == "" {
+		return ""
+	}
+	get := func(b []byte) string {
+		var obj map[string]any
+		if json.Unmarshal(bytes.TrimSpace(b), &obj) != nil {
+			return ""
+		}
+		s, _ := extractJSONPath(obj, []string{path})
+		return s
+	}
+	if s := get(stdout); s != "" {
+		return s
+	}
+	lines := bytes.Split(stdout, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := get(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 func validJSONPath(p string) bool {
 	if !strings.HasPrefix(p, "$.") || len(p) <= 2 {
 		return false
@@ -339,15 +373,27 @@ func (m *MainSession) Initial() string {
 	return ""
 }
 
+// Cancel 是取消命令：Command 里可用 {run_id} 与 {session_id}，ExecutorArgs 列出要追加的执行者参数（executor_args 的键）。
+type Cancel struct {
+	Command      []string `json:"command"`
+	ExecutorArgs []string `json:"executor_args,omitempty"`
+}
+
 // Declaration 是 `apa declare` 提交或主机配置文件登记的整份声明。
 type Declaration struct {
 	InstanceOptions *InstanceOptions `json:"instance_options,omitempty"`
-	Harness         string           `json:"harness"`
-	Name            *Label           `json:"name,omitempty"` // 界面称呼这个 Agent 的名字（附录 A.2）
-	Headless        *Headless        `json:"headless,omitempty"`
-	MainSession     *MainSession     `json:"main_session,omitempty"`
-	Executors       []Executor       `json:"executors,omitempty"`
-	Selfcheck       *Selfcheck       `json:"selfcheck,omitempty"`
+	// ExecutorArgs 是执行者级参数：键是执行者句柄里的字段，值是 [标志, "{键}"]，句柄里有这个字段才追加（附录 A.2）。
+	// 同一份声明因此能承载多个执行者，共用一张权限卡。
+	ExecutorArgs map[string][]string `json:"executor_args,omitempty"`
+	// Overrides 是可覆盖参数（如模型、思考档）：写法同 executor_args，另列出允许的取值；
+	// 本人给执行者定的默认值与单次委派的覆盖都只能取这里列出的值（附录 A.2）。
+	Overrides   map[string]Override `json:"overrides,omitempty"`
+	Harness     string              `json:"harness"`
+	Name        *Label              `json:"name,omitempty"` // 界面称呼这个 Agent 的名字（附录 A.2）
+	Headless    *Headless           `json:"headless,omitempty"`
+	MainSession *MainSession        `json:"main_session,omitempty"`
+	Executors   []Executor          `json:"executors,omitempty"`
+	Selfcheck   *Selfcheck          `json:"selfcheck,omitempty"`
 }
 
 // Selfcheck 是插件的自检命令（A.1、A.2）：只作数据保存，由 `apa doctor` 在 APA 主机上执行，内核不执行。
@@ -388,6 +434,10 @@ ALTER TABLE executors_entry ADD COLUMN handle TEXT NOT NULL DEFAULT '';
 ALTER TABLE executors_entry ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
 }, {
 	Version: 3, Ledger: 9, Name: "agent-cards", SQL: `CREATE TABLE executors_agent (id TEXT PRIMARY KEY, harness TEXT NOT NULL, name TEXT NOT NULL, options TEXT NOT NULL, enabled INTEGER NOT NULL, rev INTEGER NOT NULL) WITHOUT ROWID;`,
+}, {
+	// 账本结构版本 14（附录 A.2）：本人给执行者定的可覆盖参数默认值。只增列，已有条目为空（不传参，行为不变）。
+	Version: 4, Ledger: 14, Name: "ledger-v14-executor-overrides",
+	SQL: `ALTER TABLE executors_entry ADD COLUMN overrides TEXT NOT NULL DEFAULT '';`,
 }}}
 
 func invalid(format string, a ...any) error {
@@ -431,6 +481,9 @@ func (d Declaration) validate() error {
 	if err := d.InstanceOptions.validate(); err != nil {
 		return err
 	}
+	if err := d.validateArgs(); err != nil {
+		return err
+	}
 	if d.Harness == "" || strings.ContainsAny(d.Harness, " \t\r\n") {
 		return invalid("harness is required and must not contain whitespace")
 	}
@@ -466,8 +519,17 @@ func (d Declaration) validate() error {
 		}
 	}
 	seen := map[string]bool{}
-	for _, e := range d.Executors {
+	for i := range d.Executors {
+		e := &d.Executors[i]
 		if err := e.validate(); err != nil {
+			return err
+		}
+		h, err := ValidateHandle("executors."+e.ID+".handle", e.Handle)
+		if err != nil {
+			return err
+		}
+		e.Handle = h
+		if err := CheckValue("executors."+e.ID+".label", e.Label, 80); err != nil {
 			return err
 		}
 		if seen[e.ID] {
@@ -494,8 +556,12 @@ func (e Executor) validate() error {
 }
 
 var (
-	placeholders = map[string]bool{"{prompt}": true, "{run_dir}": true}
-	accessTiers  = map[string]bool{"read": true, "edit": true, "full": true}
+	// 命令模板的占位符：{run_context} 是运行上下文文件的路径（路径不是凭据，§7.7），{report_schema} 是内核写进运行目录的
+	// 回报结构（JSON Schema）的路径，{run_id} 是这次运行的 id。
+	placeholders       = map[string]bool{"{prompt}": true, "{run_dir}": true, "{run_context}": true, "{run_id}": true, "{report_schema}": true, ExecutorArgsMarker: true}
+	cancelPlaceholders = map[string]bool{"{run_id}": true, "{session_id}": true}
+	remotePlaceholders = map[string]bool{"{report_schema}": true}
+	accessTiers        = map[string]bool{"read": true, "edit": true, "full": true}
 )
 
 func (h *Headless) validate() error {
@@ -506,7 +572,31 @@ func (h *Headless) validate() error {
 		if a == "" {
 			return invalid("headless.command has an empty element")
 		}
-		if err := checkPlaceholders(a); err != nil {
+		if err := checkPlaceholders("headless.command", a, placeholders); err != nil {
+			return err
+		}
+		if a != ExecutorArgsMarker && strings.Contains(a, ExecutorArgsMarker) {
+			return invalid("headless.command: %s must be a whole element", ExecutorArgsMarker)
+		}
+	}
+	if n := slices.Index(h.Command, ExecutorArgsMarker); n == 0 || n >= 0 && slices.Contains(h.Command[n+1:], ExecutorArgsMarker) {
+		return invalid("headless.command: %s may appear once, after the program", ExecutorArgsMarker)
+	}
+	if c := h.Cancel; c != nil {
+		if len(c.Command) == 0 || slices.Contains(c.Command, "") {
+			return invalid("headless.cancel.command must list non-empty argv elements")
+		}
+		for _, a := range c.Command {
+			if err := checkPlaceholders("headless.cancel.command", a, cancelPlaceholders); err != nil {
+				return err
+			}
+		}
+	}
+	for _, a := range h.RemoteArgs {
+		if a == "" {
+			return invalid("headless.remote_args has an empty element")
+		}
+		if err := checkPlaceholders("headless.remote_args", a, remotePlaceholders); err != nil {
 			return err
 		}
 	}
@@ -565,7 +655,7 @@ func (h *Headless) validate() error {
 }
 
 // checkPlaceholders 拒绝命令模板里未登记的 {占位符}。
-func checkPlaceholders(arg string) error {
+func checkPlaceholders(where, arg string, known map[string]bool) error {
 	for rest := arg; ; {
 		i := strings.IndexByte(rest, '{')
 		if i < 0 {
@@ -573,10 +663,10 @@ func checkPlaceholders(arg string) error {
 		}
 		j := strings.IndexByte(rest[i:], '}')
 		if j < 0 {
-			return invalid("headless.command: unclosed placeholder in %q", arg)
+			return invalid("%s: unclosed placeholder in %q", where, arg)
 		}
-		if p := rest[i : i+j+1]; !placeholders[p] {
-			return invalid("headless.command: unknown placeholder %s", p)
+		if p := rest[i : i+j+1]; !known[p] {
+			return invalid("%s: unknown placeholder %s", where, p)
 		}
 		rest = rest[i+j+1:]
 	}
@@ -606,17 +696,22 @@ func validKind(k string) bool {
 	return false
 }
 
-const entryCols = "e.id, e.kind, e.scenarios, e.host, e.harness, e.label, e.handle, e.created_at"
+const entryCols = "e.id, e.kind, e.scenarios, e.host, e.harness, e.label, e.handle, e.created_at, e.overrides"
 
 func scanEntry(r *store.Rows) (Entry, error) {
 	var e Entry
-	var scen, handle string
+	var scen, handle, overrides string
 	var created int64
-	if err := r.Scan(&e.ID, &e.Kind, &scen, &e.Host, &e.Harness, &e.Label, &handle, &created); err != nil {
+	if err := r.Scan(&e.ID, &e.Kind, &scen, &e.Host, &e.Harness, &e.Label, &handle, &created, &overrides); err != nil {
 		return e, err
 	}
 	if handle != "" {
 		e.Handle = json.RawMessage(handle)
+	}
+	if overrides != "" {
+		if err := json.Unmarshal([]byte(overrides), &e.Overrides); err != nil {
+			return e, err
+		}
 	}
 	e.CreatedAt = unixTime(created)
 	return e, json.Unmarshal([]byte(scen), &e.Scenarios)
@@ -761,9 +856,10 @@ func putEntry(tx *store.Tx, e Executor, harness string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO executors_entry (id, kind, scenarios, host, harness) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, scenarios = excluded.scenarios, host = excluded.host`,
-		e.ID, e.Kind, string(scen), e.Host, harness)
+	_, err = tx.Exec(`INSERT INTO executors_entry (id, kind, scenarios, host, harness, label, handle) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, scenarios = excluded.scenarios, host = excluded.host,
+		label = excluded.label, handle = excluded.handle`,
+		e.ID, e.Kind, string(scen), e.Host, harness, e.Label, string(e.Handle))
 	return err
 }
 

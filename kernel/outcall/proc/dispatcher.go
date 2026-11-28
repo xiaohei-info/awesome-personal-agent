@@ -147,8 +147,37 @@ func (d *Dispatcher) Recover(ctx context.Context) (failed []domain.Run, alive []
 	}
 	for _, rec := range gone {
 		d.removeContext(rec)
+		d.cancelRemote(rec) // 进程没了，执行者在别处起的会话可能还在
 	}
 	return failed, alive, nil
+}
+
+// cancelTimeout 是取消命令的时限：它只是通知执行者停下，不等对方收尾。
+const cancelTimeout = 30 * time.Second
+
+// cancelRemote 调一次声明的取消命令（Spec.Cancel），返回失败原因；没有取消命令或成功为空。
+// 只给白名单环境，不带运行凭据：取消命令按会话或运行 id 找对方，不需要 APA 身份。
+func (d *Dispatcher) cancelRemote(rec Record) string {
+	argv := rec.Spec.Cancel
+	if len(argv) == 0 {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cancelTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	for _, kv := range d.opt.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok && envWhitelist[k] {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 2 * time.Second
+	errb := &tail{limit: 4 << 10}
+	cmd.Stderr = errb
+	if err := cmd.Run(); err != nil {
+		return withStderr("cancel: "+err.Error(), errb)
+	}
+	return ""
 }
 
 func groupAlive(pgid int) bool {
@@ -347,6 +376,11 @@ func (d *Dispatcher) run(rec Record) {
 	}
 	state, exit, reason := d.exec(rec, out, &errb)
 	d.removeContext(rec)
+	if state != domain.RunSucceeded {
+		if why := d.cancelRemote(rec); why != "" {
+			reason += "; " + why
+		}
+	}
 	stdout, overflow := out.result()
 	res := Result{Stdout: stdout, Stderr: errb.bytes(), Reason: reason, Overflow: overflow}
 	if t, ok := out.(*tail); ok {

@@ -157,10 +157,13 @@ func setup(t *testing.T, maxDepth int) *env {
 		}
 	}
 	ld := packs.New(packs.Options{Builtin: fstest.MapFS{
-		"bgr/pack.yaml":         {Data: []byte(packYAML)},
-		"bgr/prompts/handle.md": {Data: []byte(handleMD)},
-		"bgr/prompts/short.md":  {Data: []byte(shortMD)},
-		"bgr/prompts/work.md":   {Data: []byte(workMD)},
+		"bgr/pack.yaml":                             {Data: []byte(packYAML)},
+		"bgr/prompts/handle.md":                     {Data: []byte(handleMD)},
+		"bgr/prompts/short.md":                      {Data: []byte(shortMD)},
+		"bgr/prompts/work.md":                       {Data: []byte(workMD)},
+		"background-run/pack.yaml":                  {Data: []byte("name: background-run\nversion: 1.0.0\ndescription: 委派即开工的任务模板\n")},
+		"background-run/prompts/run-task.md":        {Data: []byte("---\nagent: task\ncwd: run_dir\n---\n本机运行者在 {item_id} 上干活，运行 {run_id}。\n")},
+		"background-run/prompts/run-task-remote.md": {Data: []byte("---\nagent: task\ncwd: run_dir\n---\n远端运行者在 {item_id} 上干活。\n")},
 	}, Kinds: kinds})
 	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
 		t.Fatalf("load: %v %+v", err, rej)

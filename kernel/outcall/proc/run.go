@@ -111,6 +111,9 @@ type Spec struct {
 	// StdoutLimit 大于 0 表示 stdout 是不透明的字节（来源程序 fetch 模式取回的附件，§9.2）：整段保留到该字节数，
 	// 不按行切、不裁末尾；超过即 Result.Overflow，超出部分丢弃。
 	StdoutLimit int `json:"stdout_limit,omitempty"`
+	// Cancel 是运行没有成功结束（失败、超时、关停、重启后没了进程）时调一次的取消命令（声明的 headless.cancel，已展开）：
+	// 内核杀掉的只是本机进程，执行者在别处起的会话靠它停。输出不入账，只把失败记进运行附注。
+	Cancel []string `json:"cancel,omitempty"`
 }
 
 // Request 是入队请求。Run.ID 为空时自动生成；State 总是被置为 queued。

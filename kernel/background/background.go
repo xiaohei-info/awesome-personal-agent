@@ -22,12 +22,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -94,12 +96,18 @@ type Options struct {
 	MaxChainDepth int
 	// Wake 产出唤醒投递；为空时选了唤醒的 main_session 运行不拉起，转 needs_input。
 	Wake *wake.Service
+	// ContextDir 是外呼调用器写运行上下文文件的目录（proc.Options.ContextDir）：声明以 {run_context} 把路径交给
+	// 不继承环境变量的执行者（§7.7）。空表示 {run_context} 展开为空。
+	ContextDir string
 	// OnError 接收 Settle 里无法交给调用方的错误（落账失败等）；可为空。
 	OnError func(runID string, err error)
 }
 
 // Service 是后台运行入口，可并发使用。
-type Service struct{ o Options }
+type Service struct {
+	o      Options
+	queued atomic.Bool // 委派即开工在命令事务里入队了运行，提交后要调度
+}
 
 // New 返回 Service。
 func New(o Options) (*Service, error) {
@@ -118,7 +126,7 @@ func New(o Options) (*Service, error) {
 	if o.Host == "" {
 		o.Host, _ = os.Hostname()
 	}
-	return &Service{o}, nil
+	return &Service{o: o}, nil
 }
 
 const systemPrincipal = "kernel:background"
@@ -462,7 +470,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 	if workDir != "" {
 		dir = workDir
 	}
-	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
+	argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
 	argv = append(argv, f.selected.Args...)
 	argv = append(argv, hl.Output...)
 	if sp.runner == "main_session" {
@@ -561,6 +569,14 @@ func (s *Service) Env(r domain.Run) map[string]string {
 	}
 	var env map[string]string
 	err := s.o.Store.Update(context.Background(), func(tx *store.Tx) error {
+		// 执行者不在 APA 主机上：不发运行凭据，回报走结构化输出（§13.6）。
+		if d, ok, err := delegation.ByRun(tx, r.ID); err != nil {
+			return err
+		} else if ok {
+			if e, found, err := executors.Get(tx, d.Executor); err != nil || (found && s.Remote(e)) {
+				return err
+			}
+		}
 		secret, err := runidentity.Issue(tx, r.ID, s.o.Now())
 		if err != nil {
 			return err
@@ -619,9 +635,40 @@ func (s *Service) Settle(ctx context.Context, res proc.Result) {
 
 func (s *Service) settle(ctx context.Context, res proc.Result) error {
 	run := res.Run
-	var it domain.Item
-	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, run.Target); return }); err != nil {
+	var (
+		it       domain.Item
+		started  bool // 委派即开工的运行（有委派记录）
+		reported bool // 运行者自己用运行凭据回执过
+		hl       executors.Headless
+	)
+	read := func(tx *store.Tx) (err error) {
+		if it, err = items.Get(tx, run.Target); err != nil {
+			return err
+		}
+		if _, started, err = delegation.ByRun(tx, run.ID); err != nil || !started {
+			return err
+		}
+		reps, err := delegation.Reports(tx, it.ID)
+		for _, r := range reps {
+			reported = reported || r.Actor.Run == run.ID
+		}
+		if err == nil {
+			hl, _, err = executors.ActiveHeadless(tx, run.Harness)
+		}
 		return err
+	}
+	if err := s.o.Store.View(ctx, read); err != nil {
+		return err
+	}
+	// 回报的兜底：运行者没用运行凭据回执（执行者不在本机、没有凭据）时，按回报结构从 stdout 取一次（§13.6）。
+	if started && run.State == domain.RunSucceeded && !reported && (it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting) {
+		if r, ok := fallbackReport(res.Stdout); ok {
+			if err := s.fallback(ctx, run, it.ID, r); err != nil {
+				s.fail(run.ID, err)
+			} else if err := s.o.Store.View(ctx, read); err != nil {
+				return err
+			}
+		}
 	}
 	failure := ""
 	faulted := run.State != domain.RunSucceeded
@@ -637,7 +684,32 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 			return err
 		}
 	}
-	return s.record(ctx, run, it.ID, sessionOf(res.Stdout), failure)
+	sid := sessionOf(res.Stdout)
+	if sid == "" {
+		sid = executors.ExtractSession(hl.Session.Extract, res.Stdout)
+	}
+	return s.record(ctx, run, it.ID, sid, failure, started && len(hl.Resume) > 0)
+}
+
+// fallback 以内核身份把 stdout 里的回报结构写成回执：报 done 却没带结果证据时按进展记，内核不替执行者补证据。
+func (s *Service) fallback(ctx context.Context, run domain.Run, item string, r map[string]string) error {
+	ev := map[string]string{}
+	for _, k := range []string{"pr", "commit", "branch", "link"} {
+		if r[k] != "" {
+			ev[k] = r[k]
+		}
+	}
+	outcome := r["outcome"]
+	if outcome == delegation.OutcomeDone && len(ev) == 0 {
+		outcome = delegation.OutcomeProgress
+	}
+	b, _ := json.Marshal(map[string]any{"id": item, "outcome": outcome, "summary": r["summary"], "evidence": ev,
+		"reason": "run " + run.ID + " returned its report on stdout"})
+	a := system
+	a.OnBehalfOf, a.Run = s.o.Owner, run.ID
+	_, err := s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate}, Command: "delegate.report",
+		Input: b, Owner: s.o.Owner, IdemKey: "background:fallback:" + run.ID})
+	return err
 }
 
 func (s *Service) needsInput(ctx context.Context, itemID, reason string) error {
@@ -669,7 +741,7 @@ func faultOf(r domain.Run) *domain.Fault {
 	return proc.FaultOf(r.State, r.ExitCode, "", r.TimeoutSec)
 }
 
-func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID, failure string) error {
+func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID, failure string, resumable bool) error {
 	if sessionID == "" {
 		sessionID = run.SessionID
 	}
@@ -691,6 +763,10 @@ func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID,
 		}
 		depth, err := items.ChainDepth(tx, itemID) // 沿用事项当前深度：运行者的写入已在运行深度上加一，结束记录不能把它拉回去
 		if err != nil {
+			return err
+		}
+		actor := domain.Actor{Type: domain.ActorAgent, Principal: "agent:background", Via: domain.ViaClock, Run: run.ID, Harness: run.Harness}
+		if err := delegation.FinishRun(tx, run.ID, sessionID, resumable, s.o.Now(), actor, depth); err != nil {
 			return err
 		}
 		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: itemID,
