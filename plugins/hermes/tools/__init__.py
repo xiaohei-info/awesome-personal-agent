@@ -99,11 +99,15 @@ _CLI_TOOLS = {
                     "project": _s("Project id"), "include_dropped": {"type": "boolean", "description": "Also dropped items"},
                     "cursor": _s("next_cursor from the previous page")}, ["query"],
                    lambda a: ["search", a["query"], *_flags(a, "type", "project", "include_dropped", "cursor")]),
-    "apa_item_comment": ("Comment on an item: record progress or new information, or reply to a comment (apa item comment). The owner can undo it.",
+    "apa_item_comment": ("Comment on an item: record progress or new information, or reply to a comment (apa item comment). The owner can undo it. "
+                         "mention calls executors in: APA starts each one on a child item and its report comes back as a reply to this comment; "
+                         "if any of them cannot be started nothing is written. Without mention no one is woken.",
                          {"id": _s("Item id"), "text": _s("The comment"), "reply_to": _s("Id of the comment on this item being replied to (optional)"),
+                          "mention": _s("Comma-separated executor ids from apa executors to @, at most 3; session:main is the resident main session (optional)"),
                           "on": _s("Date it happened (YYYY-MM-DD), not later than today")},
                          ["id", "text"],
-                         lambda a: ["item", "comment", a["id"], *_flags(a, "text", "reply_to", "on")]),
+                         lambda a: ["item", "comment", a["id"], *_flags(a, "text", "reply_to", "on"),
+                                    *[x for m in str(a.get("mention") or "").split(",") if m.strip() for x in ("--mention", m.strip())]]),
     "apa_source_propose": ("Turn a queued/running or backlog source event into a proposal, or merge it into an existing proposal (apa source propose).",
                            {"id": _s("Source event id"), "into": _s("Existing proposal id to merge this event into (optional)")},
                            ["id"],
