@@ -177,7 +177,8 @@ func (a *Attention) Sync(tx *store.Tx) error {
 		return err
 	}
 	var order []string
-	var results []domain.Event // 委派回执：结果通知（delegation.go）
+	var results []domain.Event  // 委派回执：结果通知（delegation.go）
+	var mentions []domain.Event // @ 了主会话的发言：唤醒（mention.go）
 	seen := map[string]bool{}
 	for {
 		es, err := eventlog.ReadLive(tx, after, 500)
@@ -189,8 +190,11 @@ func (a *Attention) Sync(tx *store.Tx) error {
 		}
 		for _, en := range es {
 			after = en.Event.Seq
-			if en.Event.Type == domain.EvDelegationReported {
+			switch en.Event.Type {
+			case domain.EvDelegationReported:
 				results = append(results, en.Event)
+			case domain.EvItemProgressAdded:
+				mentions = append(mentions, en.Event)
 			}
 			if id := en.Event.Object; itemEvents[en.Event.Type] && !seen[id] {
 				seen[id] = true
@@ -198,7 +202,7 @@ func (a *Attention) Sync(tx *store.Tx) error {
 			}
 		}
 	}
-	if len(order) > 0 || len(results) > 0 {
+	if len(order) > 0 || len(results) > 0 || len(mentions) > 0 {
 		_, pol, err := policy.Current(tx)
 		if err != nil {
 			return err
@@ -210,6 +214,11 @@ func (a *Attention) Sync(tx *store.Tx) error {
 		}
 		for _, e := range results {
 			if err := a.delegationResult(tx, pol, e); err != nil {
+				return err
+			}
+		}
+		for _, e := range mentions {
+			if err := a.mentionWake(tx, pol, e); err != nil {
 				return err
 			}
 		}

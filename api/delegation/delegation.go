@@ -1,7 +1,8 @@
 // Package delegation 是委派与声明分组的 HTTP 路由（附录 B.2，设计 §7.5、§14.3）：
 // GET /executors、DELETE /executors/{id}、PUT /executors/{id}/overrides、POST /delegations、POST /items/{id}/report、
 // POST /reports（按会话句柄回执）、POST /items/{id}/dispatches、POST /dispatches（未挂事项的派活）、
-// POST /dispatches/{id}/attach、PATCH /dispatches/{id}、PATCH /dispatches（按会话句柄）、GET /dispatches、POST /declarations。
+// POST /dispatches/{id}/attach、PATCH /dispatches/{id}、PATCH /dispatches（按会话句柄）、GET /dispatches、POST /declarations、
+// GET /items/{id}/mentionable（讨论里的 @ 候选）。
 //
 // 路由里没有业务规则：全部映射到内核命令（executor.list、delegate.create、delegate.report、executor.declare），
 // 授权（项目允许的执行者 21、运行身份范围 4、声明须 Web 确认）、校验、乐观版本与幂等都由命令管线判定。
@@ -43,6 +44,7 @@ func Routes(x *command.Executor) core.RouteGroup {
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/dispatches", Handler: h.write("delegate.dispatch", true, http.StatusCreated)})
 		r.Handle(core.Route{Method: "PATCH", Path: "/dispatches/{id}", Handler: h.write("delegate.dispatch_update", true, http.StatusOK)})
 		r.Handle(core.Route{Method: "GET", Path: "/dispatches", Handler: h.dispatches})
+		r.Handle(core.Route{Method: "GET", Path: "/items/{id}/mentionable", Handler: h.mentionable})
 		r.Handle(core.Route{Method: "POST", Path: "/dispatches", Handler: h.write("delegate.dispatch", false, http.StatusCreated)})
 		r.Handle(core.Route{Method: "PATCH", Path: "/dispatches", Handler: h.write("delegate.dispatch_update", false, http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/dispatches/{id}/attach", Handler: h.write("delegate.attach", true, http.StatusCreated)})
@@ -60,6 +62,16 @@ func (h *handlers) executors(w http.ResponseWriter, r *http.Request, p *core.Pri
 		in, _ = json.Marshal(map[string]string{"project": proj})
 	}
 	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "executor.list", Input: in})
+	if err != nil {
+		return err
+	}
+	return writeRaw(w, http.StatusOK, res.Value)
+}
+
+// mentionable 是事项讨论里的 @ 候选：主会话与名录里的每个执行者，各自能不能 @、不能的类别码（delegate.mentionable）。
+func (h *handlers) mentionable(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	in, _ := json.Marshal(map[string]string{"id": r.PathValue("id")})
+	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "delegate.mentionable", Input: in})
 	if err != nil {
 		return err
 	}

@@ -59,7 +59,8 @@ func Routes(x *command.Executor, st *store.Store, staleAfter ...func() time.Dura
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/relations", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "DELETE", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
-		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/comments", Handler: h.write("item.progress", "id", http.StatusCreated, h.withComment)})
+		// 带 mentions 的发言是 delegate.mention（写发言并叫起被 @ 的执行者或主会话，§6.3），其余是 item.progress。
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/comments", Handler: h.writeWith(commentCommand, "id", http.StatusCreated, h.withComment)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/attach", Handler: h.write(inbound.CmdAttach, "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/proposals/batch", Handler: h.batch})
 		r.Handle(core.Route{Method: "GET", Path: "/today", Handler: h.today})
@@ -367,6 +368,23 @@ func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Princip
 
 // write 把请求体原样交给命令。pathKey 非空时把路径 id 写入体的该键（体里自带同名键直接拒绝）。
 func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.Request, id string, out map[string]any) error) core.Handler {
+	return h.writeWith(func(map[string]json.RawMessage) string { return cmd }, pathKey, status, extra...)
+}
+
+// commentCommand 按请求体选发言的命令：mentions 非空走 delegate.mention；空数组等于没给。
+func commentCommand(body map[string]json.RawMessage) string {
+	if raw, ok := body["mentions"]; ok {
+		var ms []string
+		if json.Unmarshal(raw, &ms) != nil || len(ms) > 0 {
+			return "delegate.mention" // 形状不对的交给命令报错
+		}
+		delete(body, "mentions")
+	}
+	return "item.progress"
+}
+
+// writeWith 同 write，命令由请求体决定。
+func (h *handlers) writeWith(cmdOf func(map[string]json.RawMessage) string, pathKey string, status int, extra ...func(r *http.Request, id string, out map[string]any) error) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 		var body map[string]json.RawMessage
 		if err := core.DecodeJSON(r, &body); err != nil {
@@ -387,6 +405,7 @@ func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.
 		if r.Method == http.MethodDelete { // DELETE …/correlation-keys：移除
 			body["remove"] = json.RawMessage("true")
 		}
+		cmd := cmdOf(body)
 		in, err := json.Marshal(body)
 		if err != nil {
 			return err
@@ -405,7 +424,8 @@ func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.
 			return err
 		}
 		var out struct {
-			ID string `json:"id"`
+			ID    string   `json:"id"`
+			Items []string `json:"items"` // 带 @ 的发言建出的委派子事项
 		}
 		if err := json.Unmarshal(res.Value, &out); err != nil {
 			return err
@@ -414,6 +434,9 @@ func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.
 			status = http.StatusOK
 		}
 		resp := map[string]any{"id": out.ID, "version": res.Version, "replayed": res.Replayed}
+		if len(out.Items) > 0 {
+			resp["items"] = out.Items
+		}
 		if !res.Replayed { // 重放时"最后一条"可能已是别的进展，不附
 			for _, f := range extra {
 				if err := f(r, out.ID, resp); err != nil {
