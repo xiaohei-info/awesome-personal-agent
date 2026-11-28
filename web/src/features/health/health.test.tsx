@@ -92,6 +92,14 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
     expect(s.calls.filter((c) => !c.startsWith("GET"))).toEqual([]);
   });
 
+  it("检索统计：零命中与只命中部分词的次数在状态页可见，不计入要处理", async () => {
+    const s = serve(() => json(200, { ...report(), search: { queries: 12, zero: 2, partial: 3, since: "2026-11-28" } }));
+    mount(s.impl);
+    const sec = within(await screen.findByRole("region", { name: "检索" }));
+    expect(sec.getByText("自 2026-11-28 起检索 12 次，2 次什么都没找到，3 次只找到部分词")).toBeInTheDocument();
+    expect(main().queryByRole("region", { name: "要你处理" })).not.toBeInTheDocument();
+  });
+
   it("要你处理：每行一句问题、一句影响、一个写着要做什么的主按钮，按对象计数；英文原因与 id 不上主界面", async () => {
     const bad = {
       source_failures: { ok: false, count: 2, severity: "error", why: "a source has consecutive pull failures", detail: [{ source: "src_mail", enabled: true, consecutive_failures: 5, needs_input_item: "itm_9" }, { source: "src_new", enabled: false, consecutive_failures: 0 }] },

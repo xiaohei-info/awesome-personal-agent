@@ -347,8 +347,20 @@ func isNotFound(err error) bool {
 	return errors.As(err, &de) && de.Code == domain.CodeNotFound
 }
 
+// itemDoc 是事项可检索的原文：决定的问题、选项与答复接在正文之后（与正文同一档裁剪）。
 func itemDoc(it domain.Item, progress []string) (Doc, meta) {
-	return Doc{Type: TypeItem, ID: it.ID, Title: it.Title, Tags: strings.Join(it.Tags, " "), Summary: it.Summary, Body: it.Body, Progress: progress},
+	body := it.Body
+	if a := it.Ask; a != nil {
+		parts := []string{body, a.Question}
+		for _, o := range a.Options {
+			parts = append(parts, o.Label)
+		}
+		if r := a.Resolution; r != nil {
+			parts = append(parts, r.Text)
+		}
+		body = strings.TrimSpace(strings.Join(parts, "\n"))
+	}
+	return Doc{Type: TypeItem, ID: it.ID, Title: it.Title, Tags: strings.Join(it.Tags, " "), Summary: it.Summary, Body: body, Progress: progress},
 		meta{typ: TypeItem, project: it.Project, phase: string(it.Phase), kind: string(it.Kind), tags: it.Tags, updated: it.UpdatedAt.UnixNano()}
 }
 

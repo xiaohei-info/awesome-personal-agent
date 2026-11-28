@@ -55,17 +55,19 @@ def tools():
 def test_registers_the_apa_tools(tools):
     assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
                           "apa_report", "apa_dispatch", "apa_item_history", "apa_attach", "apa_proposals_apply", "apa_item_comment",
-                          "apa_item_list", "apa_item_show", "apa_item_thread", "apa_project_list", "apa_project_show", "apa_source_event", "apa_search", "apa_source_propose", "apa_source_ignore", "apa_source_attach", "apa_source_remind"}
+                          "apa_item_list", "apa_item_show", "apa_item_thread", "apa_project_list", "apa_project_show", "apa_material_list", "apa_material_show", "apa_source_event", "apa_search", "apa_source_propose", "apa_source_ignore", "apa_source_attach", "apa_source_remind"}
 
 
 def test_query_tools_map_to_read_commands(tools, apa):
     tools["apa_item_list"]({"q": "passport", "phase": "open", "planned_for": "2026-05-01"}, session_id="s")
     tools["apa_source_event"]({"id": "sev_1", "part": "body"}, session_id="s")
-    tools["apa_search"]({"query": "北辰 加账号", "include_dropped": True}, session_id="s")
+    tools["apa_search"]({"query": "北辰 加账号", "include_dropped": True, "phase": "open", "after": "2026-11-01"}, session_id="s")
+    tools["apa_material_show"]({"id": "mat_1", "offset": "2000"}, session_id="s")
     argv = [c["argv"] for c in calls(apa)]
     assert argv[0][:2] == ["item", "list"] and "--planned-for" in argv[0]
     assert argv[1] == ["source", "event", "sev_1", "--part", "body"]
-    assert argv[2] == ["search", "北辰 加账号", "--include-dropped"]
+    assert argv[2] == ["search", "北辰 加账号", "--phase", "open", "--after", "2026-11-01", "--include-dropped"]
+    assert argv[3] == ["material", "show", "mat_1", "--offset", "2000"]
 
 
 def test_cli_calls_carry_harness_hermes(tools, apa):

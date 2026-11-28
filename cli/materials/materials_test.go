@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	apictx "github.com/xiaohei-info/awesome-personal-agent/api/context"
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
@@ -197,6 +198,21 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	}
 	if k.apa(auth.Observer, "material", "show", "mat_missing").code != domain.ExitNotFound {
 		t.Fatal("missing material must exit 5")
+	}
+
+	// 长内容：默认给前 2000 字并写明总长，--offset 续读其余，--full 给全部。
+	long := strings.Repeat("规", 2500) + "尾"
+	lid := k.ok(auth.Worker, "material", "commit", "--from", write(t, long), "--reason", "r", "--kind", "reference", "--title", "Long", "--project", k.prj).json(t)["material"].(string)
+	head := k.ok(auth.Observer, "material", "show", lid).json(t)
+	if c := head["revision"].(map[string]any)["content"].(string); utf8.RuneCountInString(c) != 2000 ||
+		head["parts"].(map[string]any)["content"].(map[string]any)["chars"] != float64(2501) || head["next"].([]any)[0] != "apa material show "+lid+" --offset 2000" {
+		t.Fatalf("bounded show: %v", head["parts"])
+	}
+	if seg := k.ok(auth.Observer, "material", "show", lid, "--offset", "2000").json(t); seg["content"] != strings.Repeat("规", 500)+"尾" || len(seg["next"].([]any)) != 0 {
+		t.Fatalf("segment: %v", seg)
+	}
+	if full := k.ok(auth.Observer, "material", "show", lid, "--full").json(t); full["revision"].(map[string]any)["content"] != long {
+		t.Fatal("--full must give everything")
 	}
 }
 

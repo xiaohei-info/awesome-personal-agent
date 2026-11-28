@@ -806,7 +806,8 @@ func agentAudience(k auth.Kind) string {
 	return ""
 }
 
-// item show 默认截正文前 2000 字、只给最近 5 条进展，写明总量并给出分段读取的命令；--part 分段取其余，--full 照旧给全部。
+// item show 默认截正文前 2000 字、只给最近 5 条进展，写明总量并给出分段读取的命令；正文与挂靠消息用 --part 分段取其余，
+// 更早的发言在讨论流（apa item thread）里读，--full 照旧给全部。
 func TestItemShowIsBoundedAndSegmented(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem()
@@ -823,21 +824,19 @@ func TestItemShowIsBoundedAndSegmented(t *testing.T) {
 	if ps := out["progress"].([]any); len(ps) != 5 || ps[4].(map[string]any)["text"] != "进展6" || parts["progress"].(map[string]any)["count"] != float64(7) {
 		t.Fatalf("latest progress: %v", ps)
 	}
-	if n := out["next"].([]any); n[0] != "apa item show "+id+" --part body --offset 2000" {
-		t.Fatalf("next: %v", n)
+	if n := out["next"].([]any); len(n) != 3 || n[0] != "apa item show "+id+" --part body --offset 2000" || n[1] != "apa item thread "+id {
+		t.Fatalf("next: %v", n) // 更早的发言在讨论流里读
 	}
 	seg := k.ok(auth.Observer, "item", "show", id, "--part", "body", "--offset", "2000").json(t)
 	if seg["body"] != strings.Repeat("长", 500)+"尾" || len(seg["next"].([]any)) != 0 {
 		t.Fatalf("body segment: %v", seg)
 	}
-	older := k.ok(auth.Observer, "item", "show", id, "--part", "progress", "--offset", "5").json(t)
-	if ps := older["progress"].([]any); len(ps) != 2 || ps[0].(map[string]any)["text"] != "进展0" {
-		t.Fatalf("older progress: %v", older)
-	}
 	if full := k.ok(auth.Observer, "item", "show", id, "--full").json(t); full["item"].(map[string]any)["body"] != long || len(full["progress"].([]any)) != 7 {
 		t.Fatal("--full must give everything")
 	}
-	if r := k.apa(auth.Observer, "item", "show", id, "--part", "nope"); r.code != domain.ExitUsage {
-		t.Fatalf("bad part: %d", r.code)
+	for _, bad := range []string{"nope", "progress"} {
+		if r := k.apa(auth.Observer, "item", "show", id, "--part", bad); r.code != domain.ExitUsage {
+			t.Fatalf("bad part %s: %d", bad, r.code)
+		}
 	}
 }

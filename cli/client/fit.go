@@ -20,6 +20,18 @@ func Fit(out map[string]any, key string, budget int, finish func(kept int)) {
 	}
 }
 
+// Segment 从 text 的第 from 个字起取一段交给 build 组成输出：从 budget 个字往下缩，直到连同 build 补上的字段与续读命令
+// 整份不超过 budget 个字符（至少给一个字）。build 收到这一段和它结束的位置（下一段从这里续读）。
+func Segment(text string, from, budget int, build func(seg string, to int) map[string]any) map[string]any {
+	rs := []rune(text)
+	from = min(max(from, 0), len(rs))
+	for to := min(len(rs), from+budget); ; to -= max(1, (to-from)/10) {
+		if out := build(string(rs[from:to]), to); to <= from+1 || Size(out) <= budget {
+			return out
+		}
+	}
+}
+
 // Size 是 v 的紧凑 JSON 字符数。
 func Size(v any) int {
 	b, _ := json.Marshal(v)

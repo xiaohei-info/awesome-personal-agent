@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/guide"
@@ -59,8 +60,8 @@ func TestTemplateStaysWithinBudgetAndStatesContract(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	// 保守估算：每 3 字节 1 token（英文实际约 4 字节）。
-	if tok := len(out) / 3; tok > 1000 {
+	// 按每 4 个字符 1 个 token 估算，与 e2e 的 ACT-BOOT-05 同一口径（英文实际约 4 字节一个 token）。
+	if tok := utf8.RuneCountInString(out) / 4; tok > 1000 {
 		t.Errorf("template ~%d tokens, want <= 1000", tok)
 	}
 	low := strings.ToLower(out)
@@ -131,7 +132,7 @@ func TestTemplateFollowsTheCallersCard(t *testing.T) {
 		}
 	}
 	for _, out := range []string{organize, decide} {
-		if tok := len(out) / 3; tok > 1000 {
+		if tok := utf8.RuneCountInString(out) / 4; tok > 1000 {
 			t.Errorf("template with card ~%d tokens, want <= 1000", tok)
 		}
 	}

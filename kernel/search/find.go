@@ -27,11 +27,12 @@ const (
 // weights 是 bm25 的字段权重，顺序同索引列：标题 10、标签 6、摘要 4、进展 2、正文 1。
 const weights = "10.0, 6.0, 4.0, 2.0, 1.0"
 
-// 结构系数：阶段（事项）、时间（按最近变更，半衰期 90 天，下限 0.5）、当前项目。
+// 结构系数：阶段（事项）、简报降权、时间（按最近变更，半衰期 90 天，下限 0.5）、当前项目。
 const (
-	halfLife  = 90 * 24 * time.Hour
-	minRecent = 0.5
-	hereBoost = 1.5
+	halfLife    = 90 * 24 * time.Hour
+	minRecent   = 0.5
+	hereBoost   = 1.5
+	briefFactor = 0.7 // 简报是派生内容，与它总结的事项重复（§7.1）
 )
 
 func phaseFactor(p string) float64 {
@@ -432,6 +433,9 @@ func query(tx *store.Tx, q Query, types []string, terms []term) ([]*cand, error)
 		f := 1.0
 		if c.typ == TypeItem {
 			f = phaseFactor(c.phase)
+			if c.kind == string(domain.KindBrief) {
+				f *= briefFactor
+			}
 		}
 		if c.updated > 0 {
 			f *= max(minRecent, math.Pow(0.5, float64(now.Sub(time.Unix(0, c.updated)))/float64(halfLife)))

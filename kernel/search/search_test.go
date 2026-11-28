@@ -258,6 +258,22 @@ func TestDroppedWithheldAndSingleCharFallback(t *testing.T) {
 	}
 }
 
+// 决定的问题与选项随事项可搜（命中在正文）；简报与同样命中的事项相比排后。
+func TestDecisionTextAndBriefRank(t *testing.T) {
+	e := setup(t)
+	var r struct{ ID string }
+	json.Unmarshal(e.must(t, owner, "item.create", map[string]any{"kind": "task", "title": "发布安排", "project": e.prj,
+		"ask": map[string]any{"question": "灰度先放哪个机房", "options": []map[string]any{{"id": "a", "label": "北京机房"}, {"id": "b", "label": "上海机房"}}}}), &r)
+	if got := e.search(t, Query{Text: "灰度 上海"}); len(got) != 1 || got[0].ID != r.ID || !slices.Contains(got[0].MatchedIn, "body") {
+		t.Fatalf("decision text: %+v", got)
+	}
+	task := e.item(t, e.prj, "open", "周报汇总", "")
+	json.Unmarshal(e.must(t, owner, "item.create", map[string]any{"kind": "brief", "phase": "open", "title": "周报汇总", "project": e.prj}), &r)
+	if got := ids(e.search(t, Query{Text: "周报汇总"})); !reflect.DeepEqual(got, []string{task, r.ID}) {
+		t.Fatalf("brief must rank after the item: %v", got)
+	}
+}
+
 // 增量：写一条进展后立即能按进展里的词搜到；丢掉索引后重建，结果逐字相同；Forget 后检索不到、索引里没有该行。
 func TestIncrementalRebuildAndForget(t *testing.T) {
 	e := setup(t)

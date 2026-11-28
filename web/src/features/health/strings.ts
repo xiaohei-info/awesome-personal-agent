@@ -14,6 +14,10 @@ const zh = {
   fine: (n: number) => `其余 ${n} 项正常`,
   allFine: (n: number) => `${n} 项都正常`,
   rawSignals: "信号原文",
+  searchTitle: "检索",
+  searchLine: (since: string, q: number, zero: number, partial: number) =>
+    `${since ? `自 ${since} 起` : ""}检索 ${q} 次，${zero} 次什么都没找到，${partial} 次只找到部分词`,
+  searchNone: "还没有人检索过",
   doctor: "自检详情",
   status: { ok: "正常", warning: "提醒", error: "错误" },
   notConnected: "未接入",
@@ -105,6 +109,10 @@ const en: typeof zh = {
   fine: (n) => `${n} more are fine`,
   allFine: (n) => `All ${n} are fine`,
   rawSignals: "Raw signals",
+  searchTitle: "Search",
+  searchLine: (since, q, zero, partial) =>
+    `${since ? `Since ${since}: ` : ""}${q} searches, ${zero} found nothing, ${partial} matched only some words`,
+  searchNone: "No searches yet",
   doctor: "Self-check details",
   status: { ok: "OK", warning: "Notice", error: "Error" },
   notConnected: "Not connected",

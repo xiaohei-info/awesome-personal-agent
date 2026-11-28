@@ -198,6 +198,16 @@ export function HealthPage() {
               </ul>
             </details>
           )}
+          {report?.search && (
+            <section aria-label={t.searchTitle} className="panel">
+              <h2>{t.searchTitle}</h2>
+              <p className="sub">
+                {report.search.queries
+                  ? t.searchLine(report.search.since ?? "", report.search.queries, report.search.zero, report.search.partial)
+                  : t.searchNone}
+              </p>
+            </section>
+          )}
           {raw && report && (
             <details className="panel">
               <summary>{t.rawSignals}</summary>
