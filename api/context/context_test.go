@@ -150,6 +150,11 @@ type ctxResp struct {
 	Items []struct {
 		ID, Title, Action string
 	} `json:"items"`
+	Overview []struct {
+		Items []struct {
+			ID, Title, Action string
+		} `json:"items"`
+	} `json:"overview"`
 }
 
 func (e *env) ctx(query string, mod func(*http.Request)) (ctxResp, *httptest.ResponseRecorder) {
@@ -157,6 +162,9 @@ func (e *env) ctx(query string, mod func(*http.Request)) (ctxResp, *httptest.Res
 	rec := e.do("GET", "/v1/context"+query, "", mod)
 	var r ctxResp
 	_ = json.Unmarshal(rec.Body.Bytes(), &r)
+	for _, g := range r.Overview { // 不属于任何项目的会话从头读给工作台概览（§7.6）：这里只关心带了哪些事项
+		r.Items = append(r.Items, g.Items...)
+	}
 	return r, rec
 }
 

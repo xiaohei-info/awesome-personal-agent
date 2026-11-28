@@ -1,6 +1,7 @@
 // Package delegation 是委派与声明分组的 HTTP 路由（附录 B.2，设计 §7.5、§14.3）：
-// GET /executors、DELETE /executors/{id}、POST /delegations、POST /items/{id}/report、
-// POST /items/{id}/dispatches、PATCH /dispatches/{id}、GET /dispatches、POST /declarations。
+// GET /executors、DELETE /executors/{id}、PUT /executors/{id}/overrides、POST /delegations、POST /items/{id}/report、
+// POST /reports（按会话句柄回执）、POST /items/{id}/dispatches、POST /dispatches（未挂事项的派活）、
+// POST /dispatches/{id}/attach、PATCH /dispatches/{id}、PATCH /dispatches（按会话句柄）、GET /dispatches、POST /declarations。
 //
 // 路由里没有业务规则：全部映射到内核命令（executor.list、delegate.create、delegate.report、executor.declare），
 // 授权（项目允许的执行者 21、运行身份范围 4、声明须 Web 确认）、校验、乐观版本与幂等都由命令管线判定。
@@ -42,6 +43,11 @@ func Routes(x *command.Executor) core.RouteGroup {
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/dispatches", Handler: h.write("delegate.dispatch", true, http.StatusCreated)})
 		r.Handle(core.Route{Method: "PATCH", Path: "/dispatches/{id}", Handler: h.write("delegate.dispatch_update", true, http.StatusOK)})
 		r.Handle(core.Route{Method: "GET", Path: "/dispatches", Handler: h.dispatches})
+		r.Handle(core.Route{Method: "POST", Path: "/dispatches", Handler: h.write("delegate.dispatch", false, http.StatusCreated)})
+		r.Handle(core.Route{Method: "PATCH", Path: "/dispatches", Handler: h.write("delegate.dispatch_update", false, http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/dispatches/{id}/attach", Handler: h.write("delegate.attach", true, http.StatusCreated)})
+		r.Handle(core.Route{Method: "POST", Path: "/reports", Handler: h.write("delegate.report", false, http.StatusOK)})
+		r.Handle(core.Route{Method: "PUT", Path: "/executors/{id}/overrides", Handler: h.write("executor.override", true, http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/declarations", Handler: h.write("executor.declare", false, http.StatusAccepted)})
 	}
 }
