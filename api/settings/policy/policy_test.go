@@ -199,6 +199,10 @@ func TestExecutorRolesAndRetiredAgentSections(t *testing.T) {
 	if version != 1 || pol.DefaultExecutor != "host" || pol.MainExecutor != "host.main" || pol.RuleExecutor["p/event_rules/r"] != "host" {
 		t.Fatalf("v%d %+v", version, pol)
 	}
+	put(`{"default_executor":"","rule_executor":{}}`, 200) // 清空也是改动（带 omitempty 的段清空后不在新文档里）
+	if version, pol = e.current(); version != 2 || pol.DefaultExecutor != "" || len(pol.RuleExecutor) != 0 {
+		t.Fatalf("clear: v%d %+v", version, pol)
+	}
 }
 
 // ACT-WEB-01：Web 上配置 web_only 规则生成新版本，事件流有 policy.changed，默认类别仍在。

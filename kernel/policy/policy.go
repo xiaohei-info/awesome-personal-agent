@@ -1065,6 +1065,11 @@ func UpdateWith(tx *store.Tx, actor domain.Actor, basis *domain.Basis, reason st
 			changed = append(changed, k)
 		}
 	}
+	for k := range oldSec { // 带 omitempty 的段清空后不再出现在新文档里，也是改动
+		if _, ok := newSec[k]; !ok {
+			changed = append(changed, k)
+		}
+	}
 	if legacy { // 最新版本还是旧形状：本人保存即写成新字段，哪怕值没变（§16.5）
 		changed = append(changed, "model_endpoint")
 	}
