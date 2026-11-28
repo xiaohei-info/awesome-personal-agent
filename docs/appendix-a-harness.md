@@ -37,16 +37,17 @@
 
 ## A.2 无头运行声明
 
-插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效；本人也可以直接写主机配置文件（§14.12）。内核只把它当数据处理，不认识具体 harness。界面上它是 Agent 卡片的"允许 APA 在后台拉起它"，按声明里的 `name` 称呼，并按 `headless.tools` 列出每一档给 Agent 的工具（主文档 §4.1）。同一 harness 再次提交时，新版本取代仍待确认的旧版本（旧版本转 `superseded`），待确认的始终只有最新一份；内容与最新的待确认或已生效版本相同时不产生新版本，返回原版本号，本人不必再确认；与已生效版本相同时，仍待确认的旧版本随之作废（插件按实际情况自动重交时，退回到已生效的状态不留下过时的待确认）。`name` 与 `headless.tools`、`headless.tool_notes` 的中英文字都必填，`tools` 与 `tool_notes` 只能写在 `headless.access` 已声明的档位上。
+插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效；本人也可以直接写主机配置文件（§14.12）。内核只把它当数据处理，不认识具体 harness。界面上一份声明就是一个 Agent（"设置 › Agent"里一行，只管接入、拉起方式与一张权限卡；选人选的是它下面的执行者，主文档 §6.17），确认它即"允许 APA 在后台拉起它"，按声明里的 `name` 称呼，并按 `headless.tools` 列出每一档给 Agent 的工具（主文档 §4.1）。同一 harness 再次提交时，新版本取代仍待确认的旧版本（旧版本转 `superseded`），待确认的始终只有最新一份；内容与最新的待确认或已生效版本相同时不产生新版本，返回原版本号，本人不必再确认；与已生效版本相同时，仍待确认的旧版本随之作废（插件按实际情况自动重交时，退回到已生效的状态不留下过时的待确认）。`name` 与 `headless.tools`、`headless.tool_notes` 的中英文字都必填，`tools` 与 `tool_notes` 只能写在 `headless.access` 已声明的档位上。
 
 | 字段 | 语义 |
 |---|---|
-| `harness` | harness 标识，只用于展示和选择 |
+| `harness` | 声明的键：harness 标识，也是这份声明的权限卡的键（主文档 §14.5）；执行者经它找到怎么拉起 |
+| `base` | 只读，提交的声明不能带（返回退出码 2）。非空表示这是同一程序隔离另写的一份声明，值是所属程序的 `harness`：运行记录的 `harness` 记它，该程序的钥匙可用 `agent_id` 绑到这份声明（主文档 §14.2）。只由执行者统一切换从旧 Agent 卡写出（主文档 §16.5） |
 | `name` | 可选。中英各一份的显示名 `{zh, en}`，界面按它称呼这个 Agent；未声明时界面称"Agent"，`harness` 只在"显示原始值"里 |
-| `headless.command` | 命令模板，占位符 `{prompt}`、`{run_dir}`、`{run_context}`（运行上下文文件的路径；执行者不在 APA 主机上时为空）、`{run_id}`（这次运行的 id，可用作执行者那边的标签，供取消命令找回）、`{report_schema}`（内核写在运行目录里的回报结构 JSON Schema 的路径）；另可放一个整元素 `{executor_args}`（不能是第一个元素，至多一个），标出执行者参数与可覆盖参数的位置，供要求全局参数在子命令之前的程序使用（如 `<程序> -p <profile> chat …`），没有它时这些参数紧跟命令模板之后。只有委派即开工的运行拼执行者参数；其他运行里这个元素被去掉，`{run_context}`、`{report_schema}` 展开为空 |
+| `headless.command` | 命令模板，占位符 `{prompt}`、`{run_dir}`、`{run_context}`（运行上下文文件的路径；执行者不在 APA 主机上时为空）、`{run_id}`（这次运行的 id，可用作执行者那边的标签，供取消命令找回）、`{report_schema}`（内核写在运行目录里的回报结构 JSON Schema 的路径）；另可放一个整元素 `{executor_args}`（不能是第一个元素，至多一个），标出执行者参数与可覆盖参数的位置，供要求全局参数在子命令之前的程序使用（如 `<程序> -p <profile> chat …`），没有它时这些参数紧跟命令模板之后。所有后台运行都按选中的执行者拼执行者参数与生效的可覆盖参数，`{run_context}` 在执行者在 APA 主机上时总是展开；`{report_schema}` 是运行目录里 `report-schema.json` 的路径，内核只在委派即开工的运行里写这个文件，其他运行里它展开为空。~~只有委派即开工的运行拼执行者参数；其他运行里这个元素被去掉，`{run_context}`、`{report_schema}` 展开为空~~ **已取消（2026-11-28）**：所有后台运行一条拼装（主文档 §13.6，决定 102） |
 | `headless.output` | 结构化输出标志 |
 | `headless.final_text` | 可选。从结构化 stdout（如 `stream-json`）提取最终助手文本的字段路径（如 `$.text`、`$.result`），内核据此过滤工具事件与运行日志，只把最终助手文本交给下游通知 |
-| `instance_options` | 可选。`fields` 声明非敏感字段的双语标签、`type: enum` 与 `choices` 或 `type: string` 与整值 `pattern`。`display_as: model` 表示配置模型。`args_if_set` 将字段映射为固定标志及一个单独的 `{字段}` 参数。`env_if_set` 将字段映射到声明允许的宿主配置环境名，排除 APA 身份变量、进程加载与系统路径变量及凭据名。`cwd_choices` 可列出 `run_dir` 与 `project_checkout`。留空使用宿主默认设置。 |
+| `instance_options` | **只读兼容（2026-11-28 起，决定 102）**：旧插件仍可提交，内核不再用它拼参数；执行者统一切换时旧 Agent 卡上按 `args_if_set` 拼参数的取值换成 `overrides`（主文档 §16.5）。v0.2.0 之后的第一个版本不再接受这个字段。新插件改用 `overrides`。以下为原语义：~~可选。`fields` 声明非敏感字段的双语标签、`type: enum` 与 `choices` 或 `type: string` 与整值 `pattern`。`display_as: model` 表示配置模型。`args_if_set` 将字段映射为固定标志及一个单独的 `{字段}` 参数。`env_if_set` 将字段映射到声明允许的宿主配置环境名，排除 APA 身份变量、进程加载与系统路径变量及凭据名。`cwd_choices` 可列出 `run_dir` 与 `project_checkout`。留空使用宿主默认设置。~~ |
 | `headless.usage` | 可选。本次运行的 token 用量从哪读，见下文"运行用量契约" |
 | `headless.session.assign` | 预设会话 id 的标志，与 `extract` 二选一 |
 | `headless.session.extract` | 从 stdout 取会话 id 的路径 |
@@ -59,19 +60,19 @@
 | `headless.credential` | 运行凭据的传递方式：`env`（默认）或 `file`（§7.7） |
 | `headless.exit_codes` | 已文档化的退出码语义；未文档化时以回执为准 |
 | `headless.exit_output` | 可选。按语义键收窄 `exit_codes`：声明后，退出码命中且 stdout 或 stderr 含所列任一片段，才算该语义。用于多种失败共用一个退出码的 harness，片段以实测原文为准；未声明时只看退出码 |
-| `main_session.wake` | 可选，布尔。为真表示 Agent 侧装了唤醒插件，以 Agent 本人身份做事时也能在真实主会话里接着做；只有带网关的 harness 可声明。只说能力：用哪种由本人在 Web 按 Agent 或按规则选（主文档 §13.6），换选择不需要重新提交声明。无头运行总是支持 |
-| `main_session.wake_missing` | 可选，只在不能唤醒时允许。插件按实际启用情况判定的、唤醒还缺的各项：`[{zh, en, how: {zh, en}}]`，`zh`/`en` 是给本人看的一句话（不写配置键），`how` 是怎么打开（可写配置键与命令）。Agent 卡片上"在和你的对话里接着做"置灰时显示第一项，"怎么打开"折叠列出全部 `how`；`apa doctor` 在该 Agent 的详情里带出英文原因。内核只存取，不解释 |
+| `main_session.wake` | 可选，布尔。为真表示 Agent 侧装了唤醒插件，以 Agent 本人身份做事时也能在真实主会话里接着做；只有带网关的 harness 可声明。只说能力：用哪种由本人在 Web 按声明或按规则选（主文档 §13.6），换选择不需要重新提交声明。无头运行总是支持 |
+| `main_session.wake_missing` | 可选，只在不能唤醒时允许。插件按实际启用情况判定的、唤醒还缺的各项：`[{zh, en, how: {zh, en}}]`，`zh`/`en` 是给本人看的一句话（不写配置键），`how` 是怎么打开（可写配置键与命令）。"设置 › Agent"里这份声明的"在和你的对话里接着做"置灰时显示第一项，"怎么打开"折叠列出全部 `how`；`apa doctor` 在该 Agent 的详情里带出英文原因。内核只存取，不解释 |
 | `main_session.launch` | 旧字段，兼容读取：`wake` 视为 `wake: true`，并作为本人没选过时的初始值；`headless` 或未写不表达选择。新插件不写 |
 | `main_session.args` | 可选。让无头运行加载主会话同一份指令与技能所需的额外标志，未声明时沿用 `headless.command` |
-| `executors[]` | 可选：`{id, kind, host?, label?, handle?, scenarios[]?}`。本人确认后并入执行者名录，不删除已登记的条目（主文档 §6.17）。`handle` 与随委派登记的执行者句柄同一套校验；用 `executor_args` 的声明在这里列出它的执行者，同一份声明下的执行者共用一张权限卡。不列时执行者在第一次委派时登记 |
-| `executor_args` | 可选，需要 `headless`。执行者级参数：`{键: ["--标志", "{键}"]}`，键是执行者句柄顶层的字段名；拉起某个执行者时，句柄里有这个字段且取值是单个结构化取值（同 `instance_options` 的取值形态）才按键名顺序追加 [标志, 值]。一份声明因此能承载多个执行者（同一个程序的不同 profile、不同机器） |
+| `executors[]` | 可选：`{id, kind, host?, label?, handle?, scenarios[]?}`。本人确认后并入执行者名录，不删除已登记的条目（主文档 §6.17）。`handle` 与随委派登记的执行者句柄同一套校验；用 `executor_args` 的声明在这里列出它的执行者，同一份声明下的执行者共用一张权限卡。能无头运行的声明不列时，确认（或主机配置文件登记）后内核建一个与声明同名的执行者，代表这份声明那一种启动方式；之后用到的执行者也可在第一次委派时登记 |
+| `executor_args` | 可选，需要 `headless`。执行者级参数：`{键: ["--标志", "{键}"]}`，键是执行者句柄顶层的字段名；拉起某个执行者时，句柄里有这个字段且取值是单个结构化取值（以字母或数字开头，其余为字母、数字与 `._:/@+-`，至多 200 字符）才按键名顺序追加 [标志, 值]。一份声明因此能承载多个执行者（同一个程序的不同 profile、不同机器） |
 | `overrides` | 可选，需要 `headless`。可覆盖参数：`{键: {label: {zh, en}, args: ["--标志", "{键}"], choices: [...], role?}}`。`choices` 必填，列出允许的取值；`role` 取 `model` 或 `thinking`（各至多一项），据此把生效值写进运行记录的 `configured_model`、`configured_thinking`。键不能与 `executor_args` 重名，不能是凭据形态的名字。生效值按 单次委派（`apa delegate --start --model/--thinking/--override`）> 本人给执行者定的默认（执行者页，`PUT /executors/{id}/overrides`）> 不传 取，取值必须在 `choices` 里；都没有时不追加标志，行为与不声明相同。拼法固定为 [标志, 值]，模型与调用方碰不到命令 |
 | `headless.cancel` | 可选。`{command: [...], executor_args?: [键]}`：停掉执行者那边这次运行所起会话的命令，占位符 `{run_id}`、`{session_id}`，`executor_args` 列出要追加的执行者参数（须是声明里的键）。运行以失败、超时或停服收尾，或内核重启时发现进程已不在，外呼调用器各调一次（30 秒，只带白名单环境、不带凭据），失败附在运行的失败说明里。内核停掉的只是本机进程，执行者自己的会话要靠它停 |
 | `headless.await` | 可选。写法同 `headless.cancel`：按运行 id 或会话句柄找到执行者那边这次运行所起的会话，等到它结束并像 `headless.command` 一样输出结果（会话 id、回报结构）；对方已不在时以非零退出。只在执行者的会话不随本机进程结束（由别的守护进程拉起）时声明。带它的委派即开工运行在内核关停时只杀本机进程、不判失败、不调取消命令，重启后在同一个 Run 上改跑它，时限仍从首次拉起算（主文档 §13.6） |
 | `headless.remote_args` | 可选。执行者不在 APA 主机上（名录条目的 `host` 不是本机）时追加的标志，占位符只有 `{report_schema}`。这样的运行不发运行凭据，回报走结构化输出：内核从 stdout 取回报结构兜底回执（主文档 §13.6） |
 | `selfcheck.command` | 可选。自检命令，输出格式见 A.1。由 `apa doctor` 在 APA 主机上以运行它的账号执行，不经外呼调用器；与声明的其余部分一样，经本人在 Web 确认后才会被执行 |
 
-**委派即开工的拼法**（`apa delegate --start`，主文档 §13.6）：`headless.command`（展开占位符）→ 实例选项 → `executor_args` → 生效的 `overrides` → `headless.output` → 权限卡工具档位对应的 `headless.access` 标志 → 执行者不在 APA 主机上时的 `remote_args` → `session.assign`。命令只来自本人确认的声明；调用方与本人给的只有执行者句柄里的结构化取值与 `choices` 里的值。
+**拼法**（所有后台运行同一处：委派即开工与 @、规则后台运行、任务型、来源批处理、续接，主文档 §13.6）：`headless.command`（展开占位符；`executor_args` 与生效的 `overrides` 放在 `{executor_args}` 处，没有就紧跟模板之后）→ 本人没开"带人格和记忆"时的 `headless.no_persona` → 设置的后台思考档对应的 `headless.effort`（执行者有生效的 `role: thinking` 覆盖时不追加）→ `headless.output` → 以本人身份运行时的 `main_session.args` → 权限卡工具档位对应的 `headless.access` 标志 → 执行者不在 APA 主机上时的 `remote_args` → 续接时的 `headless.resume`，否则 `session.assign`。取消与续等命令按 `headless.cancel`、`headless.await` 另拼。命令只来自本人确认的声明；调用方与本人给的只有执行者句柄里的结构化取值与 `choices` 里的值。~~委派即开工的拼法：`headless.command` → 实例选项 → `executor_args` → 生效的 `overrides` → …~~ **已取消（2026-11-28）**：实例选项随 Agent 卡取消，所有后台运行共用一处拼装（决定 102）。
 
 通用示例（一个外部 agent 管理器，多个 profile 各是一个执行者；`<agent-manager>`、profile 名与模型名都是占位）：
 
@@ -106,7 +107,7 @@ executors:
 | 来源 | 二选一。声明 `file`：运行结束时读运行目录里的这个 JSON 文件（只能是文件名，整个文件是一个对象，上限 64 KiB，链接不读），由插件或 harness 自己写。不声明 `file`：读 stdout 里最后一个同时带 `input`、`output` 字段的 JSON 行；`event` 非空时只看 `type` 等于它的行。stdout 只保留末段 64 KiB，超过的结果行读不到 |
 | 哪种适合 | 结束事件里直接带整次运行的单次合计的，声明 stdout 路径即可；只按每次模型调用或每一轮分别给用量、或只给累计值的，由插件累加后写文件。写文件时逐次累加、整份原子替换，超时被终止的运行因此留下已完成调用的合计 |
 | 字段 | `input`、`output` 必填；`cache_read`、`cache_write`、`model` 可选。值是 `$.a.b` 路径指向的非负整数（`model` 是字符串） |
-| 口径 | `input` 含缓存读写；harness 的输入数不含缓存时声明 `input_excludes_cache: true`，内核把 `cache_read` 与 `cache_write` 加进输入。`output` 含思考部分。`model` 取不到时用 Agent 卡片配置的模型 |
+| 口径 | `input` 含缓存读写；harness 的输入数不含缓存时声明 `input_excludes_cache: true`，内核把 `cache_read` 与 `cache_write` 加进输入。`output` 含思考部分。`model` 取不到时用运行记录的 `configured_model`（执行者默认或单次覆盖的生效值）|
 | 未提供与未回报 | 任何注册的执行者都经 `headless.usage` 提供用量，没有就显示"未提供"：声明里没有 `usage` 的执行者，它的运行记为未提供；声明了但取不到文件或字段、输入与输出全是 0 的记为未回报。两种都如实标明、只计次数，不计 0、不估算 |
 
 ```yaml

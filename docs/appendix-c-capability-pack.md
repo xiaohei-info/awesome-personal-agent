@@ -164,7 +164,7 @@ webhook_mappings:
 | `create_item` | 建事项或子事项 | 指定 `assignee` 时校验项目允许的执行者 |
 | `create_timer` | 为触发事项建提醒 Timer：`after`（时长）或 `at`（RFC 3339）一次性，`schedule`（固定间隔）周期；到期经触达提醒（主文档 §6.8） | 需要触发事项，时钟规则不可用 |
 | `call_agent` | 调专属 agent，指定提示词模板。实例驱动的规则里，实例参数 `mode` 为 `create_item` 时不执行（只建事项，不调模型、不需要 harness，主文档 §13.5）。判断型的答案由发起它的内置处理器使用（如回执核实门控，主文档 §7.5）；通用规则里判断型的答案只留痕，不单独改状态 | 形态校验 |
-| `start_background_run` | 拉起后台运行：`runner`、`prompt`、`cwd`，可选 `harness`（默认用 Web 设置的默认 harness）；`runner: task` 时再加 `executor`，内核先把子事项委派给该执行者（与 `apa delegate` 同一路径），运行者在子事项上回执 | §13.6 的前置校验 |
+| `start_background_run` | 拉起后台运行：`runner`、`prompt`、`cwd`、`access`，可选 `executor`（执行者 id；没写时按主文档 §13.6 的选择顺序取：事项指定的 > 规则固定用的 > 分工，`runner: main_session` 取主执行者，其余取日常执行者）。`runner: task` 时内核先把子事项委派给选出的执行者（与 `apa delegate` 同一路径），运行者在子事项上回执；不在 APA 主机上的执行者不能用于规则拉起的运行。~~可选 `harness`（默认用 Web 设置的默认 harness）~~ **已取消（2026-11-28）**：谁来干活统一为执行者（主文档决定 102），执行者所属的声明决定怎么拉起；写了 `harness` 的包拒绝加载 | §13.6 的前置校验 |
 
 规则动作产生的 Event 不再触发规则。规则内容 hash 记入账本，动作类规则内容变化后回到 `observe`，提醒类规则保持本人上一次的选择（主文档 §14.8）。
 
@@ -173,7 +173,7 @@ webhook_mappings:
 - 求值：规则引擎每一轮（每条命令提交后，以及维护循环的每次周期）按 `phase` 取出候选事项，用它们的当前状态匹配其余条件；不看事件流，也不区分状态是谁改出来的。`when` 必须写 `phase`，只能用 `phase`、`kind`、`tag`、`tag_any`、`project`、`assignee`、`source`、`agent_ready`；写 `event`、`to_phase`、`from_phase` 的包被拒绝。
 - 一次性：幂等键是（规则, 事项）。`auto` 命中时先在事项上记一条 `rule.fired`（`trigger: state`），再执行 `do[]`；该事项上已有这条规则的 `rule.fired` 或 `background.launched` 时不再自动执行，执行失败也不重试。`observe` 对每件事只记一条 `rule.observed`。`off` 不求值。
 - 本人“现在开工”不受一次性限制：每次记一条 `trigger: manual` 的 `rule.fired`，`background.launched` 带 `manual: true`；这条记录同样让状态规则之后不再自动为这件事开工。
-- `agent_ready: true`：只能写 `true`，`do[]` 要有 `start_background_run`。按拉起时同一口径选出的 Agent 存在、未停用、有已确认的无头声明、声明里有权限卡上那一档工具（主文档 §14.5），且事项没有在途运行，才算满足。不满足时这一轮不命中、不留记录，条件成立后的下一轮照常命中。“现在开工”不看它，由动作处理器照旧拒绝并告警。
+- `agent_ready: true`：只能写 `true`，`do[]` 要有 `start_background_run`。按拉起时同一口径选出的执行者能拉起（在执行者名录里、所属声明有已确认的无头运行、在 APA 主机上、声明里有权限卡上那一档工具，主文档 §13.6、§14.5），且事项没有在途运行，才算满足。不满足时这一轮不命中、不留记录，条件成立后的下一轮照常命中。“现在开工”不看它，由动作处理器照旧拒绝并告警。
 - 链路：状态规则也会看到规则动作改出来的状态；拉起的运行取事项当前的链路深度加一，与每事项一次的记录共同防止回环。
 - 切到 `auto` 的那一轮就会对此刻全部满足条件、还没记录的事项动作；切换前可在 `observe` 的记录里看到会动哪些事。
 
@@ -384,7 +384,7 @@ run_as: main_session
 
 ## C.13 示例：简报包
 
-简报、复盘和例行安排的实例参数支持 `agent_id`。省略时沿用规则或角色选择。例行安排的 `create_item` 模式只创建事项。
+简报、复盘和例行安排的实例参数支持 `executor`（执行者 id）。省略时沿用规则固定用的执行者或日常执行者（主文档 §13.6）。例行安排的 `create_item` 模式只创建事项。~~实例参数 `agent_id`~~ **已取消（2026-11-28）**：谁来干活统一为执行者（主文档决定 102），写入返回 400，执行者统一切换时换成 `executor`。
 
 ```yaml
 name: brief
@@ -439,7 +439,7 @@ default_instruction: |-
 
 简报的资料文件由内核读账本组出，不调模型，组哪些段由模板的 `materials` 决定：`context`（时区、窗口、项目范围与各来源的覆盖）、`prior`（同一安排上一份有效的简报，与窗口起点是同一份）、`schedule`（日程）、`decisions`（待决策）、`due_waiting`（到期与等待）、`planned`（计划今天或更早且未完成的事项）、`activity`（本期活动）、`proposals`（上一份简报以来的新增建议、后续事件与未处置总数）、`digest`（摘要出口 `then: digest` 的来源事件，每条带按报告时区写的发生时刻，每条只汇入一份简报一次，本份是有效结果——完成且写全声明的结果字段——后才算汇入）与 `spot_check`（抽检条目）；`digest` 与 `proposals` 引用的来源事件另带按外发范围裁剪的原文文件。各段的取法见主文档 §7.3"简报的资料"。
 
-建实例：`apa instance add brief --param schedule="0 8 * * 1-5"`，到期落为 Timer。到期后内核建好 `brief` 事项，任务型在这个事项上运行，harness 用 Web 设置的默认 harness，资料文件带实例参数（含项目范围），`instruction.txt` 是实例的 `instruction`，没写时是 `default_instruction`。实例由本人建或是开箱的默认安排，这条规则只写回自身事项，且运行不超过 Web 设置的权限上限，所以不走观察模式，省略 `mode`。Agent 还不能后台运行时这次到期跳过，记 `rule.skipped`，不建事项（主文档 §7.3）。
+建实例：`apa instance add brief --param schedule="0 8 * * 1-5"`，到期落为 Timer。到期后内核建好 `brief` 事项，任务型在这个事项上运行，执行者取实例参数 `executor`，没写时取规则固定用的执行者或日常执行者，资料文件带实例参数（含项目范围），`instruction.txt` 是实例的 `instruction`，没写时是 `default_instruction`。实例由本人建或是开箱的默认安排，这条规则只写回自身事项，且运行不超过 Web 设置的权限上限，所以不走观察模式，省略 `mode`。Agent 还不能后台运行时这次到期跳过，记 `rule.skipped`，不建事项（主文档 §7.3）。
 
 ## C.14 内置包声明的内容
 
