@@ -135,7 +135,7 @@ function Row({ c, report, kinds, stalled, onDone }: { c: Child; report?: Step; k
   );
 }
 
-// 派给执行者的活（原「Agent 工作 › 进行中」的下半，界面设计 §9.6）：不进导航，从状态页「久无回音」、委派事项详情进入。
+// 派给执行者的活（界面设计 §9.6）：「执行者」入口的「委派」页签；状态页「久无回音」、委派事项详情也链到这里。
 // Agent 后台运行看诊断 › 运行记录与事项详情的 Agent 处理。判定都在服务端，本页只读并提供改派、重新委派。
 export function DelegationPage() {
   const { api } = useSession();

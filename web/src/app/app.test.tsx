@@ -195,11 +195,11 @@ async function openAt(at: string) {
 }
 
 describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
-  it("三组八个入口，设置与诊断在底部；默认落到今天", async () => {
+  it("三组九个入口，设置与诊断在底部；默认落到今天", async () => {
     const nav = await openAt("/");
     expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "工作", "自动化"]);
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "今天", "等你决定", "建议", "事项", "项目", "消息来源", "定时安排", "用量", "设置", "诊断",
+      "今天", "等你决定", "建议", "事项", "项目", "消息来源", "定时安排", "执行者", "用量", "设置", "诊断",
     ]);
     expect(await screen.findByRole("heading", { name: "今天 页面" })).toBeInTheDocument();
   });
@@ -213,6 +213,7 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
     ["/agent-changes", "诊断", "Agent 改动"], ["/rule-changes", "诊断", "规矩改动"], ["/runs", "诊断", "运行记录"],
     ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查"], ["/judgment", "消息来源", "筛选门槛"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"], ["/usage", "用量", "用量"],
+    ["/executors", "执行者", "执行者"], ["/delegation", "执行者", "委派"], ["/delegation#d-itm_1", "执行者", "委派"],
     ["/settings/channels", "设置", "提醒渠道"], ["/settings/outward-api", "设置", "对外接口"], ["/settings-exec", "设置", "Agent"],
     ["/settings/grants", "设置", "Agent"], ["/settings/agents", "设置", "Agent"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
     ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与推送"], ["/settings/access", "设置", "Agent"], ["/settings/models", "设置", "模型"], ["/settings/note-vaults", "设置", "笔记库"], ["/settings/storage", "设置", "存储"],
@@ -243,12 +244,6 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
     expect(await screen.findByTestId("at")).toHaveTextContent("/today#stale");
   });
 
-  // 原「Agent 工作」下线（2026-11-22）：改动、规矩改动并进诊断；派给执行者的活与执行者名录不进导航，地址照常可用。
-  it.each([["/delegation", "派给执行者的活"], ["/executors", "执行者"]])("%s 照常打开，不高亮任何入口", async (at, title) => {
-    const nav = await openAt(at);
-    expect(await screen.findByRole("heading", { name: title + " 页面" })).toBeInTheDocument();
-    expect(within(nav).queryAllByRole("link").filter((a) => a.getAttribute("aria-current"))).toHaveLength(0);
-  });
 
   it("动作链接照常可用；动作确认页不高亮任何入口", async () => {
     const nav = await openAt("/act/itm_1?do=done");
@@ -265,7 +260,7 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
       const more = within(nav).getByRole("button", { name: "更多" });
       await userEvent.click(more);
       const sheet = screen.getByRole("dialog", { name: "全部页面" });
-      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "消息来源", "定时安排", "用量", "设置", "诊断"]);
+      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "消息来源", "定时安排", "执行者", "用量", "设置", "诊断"]);
       expect(within(sheet).getAllByRole("link")[0]).toHaveFocus();
       await userEvent.keyboard("{Escape}");
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
