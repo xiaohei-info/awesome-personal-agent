@@ -33,7 +33,7 @@ import (
 
 // InstructionVersion 是常驻指令的当前版本；插件带着自己持有的版本来问，过期就提示更新。
 // 常驻指令（`apa guide`）的内容变化时递增。
-const InstructionVersion = 4
+const InstructionVersion = 5
 
 // Module 登记会话游标表。游标是事件序号，只属于本模块。
 var Module = store.Module{Name: "context", Migrations: []store.Migration{{

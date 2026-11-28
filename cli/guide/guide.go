@@ -110,7 +110,7 @@ func conventions(l cardLimits, ok bool) string {
 	} else {
 		b.WriteString("- Something the user wants followed up becomes a proposal: apa propose. Search first (apa item list --q) and add to the item it belongs to. Proposals and questions wait for the user.\n")
 	}
-	b.WriteString("- When the conversation moves an item (a decision, a result, a changed requirement), write it: apa item progress <id> --text. Back-and-forth is not progress.\n")
+	b.WriteString("- When the conversation moves an item (a decision, a result, a changed requirement), write it: apa item comment <id> --text (--reply-to <comment id> answers one; apa item thread <id> reads the discussion). Back-and-forth is not progress.\n")
 	b.WriteString("- Hand work over from its item: apa delegate --parent <item> --assignee <executor> (only executors the project allows). Add --start for executors apa executors marks startable: APA runs them and their report lands as progress on the item. With your own tools, name the child item id in the task; a dispatch recorded without one is shown every turn until you apa dispatch attach it or apa dispatch untrack it.\n")
 	b.WriteString("- Reports already land as progress on the parent item; write more only for a new conclusion. apa context --scope item shows earlier dispatches; act only on handles your own harness wrote.\n")
 	b.WriteString("- Close an item once its result is checked, with evidence or a reason: apa item transition <id> --to done --reason <why>. The user sees it and can undo it.\n")
