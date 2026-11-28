@@ -17,8 +17,8 @@ import (
 // Thread 是讨论流的一页，按时间先后。More 是比这一页更早、没给出的条数；有更早的时 Before 是读下一页要传的游标。
 type Thread struct {
 	Entries []ThreadEntry `json:"entries"`
-	More    int     `json:"more,omitempty"`
-	Before  int64   `json:"before,omitempty"`
+	More    int           `json:"more,omitempty"`
+	Before  int64         `json:"before,omitempty"`
 }
 
 // ThreadEntry 是讨论流的一行：与经过的一行相同，原始记录只在 Full 时给出。
