@@ -170,6 +170,36 @@ func (e *jenv) chat(key, ans string, sufficient bool) {
 	e.stub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: key}, Answer: ans, Sufficient: bptr(sufficient)})
 }
 
+type effortSpy struct {
+	Completer
+	got []string
+}
+
+func (s *effortSpy) Complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request) (model.Response, error) {
+	s.got = append(s.got, req.Effort)
+	return s.Completer.Complete(ctx, ep, req)
+}
+
+// 走对话端点的判断带判断项思考强度（线上格式见 model 包的 TestResponsesSendsEffortOnly）；不指定时不发。
+func TestChatJudgeSendsJudgeThinking(t *testing.T) {
+	for set, want := range map[string]string{"": "low", "high": "high", policy.ThinkingOff: ""} {
+		e := setupJudge(t, false, true)
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.Thinking.Judge = set; return nil })
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		spy := &effortSpy{Completer: e.svc.o.Model}
+		e.svc.o.Model = spy
+		e.chat("effort", "no", true)
+		e.judge(t, jc("chatonly", "effort"))
+		if len(spy.got) != 1 || spy.got[0] != want {
+			t.Fatalf("thinking %q: sent %q, want %q", set, spy.got, want)
+		}
+	}
+}
+
 // ACT-CAS-11：概率低于下限按否定案，不再问对话端点；记录逐级留痕且已写入账本。
 func TestClassifierBelowLowDecidesNo(t *testing.T) {
 	e := setupJudge(t, true, true)
