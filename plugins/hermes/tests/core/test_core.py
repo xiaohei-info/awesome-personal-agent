@@ -11,10 +11,14 @@ from conftest import load_core
 class Ctx:
     def __init__(self):
         self.sections = {}
+        self.session_env = []
 
     def register_system_prompt_section(self, id, content, **kw):
         assert id not in self.sections
         self.sections[id] = (content, kw)
+
+    def register_session_env(self, names, resolver):
+        self.session_env.append((list(names), resolver))
 
 
 def fake_apa(tmp_path, body):
@@ -39,6 +43,15 @@ def test_register_adds_the_instruction_section(core):
     s = sections(core)
     assert set(s) == {"apa.instructions"}
     assert callable(s["apa.instructions"][0])
+
+
+def test_terminal_children_carry_the_session_identity(core):
+    ctx = Ctx()
+    core.register(ctx)
+    [(names, resolve)] = ctx.session_env
+    assert names == ["APA_SESSION", "APA_HARNESS"]
+    assert resolve("s1") == {"APA_SESSION": "s1", "APA_HARNESS": "hermes"}
+    assert resolve("") is None  # no session bound: nothing set, the CLI runs without an identity
 
 
 def test_section_renders_apa_stdout(core, tmp_path, monkeypatch):

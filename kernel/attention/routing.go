@@ -65,6 +65,7 @@ var throttles = []struct {
 	{"decision:", throttle{quiet: true}},
 	{"brief:", throttle{quiet: true}},
 	{"task:", throttle{quiet: true}},
+	{delivery.ResultPrefix, throttle{quiet: true}}, // 委派结果：一次回执一条，不并入摘要
 	{schedPrefix, throttle{quiet: true, merge: mergeBatch}},
 	{"push:", throttle{quiet: true, merge: mergeQuiet}}, // 来源失败、运行失败、没出来、新建议攒多了
 	{"health:", throttle{}},                             // 系统告警：不判静默
@@ -88,6 +89,9 @@ type row struct {
 	pack  string       // 定时任务类型（推主会话时内容换成正文）；不是定时任务产出时为空
 	task  *domain.Item // 定时任务的产出事项
 	inst  string
+	// from 非空时只用发起方那一层（委派结果）：fromUser 只看本人层，fromAgent 只看 Agent 层；
+	// fromAgent 不是主 Agent 时 main 不唤醒主会话，按该行的 Else 走。
+	from, fromAgent string
 }
 
 // templateKinds 是模板型运行的事项：失败归"没出来"（与健康推送的判定一致）。
@@ -112,6 +116,8 @@ func rowOf(tx *store.Tx, h held) (row, error) {
 		return one(policy.RowRuleReminder)
 	case strings.HasPrefix(id, schedPrefix), strings.HasPrefix(id, schedBatchPrefix):
 		return one(policy.RowScheduled)
+	case strings.HasPrefix(id, delivery.ResultPrefix):
+		return delegationRow(tx, h.item)
 	case strings.HasPrefix(id, "batch-result:"):
 		return one(policy.RowSourceResult)
 	case strings.HasPrefix(id, "push:proposals:"):
@@ -198,6 +204,12 @@ func resolve(tx *store.Tx, pol policy.Policy, r row, prio domain.Priority) (laye
 		return v
 	}
 	l := layers{user: user(t.User)}
+	switch {
+	case r.from == fromUser: // 只推本人
+		return l, nil
+	case r.from == fromAgent: // 只推 Agent：本人层不用，主会话唤醒不了时也不改落本人层
+		l.user = ""
+	}
 	switch t.Agent {
 	case policy.AgentNextChat:
 		l.agent = delivery.RouteInject
@@ -205,6 +217,9 @@ func resolve(tx *store.Tx, pol policy.Policy, r row, prio domain.Priority) (laye
 		route, blocked, err := MainRoute(tx, pol)
 		if err != nil {
 			return l, err
+		}
+		if r.from == fromAgent && r.fromAgent != mainAgent(pol) { // 发起的不是主 Agent：不唤醒主会话
+			blocked = "not_main"
 		}
 		switch {
 		case blocked == "":
@@ -219,6 +234,17 @@ func resolve(tx *store.Tx, pol policy.Policy, r row, prio domain.Priority) (laye
 		l.agent = ""
 	}
 	return l, nil
+}
+
+// mainAgent 是主 Agent 的卡 id，与 executors.Resolve 对主会话的取法相同（旧设置迁移来的为 legacy:<harness>）。
+func mainAgent(pol policy.Policy) string {
+	if pol.MainAgentID != nil {
+		return *pol.MainAgentID
+	}
+	if pol.DefaultHarness != "" {
+		return "legacy:" + pol.DefaultHarness
+	}
+	return ""
 }
 
 // emit 按 r 所在行把 d（基础 id，路由待定）写成一层或两层投递；两层都不推时按 floor 留 Web 未读或什么都不出。

@@ -23,7 +23,7 @@ func usage(why, usageText string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, usageText)
 }
 
-const contextUsage = "usage: apa context [--session ID] [--scope project|cwd|item|all] [--item ID] [--project ID] [--path DIR] [--host H] [--instruction N] [--format json|inject]"
+const contextUsage = "usage: apa context [--session ID] [--scope project|cwd|item|all] [--item ID] [--project ID] [--path DIR] [--host H] [--instruction N] [--in-flight] [--format json|inject]"
 
 func run(c *client.Ctx, args []string) error {
 	fs := flag.NewFlagSet("context", flag.ContinueOnError)
@@ -36,6 +36,7 @@ func run(c *client.Ctx, args []string) error {
 	host := fs.String("host", "", "")
 	format := fs.String("format", "", "")
 	instruction := fs.Int("instruction", 0, "")
+	inFlight := fs.Bool("in-flight", false, "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *instruction < 0 {
 		return usage("invalid arguments for context", contextUsage)
 	}
@@ -56,6 +57,9 @@ func run(c *client.Ctx, args []string) error {
 	set("format", *format)
 	if *instruction > 0 {
 		q.Set("instruction", strconv.Itoa(*instruction))
+	}
+	if *inFlight {
+		q.Set("in_flight", "1")
 	}
 	// 项目：--project 优先，其次 APA_PROJECT；二者都没有才用当前目录交给内核映射。事项作用域不需要项目。
 	if p := firstNonEmpty(*project, c.Project()); p != "" {

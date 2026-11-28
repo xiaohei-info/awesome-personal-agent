@@ -284,7 +284,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		dir = workDir
 	}
 	sessionID := ""
-	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
+	argv := executors.Expand(hl.Command, map[string]string{"{prompt}": prompt, "{run_dir}": runDir, "{run_id}": runID, "{run_context}": "", "{report_schema}": ""}, nil)
 	argv = append(argv, selected.Args...)
 	argv = append(argv, hl.Output...)
 	argv = append(argv, hl.Access[access]...)

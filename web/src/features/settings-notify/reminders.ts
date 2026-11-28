@@ -42,6 +42,7 @@ export const EDITORS: Record<string, Home> = {
   source_failing: "sources",
   source_result: "pipeline",
   run_failed: "agents",
+  delegation_result: "agents",
   new_proposals: "proposals",
   health: "status",
 };

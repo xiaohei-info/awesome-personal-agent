@@ -415,3 +415,30 @@ func (e *env) getItem(id string) (it domain.Item) {
 	}
 	return
 }
+
+// 委派结果（§13.6）：只推发起方那一层。主 Agent 发起的唤醒主会话；别的 Agent 发起的不唤醒主会话，按该行的 Else 下次对话带上；
+// 本人发起的推本人层（没有默认渠道时 Web 未读），不再推给 Agent。
+func TestDelegationResultGoesToWhoStartedIt(t *testing.T) {
+	e := setup(t)
+	e.mainSession()
+	r := func(from, agent string) layers {
+		var l layers
+		e.update(func(tx *store.Tx) error {
+			_, pol, err := policy.Current(tx)
+			if err == nil {
+				l, err = resolve(tx, pol, row{keys: []string{policy.RowDelegationResult}, floor: true, from: from, fromAgent: agent}, domain.PriorityNormal)
+			}
+			return err
+		})
+		return l
+	}
+	if l := r(fromAgent, "legacy:hx"); l.agent != delivery.RouteWake || l.user != "" {
+		t.Errorf("main agent started it: %+v", l)
+	}
+	if l := r(fromAgent, "agt_other"); l.agent != delivery.RouteInject || l.user != "" {
+		t.Errorf("another agent started it: %+v", l)
+	}
+	if l := r(fromUser, ""); l.user != delivery.RouteWeb || l.agent != "" {
+		t.Errorf("the owner started it: %+v", l)
+	}
+}

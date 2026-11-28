@@ -12,7 +12,7 @@ import { strings } from "./strings";
 // 形状对应 GET /v1/runs?state=&category=&before=&limit=（设计 §6.11，附录 B.2）：按入队顺序升序，本页倒过来当日志读。
 // 只读展示，不做任何判定；失败处理走 needs_input，不提供重试。
 interface Run {
-  agent_name?: string; configured_model?: string; permission_cap?: string; selection_source?: string;
+  agent_name?: string; configured_model?: string; configured_thinking?: string; permission_cap?: string; selection_source?: string;
   id: string;
   category: string;
   runner?: string;
@@ -77,6 +77,7 @@ function Detail({ r }: { r: Run }) {
       <ul aria-label={t.log} className="sub-list">
         {r.agent_name && <li>{r.agent_name} · {r.runner === "main_session" ? t.mainRole : t.taskRole} · {r.launch === "wake" ? t.wake : t.headless} · {t.cap(label("perm", r.permission_cap ?? "read"))} · {t.sources[r.selection_source as keyof typeof t.sources]}</li>}
         {r.configured_model && <li>{t.configuredModel(r.configured_model)}</li>}
+        {r.configured_thinking && <li>{t.configuredThinking(r.configured_thinking)}</li>}
         {r.basis?.rule_id && <li>{t.rule(r.basis.rule_id)}</li>}
         {r.session_id && <li>{t.session(r.session_id)}</li>}
         {r.access && <li>{t.access(label("perm", r.access))}</li>}

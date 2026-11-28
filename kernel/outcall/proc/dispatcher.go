@@ -116,18 +116,47 @@ func New(st *store.Store, cfg config.Config, opt Options) *Dispatcher {
 
 // Recover 在启动时调用一次：进程组已不存在的 running 按失败处理；仍存活的保持 running 并返回，
 // 由调用方接管（它们继续占额度）。queued 的 Run 不动，随后 Dispatch 会重新执行。
+// 带续等命令（Spec.Await）的运行例外：没到时限的在同一个 Run 上改跑续等命令（上次没正常关停留下的本机进程先杀掉，
+// 它的输出已无人读），不算失败也不返回；已过时限的按超时落账、调取消命令，随 failed 返回。
 // 外部 Run 的进程不在本机，内核重启与它无关，不在此判定。
 func (d *Dispatcher) Recover(ctx context.Context) (failed []domain.Run, alive []domain.Run, err error) {
-	var gone []Record
+	var gone, resume []Record
 	err = d.st.Update(ctx, func(tx *store.Tx) error {
-		failed, alive, gone = nil, nil, nil
+		failed, alive, gone, resume = nil, nil, nil, nil
 		recs, err := query(tx, "WHERE state = 'running' AND queue != ? ORDER BY seq", string(QueueExternal))
 		if err != nil {
 			return err
 		}
+		now := d.opt.Now()
 		for _, rec := range recs {
+			awaitable := len(rec.Spec.Await) > 0 && rec.Run.StartedAt != nil
 			if rec.PGID > 0 && groupAlive(rec.PGID) {
-				alive = append(alive, rec.Run)
+				if !awaitable {
+					alive = append(alive, rec.Run)
+					continue
+				}
+				syscall.Kill(-rec.PGID, syscall.SIGKILL)
+			}
+			if awaitable {
+				state, why := domain.RunState(""), ""
+				if !now.Before(rec.Run.StartedAt.Add(time.Duration(rec.Run.TimeoutSec) * time.Second)) {
+					state, why = domain.RunTimeout, fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
+				}
+				if state == "" {
+					if _, err := tx.Exec("UPDATE outcall_run SET pgid = 0 WHERE id = ?", rec.Run.ID); err != nil {
+						return err
+					}
+					resume = append(resume, rec)
+					continue
+				}
+				if err := Settle(tx, rec.Run.ID, state, nil, why, now); err != nil {
+					return err
+				}
+				got, err := Get(tx, rec.Run.ID)
+				if err != nil {
+					return err
+				}
+				failed, gone = append(failed, got.Run), append(gone, rec)
 				continue
 			}
 			if err := Settle(tx, rec.Run.ID, domain.RunFailed, nil, reasonRestarted, d.opt.Now()); err != nil {
@@ -147,8 +176,41 @@ func (d *Dispatcher) Recover(ctx context.Context) (failed []domain.Run, alive []
 	}
 	for _, rec := range gone {
 		d.removeContext(rec)
+		d.cancelRemote(rec) // 进程没了，执行者在别处起的会话可能还在
+	}
+	for _, rec := range resume {
+		d.wg.Add(1)
+		go d.run(rec, true)
 	}
 	return failed, alive, nil
+}
+
+// cancelTimeout 是取消命令的时限：它只是通知执行者停下，不等对方收尾。
+const cancelTimeout = 30 * time.Second
+
+// cancelRemote 调一次声明的取消命令（Spec.Cancel），返回失败原因；没有取消命令或成功为空。
+// 只给白名单环境，不带运行凭据：取消命令按会话或运行 id 找对方，不需要 APA 身份。
+func (d *Dispatcher) cancelRemote(rec Record) string {
+	argv := rec.Spec.Cancel
+	if len(argv) == 0 {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cancelTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	for _, kv := range d.opt.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok && envWhitelist[k] {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 2 * time.Second
+	errb := &tail{limit: 4 << 10}
+	cmd.Stderr = errb
+	if err := cmd.Run(); err != nil {
+		return withStderr("cancel: "+err.Error(), errb)
+	}
+	return ""
 }
 
 func groupAlive(pgid int) bool {
@@ -175,7 +237,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context) error {
 				break
 			}
 			d.wg.Add(1)
-			go d.run(rec)
+			go d.run(rec, false)
 		}
 	}
 	return nil
@@ -244,6 +306,7 @@ func (d *Dispatcher) claim(ctx context.Context, q Queue) (rec Record, ok bool, e
 }
 
 // Close 关停：杀掉所有运行中的进程组并按失败落账（原因 shutdown），等待它们结束。queued 的 Run 保持原样。
+// 带续等命令的运行只杀本机进程：Run 留在 running，不调取消命令，重启后由 Recover 续等。
 func (d *Dispatcher) Close() {
 	d.cancel()
 	d.wg.Wait()
@@ -335,9 +398,13 @@ func (d *Dispatcher) removeContext(rec Record) {
 	}
 }
 
-// run 执行一条已置为 running 的 Run 并落账终态。
-func (d *Dispatcher) run(rec Record) {
+// run 执行一条已置为 running 的 Run 并落账终态。resumed 为真时是重启后的续等：跑 Spec.Await，时限是首次拉起起算的剩余时间。
+func (d *Dispatcher) run(rec Record, resumed bool) {
 	defer d.wg.Done()
+	argv, timeout := rec.Spec.Command, time.Duration(rec.Run.TimeoutSec)*time.Second
+	if resumed {
+		argv, timeout = rec.Spec.Await, rec.Run.StartedAt.Add(timeout).Sub(d.opt.Now())
+	}
 	errb := tail{limit: tailLimit}
 	var out stdoutSink = &tail{limit: tailLimit, dir: rec.Spec.RunDir}
 	if rec.Spec.StdoutLimit > 0 {
@@ -345,8 +412,22 @@ func (d *Dispatcher) run(rec Record) {
 	} else if eventStream(rec.Run.Category) {
 		out = &whole{limit: d.maxOutput}
 	}
-	state, exit, reason := d.exec(rec, out, &errb)
+	state, exit, reason := d.exec(rec, argv, timeout, out, &errb)
+	if state == "" { // 关停时脱开：执行者那边的会话还在跑，运行上下文留给它，重启后续等
+		if err := d.st.Update(context.Background(), func(tx *store.Tx) error {
+			_, err := tx.Exec("UPDATE outcall_run SET pgid = 0 WHERE id = ?", rec.Run.ID)
+			return err
+		}); err != nil && d.opt.OnResult != nil {
+			d.opt.OnResult(Result{Run: rec.Run, Reason: fmt.Sprintf("detach run: %v", err)})
+		}
+		return
+	}
 	d.removeContext(rec)
+	if state != domain.RunSucceeded {
+		if why := d.cancelRemote(rec); why != "" {
+			reason += "; " + why
+		}
+	}
 	stdout, overflow := out.result()
 	res := Result{Stdout: stdout, Stderr: errb.bytes(), Reason: reason, Overflow: overflow}
 	if t, ok := out.(*tail); ok {
@@ -372,7 +453,8 @@ func (d *Dispatcher) run(rec Record) {
 	}
 }
 
-func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState, *int, string) {
+// exec 跑 argv；关停时带续等命令的运行杀掉本机进程后返回空状态（脱开，不落账）。
+func (d *Dispatcher) exec(rec Record, argv []string, timeout time.Duration, stdout, stderr io.Writer) (domain.RunState, *int, string) {
 	if d.opt.CheckAgent != nil && rec.Run.AgentSnapshot != nil {
 		if err := d.st.View(d.ctx, func(tx *store.Tx) error { return d.opt.CheckAgent(tx, rec.Run) }); err != nil {
 			return domain.RunFailed, nil, err.Error()
@@ -388,7 +470,7 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 	if err != nil {
 		return domain.RunFailed, nil, "start: run context: " + err.Error()
 	}
-	cmd := exec.Command(spec.Command[0], spec.Command[1:]...)
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = spec.Dir
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
@@ -410,7 +492,6 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	timeout := time.Duration(rec.Run.TimeoutSec) * time.Second
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -424,7 +505,7 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 		case <-timer.C:
 			killed, why = domain.RunTimeout, fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
 		case <-d.ctx.Done():
-			killed, why = domain.RunFailed, reasonShutdown
+			killed, why = shutdown(spec)
 		}
 	} else {
 		start := d.opt.Now()
@@ -447,12 +528,17 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 				goto waited
 			case <-tick.C:
 			case <-d.ctx.Done():
-				killed, why = domain.RunFailed, reasonShutdown
+				killed, why = shutdown(spec)
 				goto waited
 			}
 		}
 	}
 waited:
+	if killed == detached {
+		syscall.Kill(-pgid, syscall.SIGKILL)
+		<-done
+		return "", nil, ""
+	}
 	if killed != "" {
 		syscall.Kill(-pgid, syscall.SIGKILL)
 		werr = <-done
@@ -470,6 +556,16 @@ waited:
 	default: // 管道错误或 WaitDelay 到期等
 		return domain.RunFailed, &code, "wait: " + werr.Error()
 	}
+}
+
+// detached 是 exec 内部的标记：关停时带续等命令的运行只杀本机进程、不落账。
+const detached domain.RunState = "detached"
+
+func shutdown(spec Spec) (domain.RunState, string) {
+	if len(spec.Await) > 0 {
+		return detached, ""
+	}
+	return domain.RunFailed, reasonShutdown
 }
 
 func exitCode(err error) int {

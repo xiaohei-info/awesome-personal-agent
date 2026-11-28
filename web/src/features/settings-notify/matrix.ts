@@ -13,7 +13,7 @@ const GROUPS: { id: "A" | "B" | "C" | "D" | "E" | "F"; rows: string[] }[] = [
   { id: "B", rows: ["scheduled"] },
   { id: "C", rows: ["overdue", "followup", "stale", "rule_reminder"] },
   { id: "D", rows: [...TASK_ROWS.map((t) => "task_result:" + t), ...TASK_ROWS.map((t) => "task_failed:" + t)] },
-  { id: "E", rows: ["source_failing", "run_failed", "health"] },
+  { id: "E", rows: ["source_failing", "run_failed", "delegation_result", "health"] },
   { id: "F", rows: ["new_proposals", "source_alert", "source_result"] },
 ];
 

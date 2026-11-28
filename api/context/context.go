@@ -1,6 +1,6 @@
 // Package context 是上下文的 HTTP 路由（附录 B.2，设计 §7.6）：
 //
-//	GET /context[?session&project&path&host&scope&item&instruction&format=inject]
+//	GET /context[?session&project&path&host&scope&item&instruction&in_flight=1&format=inject]
 //
 // 路由里没有业务规则：增量投影、游标、注入渲染在 kernel/context；
 // 本层只做认证后的参数搬运。会话取自 X-APA-Session 头（与审计同源），不带会话时不读不写游标。
@@ -71,6 +71,13 @@ func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Princ
 			return invalid("instruction must be a non-negative integer", "send the instruction version the plugin holds")
 		}
 		req.Instruction = n
+	}
+	switch q.Get("in_flight") {
+	case "":
+	case "1", "true":
+		req.InFlight = true
+	default:
+		return invalid("in_flight must be 1 or omitted", "send in_flight=1 on the first read after the plugin process restarted")
 	}
 	if f := q.Get("format"); f != "" && f != "inject" && f != "json" {
 		return invalid("format must be json or inject", "use --format inject or omit it")

@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -105,6 +106,22 @@ func TestSetHandlingModeOwnerOnly(t *testing.T) {
 	}
 	if _, err := e.do(agent, CmdSetHandling, m{"id": "src_mode", "mode": domain.HandlingRemindOnly}); exit(err) != 20 {
 		t.Fatalf("agent: %v", err)
+	}
+	if got := e.get(t, "src_mode").HandlingMode; got != domain.HandlingNormal {
+		t.Fatalf("mode = %q", got)
+	}
+}
+
+// 直接立项（§9.3）：处理来源的 Agent 的权限卡没开"替我拍板"时不能选，带类别码拒绝，处理方式不变。
+func TestCreateItemNeedsDecideOnTheHandlingAgentsCard(t *testing.T) {
+	e := setup(t)
+	if _, err := e.do(owner, CmdRegister, pull("src_mode")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.do(owner, CmdSetHandling, m{"id": "src_mode", "mode": domain.HandlingCreateItem})
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Reason != ReasonCreateItemNeedsDecide {
+		t.Fatalf("want %s, got %v", ReasonCreateItemNeedsDecide, err)
 	}
 	if got := e.get(t, "src_mode").HandlingMode; got != domain.HandlingNormal {
 		t.Fatalf("mode = %q", got)

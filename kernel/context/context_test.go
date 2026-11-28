@@ -104,15 +104,28 @@ func (e *env) build(t *testing.T, req Request) Result {
 	return r
 }
 
+// entries 是结果里的全部事项条目：增量的 Items，加上工作台概览各组里的（不属于任何项目的会话从头读时）。
+func entries(r Result) []Entry {
+	out := slices.Clone(r.Items)
+	for _, g := range r.Overview {
+		out = append(out, g.Items...)
+	}
+	return out
+}
+
 func ids(r Result) []string {
 	out := []string{}
-	for _, e := range r.Items {
+	for _, e := range entries(r) {
 		out = append(out, e.ID)
 	}
 	return out
 }
 
-func eq(a, b []string) bool { return strings.Join(a, ",") == strings.Join(b, ",") }
+// eq 不计顺序：概览按组排列，增量按最近变更排列，断言只关心带了哪些事项。
+func eq(a, b []string) bool {
+	a, b = slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b))
+	return strings.Join(a, ",") == strings.Join(b, ",")
+}
 
 // flow-hermes-context：游标按会话保存，只发增量，增量通常为空；两个会话互不影响。
 func TestCursorPerSessionOnlyDelta(t *testing.T) {
@@ -169,7 +182,7 @@ func TestCursorBeyondHeadRestarts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if r := e.build(t, Request{Session: "s"}); len(r.Items) != 1 {
+	if r := e.build(t, Request{Session: "s"}); len(entries(r)) != 1 {
 		t.Fatalf("stale-ahead cursor must restart: %v", ids(r))
 	}
 }
@@ -195,7 +208,8 @@ func TestInjectEnvelopeIsDataOnly(t *testing.T) {
 		t.Fatalf("fixed declaration missing:\n%s", out)
 	}
 	for _, l := range lines[:len(lines)-1] {
-		if l == envelopeClose || !strings.HasPrefix(l, "- ") && l != envelopeOpen && l != truthStatement {
+		fixed := l == envelopeOpen || l == truthStatement || strings.HasPrefix(l, "工作台概览（") || strings.HasPrefix(l, "## ")
+		if l == envelopeClose || !strings.HasPrefix(l, "- ") && !fixed {
 			t.Fatalf("title forged an envelope line %q:\n%s", l, out)
 		}
 	}
@@ -454,7 +468,7 @@ func TestInFlightRunIsHinted(t *testing.T) {
 	}
 	running := func(r Result) map[string]bool {
 		m := map[string]bool{}
-		for _, it := range r.Items {
+		for _, it := range entries(r) {
 			m[it.ID] = it.Running
 		}
 		return m
@@ -491,14 +505,14 @@ func TestImportedEventsStayOutOfTheDelta(t *testing.T) {
 	if r := e.build(t, Request{Session: "s1"}); len(r.Items) != 0 || r.Inject() != "" {
 		t.Fatalf("imported change leaked into the delta: %v %q", ids(r), r.Inject())
 	}
-	touch("")
-	if r := e.build(t, Request{Session: "s1"}); !eq(ids(r), []string{a}) {
+	e.do(t, owner, "item.update", map[string]any{"id": a, "title": "A2"})
+	if r := e.build(t, Request{Session: "s1", Scope: projects.Scope{Flag: ""}, All: true}); !eq(ids(r), []string{a}) {
 		t.Fatalf("control: live change must appear in the delta: %v", ids(r))
 	}
 }
 
-// 主会话无项目目录（Resolve 返回空）：上下文包含内置 Inbox 事项与无事项投递，不包含其他具体项目的事项，Project 字段保持 nil。
-func TestContextEmptyScopeIncludesInboxAndItemlessDeliveries(t *testing.T) {
+// 主会话无项目目录（Resolve 返回空）：工作台视图——概览带所有项目的事项，投递也不按项目过滤，Project 字段保持 nil（§7.6）。
+func TestContextEmptyScopeIsTheWholeWorkbench(t *testing.T) {
 	e := setup(t)
 	inboxID, err := projects.EnsureInbox(bg, e.x, e.st, "owner")
 	if err != nil {
@@ -529,15 +543,15 @@ func TestContextEmptyScopeIncludesInboxAndItemlessDeliveries(t *testing.T) {
 	if r.Project != nil {
 		t.Fatalf("empty cwd scope must keep Project=nil, got %+v", r.Project)
 	}
-	if !eq(ids(r), []string{inboxItem}) {
-		t.Fatalf("want only inbox item %s, got %v", inboxItem, ids(r))
+	if !eq(ids(r), []string{inboxItem, otherItem}) {
+		t.Fatalf("want items of every project, got %v", ids(r))
 	}
 	got := map[string]bool{}
 	for _, d := range r.Deliveries {
 		got[d.ID] = true
 	}
-	if len(got) != 2 || !got["dlv_none"] || !got["dlv_inbox"] {
-		t.Fatalf("want itemless + inbox deliveries, got %+v", r.Deliveries)
+	if len(got) != 3 {
+		t.Fatalf("want every injectable delivery, got %+v", r.Deliveries)
 	}
 }
 
