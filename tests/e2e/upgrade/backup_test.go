@@ -46,7 +46,7 @@ func (b *bak) apa(tok string, want int, args ...string) baseline.Result {
 // itemCount 与 maxSeq 取自某个实例（URL 与观察者凭据）。
 func (b *bak) itemTitlesAt(url string) map[string]bool {
 	b.t.Helper()
-	res := b.run(b.apaBin(), "", []string{"APA_URL=" + url, "APA_TOKEN=" + b.e.OBS}, "item", "list")
+	res := b.run(b.apaBin(), "", []string{"APA_URL=" + url, "APA_TOKEN=" + b.e.OBS}, "item", "list", "--full", "--limit", "200")
 	if res.Code != 0 {
 		b.t.Fatalf("apa item list: %d %s%s", res.Code, res.Stdout, res.Stderr)
 	}

@@ -341,7 +341,7 @@ func (k *kit) item(id string) itemView {
 	var out struct {
 		Item itemView `json:"item"`
 	}
-	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", id).Stdout), &out))
+	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", id, "--full").Stdout), &out))
 	return out.Item
 }
 

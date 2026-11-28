@@ -299,7 +299,7 @@ echo '{"cursor":"'"$cursor"'"}'
 		if wake.Actor.Type != "system" || !strings.Contains(wake.Reason, reply.ID) {
 			t.Errorf("Event 操作者应为 system、reason 含\"收到回音\"和来源事件 id: %+v", wake)
 		}
-		if !strings.Contains(k.apa(k.OBS, 0, "item", "show", root).Stdout, reply.ID) {
+		if !strings.Contains(k.apa(k.OBS, 0, "item", "show", root, "--full").Stdout, reply.ID) {
 			t.Error("回信应作为挂靠消息显示在事项上")
 		}
 		eq(t, "建议流条数", len(k.suggestions()), sug)
@@ -403,7 +403,7 @@ echo '{"cursor":"'"$cursor"'"}'
 		var detail struct {
 			Keys []struct{ Domain, Key string } `json:"correlation_keys"`
 		}
-		if err := json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", old).Stdout), &detail); err != nil {
+		if err := json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "show", old, "--full").Stdout), &detail); err != nil {
 			t.Fatal(err)
 		}
 		found := false

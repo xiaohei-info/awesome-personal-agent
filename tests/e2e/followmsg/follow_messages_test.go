@@ -49,7 +49,7 @@ type itemView struct {
 
 func (k *kit) showItem(id string) itemView {
 	k.t.Helper()
-	r := k.Apa(k.OBS, "", "item", "show", id)
+	r := k.Apa(k.OBS, "", "item", "show", id, "--full")
 	k.expect("item show "+id, r, 0)
 	var out struct {
 		Item itemView `json:"item"`
@@ -72,7 +72,7 @@ func (k *kit) judgeSaw(subject, hint string) bool {
 
 func (k *kit) itemCount() int {
 	k.t.Helper()
-	r := k.Apa(k.OBS, "", "item", "list")
+	r := k.Apa(k.OBS, "", "item", "list", "--full", "--limit", "200")
 	k.expect("item list", r, 0)
 	var out struct {
 		Items []json.RawMessage `json:"items"`

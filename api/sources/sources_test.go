@@ -17,6 +17,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apifollowmsg "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
+	apisearch "github.com/xiaohei-info/awesome-personal-agent/api/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -26,12 +27,14 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -83,7 +86,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module, registry.Module, webhook.Module,
-		projects.Module, clock.Module, items.Module, runner.Module, rules.Module, proc.Module, runidentity.Module} {
+		projects.Module, clock.Module, items.Module, runner.Module, rules.Module, proc.Module, runidentity.Module, materials.Module, search.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +147,7 @@ func setup(t *testing.T) *env {
 	if err := st.Update(context.Background(), func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Now: e.clock, Groups: []core.RouteGroup{grp, apifollowmsg.Routes(x)}})
+	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Now: e.clock, Groups: []core.RouteGroup{grp, apifollowmsg.Routes(x), apisearch.Routes(st)}})
 	if err != nil {
 		t.Fatal(err)
 	}

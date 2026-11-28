@@ -85,7 +85,7 @@ func TestFlowRuleModes(t *testing.T) {
 	}
 	show := func(id string) item {
 		t.Helper()
-		r := e.Apa(e.OBS, "", "item", "show", id)
+		r := e.Apa(e.OBS, "", "item", "show", id, "--full")
 		var out struct {
 			Item item `json:"item"`
 		}

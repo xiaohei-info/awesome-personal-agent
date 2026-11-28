@@ -20,8 +20,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -45,7 +47,7 @@ type env struct {
 func setup(t *testing.T, staleAfter ...func() time.Duration) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, registry.Module, runner.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, registry.Module, runner.Module, core.Module, materials.Module, search.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -644,8 +646,22 @@ func TestListSearchSortFilterOverHTTP(t *testing.T) {
 		}
 		return out
 	}
-	if got := list("q=" + url.QueryEscape("护照")); len(got) != 3 || strings.Join(got, ",") != strings.Join(sorted(c.ID, d.ID, n.ID), ",") {
+	// 全文走统一索引：按相关度排，标题命中的在前（§7.1）。
+	if got := list("q=" + url.QueryEscape("护照")); len(got) != 3 || got[0] != n.ID || strings.Join(sorted(got...), ",") != strings.Join(sorted(c.ID, d.ID, n.ID), ",") {
 		t.Fatalf("q=护照 = %v", got)
+	}
+	// 带 limit 时分页：给总数与续页游标，按游标能翻完。
+	var pg struct {
+		Items      []domain.Item
+		Total      int
+		NextCursor string `json:"next_cursor"`
+	}
+	_ = json.Unmarshal(e.do("GET", "/v1/items?limit=3", "", obs).Body.Bytes(), &pg)
+	if len(pg.Items) != 3 || pg.Total != 4 || pg.NextCursor != "3" {
+		t.Fatalf("page 1 = %+v", pg)
+	}
+	if got := list("limit=3&cursor=3"); len(got) != 1 {
+		t.Fatalf("page 2 = %v", got)
 	}
 	if e.get(d.ID).Item.Version != 2 { // create(1) + progress(2)；搜索不能再改
 		t.Fatalf("search changed a version: %d", e.get(d.ID).Item.Version)
@@ -662,7 +678,7 @@ func TestListSearchSortFilterOverHTTP(t *testing.T) {
 	if got := list("tag=t1&phase=open"); len(got) != 1 || got[0] != c.ID { // v0.1 参数语义不变
 		t.Fatalf("tag+phase = %v", got)
 	}
-	for _, bad := range []string{"sort=nope", "planned_for=tomorrow", "q=!!"} {
+	for _, bad := range []string{"sort=nope", "planned_for=tomorrow", "q=!!", "limit=0", "limit=201", "cursor=3"} {
 		if rec := e.do("GET", "/v1/items?"+bad, "", obs); rec.Code != 400 {
 			t.Fatalf("%s = %d %s", bad, rec.Code, rec.Body)
 		}

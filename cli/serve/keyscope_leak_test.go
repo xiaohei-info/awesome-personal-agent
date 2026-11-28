@@ -114,10 +114,11 @@ func TestExternalKeyNeverSeesContentOfASourceItWasNotGiven(t *testing.T) {
 			}
 		}
 	}
-	// 带查询参数才会多出内容的读法：按进展日读事项、全文搜索事项与材料。
+	// 带查询参数才会多出内容的读法：按进展日读事项、全文检索事项、材料与来源事件。
 	day := time.Now().Format("2006-01-02")
 	for _, p := range []string{"/v1/items?progress_from=" + day + "&progress_to=" + day, "/v1/items?q=LEAKITEMBODY", "/v1/items?q=LEAKPROGRESS",
-		"/v1/materials/search?q=LEAKMATERIAL", "/v1/context?scope=all", "/v1/context?scope=item&item=" + s.item} {
+		"/v1/search?q=LEAKMATERIAL", "/v1/search?q=LEAKITEMBODY&include_dropped=true", "/v1/search?q=LEAKPROGRESS&include_dropped=true",
+		"/v1/search?q=LEAK&type=item,material,project,source&include_dropped=true", "/v1/projects", "/v1/context?scope=all", "/v1/context?scope=item&item=" + s.item} {
 		for name, key := range keys {
 			_, body := getAs(k, key, p)
 			for _, m := range leakMarks {

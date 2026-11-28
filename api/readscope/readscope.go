@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -316,4 +317,55 @@ func TrimmedOf(before, after string) *Trimmed {
 		return nil
 	}
 	return &Trimmed{TotalChars: total, ReturnedChars: got}
+}
+
+// Gate 是检索结果的读取闸（§14.14）：事项、材料按档位裁剪后交给检索在裁后的原文上复核命中；来源事件按它所属来源的档位，
+// 元信息档只留标题；项目不出自来源，原样给。不受档位限制的调用者为 nil。
+func (r *Reader) Gate() search.Gate {
+	if r.All() {
+		return nil
+	}
+	return func(d search.Doc) (search.Doc, bool, error) {
+		var t string
+		switch d.Type {
+		case search.TypeProject:
+			return d, true, nil
+		case search.TypeItem:
+			it, err := items.Get(r.tx, d.ID)
+			if err != nil {
+				return d, false, err
+			}
+			if t, err = r.ItemTier(it); err != nil {
+				return d, false, err
+			}
+		case search.TypeMaterial:
+			var err error
+			if t, err = r.MaterialTier(d.ID); err != nil {
+				return d, false, err
+			}
+		case search.TypeSource:
+			ev, err := runner.Event(r.tx, d.ID)
+			if err != nil {
+				return d, false, err
+			}
+			if t = r.Tier(ev.SourceID); t == Meta {
+				d.Summary = ""
+			}
+			return d, t != None, nil
+		}
+		switch t {
+		case None:
+			return d, false, nil
+		case Meta:
+			d.Summary, d.Body, d.Progress = "", "", nil
+		case Excerpt:
+			d.Body = First(d.Body, ExcerptChars)
+			ps := make([]string, len(d.Progress))
+			for i, p := range d.Progress {
+				ps[i] = TrimText(p, t)
+			}
+			d.Progress = ps
+		}
+		return d, true, nil
+	}
 }

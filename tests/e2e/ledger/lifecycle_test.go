@@ -236,7 +236,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 		x, y := addTask(t, e, "rel-x"), addTask(t, e, "rel-y")
 		ok(t, e.Apa(e.DEL, "", "item", "update", x, "--tags", "alpha,beta", "--reason", "tag"), "加 tag")
 		ok(t, e.Apa(e.DEL, "", "item", "relate", x, "--to", y, "--type", "relates"), "relate")
-		rels, _ := ok(t, e.Apa(e.OBS, "", "item", "show", x), "show")["relations"].([]any)
+		rels, _ := ok(t, e.Apa(e.OBS, "", "item", "show", x, "--full"), "show")["relations"].([]any)
 		if len(rels) != 1 || rels[0].(map[string]any)["to"] != y || rels[0].(map[string]any)["type"] != "relates" {
 			t.Errorf("item show 应看到 relates 边: %v", rels)
 		}
@@ -257,7 +257,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 	})
 
 	t.Run("ACT-ITEM-13 读取不存在的对象返回退出码 5", func(t *testing.T) {
-		b := fail(t, e.Apa(e.OBS, "", "item", "show", "item_not_exist"), 5, "item show 不存在")
+		b := fail(t, e.Apa(e.OBS, "", "item", "show", "item_not_exist", "--full"), 5, "item show 不存在")
 		if b["code"] != "not_found" {
 			t.Errorf("错误码应为 not_found: %v", b)
 		}

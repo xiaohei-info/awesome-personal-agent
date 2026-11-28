@@ -118,7 +118,7 @@ func (f *fx) show(id string) item {
 	out := decode[struct {
 		Item     item             `json:"item"`
 		Progress []map[string]any `json:"progress"`
-	}](f.t, f.apa(f.OBS, 0, "item", "show", id).Stdout)
+	}](f.t, f.apa(f.OBS, 0, "item", "show", id, "--full").Stdout)
 	out.Item.Progress = out.Progress
 	return out.Item
 }

@@ -162,7 +162,7 @@ func TestFlowEndpointConfig(t *testing.T) {
 		}
 		eq(t, "第一条处置", low.Disposition, "ignored")
 		eq(t, "第二条处置", high.Disposition, "proposed")
-		item := jsonMap(t, f.apa(f.OBS, 0, "item", "show", high.Item).Stdout)
+		item := jsonMap(t, f.apa(f.OBS, 0, "item", "show", high.Item, "--full").Stdout)
 		it := sub(item, "item")
 		if it == nil {
 			it = item

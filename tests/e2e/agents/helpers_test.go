@@ -306,7 +306,7 @@ func (f *fx) item(id string) map[string]any {
 	var out struct {
 		Item map[string]any `json:"item"`
 	}
-	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id).Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "show", id, "--full").Stdout), &out); err != nil {
 		f.t.Fatal(err)
 	}
 	return out.Item
@@ -338,7 +338,7 @@ func (f *fx) titled(title string) []string {
 			Title string `json:"title"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list").Stdout), &out); err != nil {
+	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "item", "list", "--full", "--limit", "200").Stdout), &out); err != nil {
 		f.t.Fatal(err)
 	}
 	var ids []string

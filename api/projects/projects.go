@@ -1,6 +1,6 @@
 // Package projects 是项目分组的 HTTP 路由（附录 B.2、设计 §12.1、§14.7）：
 //
-//	GET/POST /projects        GET/PATCH /projects/{id}
+//	GET/POST /projects        GET/PATCH /projects/{id}     （读取带项目卡片：各阶段条数与最近活动）
 //	POST /projects/{id}/repos
 //	GET /projects/resolve?path&host[&project]
 //
@@ -9,13 +9,19 @@
 package projects
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -100,23 +106,103 @@ func webOnlyExecutors() error {
 	return domain.NewError(domain.CodeInvalidRequest, "allowed_executors is not part of creating a project", "create the project, then set it with PUT /v1/settings/projects/{id}/allowed-executors")
 }
 
-func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
-	var ps []domain.Project
-	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { ps, err = kp.List(tx); return }); err != nil {
+// Card 是项目卡片（§12.1）：现算的各阶段事项条数与最近活动日；单个项目另带最近变更的事项与材料条数。
+// 外部钥匙只数它读得到的事项（读取闸，§14.14）。
+type Card struct {
+	Counts       map[domain.Phase]int `json:"counts"`
+	LastActivity string               `json:"last_activity,omitempty"` // 本机日期 YYYY-MM-DD
+	Recent       []RecentItem         `json:"recent,omitempty"`
+	Materials    *int                 `json:"materials,omitempty"`
+}
+
+// RecentItem 是卡片里的一条最近变更（已放弃的不列）。
+type RecentItem struct {
+	ID      string       `json:"id"`
+	Title   string       `json:"title"`
+	Phase   domain.Phase `json:"phase"`
+	Updated string       `json:"updated"`
+}
+
+// recentRows 是单个项目卡片里最近变更的条数。
+const recentRows = 5
+
+// cards 按项目汇总 its（已过读取闸）；withRecent 时带最近变更。
+func cards(its []domain.Item, withRecent bool) map[string]*Card {
+	out := map[string]*Card{}
+	slices.SortFunc(its, func(a, b domain.Item) int { return cmp.Or(b.UpdatedAt.Compare(a.UpdatedAt), cmp.Compare(a.ID, b.ID)) })
+	for _, it := range its {
+		c := out[it.Project]
+		if c == nil {
+			c = &Card{Counts: map[domain.Phase]int{}, LastActivity: it.UpdatedAt.In(time.Local).Format("2006-01-02")}
+			out[it.Project] = c
+		}
+		c.Counts[it.Phase]++
+		if withRecent && len(c.Recent) < recentRows && it.Phase != domain.PhaseDropped {
+			c.Recent = append(c.Recent, RecentItem{it.ID, it.Title, it.Phase, it.UpdatedAt.In(time.Local).Format("2006-01-02")})
+		}
+	}
+	return out
+}
+
+func empty() *Card { return &Card{Counts: map[domain.Phase]int{}} }
+
+func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var (
+		ps []domain.Project
+		cs map[string]*Card
+	)
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
+		if ps, err = kp.List(tx); err != nil {
+			return err
+		}
+		its, err := kitems.List(tx, kitems.Filter{})
+		if err == nil {
+			its, _, err = readscope.New(tx, p.Caller).Items(its)
+		}
+		cs = cards(its, false)
+		return err
+	}); err != nil {
 		return err
 	}
 	if ps == nil {
 		ps = []domain.Project{}
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"projects": ps})
+	out := map[string]*Card{}
+	for _, pr := range ps {
+		if out[pr.ID] = cs[pr.ID]; out[pr.ID] == nil {
+			out[pr.ID] = empty()
+		}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"projects": ps, "cards": out})
 }
 
-func (a *api) get(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
-	p, err := a.view(r, r.PathValue("id"))
-	if err != nil {
+func (a *api) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var out struct {
+		domain.Project
+		Card *Card `json:"card"`
+	}
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
+		if out.Project, err = kp.Get(tx, r.PathValue("id")); err != nil {
+			return err
+		}
+		its, err := kitems.List(tx, kitems.Filter{Project: out.Project.ID})
+		if err != nil {
+			return err
+		}
+		if its, _, err = readscope.New(tx, p.Caller).Items(its); err != nil {
+			return err
+		}
+		if out.Card = cards(its, true)[out.Project.ID]; out.Card == nil {
+			out.Card = empty()
+		}
+		ms, err := km.List(tx, out.Project.ID)
+		n := len(ms)
+		out.Card.Materials = &n
+		return err
+	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, p)
+	return core.WriteJSON(w, http.StatusOK, out)
 }
 
 func (a *api) create(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

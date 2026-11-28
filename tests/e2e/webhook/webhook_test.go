@@ -260,7 +260,7 @@ type itemRow struct {
 
 func (f *fx) items(phase string) []itemRow {
 	f.t.Helper()
-	r := f.apa(f.OBS, 0, "item", "list", "--phase", phase)
+	r := f.apa(f.OBS, 0, "item", "list", "--phase", phase, "--full", "--limit", "200")
 	var out struct {
 		Items []itemRow `json:"items"`
 	}

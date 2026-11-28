@@ -397,7 +397,7 @@ func (k *kit) proposals() int {
 	var out struct {
 		Items []json.RawMessage `json:"items"`
 	}
-	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "list", "--phase", "proposed").Stdout), &out))
+	k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "item", "list", "--phase", "proposed", "--full", "--limit", "200").Stdout), &out))
 	return len(out.Items)
 }
 

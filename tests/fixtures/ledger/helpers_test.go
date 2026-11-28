@@ -116,12 +116,12 @@ func count(t *testing.T, st *store.Store, q string, args ...any) int {
 	return int(n)
 }
 
-// tableCounts 数出账本里每张表（不含 sqlite 内部表与全文索引影子表）的行数。
+// tableCounts 数出账本里每张表（不含 sqlite 内部表与检索索引：检索索引是派生数据，随时重建）的行数。
 func tableCounts(t *testing.T, st *store.Store) map[string]int {
 	t.Helper()
 	var names []string
 	err := st.View(context.Background(), func(tx *store.Tx) error {
-		r, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'material_search_%' ORDER BY name`)
+		r, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'material\_search%' ESCAPE '\' AND name NOT LIKE 'search\_%' ESCAPE '\' ORDER BY name`)
 		if err != nil {
 			return err
 		}

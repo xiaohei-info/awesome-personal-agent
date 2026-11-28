@@ -26,7 +26,7 @@ Output: JSON on stdout (--pretty to indent). Errors: JSON {code, why, next} on s
 Commands:
   onboarding   init, serve, login, guide, declare
   context      context, inbox
-  items        item, propose
+  items        search, item, propose
   decisions    ask, decide, accept, dismiss
   delegation   executors, delegate, dispatch, report, handback   (run apa delegate before handing work to anyone)
   projects     project, material, blob, agents sync|check
@@ -57,8 +57,15 @@ Permission card: every command belongs to one group; the user allows or disallow
   Background runs have the same card as your main session. apa why denied lists what was refused and why.
   What the user said in chat is not a basis for anything; there is no --evidence or --grant.
 
-Lists are compact: apa item list, apa inbox and apa today omit body, spec, ext and proposal. Read one item with apa item show <id>;
-  pass --full only when you need those fields for every row.
+Finding things: the ledger is the user's work context. Read it in steps; every read is bounded and says what it left out.
+  apa search <words>          ranked across projects: items with their progress, materials, projects. Chinese or English; a whole
+                              sentence works; "quoted words" is a phrase; --type source adds message titles and summaries.
+  apa item show <id>          summary, first 2000 characters of the body, latest 5 progress notes, and how much there is;
+                              --part body|progress|messages --offset <n> reads the rest, --full reads everything.
+  apa item list [filters]     30 short rows by default (--limit up to 200); total and next_cursor tell what is left.
+  apa project list | show     item counts per project; show adds the latest items.    apa why <id>: who changed what, and why.
+  Each read prints "next": commands one level deeper. Dropped items are left out unless asked for; "withheld" counts them.
+  apa inbox and apa today omit body, spec, ext and proposal; pass --full only when you need those fields for every row.
 
 Scheduling: --planned-for <YYYY-MM-DD> is the day to do it; --planned-slot "HH:MM - HH:MM" (same day, no midnight crossing, needs a date) is when.
   A date without a slot means that day, no fixed time. Neither sets a reminder; --deadline does. What is planned next week: apa item list --from <Mon> --to <Sun>.

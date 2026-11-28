@@ -13,7 +13,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -89,7 +91,18 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	q := r.URL.Query()
 	f := kitems.Filter{Phase: domain.Phase(q.Get("phase")), Kind: domain.Kind(q.Get("kind")),
 		Project: q.Get("project"), Assignee: q.Get("assignee"), OriginSource: q.Get("origin_source"), OriginRef: q.Get("origin_ref")}
-	sq := search.ItemQuery{Text: q.Get("q"), Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort"), From: q.Get("from"), To: q.Get("to")}
+	sq := search.ItemQuery{Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort"), From: q.Get("from"), To: q.Get("to")}
+	page, err := pageOf(q)
+	if err != nil {
+		return err
+	}
+	// q：全文走统一索引（§7.1），命中的按相关度排在前面；读取闸在裁后的原文上复核（§14.14）。
+	var ranked []string
+	if text := q.Get("q"); text != "" {
+		if ranked, err = search.Rank(r.Context(), h.st, text, func(tx *store.Tx) search.Gate { return readscope.New(tx, p.Caller).Gate() }); err != nil {
+			return err
+		}
+	}
 	// progress_from、progress_to：只列这段日子里有进展的事项，并附上这些进展（「已完成」页按周数进展，附录 B.2）。
 	pf, pt := q.Get("progress_from"), q.Get("progress_to")
 	if pf != "" || pt != "" {
@@ -99,7 +112,6 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	}
 	var (
 		its     []domain.Item
-		prog    map[string]string
 		rejs    = map[string]Rejection{}
 		done    map[string]time.Time
 		undone  map[string]bool
@@ -124,19 +136,12 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 			}
 			its = slices.DeleteFunc(its, func(it domain.Item) bool { return within[it.ID] == nil })
 		}
-		if sq.Text != "" {
-			if prog, err = search.ItemProgressText(tx); err != nil {
-				return err
-			}
+		if q.Get("q") != "" {
+			its = byRank(its, ranked)
 		}
-		// 外部钥匙先裁后搜：不给的事项去掉，其余按档位裁正文与进展，只在裁后的内容上匹配（§14.14）。
+		// 外部钥匙：不给的事项去掉，其余按档位裁正文（§14.14）。
 		if its, scopes, err = readscope.New(tx, p.Caller).Items(its); err != nil {
 			return err
-		}
-		for id, t := range scopes {
-			if prog[id] != "" {
-				prog[id] = readscope.TrimText(prog[id], t)
-			}
 		}
 		for _, it := range its {
 			if rj, err := LastRejection(tx, it); err != nil {
@@ -158,14 +163,28 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	}); err != nil {
 		return err
 	}
-	its, err := search.FilterItems(its, prog, sq)
-	if err != nil {
+	if its, err = search.FilterItems(its, sq); err != nil {
 		return err
 	}
 	if its == nil {
 		its = []domain.Item{}
 	}
-	out := map[string]any{"items": its, "last_rejections": rejs}
+	out := map[string]any{}
+	if page.limit > 0 { // 带 limit 时只回这一页，给总数与续页游标（附录 B.2）；不带时与以前一样回全部
+		out["total"] = len(its)
+		end := min(len(its), page.offset+page.limit)
+		if end < len(its) {
+			out["next_cursor"] = strconv.Itoa(end)
+		}
+		its = its[min(page.offset, end):end]
+		in := map[string]bool{}
+		for _, it := range its {
+			in[it.ID] = true
+		}
+		maps.DeleteFunc(rejs, func(id string, _ Rejection) bool { return !in[id] })
+		maps.DeleteFunc(scopes, func(id, _ string) bool { return !in[id] })
+	}
+	out["items"], out["last_rejections"] = its, rejs
 	if len(scopes) > 0 {
 		out["content_scopes"] = scopes
 	}
@@ -219,6 +238,42 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		out["today"], out["utc_offset"] = kitems.Today(now), now.Format("-07:00")
 	}
 	return core.WriteJSON(w, http.StatusOK, out)
+}
+
+// MaxListLimit 是 GET /items 一页的上限。
+const MaxListLimit = 200
+
+type page struct{ limit, offset int }
+
+// pageOf 读 limit 与 cursor：都不带时不分页（Web 的列表页照旧读全部）。cursor 是上一页给的 next_cursor。
+func pageOf(q url.Values) (page, error) {
+	var p page
+	if s := q.Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > MaxListLimit {
+			return p, domain.NewError(domain.CodeInvalidRequest, "limit must be 1 to 200", "fix limit and retry")
+		}
+		p.limit = n
+	}
+	if s := q.Get("cursor"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 || p.limit == 0 {
+			return p, domain.NewError(domain.CodeInvalidRequest, "cursor must come from next_cursor and go with limit", "drop cursor to start from the first page")
+		}
+		p.offset = n
+	}
+	return p, nil
+}
+
+// byRank 只留 ranked 里的事项，按 ranked 的顺序（相关的在前）。
+func byRank(its []domain.Item, ranked []string) []domain.Item {
+	at := make(map[string]int, len(ranked))
+	for i, id := range ranked {
+		at[id] = i
+	}
+	out := slices.DeleteFunc(its, func(it domain.Item) bool { _, ok := at[it.ID]; return !ok })
+	slices.SortStableFunc(out, func(a, b domain.Item) int { return at[a.ID] - at[b.ID] })
+	return out
 }
 
 func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

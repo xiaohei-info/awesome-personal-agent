@@ -1,23 +1,23 @@
-// Package search 是材料检索（设计 §12.4、§18）：SQLite FTS5 加应用层中日韩二元切分的全文索引，加结构化筛选。
+// Package search 是统一检索（设计 §7.1、§12.4、§18）：项目、事项（含进展）、材料与来源事件的标题摘要进同一个
+// SQLite FTS5 索引，应用层做中日韩二元切分，FTS5 的 porter 词形还原叠在英文整词与前缀之上。
 //
-//   - 自有型材料索引标题、当前修订正文、标签；托管型只索引标题、路径、标签，正文永不进索引。
-//   - 索引是 materials 表的派生数据，本包只读 materials，只写自己的表；每次检索前按签名增量同步，
-//     所以修订、回退、确认都不需要通知本包，索引也可以随时丢弃重建。
-//   - 关联事项筛选读事项中心的类型化关系（item.relate 以材料为终点的边，§6.3）；本包不另存关联。
-//   - 结果只回 id、标题、片段（托管型回路径）。
+//   - 索引是账本的派生数据：只读各模块的投影，只写本包自己的表，随时可以丢弃重建；不参与任何写入判定。
+//   - 增量同步按序号折叠：事件日志游标之后被动到的项目、事项、材料逐个从投影重读；来源事件按来源事件表的序号追加。
+//     命令模块不知道索引的存在；只有物理删除经 Forget 当场清掉（被删对象不再有新事件）。
+//   - 自有型材料索引正文；托管型与链接型只索引标题、位置、标签。来源事件只索引标题与摘要，对话捕获不进。
+//   - 查询见 find.go：任一词命中、bm25 字段加权、阶段与时间与当前项目系数；不调模型，同一查询同一账本结果相同。
 package search
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -32,35 +32,73 @@ CREATE INDEX material_links_item ON material_links (item);`,
 	// 关联并入 item.relate（带类型、记 Event）；旧表没有事件来源，无法折叠重建，直接丢弃。
 	Version: 2, Name: "drop-material-links",
 	SQL: `DROP TABLE material_links;`,
+}, {
+	// 账本结构版本 15（§7.1）：统一索引取代材料索引。旧的两张表是派生数据，直接丢弃，首次检索时全量重建。
+	// search_doc 是每个对象一行的结构化字段（筛选与系数用），rowid 与 search_index 对应；search_cursor 记折叠到的序号；
+	// search_stat 按本机日期记检索次数、零命中与只有部分命中的次数，不存查询原文。
+	Version: 3, Ledger: 15, Name: "ledger-v15-unified-search",
+	SQL: `DROP TABLE material_search;
+DROP TABLE material_search_state;
+CREATE TABLE search_doc (rowid INTEGER PRIMARY KEY, object TEXT NOT NULL UNIQUE, type TEXT NOT NULL, project TEXT NOT NULL,
+	phase TEXT NOT NULL, kind TEXT NOT NULL, tags TEXT NOT NULL, updated_at INTEGER NOT NULL);
+CREATE VIRTUAL TABLE search_index USING fts5(title, tags, summary, progress, body, tokenize = 'porter unicode61');
+CREATE TABLE search_cursor (name TEXT PRIMARY KEY, seq INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE search_stat (day TEXT PRIMARY KEY, queries INTEGER NOT NULL, zero INTEGER NOT NULL, partial INTEGER NOT NULL) WITHOUT ROWID;`,
 }}}
 
-// 默认与上限结果数。
+// 对象类型。
 const (
-	DefaultLimit = 20
-	MaxLimit     = 200
+	TypeItem     = "item"
+	TypeMaterial = "material"
+	TypeProject  = "project"
+	TypeSource   = "source" // 来源事件，只在显式指定时检索
 )
 
-// Query 是一次检索：Text 为空时只按筛选条件列出。筛选条件之间取交集，Tags 要求全部命中。
-type Query struct {
-	Text    string
-	Project string
-	Kind    string
-	Tags    []string
-	Item    string    // 关联事项
-	After   time.Time // 当前修订时间下界（含）；托管型无修订，设置时间筛选后不会命中
-	Before  time.Time // 当前修订时间上界（不含）
-	Limit   int
+// 索引列，顺序即 search_index 的列序；权重见 find.go。
+const (
+	colTitle = iota
+	colTags
+	colSummary
+	colProgress
+	colBody
+	numCols
+)
+
+// colNames 是命中位置在结果里的叫法。
+var colNames = [numCols]string{"title", "tags", "summary", "progress", "body"}
+
+// Doc 是一个对象可检索的原文。Progress 按记录先后排列。读取闸（api 层）按钥匙档位裁剪的就是它。
+type Doc struct {
+	Type, ID                   string
+	Title, Tags, Summary, Body string
+	Progress                   []string
 }
 
-// Hit 是一条结果。自有型回片段，托管型回路径。
-type Hit struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Kind    string `json:"kind"`
-	Project string `json:"project"`
-	Hosted  bool   `json:"hosted"`
-	Snippet string `json:"snippet,omitempty"`
-	Path    string `json:"path,omitempty"`
+func (d Doc) col(c int) []string {
+	switch c {
+	case colTitle:
+		return []string{d.Title}
+	case colTags:
+		return []string{d.Tags}
+	case colSummary:
+		return []string{d.Summary}
+	case colProgress:
+		return d.Progress
+	}
+	return []string{d.Body}
+}
+
+func (d Doc) equal(o Doc) bool {
+	return d.Title == o.Title && d.Tags == o.Tags && d.Summary == o.Summary && d.Body == o.Body &&
+		strings.Join(d.Progress, "\x00") == strings.Join(o.Progress, "\x00") && len(d.Progress) == len(o.Progress)
+}
+
+// meta 是 search_doc 里的结构化字段。
+type meta struct {
+	typ, project, phase, kind string
+	tags                      []string
+	updated                   int64  // UnixNano；0 表示没有时间（项目、托管型材料）
+	path                      string // 托管型材料的位置：结果回路径，不回片段
 }
 
 func isCJK(r rune) bool {
@@ -68,7 +106,7 @@ func isCJK(r rune) bool {
 }
 
 // tokens 做应用层切分：连续的中日韩字符切成相邻二元组（单字成一元组），其余按字母数字词切分并转小写。
-// index 为真时中日韩字符另加一元组，使单字也能检索；查询只用二元组，避免单字噪声。
+// index 为真时中日韩字符另加一元组，使单字也能检索；一元组排在该段二元组之后，带引号的短语（相邻二元组）照样连续。
 func tokens(s string, index bool) []string {
 	var out []string
 	var run []rune
@@ -113,214 +151,342 @@ func tokens(s string, index bool) []string {
 
 func join(s string) string { return strings.Join(tokens(s, true), " ") }
 
-type doc struct {
-	id, title, body, tags, path, sig string
-}
-
-func loadDocs(tx *store.Tx) ([]doc, error) {
-	r, err := tx.Query(`SELECT m.id, m.title, m.tags, m.location, m.current_rev, COALESCE(v.content, '')
-		FROM materials m LEFT JOIN revisions v ON v.id = m.current_rev ORDER BY m.id`)
+func cursor(tx *store.Tx, name string) (int64, error) {
+	var seq int64
+	r, err := tx.Query("SELECT seq FROM search_cursor WHERE name = ?", name)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer r.Close()
-	var out []doc
-	for r.Next() {
-		var d doc
-		var rev, content string
-		if err := r.Scan(&d.id, &d.title, &d.tags, &d.path, &rev, &content); err != nil {
-			return nil, err
-		}
-		var tags []string
-		if err := json.Unmarshal([]byte(d.tags), &tags); err != nil {
-			return nil, fmt.Errorf("search: corrupt tags of %s: %w", d.id, err)
-		}
-		d.tags = strings.Join(tags, " ")
-		if d.path == "" { // 自有型：正文来自当前修订
-			d.body = content
-		}
-		h := sha256.Sum256([]byte(strings.Join([]string{d.title, d.tags, d.path, rev}, "\x00")))
-		d.sig = hex.EncodeToString(h[:])
-		out = append(out, d)
+	if r.Next() {
+		err = r.Scan(&seq)
 	}
-	return out, r.Err()
+	return seq, err
 }
 
-func states(tx *store.Tx) (map[string]string, error) {
-	r, err := tx.Query("SELECT material, sig FROM material_search_state")
+func setCursor(tx *store.Tx, name string, seq int64) error {
+	_, err := tx.Exec("INSERT INTO search_cursor (name, seq) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET seq = excluded.seq", name, seq)
+	return err
+}
+
+func maxSeq(tx *store.Tx, table string) (int64, error) {
+	var seq int64
+	r, err := tx.Query("SELECT COALESCE(MAX(seq), 0) FROM " + table) // 表名是本包的常量
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer r.Close()
-	out := map[string]string{}
-	for r.Next() {
-		var id, sig string
-		if err := r.Scan(&id, &sig); err != nil {
-			return nil, err
-		}
-		out[id] = sig
+	if r.Next() {
+		err = r.Scan(&seq)
 	}
-	return out, r.Err()
+	return seq, err
 }
 
-// Sync 让索引与 materials 一致：签名变了的重建，已不存在的删除。需要写事务。
+// Sync 把索引折叠到账本当前的样子。需要写事务；没有新事件时只读两行游标。
+// 游标为 0 或超过日志头（账本被回滚过）时全量重建。
 func Sync(tx *store.Tx) error {
-	docs, err := loadDocs(tx)
+	head, err := maxSeq(tx, "eventlog_event")
 	if err != nil {
 		return err
 	}
-	have, err := states(tx)
+	cur, err := cursor(tx, "events")
 	if err != nil {
 		return err
 	}
-	for _, d := range docs {
-		old, ok := have[d.id]
-		delete(have, d.id)
-		if ok && old == d.sig {
-			continue
-		}
-		if _, err := tx.Exec("DELETE FROM material_search WHERE material = ?", d.id); err != nil {
+	switch {
+	case cur == 0 || cur > head:
+		if err := rebuild(tx); err != nil {
 			return err
 		}
-		if _, err := tx.Exec("INSERT INTO material_search (material, title, body, tags, path) VALUES (?, ?, ?, ?, ?)",
-			d.id, join(d.title), join(d.body), join(d.tags), join(d.path)); err != nil {
+	case cur < head:
+		r, err := tx.Query(`SELECT DISTINCT object FROM eventlog_event WHERE seq > ? AND seq <= ?
+			AND (object LIKE 'itm\_%' ESCAPE '\' OR object LIKE 'prj\_%' ESCAPE '\' OR object LIKE 'mat\_%' ESCAPE '\')`, cur, head)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec("INSERT OR REPLACE INTO material_search_state (material, sig) VALUES (?, ?)", d.id, d.sig); err != nil {
+		var ids []string
+		for r.Next() {
+			var id string
+			if err := r.Scan(&id); err != nil {
+				r.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := r.Close(); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := reindex(tx, id); err != nil {
+				return err
+			}
+		}
+	}
+	if err := setCursor(tx, "events", head); err != nil {
+		return err
+	}
+	return syncSources(tx)
+}
+
+// rebuild 重建项目、事项、材料三类（来源事件另有游标）。
+func rebuild(tx *store.Tx) error {
+	if err := removeWhere(tx, "type <> ?", TypeSource); err != nil {
+		return err
+	}
+	ps, err := projects.List(tx)
+	if err != nil {
+		return err
+	}
+	for _, p := range ps {
+		d, mt := projectDoc(p)
+		if err := put(tx, d, mt); err != nil {
 			return err
 		}
 	}
-	for id := range have {
-		if _, err := tx.Exec("DELETE FROM material_search WHERE material = ?", id); err != nil {
+	its, err := items.List(tx, items.Filter{})
+	if err != nil {
+		return err
+	}
+	prog := map[string][]string{}
+	r, err := tx.Query("SELECT item, text FROM item_progress ORDER BY at, id")
+	if err != nil {
+		return err
+	}
+	for r.Next() {
+		var id, text string
+		if err := r.Scan(&id, &text); err != nil {
+			r.Close()
 			return err
 		}
-		if _, err := tx.Exec("DELETE FROM material_search_state WHERE material = ?", id); err != nil {
+		prog[id] = append(prog[id], text)
+	}
+	if err := r.Close(); err != nil {
+		return err
+	}
+	for _, it := range its {
+		d, mt := itemDoc(it, prog[it.ID])
+		if err := put(tx, d, mt); err != nil {
+			return err
+		}
+	}
+	ms, err := materials.List(tx, "")
+	if err != nil {
+		return err
+	}
+	for _, m := range ms {
+		d, mt, err := materialDoc(tx, m)
+		if err != nil {
+			return err
+		}
+		if err := put(tx, d, mt); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Search 先同步索引再查询，是 Web 搜索框与 `apa material search` 共用的入口。
-func Search(ctx context.Context, st *store.Store, q Query) ([]Hit, error) {
-	var hits []Hit
-	err := st.Update(ctx, func(tx *store.Tx) error {
-		if err := Sync(tx); err != nil {
-			return err
-		}
-		var err error
-		hits, err = Find(tx, q)
+// reindex 从投影重读一个对象并替换它在索引里的那一行；对象已不存在时只删除。
+func reindex(tx *store.Tx, id string) error {
+	if err := Forget(tx, id); err != nil {
 		return err
-	})
-	return hits, err
+	}
+	d, mt, ok, err := load(tx, id)
+	if err != nil || !ok {
+		return err
+	}
+	return put(tx, d, mt)
 }
 
-// Find 在已同步的索引上查询；索引过期时由 Search 负责先 Sync。
-func Find(tx *store.Tx, q Query) ([]Hit, error) {
-	sql := `SELECT m.id, m.title, m.kind, m.project, m.location, COALESCE(v.content, '') FROM materials m
-		LEFT JOIN revisions v ON v.id = m.current_rev`
-	var where []string
-	var args []any
-	order := "m.title, m.id"
-	var terms []string
-	if strings.TrimSpace(q.Text) != "" {
-		terms = tokens(q.Text, false)
-		if len(terms) == 0 {
-			return nil, domain.NewError(domain.CodeInvalidRequest, "query has no searchable text", "use letters, digits or CJK characters")
+// load 读一个项目、事项或材料的原文与结构化字段；不存在时 ok 为假。
+func load(tx *store.Tx, id string) (Doc, meta, bool, error) {
+	var (
+		d   Doc
+		mt  meta
+		err error
+	)
+	switch {
+	case strings.HasPrefix(id, "itm_"):
+		var it domain.Item
+		if it, err = items.Get(tx, id); err == nil {
+			var ps []domain.Progress
+			if ps, err = items.Progress(tx, id); err == nil {
+				texts := make([]string, len(ps))
+				for i, p := range ps {
+					texts[i] = p.Text
+				}
+				d, mt = itemDoc(it, texts)
+			}
 		}
-		quoted := make([]string, len(terms))
-		for i, t := range terms {
-			quoted[i] = `"` + t + `"`
+	case strings.HasPrefix(id, "prj_"):
+		var p domain.Project
+		if p, err = projects.Get(tx, id); err == nil {
+			d, mt = projectDoc(p)
 		}
-		sql += " JOIN material_search ON material_search.material = m.id"
-		where = append(where, "material_search MATCH ?")
-		args = append(args, strings.Join(quoted, " "))
-		order = "bm25(material_search), m.id"
+	case strings.HasPrefix(id, "mat_"):
+		var m materials.Material
+		if m, err = materials.Get(tx, id); err == nil {
+			d, mt, err = materialDoc(tx, m)
+		}
+	case strings.HasPrefix(id, "sev_"):
+		var ok bool
+		d, mt, ok, err = sourceDoc(tx, id)
+		if err == nil && !ok {
+			return d, mt, false, nil
+		}
+	default:
+		return d, mt, false, nil
 	}
-	if q.Project != "" {
-		where, args = append(where, "m.project = ?"), append(args, q.Project)
+	if isNotFound(err) {
+		return d, mt, false, nil
 	}
-	if q.Kind != "" {
-		where, args = append(where, "m.kind = ?"), append(args, q.Kind)
+	return d, mt, err == nil, err
+}
+
+func isNotFound(err error) bool {
+	var de *domain.Error
+	return errors.As(err, &de) && de.Code == domain.CodeNotFound
+}
+
+func itemDoc(it domain.Item, progress []string) (Doc, meta) {
+	return Doc{Type: TypeItem, ID: it.ID, Title: it.Title, Tags: strings.Join(it.Tags, " "), Summary: it.Summary, Body: it.Body, Progress: progress},
+		meta{typ: TypeItem, project: it.Project, phase: string(it.Phase), kind: string(it.Kind), tags: it.Tags, updated: it.UpdatedAt.UnixNano()}
+}
+
+func projectDoc(p domain.Project) (Doc, meta) {
+	return Doc{Type: TypeProject, ID: p.ID, Title: p.Name, Tags: strings.Join(p.Tags, " "), Summary: p.Intro},
+		meta{typ: TypeProject, project: p.ID, phase: string(p.Status), tags: p.Tags}
+}
+
+func materialDoc(tx *store.Tx, m materials.Material) (Doc, meta, error) {
+	d := Doc{Type: TypeMaterial, ID: m.ID, Title: m.Title, Tags: strings.Join(m.Tags, " ")}
+	mt := meta{typ: TypeMaterial, project: m.Project, kind: m.Kind, tags: m.Tags}
+	switch {
+	case m.Location != "": // 托管型：正文永不进索引，只有位置
+		d.Summary, mt.path = m.Location, m.Location
+	case m.Link != "":
+		d.Summary = m.Link
 	}
-	for _, t := range q.Tags {
-		where = append(where, "EXISTS (SELECT 1 FROM json_each(m.tags) WHERE value = ?)")
-		args = append(args, t)
+	if m.CurrentRev != "" {
+		v, err := materials.GetRevision(tx, m.CurrentRev)
+		if err != nil {
+			return d, mt, err
+		}
+		if m.Location == "" && m.Link == "" {
+			d.Body = v.Content
+		}
+		mt.updated = v.At.UnixNano()
 	}
-	if q.Item != "" {
-		where = append(where, "EXISTS (SELECT 1 FROM item_relations l WHERE l.to_id = m.id AND l.from_id = ?)")
-		args = append(args, q.Item)
-	}
-	if !q.After.IsZero() {
-		where = append(where, "v.created_at >= ?")
-		args = append(args, q.After.UnixNano())
-	}
-	if !q.Before.IsZero() {
-		where = append(where, "v.created_at < ?")
-		args = append(args, q.Before.UnixNano())
-	}
-	if len(where) > 0 {
-		sql += " WHERE " + strings.Join(where, " AND ")
-	}
-	limit := q.Limit
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
-	sql += fmt.Sprintf(" ORDER BY %s LIMIT %d", order, min(limit, MaxLimit))
-	r, err := tx.Query(sql, args...)
+	return d, mt, nil
+}
+
+func sourceDoc(tx *store.Tx, id string) (Doc, meta, bool, error) {
+	r, err := tx.Query("SELECT source_id, type, subject, summary, occurred_at FROM sources_runner_event WHERE id = ?", id)
 	if err != nil {
-		return nil, err
+		return Doc{}, meta{}, false, err
 	}
 	defer r.Close()
-	var out []Hit
+	if !r.Next() {
+		return Doc{}, meta{}, false, r.Err()
+	}
+	var src, typ, subject, summary string
+	var at int64
+	if err := r.Scan(&src, &typ, &subject, &summary, &at); err != nil {
+		return Doc{}, meta{}, false, err
+	}
+	return Doc{Type: TypeSource, ID: id, Title: subject, Summary: summary}, meta{typ: TypeSource, kind: typ, updated: at}, true, nil
+}
+
+// syncSources 追加来源事件表里游标之后的事件（标题与摘要不会再变）；游标超过表头时重建。对话捕获不进索引。
+func syncSources(tx *store.Tx) error {
+	head, err := maxSeq(tx, "sources_runner_event")
+	if err != nil {
+		return err
+	}
+	cur, err := cursor(tx, "sources")
+	if err != nil {
+		return err
+	}
+	if cur == head {
+		return nil
+	}
+	if cur > head {
+		if err := removeWhere(tx, "type = ?", TypeSource); err != nil {
+			return err
+		}
+		cur = 0
+	}
+	r, err := tx.Query(`SELECT id, type, subject, summary, occurred_at FROM sources_runner_event
+		WHERE seq > ? AND seq <= ? AND source_id NOT LIKE 'capture:%' ORDER BY seq`, cur, head)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		d  Doc
+		mt meta
+	}
+	var rows []row
 	for r.Next() {
-		var h Hit
-		var loc, body string
-		if err := r.Scan(&h.ID, &h.Title, &h.Kind, &h.Project, &loc, &body); err != nil {
-			return nil, err
+		var x row
+		if err := r.Scan(&x.d.ID, &x.mt.kind, &x.d.Title, &x.d.Summary, &x.mt.updated); err != nil {
+			r.Close()
+			return err
 		}
-		if loc != "" {
-			h.Hosted, h.Path = true, loc
-		} else {
-			h.Snippet = snippet(body, q.Text)
-		}
-		out = append(out, h)
+		x.d.Type, x.mt.typ = TypeSource, TypeSource
+		rows = append(rows, x)
 	}
-	return out, r.Err()
+	if err := r.Close(); err != nil {
+		return err
+	}
+	for _, x := range rows {
+		if err := Forget(tx, x.d.ID); err != nil {
+			return err
+		}
+		if err := put(tx, x.d, x.mt); err != nil {
+			return err
+		}
+	}
+	return setCursor(tx, "sources", head)
 }
 
-const snippetRadius = 40
-
-// snippet 取正文里第一处命中词附近的原文；没有命中（只命中标题或标签）时取开头。
-func snippet(body, text string) string {
-	body = strings.Join(strings.Fields(body), " ")
-	rs, low := []rune(body), []rune(strings.ToLower(body))
-	if len(low) != len(rs) { // 个别字符小写后变长，退回按开头截取
-		low = rs
+func put(tx *store.Tx, d Doc, mt meta) error {
+	tags, err := json.Marshal(append([]string{}, mt.tags...))
+	if err != nil {
+		return err
 	}
-	start := 0
-	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
-		if i := indexRunes(low, []rune(w)); i >= 0 {
-			start = max(0, i-snippetRadius)
-			break
-		}
+	r, err := tx.Query(`INSERT INTO search_doc (object, type, project, phase, kind, tags, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING rowid`,
+		d.ID, mt.typ, mt.project, mt.phase, mt.kind, string(tags), mt.updated)
+	if err != nil {
+		return err
 	}
-	end := min(len(rs), start+2*snippetRadius)
-	s := string(rs[start:end])
-	if start > 0 {
-		s = "…" + s
+	var rowid int64
+	if r.Next() {
+		err = r.Scan(&rowid)
 	}
-	if end < len(rs) {
-		s += "…"
+	if cerr := r.Close(); err == nil {
+		err = cerr
 	}
-	return s
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO search_index (rowid, title, tags, summary, progress, body) VALUES (?, ?, ?, ?, ?, ?)`,
+		rowid, join(d.Title), join(d.Tags), join(d.Summary), join(strings.Join(d.Progress, "\n")), join(d.Body))
+	return err
 }
 
-func indexRunes(s, sub []rune) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if string(s[i:i+len(sub)]) == string(sub) {
-			return i
+func removeWhere(tx *store.Tx, where string, args ...any) error {
+	if _, err := tx.Exec("DELETE FROM search_index WHERE rowid IN (SELECT rowid FROM search_doc WHERE "+where+")", args...); err != nil {
+		return err
+	}
+	_, err := tx.Exec("DELETE FROM search_doc WHERE "+where, args...)
+	return err
+}
+
+// Forget 把对象从索引里删掉。物理删除在同一事务里调用它（§6.15），删完立即检索不到。
+func Forget(tx *store.Tx, ids ...string) error {
+	for _, id := range ids {
+		if err := removeWhere(tx, "object = ?", id); err != nil {
+			return err
 		}
 	}
-	return -1
+	return nil
 }

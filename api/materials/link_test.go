@@ -99,7 +99,7 @@ func TestLinkedMaterialRegisterReadAndVaultRemoval(t *testing.T) {
 
 	// 标题照常可搜，没有正文。
 	var hits struct{ Hits []struct{ ID string } }
-	into(t, e.do("obs", "GET", "/v1/materials/search?q="+"设计", ""), &hits)
+	into(t, e.do("obs", "GET", "/v1/search?type=material&q="+"设计", ""), &hits)
 	if len(hits.Hits) != 1 || hits.Hits[0].ID != first.Material {
 		t.Fatalf("search: %+v", hits)
 	}

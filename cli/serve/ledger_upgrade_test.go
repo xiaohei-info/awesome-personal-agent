@@ -99,8 +99,8 @@ func TestFrozenMigrationsMatchV01Release(t *testing.T) {
 			t.Errorf("%s: frozen v0.1 migration removed", key)
 		}
 	}
-	if reg.SchemaLedger() != 13 {
-		t.Errorf("schema.ledger = %d, want 13", reg.SchemaLedger())
+	if reg.SchemaLedger() != 15 {
+		t.Errorf("schema.ledger = %d, want 15", reg.SchemaLedger())
 	}
 }
 
@@ -136,7 +136,9 @@ func take(t *testing.T, s *store.Store) snapshot {
 	snap := snapshot{rows: map[string]int64{}, payload: map[int64]string{}}
 	err := s.View(context.Background(), func(tx *store.Tx) error {
 		var tables []string
-		r, err := tx.Query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'store_%'")
+		// 检索索引是派生数据，升级时可整张换掉（§16.5），不计入行数比较。
+		r, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'store_%'
+			AND name NOT LIKE 'material\_search%' ESCAPE '\' AND name NOT LIKE 'search\_%' ESCAPE '\'`)
 		if err != nil {
 			return err
 		}
@@ -248,8 +250,8 @@ func TestUpgradeV2ToLatestKeepsRowsAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if s.SchemaLedger() != 13 {
-		t.Fatalf("ledger = %d, want 13", s.SchemaLedger())
+	if s.SchemaLedger() != 15 {
+		t.Fatalf("ledger = %d, want 15", s.SchemaLedger())
 	}
 	after := take(t, s)
 

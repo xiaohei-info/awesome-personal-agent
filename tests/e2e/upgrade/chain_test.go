@@ -817,7 +817,7 @@ echo '{"plugin_version":"0.1.0","hooks":[],"reports_session_kind":false,"overlap
 	if res.Code != 23 || !strings.Contains(res.Stderr+res.Stdout, "tier_closed") {
 		t.Errorf("夹具 delegate 不归属 Agent、档位只整理，代答应被拒（退出码 23 / tier_closed）: %d %s%s", res.Code, res.Stdout, res.Stderr)
 	}
-	show := r.apa(r.home, r.extra(r.obs), 0, "item", "show", id)
+	show := r.apa(r.home, r.extra(r.obs), 0, "item", "show", id, "--full")
 	contains(t, "被拒的代答不应生效", show.Stdout, `"phase":"needs_input"`)
 
 	if res := r.run(r.apaBin(), r.home, old, "context", "--scope", "all"); res.Code != 0 {
