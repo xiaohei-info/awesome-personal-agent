@@ -7,9 +7,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -109,5 +112,48 @@ func TestDelegateStartRunsTheExecutorFromItsDeclaration(t *testing.T) {
 	if argv[slices.Index(argv, "--model")+1] != "m2" || argv[slices.Index(argv, "--profile")+1] != "deep" || !slices.Contains(argv, "--ctx=") ||
 		argv[slices.Index(argv, "--schema")+1] != filepath.Join(e.runs, res.Run.ID, reportSchemaFile) || !strings.Contains(strings.Join(argv, "\n"), "SPEC-TEXT") {
 		t.Fatalf("remote executor argv: %q", argv)
+	}
+}
+
+// 委派结果通知（A8，§13.6）：APA 拉起的委派有了结果，通知发起方——本人在 Web 发起的推本人层（没有默认渠道时 Web 未读）；
+// 一次回执一条，换一个触达实例（相当于重启后重新追赶事件）也不再入队；外部 harness 自己派出的（没有运行 id）不推。
+func TestStartedDelegationResultNotifiesWhoStartedIt(t *testing.T) {
+	e := setup(t, 0)
+	e.svc.Attach(e.x)
+	e.declareStartable()
+	parent := e.newItem("ship it", nil, nil)
+	e.open(parent)
+	var started, plain struct{ ID string }
+	_ = json.Unmarshal(e.must(owner, "delegate.create", map[string]any{"parent": parent, "assignee": "px.quick", "title": "README", "start": true}).Value, &started)
+	e.waitResult()
+	_ = json.Unmarshal(e.must(owner, "delegate.create", map[string]any{"parent": parent, "assignee": "work-host.cli", "title": "by hand"}).Value, &plain)
+	e.must(owner, "delegate.report", map[string]any{"id": plain.ID, "outcome": "done", "summary": "done by hand", "evidence": map[string]string{"link": "https://x.example/1"}})
+
+	results := func() (ds []domain.Delivery) {
+		a := attention.New(attention.Options{Queue: delivery.New(delivery.Options{Now: e.clock}), Now: e.clock})
+		if err := e.st.Update(bg, a.Sync); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.View(bg, func(tx *store.Tx) error {
+			all, err := delivery.Since(tx, t0.Add(-time.Hour))
+			for _, s := range all {
+				if err == nil && strings.HasPrefix(s.ID, delivery.ResultPrefix) {
+					var d domain.Delivery
+					d, err = delivery.New(delivery.Options{}).Get(tx, s.ID)
+					ds = append(ds, d)
+				}
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return ds
+	}
+	ds := results()
+	if len(ds) != 1 || ds[0].Item != started.ID || ds[0].Route != delivery.RouteWeb || !strings.Contains(ds[0].Content.Title, "README") || ds[0].Content.Summary != "did it" {
+		t.Fatalf("one result notice for the started delegation, to the owner: %+v", ds)
+	}
+	if again := results(); len(again) != 1 || again[0].ID != ds[0].ID {
+		t.Fatalf("catching up again (after a restart) must not queue it twice: %+v", again)
 	}
 }

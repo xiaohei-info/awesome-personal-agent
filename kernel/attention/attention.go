@@ -177,6 +177,7 @@ func (a *Attention) Sync(tx *store.Tx) error {
 		return err
 	}
 	var order []string
+	var results []domain.Event // 委派回执：结果通知（delegation.go）
 	seen := map[string]bool{}
 	for {
 		es, err := eventlog.ReadLive(tx, after, 500)
@@ -188,19 +189,27 @@ func (a *Attention) Sync(tx *store.Tx) error {
 		}
 		for _, en := range es {
 			after = en.Event.Seq
+			if en.Event.Type == domain.EvDelegationReported {
+				results = append(results, en.Event)
+			}
 			if id := en.Event.Object; itemEvents[en.Event.Type] && !seen[id] {
 				seen[id] = true
 				order = append(order, id)
 			}
 		}
 	}
-	if len(order) > 0 {
+	if len(order) > 0 || len(results) > 0 {
 		_, pol, err := policy.Current(tx)
 		if err != nil {
 			return err
 		}
 		for _, id := range order {
 			if err := a.reconcile(tx, pol, id); err != nil {
+				return err
+			}
+		}
+		for _, e := range results {
+			if err := a.delegationResult(tx, pol, e); err != nil {
 				return err
 			}
 		}
@@ -265,7 +274,7 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	if _, err := a.o.Queue.Supersede(tx, id, ver); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM attention_held WHERE item = ? AND version < ?`, id, ver); err != nil {
+	if _, err := tx.Exec(`DELETE FROM attention_held WHERE item = ? AND version < ? AND id NOT LIKE ?`, id, ver, delivery.ResultPrefix+"%"); err != nil {
 		return err
 	}
 	dr, ready, err := a.draft(tx, pol, it, ver)
@@ -345,7 +354,7 @@ func (a *Attention) drop(tx *store.Tx, id string) error {
 	if _, err := tx.Exec(`DELETE FROM attention_draft WHERE item = ?`, id); err != nil {
 		return err
 	}
-	_, err := tx.Exec(`DELETE FROM attention_held WHERE item = ?`, id)
+	_, err := tx.Exec(`DELETE FROM attention_held WHERE item = ? AND id NOT LIKE ?`, id, delivery.ResultPrefix+"%") // 结果通知随事项变化不作废
 	return err
 }
 
